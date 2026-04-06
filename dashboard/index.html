@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosterIQ Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+            overflow: hidden;
+        }
+
+        .login-screen {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0f172a;
+            z-index: 1000;
+        }
+
+        .login-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 40px;
+            width: 100%;
+            max-width: 360px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        .login-logo {
+            font-size: 28px;
+            font-weight: 800;
+            color: #0ea5e9;
+            margin-bottom: 30px;
+            text-align: center;
+            letter-spacing: -0.5px;
+        }
+
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-group input {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 10px 12px;
+            color: #f8fafc;
+            font-size: 14px;
+            font-family: 'Inter', sans-serif;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #0ea5e9;
+            background: rgba(14, 165, 233, 0.05);
+        }
+
+        .login-btn {
+            background: #0ea5e9;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 8px;
+        }
+
+        .login-btn:hover {
+            background: #0284c7;
+        }
+
+        .dashboard {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .top-bar {
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .top-bar-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: 800;
+            color: #0ea5e9;
+            letter-spacing: -0.5px;
+        }
+
+        .venue-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .venue-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #f8fafc;
+        }
+
+        .venue-location {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .top-bar-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .status-live {
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .status-demo {
+            background: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .dot-live {
+            background: #22c55e;
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+        }
+
+        .dot-demo {
+            background: #f59e0b;
+        }
+
+        .dot-offline {
+            background: #ef4444;
+        }
+
+        .clock {
+            font-size: 12px;
+            color: #94a3b8;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .content {
+            flex: 1;
+            overflow: auto;
+            padding: 24px;
+            display: grid;
+            grid-template-rows: auto auto auto auto;
+            gap: 24px;
+        }
+
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .metric-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-value {
+            font-size: 32px;
+            font-weight: 800;
+            color: #0ea5e9;
+        }
+
+        .metric-subtext {
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #334155;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0ea5e9, #22c55e);
+            transition: width 0.6s ease;
+        }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        .chart-container {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 300px;
+        }
+
+        .chart-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #f8fafc;
+        }
+
+        .chart-wrapper {
+            flex: 1;
+            position: relative;
+            min-height: 240px;
+        }
+
+        canvas {
+            max-height: 240px;
+        }
+
+        .signal-feed {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 340px;
+            overflow-y: auto;
+        }
+
+        .signal-item {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            transition: border-color 0.2s;
+        }
+
+        .signal-item:hover {
+            border-color: #475569;
+        }
+
+        .signal-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .signal-surge {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .signal-shortage {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+
+        .signal-peak {
+            background: rgba(14, 165, 233, 0.2);
+            color: #0ea5e9;
+        }
+
+        .signal-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .signal-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #f8fafc;
+        }
+
+        .signal-time {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 2px;
+        }
+
+        .week-ahead {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 12px;
+        }
+
+        .day-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .day-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: #94a3b8;
+        }
+
+        .day-demand {
+            font-size: 24px;
+            font-weight: 800;
+            color: #0ea5e9;
+        }
+
+        .day-staff {
+            font-size: 11px;
+            color: #64748b;
+        }
+
+        .recommendations {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+        }
+
+        .recommendation-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .recommendation-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #f8fafc;
+        }
+
+        .recommendation-text {
+            font-size: 12px;
+            color: #94a3b8;
+            line-height: 1.5;
+        }
+
+        .recommendation-btn {
+            background: #0ea5e9;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            align-self: flex-start;
+        }
+
+        .recommendation-btn:hover {
+            background: #0284c7;
+        }
+
+        .updated-text {
+            font-size: 11px;
+            color: #64748b;
+        }
+
+        @media (max-width: 1200px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .metrics-row {
+                grid-template-columns: 1fr 1fr;
+            }
+            .top-bar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .top-bar-right {
+                width: 100%;
+                justify-content: space-between;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="login-screen" class="login-screen">
+        <div class="login-card">
+            <div class="login-logo">RosterIQ</div>
+            <form class="login-form" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="venue-id">Venue ID</label>
+                    <input type="text" id="venue-id" placeholder="e.g., the-royal-oak" required>
+                </div>
+                <div class="form-group">
+                    <label for="api-url">API URL (optional)</label>
+                    <input type="text" id="api-url" placeholder="http://localhost:8000" value="http://localhost:8000">
+                </div>
+                <button type="submit" class="login-btn">Enter Dashboard</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="dashboard" class="dashboard" style="display: none;">
+        <div class="top-bar">
+            <div class="top-bar-left">
+                <div class="logo">RosterIQ</div>
+                <div class="venue-info">
+                    <div class="venue-name" id="venue-name">The Royal Oak</div>
+                    <div class="venue-location" id="venue-location">Fitzroy, VIC</div>
+                </div>
+            </div>
+            <div class="top-bar-right">
+                <div class="clock" id="clock">--:-- --</div>
+                <div class="status-badge" id="status-badge">
+                    <span class="status-dot dot-demo"></span>
+                    <span id="status-text">DEMO MODE</span>
+                </div>
+                <div class="updated-text" id="updated-time">Loading...</div>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="metrics-row">
+                <div class="metric-card">
+                    <div class="metric-label">Demand Outlook</div>
+                    <div class="metric-value" id="metric-demand">42%</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="demand-bar" style="width: 42%;"></div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Active Signals</div>
+                    <div class="metric-value" id="metric-signals">8</div>
+                    <div class="metric-subtext">Real-time alerts</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Staff Today</div>
+                    <div class="metric-value" id="metric-staff">24</div>
+                    <div class="metric-subtext" id="staff-subtext">of 30 scheduled</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Labour Cost</div>
+                    <div class="metric-value" id="metric-labour">$2,450</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="labour-bar" style="width: 65%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="content-grid">
+                <div class="chart-container">
+                    <div class="chart-title">Hourly Demand</div>
+                    <div class="chart-wrapper">
+                        <canvas id="demand-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="signal-feed">
+                    <div class="chart-title">Signal Feed</div>
+                    <div id="signal-list" style="flex: 1; overflow-y: auto;"></div>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <div class="chart-title">Signal Trend (14 Days)</div>
+                <div class="chart-wrapper">
+                    <canvas id="trend-chart"></canvas>
+                </div>
+            </div>
+
+            <div>
+                <div style="font-size: 14px; font-weight: 600; color: #f8fafc; margin-bottom: 12px;">Week Ahead</div>
+                <div class="week-ahead" id="week-ahead"></div>
+            </div>
+
+            <div>
+                <div style="font-size: 14px; font-weight: 600; color: #f8fafc; margin-bottom: 12px;">AI Recommendations</div>
+                <div class="recommendations" id="recommendations"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const CONFIG = {
+            apiBase: window.location.hostname === 'localhost' ? 'http://localhost:8000' : '',
+            venueId: new URLSearchParams(window.location.search).get('venue') || null,
+            pollInterval: 60000,
+            wsEnabled: true
+        };
+
+        // Demo data fallback
+        const DEMO_DATA = {
+            overview: {
+                venue_id: 'demo',
+                venue_name: 'The Royal Oak',
+                venue_location: 'Fitzroy, VIC',
+                demand_outlook_percent: 42,
+                active_signals_count: 8,
+                staff_today: 24,
+                staff_scheduled: 30,
+                labour_cost_today: 2450,
+                labour_cost_budget: 3800,
+                hourly_demand: [28, 32, 35, 42, 48, 55, 68, 72, 65, 58, 52, 45, 38, 32, 28],
+                signals: [
+                    { type: 'surge', title: 'Peak demand spike', time: '2 min ago' },
+                    { type: 'shortage', title: 'Staff unavailable', time: '8 min ago' },
+                    { type: 'peak', title: 'High-traffic period', time: '15 min ago' },
+                    { type: 'surge', title: 'Table turnover rate', time: '22 min ago' },
+                    { type: 'shortage', title: 'Kitchen capacity alert', time: '34 min ago' },
+                    { type: 'peak', title: 'Expected dinner rush', time: '45 min ago' },
+                    { type: 'surge', title: 'Order backlog', time: '1 hr ago' },
+                    { type: 'shortage', title: 'Reservation surge', time: '1 hr ago' }
+                ],
+                week_ahead: [
+                    { day: 'Mon', demand: 38, staff: 22 },
+                    { day: 'Tue', demand: 35, staff: 20 },
+                    { day: 'Wed', demand: 41, staff: 24 },
+                    { day: 'Thu', demand: 58, staff: 28 },
+                    { day: 'Fri', demand: 72, staff: 30 },
+                    { day: 'Sat', demand: 85, staff: 32 },
+                    { day: 'Sun', demand: 52, staff: 26 }
+                ],
+                recommendations: [
+                    { title: 'Increase staffing', text: 'Schedule 3 additional staff for Friday peak demand' },
+                    { title: 'Optimize prep', text: 'Pre-prep key items based on demand forecast' },
+                    { title: 'Table management', text: 'Configure 90-min seatings for Sat dinner service' }
+                ],
+                signal_trend: {
+                    dates: ['14d ago', '12d ago', '10d ago', '8d ago', '6d ago', '4d ago', '2d ago', 'today'],
+                    surge: [3, 4, 5, 6, 7, 8, 8, 8],
+                    shortage: [2, 2, 3, 3, 4, 4, 5, 5],
+                    peak: [4, 5, 5, 6, 6, 7, 7, 7]
+                }
+            }
+        };
+
+        let state = {
+            isOnline: false,
+            lastUpdate: null,
+            wsConnection: null,
+            data: null,
+            charts: {}
+        };
+
+        // API layer
+        const api = {
+            async getOverview(venueId) {
+                try {
+                    const response = await fetch(`${CONFIG.apiBase}/dashboard/${venueId}/overview`);
+                    if (!response.ok) throw new Error(`API error: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.warn('Failed to fetch overview, using demo data:', e);
+                    return DEMO_DATA.overview;
+                }
+            },
+
+            async getLivePulse(venueId) {
+                try {
+                    const response = await fetch(`${CONFIG.apiBase}/dashboard/${venueId}/live-pulse`);
+                    if (!response.ok) throw new Error(`API error: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.warn('Failed to fetch live-pulse, using current data');
+                    return null;
+                }
+            },
+
+            async getSignals(venueId, startDate, endDate) {
+                try {
+                    const response = await fetch(`${CONFIG.apiBase}/dashboard/${venueId}/signals?start=${startDate}&end=${endDate}`);
+                    if (!response.ok) throw new Error(`API error: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.warn('Failed to fetch signals');
+                    return null;
+                }
+            },
+
+            async getDemandOutlook(venueId, date) {
+                try {
+                    const response = await fetch(`${CONFIG.apiBase}/dashboard/${venueId}/demand-outlook?date=${date}`);
+                    if (!response.ok) throw new Error(`API error: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    return null;
+                }
+            },
+
+            async getWeekAhead(venueId) {
+                try {
+                    const response = await fetch(`${CONFIG.apiBase}/dashboard/${venueId}/week-ahead`);
+                    if (!response.ok) throw new Error(`API error: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    return null;
+                }
+            },
+
+            async getSignalHistory(venueId, days) {
+                try {
+                    const response = await fetch(`${CONFIG.apiBase}/dashboard/${venueId}/signals/history?days=${days}`);
+                    if (!response.ok) throw new Error(`API error: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    return null;
+                }
+            }
+        };
+
+        // WebSocket layer
+        function connectWebSocket() {
+            if (!CONFIG.wsEnabled) return;
+            try {
+                const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+                const host = CONFIG.apiBase.replace(/^https?:\/\//, '').replace(/:\d+$/, '');
+                const wsUrl = `${protocol}://${host}/ws/${CONFIG.venueId}`;
+                state.wsConnection = new WebSocket(wsUrl);
+
+                state.wsConnection.onopen = () => {
+                    console.log('WebSocket connected');
+                    state.isOnline = true;
+                    updateStatusBadge();
+                };
+
+                state.wsConnection.onmessage = (event) => {
+                    try {
+                        const update = JSON.parse(event.data);
+                        applyLiveUpdate(update);
+                    } catch (e) {
+                        console.warn('Failed to parse WS message:', e);
+                    }
+                };
+
+                state.wsConnection.onclose = () => {
+                    console.log('WebSocket closed, reconnecting in 5s...');
+                    state.isOnline = false;
+                    updateStatusBadge();
+                    setTimeout(connectWebSocket, 5000);
+                };
+
+                state.wsConnection.onerror = (error) => {
+                    console.warn('WebSocket error:', error);
+                    state.isOnline = false;
+                };
+            } catch (e) {
+                console.warn('WebSocket connection failed:', e);
+                state.isOnline = false;
+            }
+        }
+
+        function applyLiveUpdate(update) {
+            if (update.demand_outlook_percent !== undefined) {
+                state.data.demand_outlook_percent = update.demand_outlook_percent;
+                updateMetrics();
+            }
+            if (update.active_signals_count !== undefined) {
+                state.data.active_signals_count = update.active_signals_count;
+                updateMetrics();
+            }
+            if (update.staff_today !== undefined) {
+                state.data.staff_today = update.staff_today;
+                updateMetrics();
+            }
+            if (update.labour_cost_today !== undefined) {
+                state.data.labour_cost_today = update.labour_cost_today;
+                updateMetrics();
+            }
+            if (update.signals) {
+                state.data.signals = update.signals;
+                renderSignalFeed();
+            }
+        }
+
+        function updateStatusBadge() {
+            const badge = document.getElementById('status-badge');
+            const text = document.getElementById('status-text');
+            const dot = badge.querySelector('.status-dot');
+
+            if (state.isOnline) {
+                badge.className = 'status-badge status-live';
+                text.textContent = 'LIVE';
+                dot.className = 'status-dot dot-live';
+            } else {
+                badge.className = 'status-badge status-demo';
+                text.textContent = 'DEMO MODE';
+                dot.className = 'status-dot dot-demo';
+            }
+        }
+
+        async function loadDashboard() {
+            const data = await api.getOverview(CONFIG.venueId);
+            state.data = data;
+            state.isOnline = data !== DEMO_DATA.overview;
+            updateStatusBadge();
+
+            document.getElementById('venue-name').textContent = data.venue_name;
+            document.getElementById('venue-location').textContent = data.venue_location;
+
+            updateMetrics();
+            renderSignalFeed();
+            renderWeekAhead();
+            renderRecommendations();
+            initCharts();
+
+            connectWebSocket();
+            startPolling();
+            startClock();
+        }
+
+        function updateMetrics() {
+            const d = state.data;
+            document.getElementById('metric-demand').textContent = `${d.demand_outlook_percent}%`;
+            document.getElementById('demand-bar').style.width = `${d.demand_outlook_percent}%`;
+            document.getElementById('metric-signals').textContent = d.active_signals_count;
+            document.getElementById('metric-staff').textContent = d.staff_today;
+            document.getElementById('staff-subtext').textContent = `of ${d.staff_scheduled} scheduled`;
+            document.getElementById('metric-labour').textContent = `$${d.labour_cost_today.toLocaleString()}`;
+            const labourPct = (d.labour_cost_today / d.labour_cost_budget) * 100;
+            document.getElementById('labour-bar').style.width = `${Math.min(labourPct, 100)}%`;
+            updateLastUpdatedTime();
+        }
+
+        function renderSignalFeed() {
+            const list = document.getElementById('signal-list');
+            list.innerHTML = state.data.signals.map(sig => `
+                <div class="signal-item">
+                    <div class="signal-icon signal-${sig.type}">${sig.type === 'surge' ? '📈' : sig.type === 'shortage' ? '⚠️' : '📍'}</div>
+                    <div class="signal-content">
+                        <div class="signal-title">${sig.title}</div>
+                        <div class="signal-time">${sig.time}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderWeekAhead() {
+            const container = document.getElementById('week-ahead');
+            container.innerHTML = state.data.week_ahead.map(day => `
+                <div class="day-card">
+                    <div class="day-name">${day.day}</div>
+                    <div class="day-demand">${day.demand}%</div>
+                    <div class="day-staff">${day.staff} staff</div>
+                </div>
+            `).join('');
+        }
+
+        function renderRecommendations() {
+            const container = document.getElementById('recommendations');
+            container.innerHTML = state.data.recommendations.map(rec => `
+                <div class="recommendation-card">
+                    <div class="recommendation-title">${rec.title}</div>
+                    <div class="recommendation-text">${rec.text}</div>
+                    <button class="recommendation-btn">Learn More</button>
+                </div>
+            `).join('');
+        }
+
+        function initCharts() {
+            const ctx1 = document.getElementById('demand-chart').getContext('2d');
+            const ctx2 = document.getElementById('trend-chart').getContext('2d');
+
+            const hours = Array.from({length: state.data.hourly_demand.length}, (_, i) => `${i}:00`);
+            state.charts.demand = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: hours,
+                    datasets: [{
+                        label: 'Customers',
+                        data: state.data.hourly_demand,
+                        borderColor: '#0ea5e9',
+                        backgroundColor: 'rgba(14, 165, 233, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointBackgroundColor: '#0ea5e9',
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                        x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+                    }
+                }
+            });
+
+            const trend = state.data.signal_trend;
+            state.charts.trend = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: trend.dates,
+                    datasets: [
+                        {
+                            label: 'Surge Signals',
+                            data: trend.surge,
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            tension: 0.3,
+                            pointRadius: 3
+                        },
+                        {
+                            label: 'Shortage Signals',
+                            data: trend.shortage,
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            tension: 0.3,
+                            pointRadius: 3
+                        },
+                        {
+                            label: 'Peak Signals',
+                            data: trend.peak,
+                            borderColor: '#0ea5e9',
+                            backgroundColor: 'rgba(14, 165, 233, 0.1)',
+                            tension: 0.3,
+                            pointRadius: 3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, labels: { color: '#94a3b8' } } },
+                    scales: {
+                        y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                        x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+                    }
+                }
+            });
+        }
+
+        function startPolling() {
+            setInterval(async () => {
+                const pulse = await api.getLivePulse(CONFIG.venueId);
+                if (pulse) {
+                    applyLiveUpdate(pulse);
+                }
+            }, CONFIG.pollInterval);
+        }
+
+        function startClock() {
+            function updateClock() {
+                const now = new Date();
+                const hours = String(now.getHours()).padStart(2, '0');
+                const mins = String(now.getMinutes()).padStart(2, '0');
+                const ampm = now.getHours() >= 12 ? 'PM' : 'AM';
+                document.getElementById('clock').textContent = `${hours}:${mins} ${ampm}`;
+            }
+            updateClock();
+            setInterval(updateClock, 1000);
+        }
+
+        function updateLastUpdatedTime() {
+            const now = new Date();
+            state.lastUpdate = now;
+            const seconds = 0;
+            document.getElementById('updated-time').textContent = `Last updated: ${seconds}s ago`;
+
+            let elapsed = 0;
+            const interval = setInterval(() => {
+                elapsed++;
+                if (elapsed > 60) {
+                    clearInterval(interval);
+                    return;
+                }
+                document.getElementById('updated-time').textContent = `Last updated: ${elapsed}s ago`;
+            }, 1000);
+        }
+
+        function handleLogin(event) {
+            event.preventDefault();
+            const venueId = document.getElementById('venue-id').value.trim();
+            if (!venueId) return;
+
+            localStorage.setItem('rosteriq_venue_id', venueId);
+            const apiUrl = document.getElementById('api-url').value.trim();
+            if (apiUrl && apiUrl !== 'http://localhost:8000') {
+                CONFIG.apiBase = apiUrl;
+            }
+
+            CONFIG.venueId = venueId;
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'flex';
+            loadDashboard();
+        }
+
+        // Initialize
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedVenue = CONFIG.venueId || localStorage.getItem('rosteriq_venue_id');
+            if (savedVenue) {
+                CONFIG.venueId = savedVenue;
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'flex';
+                loadDashboard();
+            } else {
+                document.getElementById('login-screen').style.display = 'flex';
+            }
+        });
+    </script>
+</body>
+</html>

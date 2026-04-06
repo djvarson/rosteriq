@@ -1,0 +1,33 @@
+# Railway.app Deployment Configuration for RosterIQ
+# https://docs.railway.app/reference/railway-json
+
+[build]
+# Use Dockerfile for building the image
+builder = "dockerfile"
+
+[deploy]
+# Health check endpoint - Railway will continuously monitor this
+healthcheckPath = "/health"
+
+# Timeout for health checks in seconds
+healthcheckTimeout = 300
+
+# Command to start the application
+# $PORT is injected by Railway
+startCommand = "uvicorn rosteriq.api:app --host 0.0.0.0 --port $PORT"
+
+# Restart policy for failed containers
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Environment variables set by Railway
+[deploy.envVars]
+PORT = "8000"
+
+# Optional: Configure railway to use production settings
+# ENVIRONMENT = "production"
+
+# Note: Add your secrets via Railway dashboard:
+# - DATABASE_URL: Created automatically if you link a PostgreSQL service
+# - RIQ_JWT_SECRET: Generate and add in Variables section
+# - Other API keys: Add in Variables section (will be available as env vars)

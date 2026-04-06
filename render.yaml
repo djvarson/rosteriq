@@ -1,0 +1,69 @@
+# Render.com Blueprint for RosterIQ
+# Deploy with: render deploy --config render.yaml
+# https://render.com/docs/infrastructure-as-code
+
+services:
+  # Web Service: RosterIQ API
+  - type: web
+    name: rosteriq-api
+    runtime: docker
+
+    # Instance type: starter = $7/month (good for demo/testing)
+    # Use standard-1 ($12/month) or higher for production
+    plan: starter
+
+    # Health check configuration
+    healthCheckPath: /health
+    healthCheckInterval: 30
+
+    # Environment variables
+    envVars:
+      # Database connection (links to rosteriq-db service below)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rosteriq-db
+          property: connectionString
+
+      # JWT secret key - auto-generated on first deploy
+      - key: RIQ_JWT_SECRET
+        generateValue: true
+
+      # Explicitly set port to 8000
+      - key: PORT
+        value: "8000"
+
+      # CORS origins for your frontend
+      - key: CORS_ORIGINS
+        value: "https://app.rosteriq.com,https://dashboard.rosteriq.com"
+
+    # Link third-party services by name
+    # These services must be created separately in Render dashboard
+    services:
+      - name: rosteriq-db
+
+# Database: PostgreSQL 16
+databases:
+  - name: rosteriq-db
+    # Instance type: starter = $15/month
+    # Use standard for production workloads
+    plan: starter
+
+    # Database configuration
+    databaseName: rosteriq
+    user: rosteriq
+    ipAllowList: []  # Allow access from RosterIQ API service
+
+    # Backup configuration
+    backupFrequencyDays: 7
+    backupRetentionDays: 30
+
+# Note: Deploy instructions
+# 1. Create a render.yaml in your repo root
+# 2. Go to render.com and select "Infrastructure" > "New"
+# 3. Connect your GitHub repo and select render.yaml
+# 4. Add secrets in Render dashboard:
+#    - TANDA_CLIENT_ID
+#    - TANDA_CLIENT_SECRET
+#    - GOOGLE_PLACES_API_KEY
+#    - etc.
+# 5. Render will deploy automatically on git push to main

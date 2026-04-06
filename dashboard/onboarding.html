@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RosterIQ Venue Onboarding</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .onboarding-container {
+      width: 100%;
+      max-width: 600px;
+    }
+
+    .progress-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 40px;
+    }
+
+    .progress-step {
+      flex: 1;
+      height: 4px;
+      background: #334155;
+      border-radius: 2px;
+      transition: background 0.3s;
+    }
+
+    .progress-step.active {
+      background: #0ea5e9;
+    }
+
+    .progress-step.completed {
+      background: #22c55e;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 32px;
+      margin-bottom: 24px;
+    }
+
+    .card h2 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: #f8fafc;
+    }
+
+    .card p {
+      font-size: 14px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 8px;
+      color: #f8fafc;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #f8fafc;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      transition: border 0.2s;
+    }
+
+    input[type="text"]:focus,
+    input[type="email"]:focus,
+    input[type="password"]:focus,
+    select:focus {
+      outline: none;
+      border-color: #0ea5e9;
+    }
+
+    .radio-group {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .radio-option {
+      position: relative;
+      cursor: pointer;
+    }
+
+    .radio-option input {
+      display: none;
+    }
+
+    .radio-label {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+      background: #0f172a;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      text-align: center;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+
+    .radio-option input:checked + .radio-label {
+      border-color: #0ea5e9;
+      background: rgba(14, 165, 233, 0.1);
+    }
+
+    .radio-icon {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    .radio-text {
+      font-size: 13px;
+      font-weight: 500;
+      color: #f8fafc;
+    }
+
+    .card-selection {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .card-option {
+      position: relative;
+      cursor: pointer;
+    }
+
+    .card-option input {
+      display: none;
+    }
+
+    .card-label {
+      padding: 16px;
+      background: #0f172a;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      transition: all 0.2s;
+      cursor: pointer;
+      font-weight: 500;
+    }
+
+    .card-option input:checked + .card-label {
+      border-color: #0ea5e9;
+      background: rgba(14, 165, 233, 0.1);
+    }
+
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 32px;
+    }
+
+    button {
+      flex: 1;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 6px;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #0ea5e9;
+      color: #ffffff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #0284c7;
+    }
+
+    .btn-primary:disabled {
+      background: #475569;
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: #0ea5e9;
+      border: 1px solid #0ea5e9;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(14, 165, 233, 0.1);
+    }
+
+    .skip-link {
+      text-align: center;
+      margin-top: 16px;
+    }
+
+    .skip-link a {
+      color: #0ea5e9;
+      text-decoration: none;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .skip-link a:hover {
+      text-decoration: underline;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-top: 12px;
+    }
+
+    .status-disconnected {
+      background: rgba(229, 62, 62, 0.1);
+      color: #ef4444;
+    }
+
+    .status-connected {
+      background: rgba(34, 197, 94, 0.1);
+      color: #22c55e;
+    }
+
+    .status-pending {
+      background: rgba(245, 158, 11, 0.1);
+      color: #f59e0b;
+    }
+
+    .feature-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .feature-card {
+      padding: 16px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .feature-icon {
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .feature-text {
+      flex: 1;
+    }
+
+    .feature-text h4 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #f8fafc;
+    }
+
+    .feature-text p {
+      font-size: 13px;
+      color: #94a3b8;
+      margin: 0;
+    }
+
+    .feature-checkmark {
+      color: #22c55e;
+      font-weight: 700;
+    }
+
+    .summary-card {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .summary-card h4 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .summary-card p {
+      font-size: 14px;
+      color: #f8fafc;
+      margin: 0;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .step {
+      display: none;
+    }
+
+    .step.active {
+      display: block;
+      animation: fadeIn 0.3s;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="onboarding-container">
+    <div class="progress-bar" id="progressBar"></div>
+
+    <!-- Step 1: Venue Details -->
+    <div class="step active" data-step="1">
+      <div class="card">
+        <h2>Welcome to RosterIQ</h2>
+        <p>Let's get to know your venue. This helps us calibrate signals like school holidays and foot traffic patterns.</p>
+
+        <div class="form-group">
+          <label>Venue Name</label>
+          <input type="text" id="venueName" placeholder="e.g., The Blue Bar">
+        </div>
+
+        <div class="form-group">
+          <label>Address</label>
+          <input type="text" id="address" placeholder="Street address">
+        </div>
+
+        <div class="form-group">
+          <label>Suburb</label>
+          <input type="text" id="suburb" placeholder="Suburb">
+        </div>
+
+        <div class="form-group">
+          <label>State</label>
+          <select id="state">
+            <option value="">Select state</option>
+            <option value="VIC">Victoria (VIC)</option>
+            <option value="NSW">New South Wales (NSW)</option>
+            <option value="QLD">Queensland (QLD)</option>
+            <option value="SA">South Australia (SA)</option>
+            <option value="WA">Western Australia (WA)</option>
+            <option value="TAS">Tasmania (TAS)</option>
+            <option value="NT">Northern Territory (NT)</option>
+            <option value="ACT">Australian Capital Territory (ACT)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Postcode</label>
+          <input type="text" id="postcode" placeholder="e.g., 3000">
+        </div>
+
+        <div class="form-group">
+          <label>Venue Type</label>
+          <div class="radio-group">
+            <div class="radio-option">
+              <input type="radio" id="type-pub" name="venueType" value="Family Pub">
+              <label for="type-pub" class="radio-label">
+                <span class="radio-icon">🍺</span>
+                <span class="radio-text">Family Pub</span>
+              </label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="type-bar" name="venueType" value="CBD Bar">
+              <label for="type-bar" class="radio-label">
+                <span class="radio-icon">🍹</span>
+                <span class="radio-text">CBD Bar</span>
+              </label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="type-restaurant" name="venueType" value="Suburban Restaurant">
+              <label for="type-restaurant" class="radio-label">
+                <span class="radio-icon">🍽️</span>
+                <span class="radio-text">Restaurant</span>
+              </label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="type-cafe" name="venueType" value="Campus Cafe">
+              <label for="type-cafe" class="radio-label">
+                <span class="radio-icon">☕</span>
+                <span class="radio-text">Campus Cafe</span>
+              </label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="type-waterfront" name="venueType" value="Waterfront Venue">
+              <label for="type-waterfront" class="radio-label">
+                <span class="radio-icon">⛱️</span>
+                <span class="radio-text">Waterfront</span>
+              </label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="type-nightclub" name="venueType" value="Nightclub">
+              <label for="type-nightclub" class="radio-label">
+                <span class="radio-icon">🎵</span>
+                <span class="radio-text">Nightclub</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="button-group">
+          <button class="btn-primary" onclick="nextStep()">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Connect Tanda -->
+    <div class="step" data-step="2">
+      <div class="card">
+        <h2>Connect Tanda</h2>
+        <p>RosterIQ syncs your employee data, shifts, and timesheets from Tanda to predict staffing needs.</p>
+
+        <p style="font-size: 13px; background: rgba(14, 165, 233, 0.1); padding: 12px; border-radius: 6px; color: #94a3b8; margin-bottom: 20px;">
+          We access: employees, schedules, timesheets, and leave requests
+        </p>
+
+        <button class="btn-primary" style="width: 100%; margin-bottom: 12px;" onclick="connectTanda()">
+          🔗 Connect Tanda Account
+        </button>
+
+        <div id="tandaStatus" class="status-badge status-disconnected">Not connected</div>
+
+        <div class="skip-link">
+          <a onclick="nextStep()">Skip for now</a>
+        </div>
+
+        <div class="button-group" style="margin-top: 40px;">
+          <button class="btn-secondary" onclick="prevStep()">Back</button>
+          <button class="btn-primary" onclick="nextStep()">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Connect POS -->
+    <div class="step" data-step="3">
+      <div class="card">
+        <h2>Connect POS System</h2>
+        <p>Your POS data trains our demand prediction model. Without it, we'll use generic hospitality benchmarks.</p>
+
+        <div class="form-group">
+          <label>Which POS system do you use?</label>
+          <div class="card-selection">
+            <div class="card-option">
+              <input type="radio" id="pos-hl" name="posSystem" value="hl">
+              <label for="pos-hl" class="card-label">H&amp;L (Hospitality &amp; Leisure)</label>
+            </div>
+            <div class="card-option">
+              <input type="radio" id="pos-lightspeed" name="posSystem" value="lightspeed">
+              <label for="pos-lightspeed" class="card-label">Lightspeed Restaurant</label>
+            </div>
+            <div class="card-option">
+              <input type="radio" id="pos-square" name="posSystem" value="square">
+              <label for="pos-square" class="card-label">Square</label>
+            </div>
+            <div class="card-option">
+              <input type="radio" id="pos-other" name="posSystem" value="other">
+              <label for="pos-other" class="card-label">Other / Manual CSV Upload</label>
+            </div>
+          </div>
+        </div>
+
+        <div id="posInput" class="hidden">
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" placeholder="Paste your API key here">
+          </div>
+        </div>
+
+        <div class="skip-link">
+          <a onclick="nextStep()">Skip for now</a>
+        </div>
+
+        <div class="button-group" style="margin-top: 40px;">
+          <button class="btn-secondary" onclick="prevStep()">Back</button>
+          <button class="btn-primary" onclick="nextStep()">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: Connect Bookings -->
+    <div class="step" data-step="4">
+      <div class="card">
+        <h2>Connect Reservations</h2>
+        <p>Booking data improves forecast accuracy by ~25%. Optional but highly recommended.</p>
+
+        <div class="form-group">
+          <label>Which platform do you use?</label>
+          <div class="card-selection">
+            <div class="card-option">
+              <input type="radio" id="book-resdiary" name="bookSystem" value="resdiary">
+              <label for="book-resdiary" class="card-label">ResDiary</label>
+            </div>
+            <div class="card-option">
+              <input type="radio" id="book-nowbook" name="bookSystem" value="nowbook">
+              <label for="book-nowbook" class="card-label">Now Book It</label>
+            </div>
+            <div class="card-option">
+              <input type="radio" id="book-opentable" name="bookSystem" value="opentable">
+              <label for="book-opentable" class="card-label">OpenTable</label>
+            </div>
+            <div class="card-option">
+              <input type="radio" id="book-sevenrooms" name="bookSystem" value="sevenrooms">
+              <label for="book-sevenrooms" class="card-label">SevenRooms</label>
+            </div>
+            <div class="card-option">
+              <input type="radio" id="book-none" name="bookSystem" value="none">
+              <label for="book-none" class="card-label">We don't use online bookings</label>
+            </div>
+          </div>
+        </div>
+
+        <div id="bookInput" class="hidden">
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" placeholder="Paste your API key here">
+          </div>
+        </div>
+
+        <div class="skip-link">
+          <a onclick="nextStep()">Skip for now</a>
+        </div>
+
+        <div class="button-group" style="margin-top: 40px;">
+          <button class="btn-secondary" onclick="prevStep()">Back</button>
+          <button class="btn-primary" onclick="nextStep()">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 5: Free Signals -->
+    <div class="step" data-step="5">
+      <div class="card">
+        <h2>Your Free Signal Suite</h2>
+        <p>These data feeds are active for your venue at no extra cost.</p>
+
+        <div class="feature-list">
+          <div class="feature-card">
+            <span class="feature-icon">☀️</span>
+            <div class="feature-text">
+              <h4>BOM Weather <span class="feature-checkmark">✓</span></h4>
+              <p>Real-time weather patterns for your area</p>
+            </div>
+          </div>
+          <div class="feature-card">
+            <span class="feature-icon">📅</span>
+            <div class="feature-text">
+              <h4>School Holidays <span class="feature-checkmark">✓</span></h4>
+              <p>VIC term dates through 2027</p>
+            </div>
+          </div>
+          <div class="feature-card">
+            <span class="feature-icon">🏈</span>
+            <div class="feature-text">
+              <h4>Sports Calendar <span class="feature-checkmark">✓</span></h4>
+              <p>AFL, NRL, and Cricket fixtures</p>
+            </div>
+          </div>
+          <div class="feature-card">
+            <span class="feature-icon">🎉</span>
+            <div class="feature-text">
+              <h4>Public Holidays <span class="feature-checkmark">✓</span></h4>
+              <p>Federal and state holidays</p>
+            </div>
+          </div>
+          <div class="feature-card">
+            <span class="feature-icon">💰</span>
+            <div class="feature-text">
+              <h4>Payroll Cycles <span class="feature-checkmark">✓</span></h4>
+              <p>Fortnightly spending patterns</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Add Google Places API key (optional)</label>
+          <input type="password" placeholder="For local foot traffic analysis">
+        </div>
+
+        <div class="form-group">
+          <label>Add Ticketmaster API key (optional)</label>
+          <input type="password" placeholder="For local events data">
+        </div>
+
+        <div class="button-group">
+          <button class="btn-secondary" onclick="prevStep()">Back</button>
+          <button class="btn-primary" onclick="nextStep()">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 6: Review & Launch -->
+    <div class="step" data-step="6">
+      <div class="card">
+        <h2>Ready to Launch</h2>
+        <p>Your AI rostering engine is configured and ready to go.</p>
+
+        <div class="summary-card">
+          <h4>Venue Details</h4>
+          <p id="summaryVenue">Loading...</p>
+        </div>
+
+        <div class="summary-card">
+          <h4>Connected Data Sources</h4>
+          <p id="summaryConnections">Tanda: Connected | POS: Skipped | Bookings: Skipped</p>
+        </div>
+
+        <div class="summary-card">
+          <h4>Active Signal Feeds</h4>
+          <p>5 free signals + optional API keys</p>
+        </div>
+
+        <button class="btn-primary" style="width: 100%; margin-top: 32px; padding: 14px;" onclick="launchDashboard()">
+          Launch Dashboard →
+        </button>
+
+        <div class="button-group" style="margin-top: 20px;">
+          <button class="btn-secondary" onclick="prevStep()">Back</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentStep = 1;
+    const totalSteps = 6;
+
+    const formData = {
+      venueName: '',
+      address: '',
+      suburb: '',
+      state: '',
+      postcode: '',
+      venueType: '',
+      tandaConnected: false,
+      posSystem: '',
+      bookSystem: '',
+      apiKeys: {}
+    };
+
+    function initProgress() {
+      const progressBar = document.getElementById('progressBar');
+      progressBar.innerHTML = '';
+      for (let i = 1; i <= totalSteps; i++) {
+        const step = document.createElement('div');
+        step.className = 'progress-step';
+        if (i < currentStep) step.classList.add('completed');
+        if (i === currentStep) step.classList.add('active');
+        progressBar.appendChild(step);
+      }
+    }
+
+    function showStep(step) {
+      document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+      document.querySelector(`[data-step="${step}"]`).classList.add('active');
+      window.scrollTo(0, 0);
+    }
+
+    function nextStep() {
+      if (currentStep === 1) {
+        if (!document.getElementById('venueName').value || !document.getElementById('state').value) {
+          alert('Please fill in venue name and state');
+          return;
+        }
+        formData.venueName = document.getElementById('venueName').value;
+        formData.address = document.getElementById('address').value;
+        formData.suburb = document.getElementById('suburb').value;
+        formData.state = document.getElementById('state').value;
+        formData.postcode = document.getElementById('postcode').value;
+        formData.venueType = document.querySelector('input[name="venueType"]:checked')?.value || '';
+      }
+
+      if (currentStep < totalSteps) {
+        currentStep++;
+        initProgress();
+        showStep(currentStep);
+        if (currentStep === 6) updateSummary();
+      }
+    }
+
+    function prevStep() {
+      if (currentStep > 1) {
+        currentStep--;
+        initProgress();
+        showStep(currentStep);
+      }
+    }
+
+    function connectTanda() {
+      formData.tandaConnected = true;
+      const badge = document.getElementById('tandaStatus');
+      badge.textContent = 'Connected ✓';
+      badge.className = 'status-badge status-connected';
+    }
+
+    function updateSummary() {
+      const summary = `${formData.venueName}, ${formData.suburb} ${formData.postcode}, ${formData.state}`;
+      document.getElementById('summaryVenue').textContent = summary;
+      const connections = `Tanda: ${formData.tandaConnected ? 'Connected ✓' : 'Skipped'} | POS: ${formData.posSystem ? 'Connected ✓' : 'Skipped'} | Bookings: ${formData.bookSystem && formData.bookSystem !== 'none' ? 'Connected ✓' : 'Skipped'}`;
+      document.getElementById('summaryConnections').textContent = connections;
+    }
+
+    function launchDashboard() {
+      const configPayload = {
+        venue: {
+          name: formData.venueName,
+          address: formData.address,
+          suburb: formData.suburb,
+          state: formData.state,
+          postcode: formData.postcode,
+          type: formData.venueType
+        },
+        integrations: {
+          tanda: formData.tandaConnected,
+          pos: formData.posSystem,
+          bookings: formData.bookSystem
+        },
+        signals: ['bom_weather', 'school_holidays', 'sports_calendar', 'public_holidays', 'payroll_cycles']
+      };
+
+      console.log('Launching with config:', configPayload);
+      // In production: POST to /dashboard/{venue_id}/configure-feeds
+      // For now: simulate and redirect
+      alert('Configuration saved! Redirecting to dashboard...');
+      window.location.href = '/dashboard';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initProgress();
+
+      document.querySelectorAll('input[name="posSystem"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+          const posInput = document.getElementById('posInput');
+          if (radio.value && radio.value !== 'other') {
+            posInput.classList.remove('hidden');
+            formData.posSystem = radio.value;
+          } else {
+            posInput.classList.remove('hidden');
+            formData.posSystem = radio.value;
+          }
+        });
+      });
+
+      document.querySelectorAll('input[name="bookSystem"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+          const bookInput = document.getElementById('bookInput');
+          if (radio.value && radio.value !== 'none') {
+            bookInput.classList.remove('hidden');
+            formData.bookSystem = radio.value;
+          } else {
+            bookInput.classList.remove('hidden');
+            formData.bookSystem = radio.value;
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

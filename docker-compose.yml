@@ -1,0 +1,85 @@
+# Docker Compose for RosterIQ Local Development
+# Provides PostgreSQL database and API service with hot-reload
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database Service
+  postgres:
+    image: postgres:16-alpine
+    container_name: rosteriq-db
+    environment:
+      # Database credentials - match .env for local development
+      POSTGRES_USER: rosteriq
+      POSTGRES_PASSWORD: rosteriq
+      POSTGRES_DB: rosteriq
+    ports:
+      # Expose PostgreSQL on localhost:5432
+      - "5432:5432"
+    volumes:
+      # Persist database data across container restarts
+      - rosteriq-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      # Check if postgres is ready to accept connections
+      test: ["CMD-SHELL", "pg_isready -U rosteriq"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # RosterIQ API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rosteriq-api
+    environment:
+      # Load environment variables from .env file
+      DATABASE_URL: postgresql://rosteriq:rosteriq@postgres:5432/rosteriq
+      RIQ_JWT_SECRET: dev-secret-key-change-in-production
+      TANDA_CLIENT_ID: ${TANDA_CLIENT_ID:-}
+      TANDA_CLIENT_SECRET: ${TANDA_CLIENT_SECRET:-}
+      GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
+      OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY:-}
+      TICKETMASTER_API_KEY: ${TICKETMASTER_API_KEY:-}
+      PREDICTHQ_TOKEN: ${PREDICTHQ_TOKEN:-}
+      RESDIARY_API_KEY: ${RESDIARY_API_KEY:-}
+      NOWBOOKIT_API_KEY: ${NOWBOOKIT_API_KEY:-}
+      UBEREATS_CLIENT_ID: ${UBEREATS_CLIENT_ID:-}
+      UBEREATS_CLIENT_SECRET: ${UBEREATS_CLIENT_SECRET:-}
+      SPORTRADAR_API_KEY: ${SPORTRADAR_API_KEY:-}
+      CORS_ORIGINS: http://localhost:3000,http://localhost:8000
+    ports:
+      # Expose API on localhost:8000
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Mount source code for hot-reload during development
+      - ./rosteriq:/app/rosteriq
+      - ./dashboard:/app/dashboard
+    command: >
+      sh -c "
+      uvicorn rosteriq.api:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dirs=/app/rosteriq,/app/dashboard
+      "
+    healthcheck:
+      # Verify the API is responding to requests
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+# Named volume for database persistence
+volumes:
+  rosteriq-db-volume:
+    driver: local
+
+# Network configuration (default 'bridge' network is used)
+# Services communicate via service name (e.g., postgres:5432)

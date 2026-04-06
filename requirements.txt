@@ -1,0 +1,34 @@
+# RosterIQ Production Dependencies
+# Pin all versions for reproducible deployments
+
+# Web Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+
+# Data Validation
+pydantic==2.6.1
+
+# HTTP Client (for external API calls)
+httpx==0.27.0
+
+# Database
+psycopg2-binary==2.9.9
+
+# Authentication & Security
+PyJWT==2.8.0
+passlib[bcrypt]==1.7.4
+
+# File Upload Support
+python-multipart==0.0.9
+
+# ML/AI Models (Forecasting & Predictions)
+xgboost==2.0.3
+prophet==1.1.5
+
+# Data Processing
+pandas==2.2.0
+numpy==1.26.4
+
+# Additional optional dependencies that may be needed:
+# aiofiles==23.2.1  # Async file I/O if needed
+# pydantic-settings==2.1.0  # Environment variable management
