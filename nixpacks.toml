@@ -1,0 +1,9 @@
+# Force Nixpacks to use Python provider (not Node/Bun)
+[phases.setup]
+nixPkgs = ["python311", "gcc"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "uvicorn rosteriq.api:app --host 0.0.0.0 --port ${PORT:-8000}"
