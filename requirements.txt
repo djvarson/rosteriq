@@ -22,8 +22,9 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.9
 
 # ML/AI Models (Forecasting & Predictions)
-xgboost==2.0.3
-prophet==1.1.5
+# xgboost and prophet deferred - heavy deps, enable when needed
+# xgboost==2.0.3
+# prophet==1.1.5
 
 # Data Processing
 pandas==2.2.0
