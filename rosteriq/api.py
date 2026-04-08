@@ -16,9 +16,8 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger("rosteriq")
@@ -78,18 +77,12 @@ class RosterRequest(BaseModel):
 @app.post("/api/v1/rosters/generate")
 async def generate_roster(request: RosterRequest):
     """Generate an optimised roster for a venue and week."""
-    try:
-        from rosteriq.roster_engine import RosterEngine
-        # Placeholder - in production this pulls from Tanda/database
-        return {
-            "status": "success",
-            "venue_id": request.venue_id,
-            "week_start": request.week_start,
-            "message": "Roster generation endpoint active. Connect Tanda integration for live data.",
-        }
-    except Exception as e:
-        logger.error(f"Roster generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "status": "success",
+        "venue_id": request.venue_id,
+        "week_start": request.week_start,
+        "message": "Roster generation endpoint active. Connect Tanda integration for live data.",
+    }
 
 
 # --- Award Engine Endpoints ---
