@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosterIQ Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --dark-bg: #1a1a2e;
+            --darker-bg: #16213e;
+            --card-bg: #0f3460;
+            --alert-red: #e94560;
+            --success-green: #53d769;
+            --info-blue: #4fc3f7;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --border-color: #2a2a3e;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--dark-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--info-blue);
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            border: none;
+            background-color: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 14px;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            color: var(--text-primary);
+            border-bottom-color: var(--info-blue);
+        }
+
+        .tab:hover {
+            color: var(--text-primary);
+        }
+
+        .view {
+            display: none;
+        }
+
+        .view.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Roster Maker View */
+        .week-selector {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding: 15px;
+            background-color: var(--card-bg);
+            border-radius: 8px;
+        }
+
+        .week-selector button {
+            background-color: var(--darker-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .week-selector button:hover {
+            background-color: var(--info-blue);
+            border-color: var(--info-blue);
+        }
+
+        .week-display {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+            min-width: 200px;
+        }
+
+        .signals-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .signal-card {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .signal-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(79, 195, 247, 0.1);
+        }
+
+        .signal-card-title {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .signal-card-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .signal-card-detail {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .chart-container {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+            position: relative;
+            height: 300px;
+        }
+
+        .chart-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: var(--text-primary);
+        }
+
+        .roster-grid {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            margin-bottom: 30px;
+            overflow-x: auto;
+        }
+
+        .roster-grid-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: var(--text-primary);
+        }
+
+        .roster-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .roster-table th {
+            background-color: var(--darker-bg);
+            padding: 12px;
+            text-align: left;
+            color: var(--text-secondary);
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .roster-table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .shift-cell {
+            background-color: var(--darker-bg);
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+        }
+
+        .shift-bar { background-color: #2563eb; color: var(--text-primary); }
+        .shift-kitchen { background-color: #f97316; color: var(--text-primary); }
+        .shift-floor { background-color: #16a34a; color: var(--text-primary); }
+        .shift-manager { background-color: #7c3aed; color: var(--text-primary); }
+
+        .recommendations {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+
+        .recommendation-item {
+            padding: 12px;
+            margin-bottom: 10px;
+            background-color: var(--darker-bg);
+            border-left: 4px solid var(--info-blue);
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .recommendation-item.alert {
+            border-left-color: var(--alert-red);
+        }
+
+        .recommendation-item.success {
+            border-left-color: var(--success-green);
+        }
+
+        .labour-cost {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+
+        .labour-cost-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+
+        .cost-item {
+            background-color: var(--darker-bg);
+            padding: 15px;
+            border-radius: 4px;
+        }
+
+        .cost-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .cost-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--text-primary);
+        }
+
+        .generate-button {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: var(--info-blue);
+            color: var(--dark-bg);
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .generate-button:hover {
+            background-color: #03a9f4;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
+        }
+
+        .generate-button.loading {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        /* On-Shift View */
+        .status-header {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .status-time {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .live-badge {
+            background-color: var(--alert-red);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 10px;
+        }
+
+        .revenue-card {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+
+        .revenue-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .revenue-row:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .revenue-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .revenue-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--text-primary);
+        }
+
+        .variance-good {
+            color: var(--success-green);
+        }
+
+        .variance-bad {
+            color: var(--alert-red);
+        }
+
+        .staff-list {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+
+        .staff-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background-color: var(--darker-bg);
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .staff-name {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .staff-role {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .staff-info {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .quick-actions {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+
+        .action-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .action-button {
+            padding: 10px 15px;
+            background-color: var(--darker-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s ease;
+        }
+
+        .action-button:hover {
+            background-color: var(--info-blue);
+            border-color: var(--info-blue);
+            color: var(--dark-bg);
+        }
+
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .active-signals {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .signal-item {
+            padding: 12px;
+            background-color: var(--darker-bg);
+            border-left: 4px solid var(--info-blue);
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .signal-item.alert {
+            border-left-color: var(--alert-red);
+        }
+
+        .action-recommendations {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+
+            header {
+                flex-direction: column;
+                gap: 15px;
+                margin-bottom: 20px;
+            }
+
+            .tabs {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .signals-grid {
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            }
+
+            .two-column {
+                grid-template-columns: 1fr;
+            }
+
+            .roster-table {
+                font-size: 11px;
+            }
+
+            .roster-table th,
+            .roster-table td {
+                padding: 8px;
+            }
+
+            .status-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+
+            .labour-cost-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top: 2px solid var(--info-blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-left: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background-color: rgba(233, 69, 96, 0.1);
+            border: 1px solid var(--alert-red);
+            color: var(--alert-red);
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-size: 13px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: var(--text-primary);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">RosterIQ Dashboard</div>
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('roster')">Roster Maker</button>
+                <button class="tab" onclick="switchTab('onshift')">On-Shift</button>
+            </div>
+        </header>
+
+        <!-- ROSTER MAKER VIEW -->
+        <div id="roster" class="view active">
+            <div class="week-selector">
+                <button onclick="previousWeek()">← Previous</button>
+                <div class="week-display">
+                    Week of <span id="weekStart">April 7, 2026</span>
+                </div>
+                <button onclick="nextWeek()">Next →</button>
+            </div>
+
+            <div class="signals-grid" id="signalsGrid">
+                <!-- Populated by JavaScript -->
+            </div>
+
+            <div class="chart-container">
+                <div class="chart-title">Demand Forecast - Monday</div>
+                <canvas id="demandChart"></canvas>
+            </div>
+
+            <div class="roster-grid">
+                <div class="roster-grid-title">Draft Roster - Week of <span id="rosterWeek">April 7</span></div>
+                <div style="overflow-x: auto;">
+                    <table class="roster-table">
+                        <thead>
+                            <tr>
+                                <th>Time Slot</th>
+                                <th>Monday</th>
+                                <th>Tuesday</th>
+                                <th>Wednesday</th>
+                                <th>Thursday</th>
+                                <th>Friday</th>
+                                <th>Saturday</th>
+                                <th>Sunday</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rosterBody">
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="recommendations">
+                <div class="section-title">AI Recommendations</div>
+                <div id="recommendationsContainer">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="labour-cost">
+                <div class="section-title">Labour Cost Summary</div>
+                <div class="labour-cost-grid">
+                    <div class="cost-item">
+                        <div class="cost-label">Total Weekly Cost</div>
+                        <div class="cost-value" id="totalCost">$4,800</div>
+                    </div>
+                    <div class="cost-item">
+                        <div class="cost-label">Budget</div>
+                        <div class="cost-value" id="budgetCost">$5,000</div>
+                    </div>
+                    <div class="cost-item">
+                        <div class="cost-label">Variance</div>
+                        <div class="cost-value" id="varianceCost" style="color: var(--success-green);">-$200</div>
+                    </div>
+                    <div class="cost-item">
+                        <div class="cost-label">Overtime Hours</div>
+                        <div class="cost-value" id="overtimeHours">2.5h</div>
+                    </div>
+                </div>
+                <button class="generate-button" id="generateBtn" onclick="generateRoster()">
+                    <span id="btnText">Generate Roster</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ON-SHIFT VIEW -->
+        <div id="onshift" class="view">
+            <div class="status-header">
+                <div>
+                    <span class="live-badge">● LIVE</span>
+                    <span class="status-title" id="shiftStatus">Friday Dinner Service</span>
+                </div>
+                <div class="status-time" id="shiftTime">6:30 PM</div>
+            </div>
+
+            <div class="revenue-card">
+                <div class="section-title">Revenue Tracker</div>
+                <div class="revenue-row">
+                    <span class="revenue-label">Current Revenue</span>
+                    <span class="revenue-value" id="currentRevenue">$2,450</span>
+                </div>
+                <div class="revenue-row">
+                    <span class="revenue-label">Expected Revenue</span>
+                    <span class="revenue-value" id="expectedRevenue">$2,200</span>
+                </div>
+                <div class="revenue-row">
+                    <span class="revenue-label">Variance</span>
+                    <span class="revenue-value" id="revenueVariance">
+                        <span class="variance-good">+$250 (+11%)</span>
+                    </span>
+                </div>
+            </div>
+
+            <div class="two-column">
+                <div>
+                    <div class="staff-list">
+                        <div class="section-title">Staff On Deck</div>
+                        <div id="staffOnDeck">
+                            <!-- Populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="chart-container">
+                        <div class="chart-title">Demand: Expected vs Actual</div>
+                        <canvas id="demandComparisonChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-column">
+                <div class="active-signals">
+                    <div class="section-title">Active Signals</div>
+                    <div id="activeSignalsContainer">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+
+                <div class="action-recommendations">
+                    <div class="section-title">Recommended Actions</div>
+                    <div id="actionRecommendations">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="quick-actions">
+                <div class="section-title">Quick Actions</div>
+                <div class="action-buttons">
+                    <button class="action-button" onclick="quickAction('call-in')">Log Call-In</button>
+                    <button class="action-button" onclick="quickAction('break')">Record Break</button>
+                    <button class="action-button" onclick="quickAction('note')">Add Note</button>
+                    <button class="action-button" onclick="quickAction('adjust')">Adjust Staffing</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const VENUE_ID = 'venue_demo_001';
+        let currentWeekStart = new Date('2026-04-07');
+        let demandChart = null;
+        let demandComparisonChart = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            updateWeekDisplay();
+            loadRosterData();
+            loadOnShiftData();
+            updateShiftTime();
+            setInterval(updateShiftTime, 1000);
+        });
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+
+            if (tabName === 'roster') {
+                setTimeout(() => {
+                    if (demandChart) demandChart.resize();
+                }, 100);
+            } else {
+                setTimeout(() => {
+                    if (demandComparisonChart) demandComparisonChart.resize();
+                }, 100);
+            }
+        }
+
+        function previousWeek() {
+            currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+            updateWeekDisplay();
+            loadRosterData();
+        }
+
+        function nextWeek() {
+            currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+            updateWeekDisplay();
+            loadRosterData();
+        }
+
+        function updateWeekDisplay() {
+            const options = { year: 'numeric', month: 'short', day: 'numeric' };
+            document.getElementById('weekStart').textContent = currentWeekStart.toLocaleDateString('en-AU', options);
+            document.getElementById('rosterWeek').textContent = currentWeekStart.toLocaleDateString('en-AU', { month: 'short', day: 'numeric' });
+        }
+
+        function updateShiftTime() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+            document.getElementById('shiftTime').textContent = timeString;
+        }
+
+        async function loadRosterData() {
+            const dateStr = currentWeekStart.toISOString().split('T')[0];
+            try {
+                const response = await fetch(`/api/v1/signals/${VENUE_ID}/${dateStr}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    populateSignals(data);
+                } else {
+                    populateSignals(getDemoSignals());
+                }
+            } catch (error) {
+                console.warn('API unavailable, using demo data', error);
+                populateSignals(getDemoSignals());
+            }
+
+            populateRosterGrid();
+            populateRecommendations();
+        }
+
+        async function loadOnShiftData() {
+            try {
+                const response = await fetch(`/api/v1/dashboard/on-shift/${VENUE_ID}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    populateOnShiftData(data);
+                } else {
+                    populateOnShiftData(getDemoOnShiftData());
+                }
+            } catch (error) {
+                console.warn('API unavailable, using demo data', error);
+                populateOnShiftData(getDemoOnShiftData());
+            }
+        }
+
+        function populateSignals(data) {
+            const signals = data.signals || [
+                { title: 'Weather', value: '22°C', detail: 'Clear, sunny' },
+                { title: 'Events Nearby', value: '2', detail: 'Conference, Sport' },
+                { title: 'Booking Level', value: '78%', detail: '95 reservations' },
+                { title: 'Foot Traffic', value: '+12%', detail: 'Above baseline' }
+            ];
+
+            const grid = document.getElementById('signalsGrid');
+            grid.innerHTML = signals.map(s => `
+                <div class="signal-card">
+                    <div class="signal-card-title">${s.title}</div>
+                    <div class="signal-card-value">${s.value}</div>
+                    <div class="signal-card-detail">${s.detail}</div>
+                </div>
+            `).join('');
+
+            drawDemandChart(data.hourly_forecast || getDemoHourlyForecast());
+        }
+
+        function populateRosterGrid() {
+            const timeSlots = ['Breakfast', 'Lunch', 'Afternoon', 'Dinner', 'Late'];
+            const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            const roles = ['Bar', 'Kitchen', 'Floor', 'Manager'];
+            const roleClasses = ['shift-bar', 'shift-kitchen', 'shift-floor', 'shift-manager'];
+
+            let html = '';
+            timeSlots.forEach(slot => {
+                html += `<tr><td><strong>${slot}</strong></td>`;
+                days.forEach(() => {
+                    const role = roles[Math.floor(Math.random() * roles.length)];
+                    const roleClass = roleClasses[roles.indexOf(role)];
+                    const staffNum = Math.floor(Math.random() * 3) + 1;
+                    const hours = (Math.random() * 4 + 2).toFixed(1);
+                    html += `<td><div class="shift-cell ${roleClass}">${staffNum} ${role.charAt(0)} • ${hours}h</div></td>`;
+                });
+                html += '</tr>';
+            });
+
+            document.getElementById('rosterBody').innerHTML = html;
+        }
+
+        function populateRecommendations() {
+            const recommendations = [
+                { text: 'Add 1 floor staff Friday 6-10pm (high booking)', type: 'alert' },
+                { text: 'Reduce kitchen Sunday lunch (low footfall)', type: 'default' },
+                { text: 'Schedule 2 managers Saturday (events nearby)', type: 'alert' },
+                { text: 'Consider casual staff Monday morning (below forecast)', type: 'default' }
+            ];
+
+            const html = recommendations.map(r => `
+                <div class="recommendation-item ${r.type === 'alert' ? 'alert' : ''}">
+                    ${r.text}
+                </div>
+            `).join('');
+
+            document.getElementById('recommendationsContainer').innerHTML = html;
+        }
+
+        function populateOnShiftData(data) {
+            const staff = data.staff_on_deck || [
+                { name: 'Sarah Chen', role: 'Floor', hours: 4.5, break: false },
+                { name: 'Marcus Johnson', role: 'Bar', hours: 5.0, break: true },
+                { name: 'Emma Davis', role: 'Kitchen', hours: 3.0, break: false },
+                { name: 'Alex Park', role: 'Floor', hours: 6.0, break: false }
+            ];
+
+            const staffHtml = staff.map(s => `
+                <div class="staff-item">
+                    <div>
+                        <div class="staff-name">${s.name}</div>
+                        <div class="staff-role">${s.role}</div>
+                    </div>
+                    <div class="staff-info">
+                        <div>${s.hours}h worked</div>
+                        <div>${s.break ? '🍽️ On break' : '✓ Active'}</div>
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('staffOnDeck').innerHTML = staffHtml;
+
+            const signals = data.active_signals || [
+                { text: 'Weather: 24°C, clear conditions', alert: false },
+                { text: 'Nearby event: Conference at Convention Centre (500 pax)', alert: false },
+                { text: 'Booking level: 85% (high demand)', alert: true },
+                { text: 'Foot traffic: +18% above average', alert: true }
+            ];
+
+            const signalHtml = signals.map(s => `
+                <div class="signal-item ${s.alert ? 'alert' : ''}">
+                    ${s.text}
+                </div>
+            `).join('');
+
+            document.getElementById('activeSignalsContainer').innerHTML = signalHtml;
+
+            const actions = data.recommended_actions || [
+                'Consider sending home 1 bar staff after 9pm',
+                'Call in backup — 20% above forecast',
+                'Monitor kitchen workload (on track)',
+                'Revenue tracking 11% above expected'
+            ];
+
+            const actionHtml = actions.map(a => `
+                <div class="recommendation-item">
+                    ${a}
+                </div>
+            `).join('');
+
+            document.getElementById('actionRecommendations').innerHTML = actionHtml;
+
+            drawDemandComparisonChart(data.hourly_demand || getDemoHourlyDemand());
+        }
+
+        function drawDemandChart(hourlyData) {
+            const ctx = document.getElementById('demandChart');
+            if (!ctx) return;
+
+            if (demandChart) demandChart.destroy();
+
+            const labels = hourlyData.map(d => d.hour || '');
+            const data = hourlyData.map(d => d.covers || 0);
+
+            demandChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Expected Covers',
+                        data: data,
+                        backgroundColor: '#4fc3f7',
+                        borderColor: '#4fc3f7',
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(176, 176, 176, 0.1)' },
+                            ticks: { color: '#b0b0b0' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#b0b0b0' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function drawDemandComparisonChart(hourlyData) {
+            const ctx = document.getElementById('demandComparisonChart');
+            if (!ctx) return;
+
+            if (demandComparisonChart) demandComparisonChart.destroy();
+
+            const labels = hourlyData.map(d => d.hour || '');
+            const expected = hourlyData.map(d => d.expected || 0);
+            const actual = hourlyData.map(d => d.actual || 0);
+
+            demandComparisonChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Expected',
+                            data: expected,
+                            borderColor: '#4fc3f7',
+                            backgroundColor: 'rgba(79, 195, 247, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Actual',
+                            data: actual,
+                            borderColor: '#53d769',
+                            backgroundColor: 'rgba(83, 215, 105, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: '#b0b0b0' },
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(176, 176, 176, 0.1)' },
+                            ticks: { color: '#b0b0b0' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#b0b0b0' }
+                        }
+                    }
+                }
+            });
+        }
+
+        async function generateRoster() {
+            const btn = document.getElementById('generateBtn');
+            const btnText = document.getElementById('btnText');
+
+            btn.classList.add('loading');
+            btnText.innerHTML = 'Generating<span class="spinner"></span>';
+
+            try {
+                const weekStart = currentWeekStart.toISOString().split('T')[0];
+                const response = await fetch(`/api/v1/rosters/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        venue_id: VENUE_ID,
+                        week_start: weekStart
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    populateRosterGrid();
+                    setTimeout(() => {
+                        btn.classList.remove('loading');
+                        btnText.innerHTML = 'Generate Roster';
+                    }, 1000);
+                } else {
+                    throw new Error('Failed to generate roster');
+                }
+            } catch (error) {
+                console.error('Error generating roster:', error);
+                btn.classList.remove('loading');
+                btnText.innerHTML = 'Generate Roster';
+                alert('Error generating roster. Please try again.');
+            }
+        }
+
+        function quickAction(action) {
+            const messages = {
+                'call-in': 'Log call-in staff member',
+                'break': 'Record staff break',
+                'note': 'Add service note',
+                'adjust': 'Adjust staffing levels'
+            };
+            alert(`${messages[action]} - would open dialog in full implementation`);
+        }
+
+        // Demo data
+        function getDemoSignals() {
+            return {
+                signals: [
+                    { title: 'Weather', value: '22°C', detail: 'Clear, sunny' },
+                    { title: 'Events Nearby', value: '2', detail: 'Conference, Sport' },
+                    { title: 'Booking Level', value: '78%', detail: '95 reservations' },
+                    { title: 'Foot Traffic', value: '+12%', detail: 'Above baseline' }
+                ],
+                hourly_forecast: getDemoHourlyForecast()
+            };
+        }
+
+        function getDemoHourlyForecast() {
+            return [
+                { hour: '11am', covers: 15 },
+                { hour: '12pm', covers: 42 },
+                { hour: '1pm', covers: 55 },
+                { hour: '2pm', covers: 38 },
+                { hour: '5pm', covers: 8 },
+                { hour: '6pm', covers: 68 },
+                { hour: '7pm', covers: 85 },
+                { hour: '8pm', covers: 72 },
+                { hour: '9pm', covers: 45 },
+                { hour: '10pm', covers: 22 }
+            ];
+        }
+
+        function getDemoOnShiftData() {
+            return {
+                staff_on_deck: [
+                    { name: 'Sarah Chen', role: 'Floor', hours: 4.5, break: false },
+                    { name: 'Marcus Johnson', role: 'Bar', hours: 5.0, break: true },
+                    { name: 'Emma Davis', role: 'Kitchen', hours: 3.0, break: false },
+                    { name: 'Alex Park', role: 'Floor', hours: 6.0, break: false }
+                ],
+                hourly_demand: getDemoHourlyDemand(),
+                active_signals: [
+                    { text: 'Weather: 24°C, clear conditions', alert: false },
+                    { text: 'Nearby event: Conference at Convention Centre (500 pax)', alert: false },
+                    { text: 'Booking level: 85% (high demand)', alert: true },
+                    { text: 'Foot traffic: +18% above average', alert: true }
+                ],
+                recommended_actions: [
+                    'Consider sending home 1 bar staff after 9pm',
+                    'Call in backup — 20% above forecast',
+                    'Monitor kitchen workload (on track)',
+                    'Revenue tracking 11% above expected'
+                ]
+            };
+        }
+
+        function getDemoHourlyDemand() {
+            return [
+                { hour: '11am', expected: 18, actual: 15 },
+                { hour: '12pm', expected: 45, actual: 42 },
+                { hour: '1pm', expected: 52, actual: 55 },
+                { hour: '2pm', expected: 35, actual: 38 },
+                { hour: '5pm', expected: 12, actual: 8 },
+                { hour: '6pm', expected: 62, actual: 68 },
+                { hour: '7pm', expected: 80, actual: 85 },
+                { hour: '8pm', expected: 75, actual: 72 },
+                { hour: '9pm', expected: 48, actual: 45 },
+                { hour: '10pm', expected: 25, actual: 22 }
+            ];
+        }
+    </script>
+</body>
+</html>
