@@ -318,6 +318,150 @@
             border: 1px solid rgba(34, 197, 94, 0.4);
         }
 
+        /* -------- Accountability (Moment 8: accept/dismiss on recs) -------- */
+        .recommendation-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .rec-btn {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-secondary, #9ca3af);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .rec-btn:hover { background: rgba(255, 255, 255, 0.04); }
+        .rec-btn.accept:hover {
+            color: #86efac;
+            border-color: rgba(34, 197, 94, 0.6);
+            background: rgba(34, 197, 94, 0.08);
+        }
+        .rec-btn.dismiss:hover {
+            color: #fca5a5;
+            border-color: rgba(239, 68, 68, 0.6);
+            background: rgba(239, 68, 68, 0.08);
+        }
+        .rec-status-pill {
+            display: inline-block;
+            padding: 2px 8px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            border-radius: 999px;
+            margin-left: 6px;
+        }
+        .rec-status-pill.status-accepted {
+            background: rgba(34, 197, 94, 0.15);
+            color: #86efac;
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+        .rec-status-pill.status-dismissed {
+            background: rgba(239, 68, 68, 0.15);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+        .rec-impact {
+            margin-top: 4px;
+            font-size: 11px;
+            color: #fbbf24;
+            font-variant-numeric: tabular-nums;
+        }
+        .recommendation-item.responded {
+            opacity: 0.55;
+        }
+        .recommendation-item.responded .recommendation-actions {
+            display: none;
+        }
+
+        /* -------- Shift Recap: accountability block -------- */
+        .recap-accountability {
+            background: var(--darker-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            font-size: 12px;
+            color: #d1d5db;
+        }
+        .recap-accountability.hidden { display: none; }
+        .recap-accountability-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .recap-accountability-title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: #9ca3af;
+        }
+        .recap-accountability-counts {
+            font-variant-numeric: tabular-nums;
+        }
+        .recap-accountability-counts .count {
+            display: inline-block;
+            padding: 2px 8px;
+            margin-left: 4px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 10px;
+            letter-spacing: 0.3px;
+        }
+        .recap-accountability-counts .count.accepted {
+            color: #86efac;
+            background: rgba(34, 197, 94, 0.12);
+            border: 1px solid rgba(34, 197, 94, 0.35);
+        }
+        .recap-accountability-counts .count.dismissed {
+            color: #fca5a5;
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+        }
+        .recap-accountability-counts .count.pending {
+            color: #fcd34d;
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+        .recap-missed {
+            font-size: 11px;
+            color: #fca5a5;
+            font-variant-numeric: tabular-nums;
+            margin-bottom: 6px;
+        }
+        .recap-top-missed {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .recap-top-missed li {
+            padding: 4px 0;
+            border-top: 1px dashed rgba(255, 255, 255, 0.06);
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 11px;
+            color: #d1d5db;
+        }
+        .recap-top-missed li:first-child { border-top: none; }
+        .recap-top-missed .rec-text { flex: 1; }
+        .recap-top-missed .rec-missed-amt {
+            color: #fca5a5;
+            font-variant-numeric: tabular-nums;
+            flex-shrink: 0;
+        }
+
         .labour-cost {
             background-color: var(--card-bg);
             padding: 20px;
@@ -1656,6 +1800,14 @@
                     </div>
                 </div>
                 <div class="recap-summary empty" id="recapSummary">Recap loading…</div>
+                <div class="recap-accountability hidden" id="recapAccountability">
+                    <div class="recap-accountability-header">
+                        <span class="recap-accountability-title">Accountability</span>
+                        <span class="recap-accountability-counts" id="recapAcctCounts"></span>
+                    </div>
+                    <div class="recap-missed hidden" id="recapMissedLine"></div>
+                    <ul class="recap-top-missed" id="recapTopMissed"></ul>
+                </div>
                 <div class="recap-footer">
                     <span id="recapGeneratedAt">—</span>
                     <button type="button" class="recap-refresh-btn" onclick="fetchShiftRecap()">Refresh recap</button>
@@ -2522,6 +2674,9 @@
                 }
             }
 
+            // Accountability block — hidden entirely when there's no history
+            renderRecapAccountability(recap.accountability);
+
             // Timestamp
             const tsEl = document.getElementById('recapGeneratedAt');
             if (tsEl && recap.generated_at) {
@@ -2532,6 +2687,165 @@
                     tsEl.textContent = 'Updated';
                 }
             }
+
+            // Sync rendered recommendation rows with the latest statuses
+            // from the accountability state (so accepted/dismissed recs
+            // show greyed even across polls).
+            syncRecommendationStatuses();
+        }
+
+        function renderRecapAccountability(acct) {
+            const block = document.getElementById('recapAccountability');
+            if (!block) return;
+            if (!acct || !acct.total) {
+                block.classList.add('hidden');
+                return;
+            }
+            block.classList.remove('hidden');
+
+            const counts = document.getElementById('recapAcctCounts');
+            if (counts) {
+                const parts = [];
+                if (acct.accepted)  parts.push(`<span class="count accepted">${acct.accepted} accepted</span>`);
+                if (acct.dismissed) parts.push(`<span class="count dismissed">${acct.dismissed} dismissed</span>`);
+                if (acct.pending)   parts.push(`<span class="count pending">${acct.pending} pending</span>`);
+                counts.innerHTML = parts.join('');
+            }
+
+            const missedLine = document.getElementById('recapMissedLine');
+            if (missedLine) {
+                const missed = Number(acct.estimated_impact_missed_aud || 0);
+                if (missed > 0) {
+                    missedLine.classList.remove('hidden');
+                    missedLine.textContent =
+                        `~$${Math.round(missed).toLocaleString()} of estimated upside missed on dismissed recs.`;
+                } else {
+                    missedLine.classList.add('hidden');
+                    missedLine.textContent = '';
+                }
+            }
+
+            const topEl = document.getElementById('recapTopMissed');
+            if (topEl) {
+                const top = Array.isArray(acct.top_missed) ? acct.top_missed : [];
+                if (top.length === 0) {
+                    topEl.innerHTML = '';
+                } else {
+                    topEl.innerHTML = top.map(row => {
+                        const text = escapeHtmlSafe(row.text || '(no text)');
+                        const amt = Number(row.impact_estimate_aud || 0);
+                        const amtStr = amt > 0 ? `~$${Math.round(amt).toLocaleString()}` : '';
+                        return `<li><span class="rec-text">${text}</span><span class="rec-missed-amt">${amtStr}</span></li>`;
+                    }).join('');
+                }
+            }
+        }
+
+        // -------- Accountability plumbing (Moment 8) --------
+        // Module-level map of rec_id → latest known status, so re-renders
+        // of the same recommendations can immediately show the right UI
+        // state without waiting for another accountability fetch.
+        const _recStatusMap = {};
+
+        function escapeHtmlSafe(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // djb2 hash → stable, deterministic rec_id for a given action text.
+        // Re-rendering the same rec produces the same id, so auto-record is
+        // idempotent on the backend.
+        function stableRecId(text, priority) {
+            const s = String(text || '') + '|' + String(priority || '');
+            let h = 5381;
+            for (let i = 0; i < s.length; i++) {
+                h = ((h << 5) + h) ^ s.charCodeAt(i);
+                h |= 0;  // force 32-bit
+            }
+            return 'rec_ui_' + (h >>> 0).toString(16);
+        }
+
+        function autoRecordRecommendation(a) {
+            if (!a || !a.action || !a.rec_id) return;
+            // Don't spam the store for recs we've already registered this session
+            if (_recStatusMap[a.rec_id]) return;
+            _recStatusMap[a.rec_id] = 'pending';
+            const body = {
+                venue_id: VENUE_ID,
+                text: a.action,
+                source: 'dashboard',
+                priority: a.backend_priority || 'med',
+                rec_id: a.rec_id
+            };
+            if (a.impact != null) body.impact_estimate_aud = a.impact;
+            fetch('/api/v1/accountability/record', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            }).catch(err => {
+                // Swallow — accountability is not critical-path UX
+                console.warn('autoRecord failed', err);
+            });
+        }
+
+        function acceptRecommendation(recId) {
+            respondToRecommendation(recId, 'accepted', null);
+        }
+
+        function dismissRecommendation(recId) {
+            const note = prompt('Why dismissing? (optional)');
+            respondToRecommendation(recId, 'dismissed', note);
+        }
+
+        async function respondToRecommendation(recId, status, note) {
+            if (!recId) return;
+            const body = { venue_id: VENUE_ID, rec_id: recId, status: status };
+            if (note) body.note = note;
+            try {
+                const resp = await fetch('/api/v1/accountability/respond', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                _recStatusMap[recId] = status;
+                // Immediate optimistic UI update on the clicked row
+                markRecommendationRow(recId, status);
+                // Then re-pull the shift recap so the accountability block
+                // reflects the new totals and missed-impact.
+                fetchShiftRecap();
+            } catch (err) {
+                console.warn('respondToRecommendation failed', err);
+                alert('Could not record that response — the API may be offline.');
+            }
+        }
+
+        function markRecommendationRow(recId, status) {
+            const row = document.querySelector(
+                `.recommendation-item[data-rec-id="${recId}"]`
+            );
+            if (!row) return;
+            row.classList.add('responded');
+            // Avoid double-stamping if called twice
+            if (!row.querySelector('.rec-status-pill')) {
+                const pill = document.createElement('span');
+                pill.className = `rec-status-pill status-${status}`;
+                pill.textContent = status;
+                const header = row.querySelector('.recommendation-header');
+                if (header) header.appendChild(pill);
+            }
+        }
+
+        function syncRecommendationStatuses() {
+            document.querySelectorAll('.recommendation-item[data-rec-id]').forEach(row => {
+                const id = row.getAttribute('data-rec-id');
+                const st = _recStatusMap[id];
+                if (st && st !== 'pending') markRecommendationRow(id, st);
+            });
         }
 
         // -------- Demo data warning pill --------
@@ -2672,29 +2986,67 @@
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
 
-            const actionHtml = actions.map(a => {
-                // Back-compat: if a is a string, render it plainly.
+            // Normalise each action into {rec_id, action, reason, priority, impact}
+            // so we can both render it AND auto-record it in the accountability
+            // store via idempotent rec_id (djb2 hash of the action text).
+            const normalisedActions = actions.map(a => {
                 if (typeof a === 'string') {
-                    return `<div class="recommendation-item">${escapeHtml(a)}</div>`;
+                    return { rec_id: stableRecId(a, 'med'), action: a, reason: '', priority: '', impact: null };
                 }
-                const actionText = escapeHtml(a.action || '');
+                const actionText = a.action || '';
+                const prio = (a.priority || '').toLowerCase();
+                // Normalise 'medium' → 'med' to match backend VALID_PRIORITIES
+                const backendPrio = prio === 'medium' ? 'med' : (prio || 'med');
+                return {
+                    rec_id: stableRecId(actionText, backendPrio),
+                    action: actionText,
+                    reason: a.reason || '',
+                    priority: prio,
+                    backend_priority: backendPrio,
+                    impact: (typeof a.impact_estimate_aud === 'number') ? a.impact_estimate_aud : null
+                };
+            });
+
+            const actionHtml = normalisedActions.map(a => {
+                if (!a.action) return '';
+                const actionText = escapeHtml(a.action);
                 const reason = a.reason ? `<div class="recommendation-reason">${escapeHtml(a.reason)}</div>` : '';
-                const priority = (a.priority || '').toLowerCase();
-                const priorityPill = priority
-                    ? `<span class="priority-pill priority-${escapeHtml(priority)}">${escapeHtml(priority)}</span>`
+                const priorityPill = a.priority
+                    ? `<span class="priority-pill priority-${escapeHtml(a.priority)}">${escapeHtml(a.priority)}</span>`
                     : '';
+                const impactLine = (a.impact != null && a.impact > 0)
+                    ? `<div class="rec-impact">~$${Math.round(a.impact).toLocaleString()} at stake</div>`
+                    : '';
+                const recIdAttr = escapeHtml(a.rec_id);
                 return `
-                    <div class="recommendation-item priority-${escapeHtml(priority)}">
+                    <div class="recommendation-item priority-${escapeHtml(a.priority)}" data-rec-id="${recIdAttr}">
                         <div class="recommendation-header">
                             <div class="recommendation-action">${actionText}</div>
                             ${priorityPill}
                         </div>
                         ${reason}
+                        ${impactLine}
+                        <div class="recommendation-actions">
+                            <button type="button" class="rec-btn accept" onclick="acceptRecommendation('${recIdAttr}')">Accept</button>
+                            <button type="button" class="rec-btn dismiss" onclick="dismissRecommendation('${recIdAttr}')">Dismiss</button>
+                        </div>
                     </div>
                 `;
             }).join('');
 
             document.getElementById('actionRecommendations').innerHTML = actionHtml;
+
+            // Fire-and-forget auto-record of every rendered recommendation
+            // into the accountability store. The rec_id is deterministic so
+            // re-renders on the same rec are no-ops on the backend.
+            normalisedActions.forEach(a => {
+                if (!a.action) return;
+                autoRecordRecommendation(a);
+            });
+
+            // Refresh any existing recap response state into the buttons so
+            // recs that have already been accept/dismissed show greyed out.
+            syncRecommendationStatuses();
 
             // Wire live revenue numbers from /api/v1/dashboard/on-shift/{venue_id}
             if (typeof data.revenue_actual === 'number') {

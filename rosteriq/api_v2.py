@@ -243,8 +243,20 @@ class ShiftRecapHeadcount(BaseModel):
     reset_count: int
 
 
+class ShiftRecapAccountability(BaseModel):
+    """Accountability roll-up inside a shift recap (Moment 8)."""
+    total: int
+    pending: int
+    accepted: int
+    dismissed: int
+    estimated_impact_missed_aud: float
+    estimated_impact_pending_aud: float
+    acceptance_rate: float
+    top_missed: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class ShiftRecapResponse(BaseModel):
-    """End-of-shift recap — the Moment 7 'what just happened' card.
+    """End-of-shift recap — the Moment 7/8 'what just happened' card.
 
     Produced by rosteriq.shift_recap.compose_recap and consumed by
     static/dashboard.html::renderShiftRecap(). Keep shapes in sync.
@@ -255,8 +267,60 @@ class ShiftRecapResponse(BaseModel):
     revenue: ShiftRecapRevenue
     wages: ShiftRecapWages
     headcount: ShiftRecapHeadcount
+    accountability: Optional[ShiftRecapAccountability] = None
     traffic_light: str  # "green" | "amber" | "red"
     summary: str
+
+
+class AccountabilityRecordRequest(BaseModel):
+    """Record a new recommendation in the accountability ledger."""
+    venue_id: str
+    text: str
+    source: str = "manual"
+    impact_estimate_aud: Optional[float] = None
+    priority: str = "med"  # "low" | "med" | "high"
+    rec_id: Optional[str] = None  # if passed, idempotent re-record
+
+
+class AccountabilityRespondRequest(BaseModel):
+    """Mark a pending recommendation as accepted or dismissed."""
+    venue_id: str
+    rec_id: str
+    status: str  # "accepted" | "dismissed"
+    note: Optional[str] = None
+
+
+class AccountabilityEvent(BaseModel):
+    """One recommendation event in the accountability ledger."""
+    id: str
+    venue_id: str
+    recorded_at: str
+    source: str
+    text: str
+    impact_estimate_aud: Optional[float] = None
+    priority: str
+    status: str
+    responded_at: Optional[str] = None
+    response_note: Optional[str] = None
+
+
+class AccountabilitySummary(BaseModel):
+    """Summary roll-up for the accountability ledger."""
+    total: int
+    pending: int
+    accepted: int
+    dismissed: int
+    estimated_impact_missed_aud: float
+    estimated_impact_pending_aud: float
+    acceptance_rate: float
+
+
+class AccountabilityStateResponse(BaseModel):
+    """Full state response for the accountability ledger."""
+    venue_id: str
+    summary: AccountabilitySummary
+    recent: List[AccountabilityEvent]
+    generated_at: str
 
 
 class CallInRequest(BaseModel):
@@ -946,6 +1010,7 @@ async def reset_head_count(request: HeadCountResetRequest) -> HeadCountStateResp
 # ============================================================================
 
 from rosteriq import shift_recap as _shift_recap
+from rosteriq import accountability_store as _acct_store
 
 
 @app.get("/api/v1/shift-recap/{venue_id}", response_model=ShiftRecapResponse)
@@ -954,7 +1019,8 @@ async def get_shift_recap(venue_id: str) -> ShiftRecapResponse:
     Composite end-of-shift recap for a venue.
 
     Pulls today's revenue/wages from the on-shift snapshot, reads the
-    head-count timeline from the in-process head-count store, and
+    head-count timeline from the in-process head-count store, reads the
+    accountability ledger from the in-process accountability store, and
     delegates to rosteriq.shift_recap.compose_recap for all the maths
     and the one-line natural-language summary.
 
@@ -996,6 +1062,10 @@ async def get_shift_recap(venue_id: str) -> ShiftRecapResponse:
         # peak — use history() directly.
         hc_history = _hc_store.history(venue_id)
 
+        # Pull the accountability ledger — same pattern, full history so
+        # the composer can tally and rank without missing older events.
+        acct_history = _acct_store.history(venue_id)
+
         # Read venue-specific wage target from constraints if available,
         # otherwise use the module default.
         wage_target_pct = _shift_recap.DEFAULT_WAGE_TARGET_PCT
@@ -1017,12 +1087,84 @@ async def get_shift_recap(venue_id: str) -> ShiftRecapResponse:
             wages_forecast=wages_forecast,
             wage_target_pct=wage_target_pct,
             headcount_history=hc_history,
+            recommendations=acct_history,
         )
 
         return ShiftRecapResponse(**recap)
     except Exception:
         logger.exception(f"Shift recap failed for {venue_id}")
         raise HTTPException(status_code=500, detail="Shift recap failed")
+
+
+# ============================================================================
+# Accountability Ledger — Moment 8 (decisions-taken-or-not)
+# ============================================================================
+
+@app.get("/api/v1/accountability/{venue_id}", response_model=AccountabilityStateResponse)
+async def get_accountability_state(venue_id: str) -> AccountabilityStateResponse:
+    """
+    Current accountability ledger for a venue — pending/accepted/dismissed
+    recommendations plus a summary roll-up.
+    """
+    try:
+        return AccountabilityStateResponse(**_acct_store.state(venue_id))
+    except Exception:
+        logger.exception(f"Accountability fetch failed for {venue_id}")
+        raise HTTPException(status_code=500, detail="Accountability fetch failed")
+
+
+@app.post("/api/v1/accountability/record", response_model=AccountabilityStateResponse)
+async def record_accountability_event(
+    request: AccountabilityRecordRequest,
+) -> AccountabilityStateResponse:
+    """
+    Record a new recommendation in the accountability ledger. Idempotent
+    when `rec_id` is supplied — re-posting the same rec_id is a no-op.
+    """
+    try:
+        text = (request.text or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="text must not be empty")
+        _acct_store.record(
+            venue_id=request.venue_id,
+            text=text,
+            source=request.source or "manual",
+            impact_estimate_aud=request.impact_estimate_aud,
+            priority=request.priority or "med",
+            rec_id=request.rec_id,
+        )
+        return AccountabilityStateResponse(**_acct_store.state(request.venue_id))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Accountability record failed")
+        raise HTTPException(status_code=500, detail="Accountability record failed")
+
+
+@app.post("/api/v1/accountability/respond", response_model=AccountabilityStateResponse)
+async def respond_to_accountability_event(
+    request: AccountabilityRespondRequest,
+) -> AccountabilityStateResponse:
+    """
+    Mark a pending recommendation as accepted or dismissed. A response
+    note is optional but strongly encouraged for dismissed items — it's
+    exactly the "you had all this data and kept people on — why?" answer.
+    """
+    try:
+        _acct_store.respond(
+            venue_id=request.venue_id,
+            rec_id=request.rec_id,
+            status=request.status,
+            note=(request.note or None),
+        )
+        return AccountabilityStateResponse(**_acct_store.state(request.venue_id))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.exception("Accountability respond failed")
+        raise HTTPException(status_code=500, detail="Accountability respond failed")
 
 
 # ============================================================================

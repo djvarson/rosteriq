@@ -1,8 +1,9 @@
 """Shift recap composer — pure-stdlib, no FastAPI / Pydantic / pipeline imports.
 
-Given a bundle of already-fetched numbers (revenue, wages, head-count history),
-compose an end-of-shift recap that the dashboard can render as KPI tiles and
-a one-line natural-language summary.
+Given a bundle of already-fetched numbers (revenue, wages, head-count
+history, recommendation history), compose an end-of-shift recap that the
+dashboard can render as KPI tiles, an accountability roll-up, and a
+one-line natural-language summary.
 
 Separating this out from the API layer means the whole thing can be unit
 tested with plain dicts — no async, no adapters, no environment.
@@ -13,35 +14,32 @@ Shape of a recap dict:
         "venue_id": "...",
         "shift_date": "YYYY-MM-DD",
         "generated_at": "2026-04-11T12:34:56Z",
-        "revenue": {
-            "actual": float,
-            "forecast": float,
-            "delta": float,         # actual - forecast
-            "delta_pct": float,     # (actual - forecast) / forecast, 0 if forecast == 0
-        },
-        "wages": {
-            "actual": float,
-            "forecast": float,
-            "delta": float,
-            "pct_of_revenue_actual": float,   # actual / revenue_actual, 0 if revenue_actual == 0
-            "pct_of_revenue_target": float,   # supplied target, e.g. 0.30
-            "pct_delta": float,               # pct_of_revenue_actual - target
-        },
-        "headcount": {
-            "peak": int,
-            "peak_time": "HH:MM" | None,
-            "last_count": int,
-            "total_taps": int,
-            "reset_count": int,
+        "revenue": { actual, forecast, delta, delta_pct },
+        "wages":   { actual, forecast, delta,
+                     pct_of_revenue_actual, pct_of_revenue_target, pct_delta },
+        "headcount": { peak, peak_time, last_count, total_taps, reset_count },
+        "accountability": {
+            "total": int,
+            "pending": int,
+            "accepted": int,
+            "dismissed": int,
+            "estimated_impact_missed_aud": float,   # sum of dismissed events' impact
+            "estimated_impact_pending_aud": float,  # sum of pending events' impact
+            "acceptance_rate": float,               # accepted / (accepted + dismissed)
+            "top_missed": [                         # dismissed events sorted by impact desc
+                { id, text, impact_estimate_aud, priority, response_note, source },
+                ...
+            ],
         },
         "traffic_light": "green" | "amber" | "red",
         "summary": "...one-line english...",
     }
 
-The traffic light logic is deterministic: green when both revenue beats
-forecast and wage % is at-or-under target; red when either revenue misses
-forecast by more than 5% OR wage % overshoots target by more than 2 points;
-amber otherwise.
+Traffic light logic is deterministic: green when revenue beats forecast
+and wage % is at-or-under target; red when revenue misses forecast by
+>=10% OR wage % overshoots target by >=2pt OR accepted_plus_dismissed > 0
+AND acceptance_rate == 0 AND estimated_impact_missed_aud > 0; amber in
+the middle band. See `_classify` for the exact rules.
 """
 
 from __future__ import annotations
@@ -134,9 +132,92 @@ def summarise_headcount(history: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def summarise_accountability(
+    recommendations: List[Dict[str, Any]],
+    *,
+    top_missed_limit: int = 5,
+) -> Dict[str, Any]:
+    """Reduce a list of recommendation events (see accountability_store)
+    to a summary block suitable for the recap.
+
+    Accepts the entry shape emitted by rosteriq.accountability_store:
+        {id, venue_id, recorded_at, source, text, impact_estimate_aud,
+         priority, status, responded_at, response_note}
+
+    Missing or malformed fields are tolerated.
+    """
+    if not recommendations:
+        return {
+            "total": 0,
+            "pending": 0,
+            "accepted": 0,
+            "dismissed": 0,
+            "estimated_impact_missed_aud": 0.0,
+            "estimated_impact_pending_aud": 0.0,
+            "acceptance_rate": 0.0,
+            "top_missed": [],
+        }
+
+    total = len(recommendations)
+    pending = accepted = dismissed = 0
+    missed_aud = 0.0
+    pending_aud = 0.0
+    dismissed_events: List[Dict[str, Any]] = []
+
+    for ev in recommendations:
+        status = ev.get("status", "pending")
+        impact = _safe_float(ev.get("impact_estimate_aud"))
+        if status == "pending":
+            pending += 1
+            pending_aud += impact
+        elif status == "accepted":
+            accepted += 1
+        elif status == "dismissed":
+            dismissed += 1
+            missed_aud += impact
+            dismissed_events.append(ev)
+
+    responded = accepted + dismissed
+    acceptance_rate = (accepted / responded) if responded > 0 else 0.0
+
+    # Rank dismissed events by impact descending, then by recorded_at
+    # descending as a tiebreaker, then slice.
+    dismissed_events.sort(
+        key=lambda e: (
+            -_safe_float(e.get("impact_estimate_aud")),
+            -(1 if e.get("recorded_at") else 0),
+            e.get("recorded_at", ""),
+        )
+    )
+    top_missed = []
+    for ev in dismissed_events[:top_missed_limit]:
+        top_missed.append(
+            {
+                "id": ev.get("id"),
+                "text": ev.get("text"),
+                "impact_estimate_aud": _safe_float(ev.get("impact_estimate_aud")),
+                "priority": ev.get("priority", "med"),
+                "response_note": ev.get("response_note"),
+                "source": ev.get("source", "manual"),
+            }
+        )
+
+    return {
+        "total": total,
+        "pending": pending,
+        "accepted": accepted,
+        "dismissed": dismissed,
+        "estimated_impact_missed_aud": round(missed_aud, 2),
+        "estimated_impact_pending_aud": round(pending_aud, 2),
+        "acceptance_rate": round(acceptance_rate, 4),
+        "top_missed": top_missed,
+    }
+
+
 def _classify(
     revenue_delta_pct: float,
     wage_pct_delta: float,
+    accountability: Optional[Dict[str, Any]] = None,
 ) -> str:
     # Revenue side
     if revenue_delta_pct <= -RED_REVENUE_MISS:
@@ -154,9 +235,25 @@ def _classify(
     else:
         wage_light = "green"
 
-    # Worst-of
+    # Accountability side: dismissing recommendations that had real dollar
+    # impact is itself a red signal even if revenue/wages look fine.
+    accountability_light = "green"
+    if accountability:
+        missed = float(accountability.get("estimated_impact_missed_aud") or 0)
+        dismissed = int(accountability.get("dismissed") or 0)
+        accepted = int(accountability.get("accepted") or 0)
+        if dismissed > 0 and missed >= 300:
+            accountability_light = "red"
+        elif dismissed > 0 and (missed >= 100 or accepted == 0):
+            accountability_light = "amber"
+
     order = {"green": 0, "amber": 1, "red": 2}
-    worst = max(revenue_light, wage_light, key=lambda lv: order[lv])
+    worst = max(
+        revenue_light,
+        wage_light,
+        accountability_light,
+        key=lambda lv: order[lv],
+    )
     return worst
 
 
@@ -169,6 +266,7 @@ def _compose_summary(
     wage_pct_target: float,
     headcount_peak: int,
     traffic_light: str,
+    accountability: Optional[Dict[str, Any]] = None,
 ) -> str:
     # Round-trip friendly human figures
     def _fmt_money(v: float) -> str:
@@ -203,7 +301,24 @@ def _compose_summary(
 
     headcount_phrase = f"peak {headcount_peak} people on deck" if headcount_peak > 0 else "no head-count logged"
 
-    return f"{lead}: {rev_phrase}, {wage_phrase}, {headcount_phrase}."
+    # Optional accountability tail — only mentioned when there are
+    # dismissed recs with a dollar amount, because that's the line that
+    # actually matters for a post-shift conversation with the owner.
+    accountability_phrase = ""
+    if accountability:
+        dismissed = int(accountability.get("dismissed") or 0)
+        missed = float(accountability.get("estimated_impact_missed_aud") or 0)
+        if dismissed > 0 and missed > 0:
+            accountability_phrase = (
+                f" {dismissed} rec{'s' if dismissed != 1 else ''} dismissed "
+                f"(~{_fmt_money(missed)} at stake)."
+            )
+        elif dismissed > 0:
+            accountability_phrase = (
+                f" {dismissed} rec{'s' if dismissed != 1 else ''} dismissed."
+            )
+
+    return f"{lead}: {rev_phrase}, {wage_phrase}, {headcount_phrase}.{accountability_phrase}"
 
 
 def compose_recap(
@@ -216,6 +331,7 @@ def compose_recap(
     wages_forecast: Any = None,
     wage_target_pct: float = DEFAULT_WAGE_TARGET_PCT,
     headcount_history: Optional[List[Dict[str, Any]]] = None,
+    recommendations: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Pure composer — takes already-fetched numbers, returns a recap dict.
 
@@ -223,6 +339,10 @@ def compose_recap(
     to WAGE_TO_REVENUE_FALLBACK * revenue for the forecast, and treat actual
     wages as the same fraction of actual revenue. This lets the recap still
     render something useful before SwiftPOS / Tanda wage feeds are wired.
+
+    `recommendations` is the full history list from the accountability
+    store. If empty/None, the recap still renders but the accountability
+    block reports zeros and the traffic light is unaffected.
     """
     rev_a = _safe_float(revenue_actual)
     rev_f = _safe_float(revenue_forecast)
@@ -243,8 +363,9 @@ def compose_recap(
     wg_pct_delta = wg_pct_actual - wage_target_pct
 
     hc_summary = summarise_headcount(headcount_history or [])
+    acct_summary = summarise_accountability(recommendations or [])
 
-    light = _classify(rev_delta_pct, wg_pct_delta)
+    light = _classify(rev_delta_pct, wg_pct_delta, acct_summary)
 
     summary = _compose_summary(
         revenue_actual=rev_a,
@@ -254,6 +375,7 @@ def compose_recap(
         wage_pct_target=wage_target_pct,
         headcount_peak=hc_summary["peak"],
         traffic_light=light,
+        accountability=acct_summary,
     )
 
     return {
@@ -275,6 +397,7 @@ def compose_recap(
             "pct_delta": round(wg_pct_delta, 4),
         },
         "headcount": hc_summary,
+        "accountability": acct_summary,
         "traffic_light": light,
         "summary": summary,
     }
