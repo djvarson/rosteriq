@@ -726,6 +726,154 @@
             pointer-events: none;
         }
 
+        /* -------- Ask RosterIQ card (Moment 3) -------- */
+        .ask-card {
+            background-color: var(--card-bg);
+            padding: 22px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+        .ask-header {
+            margin-bottom: 14px;
+        }
+        .ask-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #f5f5f7;
+            margin-bottom: 4px;
+        }
+        .ask-subtitle {
+            font-size: 12px;
+            color: #9ca3af;
+        }
+        .ask-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .ask-input {
+            flex: 1;
+            padding: 12px 14px;
+            font-size: 14px;
+            color: #f5f5f7;
+            background-color: var(--darker-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .ask-input:focus {
+            border-color: #3b82f6;
+        }
+        .ask-submit-btn {
+            padding: 12px 22px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            background: #3b82f6;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .ask-submit-btn:hover {
+            background: #2563eb;
+        }
+        .ask-submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .ask-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .ask-chip {
+            padding: 6px 12px;
+            font-size: 11px;
+            color: #9ca3af;
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .ask-chip:hover {
+            color: #dbeafe;
+            background: rgba(59, 130, 246, 0.15);
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+        .ask-result {
+            padding: 16px;
+            background: var(--darker-bg);
+            border-radius: 6px;
+            border-left: 4px solid #3b82f6;
+            font-size: 13px;
+            color: #f5f5f7;
+            line-height: 1.5;
+        }
+        .ask-result.empty {
+            color: #9ca3af;
+            font-style: italic;
+            border-left-color: var(--border-color);
+        }
+        .ask-result.unmatched {
+            border-left-color: #f59e0b;
+        }
+        .ask-result-headline {
+            font-size: 22px;
+            font-weight: 700;
+            color: #f5f5f7;
+            margin-bottom: 6px;
+        }
+        .ask-result-period {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #9ca3af;
+            margin-bottom: 10px;
+        }
+        .ask-result-summary {
+            font-size: 14px;
+            color: #dbeafe;
+            margin-bottom: 12px;
+        }
+        .ask-breakdown-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+            font-size: 12px;
+        }
+        .ask-breakdown-table th,
+        .ask-breakdown-table td {
+            padding: 6px 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(176, 176, 176, 0.1);
+        }
+        .ask-breakdown-table th {
+            color: #9ca3af;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        .ask-breakdown-table td {
+            color: #dbeafe;
+        }
+        .ask-result-suggestions {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #9ca3af;
+        }
+        .ask-result-suggestions span {
+            color: #93c5fd;
+            cursor: pointer;
+            text-decoration: underline dotted;
+            margin-right: 12px;
+        }
+
         /* -------- Demo-data warning pill (Moment 5) -------- */
         .demo-data-pill {
             display: none;
@@ -1113,6 +1261,33 @@
                 </div>
                 <div class="scenario-result empty" id="scenarioResult">
                     Pick a mode, fill in the numbers above, and hit Solve. The math runs entirely on the server — same engine the wage pulse card uses.
+                </div>
+            </div>
+
+            <!-- Ask RosterIQ — Moment 3: deterministic natural-language queries -->
+            <div class="ask-card" id="askCard">
+                <div class="ask-header">
+                    <div class="ask-title">Ask RosterIQ</div>
+                    <div class="ask-subtitle">Plain-English questions. Deterministic answers. No LLM guesswork.</div>
+                </div>
+                <form class="ask-form" id="askForm" onsubmit="event.preventDefault(); askQuestion();">
+                    <input type="text"
+                           id="askInput"
+                           class="ask-input"
+                           autocomplete="off"
+                           placeholder="e.g. 'sales last week' or 'busiest day this month'">
+                    <button type="submit" id="askSubmitBtn" class="ask-submit-btn">Ask</button>
+                </form>
+                <div class="ask-chips">
+                    <button type="button" class="ask-chip" onclick="askQuickQuestion('sales last week')">sales last week</button>
+                    <button type="button" class="ask-chip" onclick="askQuickQuestion('wage % last saturday')">wage % last saturday</button>
+                    <button type="button" class="ask-chip" onclick="askQuickQuestion('busiest day this month')">busiest day this month</button>
+                    <button type="button" class="ask-chip" onclick="askQuickQuestion('last 4 saturdays')">last 4 saturdays</button>
+                    <button type="button" class="ask-chip" onclick="askQuickQuestion('peak head count yesterday')">peak head count yesterday</button>
+                    <button type="button" class="ask-chip" onclick="askQuickQuestion('which days over 30% last month')">days over 30% last month</button>
+                </div>
+                <div class="ask-result empty" id="askResult">
+                    Type a question or tap one of the chips above. The backend hands the question to a deterministic query library — every question has exactly one answer.
                 </div>
             </div>
 
@@ -1584,6 +1759,136 @@
                 warnings: [],
                 suggestions: suggestions,
             };
+        }
+
+        // -------- Ask RosterIQ (Moment 3) --------
+        // Routes natural-language questions through the deterministic
+        // query library on the backend. Zero LLM, zero randomness —
+        // same question = same answer, every time.
+
+        function askQuickQuestion(text) {
+            const input = document.getElementById('askInput');
+            input.value = text;
+            askQuestion();
+        }
+
+        async function askQuestion() {
+            const input = document.getElementById('askInput');
+            const btn = document.getElementById('askSubmitBtn');
+            const resultEl = document.getElementById('askResult');
+            const question = (input.value || '').trim();
+            if (!question) {
+                resultEl.className = 'ask-result empty';
+                resultEl.textContent = 'Please enter a question first.';
+                return;
+            }
+            btn.disabled = true;
+            btn.textContent = 'Asking…';
+            try {
+                const resp = await fetch('/api/v1/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        venue_id: VENUE_ID,
+                        question: question,
+                    }),
+                });
+                if (!resp.ok) {
+                    const detail = await resp.json().catch(() => ({}));
+                    renderAskError(resultEl, detail.detail || ('HTTP ' + resp.status));
+                } else {
+                    const data = await resp.json();
+                    renderAskResult(resultEl, data);
+                }
+            } catch (err) {
+                renderAskError(resultEl, 'Network error — ' + err);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Ask';
+            }
+        }
+
+        function renderAskError(el, msg) {
+            el.className = 'ask-result unmatched';
+            el.innerHTML = '<div class="ask-result-summary">' + escapeHtmlAsk(msg) + '</div>';
+        }
+
+        function renderAskResult(el, data) {
+            if (!data.matched) {
+                el.className = 'ask-result unmatched';
+                let html = '<div class="ask-result-summary">' + escapeHtmlAsk(data.reason || 'No match.') + '</div>';
+                if (data.suggestions && data.suggestions.length) {
+                    html += '<div class="ask-result-suggestions">Try: ';
+                    data.suggestions.forEach(s => {
+                        html += '<span onclick="askQuickQuestion(\'' + escapeHtmlAsk(s).replace(/'/g, "\\'") + '\')">' + escapeHtmlAsk(s) + '</span>';
+                    });
+                    html += '</div>';
+                }
+                el.innerHTML = html;
+                return;
+            }
+            const qr = data.query_result || {};
+            const unit = qr.headline_unit || '';
+            const hv = qr.headline_value;
+            let headlineText;
+            if (unit === '$') {
+                headlineText = '$' + Number(hv).toLocaleString(undefined, { maximumFractionDigits: 0 });
+            } else if (unit === '%') {
+                headlineText = Number(hv).toFixed(1) + '%';
+            } else if (unit === 'hours') {
+                headlineText = Number(hv).toFixed(1) + ' hrs';
+            } else if (unit === 'people') {
+                headlineText = Number(hv).toLocaleString() + ' people';
+            } else if (unit === 'days') {
+                headlineText = Number(hv) + ' days';
+            } else {
+                headlineText = (hv != null) ? String(hv) : '—';
+            }
+
+            el.className = 'ask-result';
+            let html = '';
+            if (qr.period && qr.period.label) {
+                html += '<div class="ask-result-period">' + escapeHtmlAsk(qr.period.label) + '</div>';
+            }
+            html += '<div class="ask-result-headline">' + escapeHtmlAsk(headlineText) + '</div>';
+            if (qr.summary) {
+                html += '<div class="ask-result-summary">' + escapeHtmlAsk(qr.summary) + '</div>';
+            }
+            if (Array.isArray(qr.breakdown) && qr.breakdown.length > 0 && qr.breakdown.length <= 15) {
+                const keys = Object.keys(qr.breakdown[0]);
+                html += '<table class="ask-breakdown-table"><thead><tr>';
+                keys.forEach(k => {
+                    html += '<th>' + escapeHtmlAsk(k) + '</th>';
+                });
+                html += '</tr></thead><tbody>';
+                qr.breakdown.forEach(row => {
+                    html += '<tr>';
+                    keys.forEach(k => {
+                        let v = row[k];
+                        if (typeof v === 'number') {
+                            v = v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+                        }
+                        html += '<td>' + escapeHtmlAsk(v) + '</td>';
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+            }
+            if (Array.isArray(qr.notes) && qr.notes.length) {
+                qr.notes.forEach(n => {
+                    html += '<div class="ask-result-summary" style="opacity:0.7;font-size:11px;margin-top:8px;">' + escapeHtmlAsk(n) + '</div>';
+                });
+            }
+            el.innerHTML = html;
+        }
+
+        function escapeHtmlAsk(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
         }
 
         // -------- Demo data warning pill --------

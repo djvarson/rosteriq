@@ -154,6 +154,29 @@ class ScenarioSolveResponse(BaseModel):
     suggestions: List[str]
 
 
+class AskRequest(BaseModel):
+    """Natural-language question for the /ask endpoint."""
+    venue_id: str
+    question: str
+    # Optional override for "today" — primarily for tests / replay.
+    today: Optional[str] = None
+
+
+class AskResponse(BaseModel):
+    """Structured answer to a natural-language question.
+
+    When `matched` is True, `query_result` mirrors QueryResult.to_dict()
+    from rosteriq.query_library. When False, `reason` explains why the
+    router couldn't handle the question and `suggestions` lists example
+    phrasings that would work.
+    """
+    matched: bool
+    question: str
+    query_result: Optional[Dict[str, Any]] = None
+    reason: Optional[str] = None
+    suggestions: List[str] = Field(default_factory=list)
+
+
 class CallInRequest(BaseModel):
     """Request to handle staff call-in."""
     venue_id: str
@@ -665,6 +688,96 @@ async def solve_wage_scenario(request: ScenarioSolveRequest) -> ScenarioSolveRes
     except Exception as e:
         logger.exception(f"Scenario solver failed for mode {request.mode}")
         raise HTTPException(status_code=500, detail="Scenario solver failed")
+
+
+# ============================================================================
+# Natural-language Ask endpoint — Moment 3
+# ============================================================================
+
+@app.post("/api/v1/ask", response_model=AskResponse)
+async def ask_question(request: AskRequest) -> AskResponse:
+    """
+    Natural-language question answering. The router lives in
+    rosteriq.query_library and is purely deterministic: same question +
+    same context = byte-identical answer, every time. No LLM, no
+    temperature, no prompt drift.
+
+    Supported phrasings include:
+      "sales last week"
+      "total wage cost last month"
+      "wage % last saturday"
+      "last 4 saturdays"
+      "busiest day this month"
+      "peak head count yesterday"
+      "which days over 30% last month"
+      "overtime hours last week"
+      "hours by employee last week"
+
+    The context is currently built from synthetic demo data via
+    rosteriq.ask_context.build_demo_query_context so the feature works
+    end-to-end on Railway without needing the pilot venue's POS
+    connection live. When a real venue is connected, swap the context
+    builder for a DB-backed one and the query_library itself stays
+    unchanged.
+    """
+    try:
+        from datetime import date as _date
+        from rosteriq.query_library import route_question, list_supported_queries
+        from rosteriq.ask_context import build_demo_query_context
+
+        question = (request.question or "").strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="question cannot be empty")
+
+        # Resolve "today" from the request or fall back to real today
+        if request.today:
+            try:
+                today = _date.fromisoformat(request.today)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"today must be YYYY-MM-DD (got {request.today!r})",
+                )
+        else:
+            today = _date.today()
+
+        ctx = build_demo_query_context(
+            venue_id=request.venue_id,
+            today=today,
+        )
+        router_result = route_question(question, ctx)
+
+        if router_result.matched and router_result.query_result is not None:
+            return AskResponse(
+                matched=True,
+                question=question,
+                query_result=router_result.query_result.to_dict(),
+                reason=None,
+                suggestions=[],
+            )
+
+        # Unmatched — surface some example phrasings to help the user
+        example_phrasings = [
+            "sales last week",
+            "wage % last saturday",
+            "busiest day this month",
+            "last 4 saturdays",
+            "peak head count yesterday",
+            "which days over 30% last month",
+        ]
+        return AskResponse(
+            matched=False,
+            question=question,
+            query_result=None,
+            reason=router_result.reason or "Couldn't match the question to a known query.",
+            suggestions=example_phrasings,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Ask endpoint failed for question {request.question!r}")
+        raise HTTPException(status_code=500, detail="Ask endpoint failed")
 
 
 # ============================================================================
