@@ -177,6 +177,45 @@ class AskResponse(BaseModel):
     suggestions: List[str] = Field(default_factory=list)
 
 
+class HeadCountLogRequest(BaseModel):
+    """Log a head-count change at a venue.
+
+    `delta` is the change: +1 / -1 from the tap buttons, or a larger
+    positive/negative integer for a group walking in or a bus leaving.
+    `note` is an optional free-text label (e.g. "bus group", "function
+    ends") that shows in the timeline and feeds the learning loop.
+    """
+    venue_id: str
+    delta: int = Field(..., description="Signed change in head count")
+    note: Optional[str] = Field(None, description="Optional free-text label")
+    source: str = Field("button", description="'button' | 'group' | 'reset'")
+
+
+class HeadCountResetRequest(BaseModel):
+    """Hard reset the venue's head count (e.g. at start of shift)."""
+    venue_id: str
+    count: int = Field(..., ge=0, description="New absolute head count")
+    note: Optional[str] = None
+
+
+class HeadCountEntry(BaseModel):
+    """One immutable log entry in the head-count history."""
+    timestamp: str
+    delta: int
+    count_after: int
+    note: Optional[str] = None
+    source: str
+
+
+class HeadCountStateResponse(BaseModel):
+    """Current head count plus recent timeline for a venue."""
+    venue_id: str
+    current: int
+    updated_at: str
+    recent: List[HeadCountEntry]
+    total_logged_today: int
+
+
 class CallInRequest(BaseModel):
     """Request to handle staff call-in."""
     venue_id: str
@@ -319,6 +358,16 @@ def get_uptime_seconds() -> float:
     """Get application uptime in seconds."""
     delta = datetime.now(timezone.utc) - STARTUP_TIME
     return delta.total_seconds()
+
+
+# ---------------------------------------------------------------------------
+# Head-count clicker — backed by rosteriq.headcount_store
+# ---------------------------------------------------------------------------
+# The store lives in a pure-stdlib sibling module so tests don't need FastAPI
+# in the environment. The endpoints below delegate all logic there; this
+# module just handles HTTP plumbing and error responses.
+
+from rosteriq import headcount_store as _hc_store
 
 
 # ============================================================================
@@ -778,6 +827,75 @@ async def ask_question(request: AskRequest) -> AskResponse:
     except Exception as e:
         logger.exception(f"Ask endpoint failed for question {request.question!r}")
         raise HTTPException(status_code=500, detail="Ask endpoint failed")
+
+
+# ============================================================================
+# Head-count clicker (Moment 6: on-shift tools)
+# ============================================================================
+
+@app.get("/api/v1/headcount/{venue_id}", response_model=HeadCountStateResponse)
+async def get_head_count(venue_id: str) -> HeadCountStateResponse:
+    """
+    Return the current head count, last-updated timestamp, and the most
+    recent entries (newest first) for the given venue.
+
+    First call for a venue seeds the history with a single 'start of
+    shift' entry at count 0.
+    """
+    try:
+        return HeadCountStateResponse(**_hc_store.state(venue_id))
+    except Exception:
+        logger.exception(f"Head-count GET failed for venue {venue_id!r}")
+        raise HTTPException(status_code=500, detail="Head-count state unavailable")
+
+
+@app.post("/api/v1/headcount/log", response_model=HeadCountStateResponse)
+async def log_head_count(request: HeadCountLogRequest) -> HeadCountStateResponse:
+    """
+    Append a delta to a venue's head count and return the updated state.
+
+    `delta` can be positive or negative; the store clamps the result at 0
+    so a duty manager cannot roll the count below empty. `note` and
+    `source` are both preserved verbatim on the entry and shown in the
+    dashboard timeline.
+    """
+    try:
+        if request.delta == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="delta must be non-zero (use /headcount/reset to set an absolute value)",
+            )
+        _hc_store.apply_delta(
+            venue_id=request.venue_id,
+            delta=int(request.delta),
+            note=(request.note or None),
+            source=request.source or "button",
+        )
+        return HeadCountStateResponse(**_hc_store.state(request.venue_id))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Head-count LOG failed")
+        raise HTTPException(status_code=500, detail="Head-count log failed")
+
+
+@app.post("/api/v1/headcount/reset", response_model=HeadCountStateResponse)
+async def reset_head_count(request: HeadCountResetRequest) -> HeadCountStateResponse:
+    """
+    Hard-reset a venue's head count to an absolute value. Appends a
+    'reset' entry to history (rather than wiping it) so accountability
+    stays intact.
+    """
+    try:
+        _hc_store.reset(
+            venue_id=request.venue_id,
+            count=int(request.count),
+            note=(request.note or None),
+        )
+        return HeadCountStateResponse(**_hc_store.state(request.venue_id))
+    except Exception:
+        logger.exception("Head-count RESET failed")
+        raise HTTPException(status_code=500, detail="Head-count reset failed")
 
 
 # ============================================================================

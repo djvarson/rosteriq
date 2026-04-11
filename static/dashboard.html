@@ -874,6 +874,191 @@
             margin-right: 12px;
         }
 
+        /* -------- Head-count clicker (Moment 6: on-shift tool) -------- */
+        .headcount-card {
+            background-color: var(--card-bg);
+            padding: 22px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+        .headcount-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .headcount-title-block {
+            flex: 1;
+        }
+        .headcount-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #f5f5f7;
+            margin-bottom: 4px;
+        }
+        .headcount-subtitle {
+            font-size: 12px;
+            color: #9ca3af;
+        }
+        .headcount-number-block {
+            text-align: right;
+            min-width: 120px;
+        }
+        .headcount-number {
+            font-size: 48px;
+            font-weight: 800;
+            color: #3b82f6;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -1px;
+            transition: color 0.2s;
+        }
+        .headcount-number.pulse {
+            color: #60a5fa;
+        }
+        .headcount-number-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: #9ca3af;
+            margin-top: 4px;
+        }
+        .headcount-buttons {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .headcount-btn {
+            padding: 14px 8px;
+            font-size: 15px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            background: var(--darker-bg);
+            color: #f5f5f7;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.1s;
+            user-select: none;
+        }
+        .headcount-btn:hover {
+            background: #1f2a44;
+            border-color: #3b82f6;
+        }
+        .headcount-btn:active {
+            transform: scale(0.96);
+        }
+        .headcount-btn.plus {
+            color: #34d399;
+        }
+        .headcount-btn.minus {
+            color: #f87171;
+        }
+        .headcount-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+        .headcount-group-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .headcount-note-input {
+            flex: 1;
+            padding: 10px 12px;
+            font-size: 13px;
+            color: #f5f5f7;
+            background: var(--darker-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            outline: none;
+        }
+        .headcount-note-input:focus {
+            border-color: #3b82f6;
+        }
+        .headcount-group-btn {
+            padding: 10px 18px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #f5f5f7;
+            background: rgba(59, 130, 246, 0.18);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            border-radius: 6px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .headcount-group-btn.negative {
+            background: rgba(248, 113, 113, 0.12);
+            border-color: rgba(248, 113, 113, 0.35);
+        }
+        .headcount-group-btn:hover {
+            filter: brightness(1.2);
+        }
+        .headcount-timeline {
+            background: var(--darker-bg);
+            border-radius: 6px;
+            padding: 10px 14px;
+            max-height: 180px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .headcount-timeline-empty {
+            color: #9ca3af;
+            font-style: italic;
+            padding: 8px 0;
+        }
+        .headcount-entry {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+            border-bottom: 1px dashed rgba(255,255,255,0.05);
+        }
+        .headcount-entry:last-child {
+            border-bottom: none;
+        }
+        .headcount-entry-time {
+            color: #9ca3af;
+            font-variant-numeric: tabular-nums;
+            min-width: 52px;
+        }
+        .headcount-entry-delta {
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            min-width: 42px;
+            text-align: right;
+        }
+        .headcount-entry-delta.pos { color: #34d399; }
+        .headcount-entry-delta.neg { color: #f87171; }
+        .headcount-entry-delta.zero { color: #9ca3af; }
+        .headcount-entry-note {
+            flex: 1;
+            color: #d1d5db;
+        }
+        .headcount-entry-total {
+            color: #9ca3af;
+            font-variant-numeric: tabular-nums;
+        }
+        .headcount-footer {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 10px;
+        }
+        .headcount-reset-btn {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            text-decoration: underline dotted;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .headcount-reset-btn:hover { color: #f87171; }
+
         /* -------- Demo-data warning pill (Moment 5) -------- */
         .demo-data-pill {
             display: none;
@@ -1291,6 +1476,44 @@
                 </div>
             </div>
 
+            <!-- Head-count clicker — Moment 6: on-shift tool -->
+            <div class="headcount-card" id="headcountCard">
+                <div class="headcount-header">
+                    <div class="headcount-title-block">
+                        <div class="headcount-title">Head Count</div>
+                        <div class="headcount-subtitle">Tap to log people in the room. Every tap is timestamped and feeds the learning loop.</div>
+                    </div>
+                    <div class="headcount-number-block">
+                        <div class="headcount-number" id="headcountNumber">—</div>
+                        <div class="headcount-number-label">In the room</div>
+                    </div>
+                </div>
+                <div class="headcount-buttons">
+                    <button type="button" class="headcount-btn minus" onclick="logHeadCount(-10)">−10</button>
+                    <button type="button" class="headcount-btn minus" onclick="logHeadCount(-5)">−5</button>
+                    <button type="button" class="headcount-btn minus" onclick="logHeadCount(-1)">−1</button>
+                    <button type="button" class="headcount-btn plus" onclick="logHeadCount(1)">+1</button>
+                    <button type="button" class="headcount-btn plus" onclick="logHeadCount(5)">+5</button>
+                    <button type="button" class="headcount-btn plus" onclick="logHeadCount(10)">+10</button>
+                </div>
+                <div class="headcount-group-row">
+                    <input type="text"
+                           id="headcountNote"
+                           class="headcount-note-input"
+                           placeholder="Optional note (e.g. 'bus group', 'function ends')"
+                           autocomplete="off">
+                    <button type="button" class="headcount-group-btn" onclick="logHeadCountGroup(1)">Log +group</button>
+                    <button type="button" class="headcount-group-btn negative" onclick="logHeadCountGroup(-1)">Log −group</button>
+                </div>
+                <div class="headcount-timeline" id="headcountTimeline">
+                    <div class="headcount-timeline-empty">No taps yet. The first tap logs &quot;Start of shift&quot; automatically.</div>
+                </div>
+                <div class="headcount-footer">
+                    <span id="headcountTotalToday">0 taps today</span>
+                    <button type="button" class="headcount-reset-btn" onclick="resetHeadCount()">Reset to 0</button>
+                </div>
+            </div>
+
             <div class="two-column">
                 <div>
                     <div class="staff-list">
@@ -1350,10 +1573,13 @@
             loadOnShiftData();
             loadWagePulse();
             initScenarioSolver();
+            fetchHeadCount();
             updateShiftTime();
             setInterval(updateShiftTime, 1000);
             // Refresh wage pulse every 30s — this is the live ticker
             setInterval(loadWagePulse, 30000);
+            // Refresh head count every 20s so multiple tabs stay in sync
+            setInterval(fetchHeadCount, 20000);
         });
 
         function switchTab(tabName) {
@@ -1889,6 +2115,141 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
+        }
+
+        // -------- Head Count clicker (Moment 6) --------
+        // All state lives server-side so the count is consistent across tabs
+        // and page refreshes. Every tap rounds-trips through /api/v1/headcount/log
+        // and the dashboard re-renders from the server response — no optimistic
+        // updates, no race conditions during a fast tap sequence.
+        let headcountBusy = false;
+
+        async function fetchHeadCount() {
+            try {
+                const resp = await fetch(`/api/v1/headcount/${VENUE_ID}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                renderHeadCount(await resp.json());
+            } catch (err) {
+                console.warn('Head count fetch failed', err);
+                const el = document.getElementById('headcountNumber');
+                if (el) el.textContent = '—';
+                const tl = document.getElementById('headcountTimeline');
+                if (tl) tl.innerHTML = '<div class="headcount-timeline-empty">Offline — taps will not persist until the API is back.</div>';
+            }
+        }
+
+        async function logHeadCount(delta) {
+            if (headcountBusy) return;
+            headcountBusy = true;
+            try {
+                const resp = await fetch('/api/v1/headcount/log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        venue_id: VENUE_ID,
+                        delta: delta,
+                        source: 'button',
+                    }),
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                renderHeadCount(await resp.json());
+                pulseHeadCountNumber();
+            } catch (err) {
+                console.warn('Head count log failed', err);
+            } finally {
+                headcountBusy = false;
+            }
+        }
+
+        async function logHeadCountGroup(sign) {
+            if (headcountBusy) return;
+            const noteInput = document.getElementById('headcountNote');
+            const raw = (noteInput?.value || '').trim();
+            // Parse leading integer if the note starts with one, e.g. "12 bus group"
+            // Default to sign * 5 if no leading number.
+            const match = raw.match(/^(\d+)\s*(.*)$/);
+            const magnitude = match ? parseInt(match[1], 10) : 5;
+            const note = match ? (match[2] || null) : (raw || null);
+            const delta = sign * magnitude;
+            headcountBusy = true;
+            try {
+                const resp = await fetch('/api/v1/headcount/log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        venue_id: VENUE_ID,
+                        delta: delta,
+                        note: note,
+                        source: 'group',
+                    }),
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                renderHeadCount(await resp.json());
+                pulseHeadCountNumber();
+                if (noteInput) noteInput.value = '';
+            } catch (err) {
+                console.warn('Head count group log failed', err);
+            } finally {
+                headcountBusy = false;
+            }
+        }
+
+        async function resetHeadCount() {
+            if (headcountBusy) return;
+            if (!confirm('Reset head count to 0? This appends a reset marker to the timeline — history is preserved.')) return;
+            headcountBusy = true;
+            try {
+                const resp = await fetch('/api/v1/headcount/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ venue_id: VENUE_ID, count: 0, note: 'Manual reset' }),
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                renderHeadCount(await resp.json());
+            } catch (err) {
+                console.warn('Head count reset failed', err);
+            } finally {
+                headcountBusy = false;
+            }
+        }
+
+        function renderHeadCount(state) {
+            const num = document.getElementById('headcountNumber');
+            if (num) num.textContent = state.current;
+            const totalEl = document.getElementById('headcountTotalToday');
+            if (totalEl) {
+                const n = state.total_logged_today || 0;
+                totalEl.textContent = `${n} tap${n === 1 ? '' : 's'} today`;
+            }
+            const tl = document.getElementById('headcountTimeline');
+            if (!tl) return;
+            if (!state.recent || state.recent.length === 0) {
+                tl.innerHTML = '<div class="headcount-timeline-empty">No taps yet.</div>';
+                return;
+            }
+            tl.innerHTML = state.recent.map(e => {
+                const t = new Date(e.timestamp);
+                const hh = String(t.getHours()).padStart(2, '0');
+                const mm = String(t.getMinutes()).padStart(2, '0');
+                const deltaClass = e.delta > 0 ? 'pos' : (e.delta < 0 ? 'neg' : 'zero');
+                const sign = e.delta > 0 ? '+' : '';
+                const note = e.note ? escapeHtmlAsk(e.note) : (e.source === 'button' ? 'Tap' : (e.source === 'reset' ? 'Reset' : 'Group'));
+                return `
+                    <div class="headcount-entry">
+                        <span class="headcount-entry-time">${hh}:${mm}</span>
+                        <span class="headcount-entry-delta ${deltaClass}">${sign}${e.delta}</span>
+                        <span class="headcount-entry-note">${note}</span>
+                        <span class="headcount-entry-total">→ ${e.count_after}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function pulseHeadCountNumber() {
+            const el = document.getElementById('headcountNumber');
+            if (!el) return;
+            el.classList.add('pulse');
+            setTimeout(() => el.classList.remove('pulse'), 180);
         }
 
         // -------- Demo data warning pill --------
