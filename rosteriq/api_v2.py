@@ -1071,6 +1071,7 @@ from rosteriq import portfolio_recap as _portfolio_recap
 from rosteriq import morning_brief as _morning_brief
 from rosteriq import brief_dispatcher as _brief_dispatcher
 from rosteriq import trends as _trends
+from rosteriq import tanda_writeback as _tanda_writeback
 
 
 async def _build_venue_shift_recap(venue_id: str) -> Dict[str, Any]:
@@ -1505,6 +1506,40 @@ class TrendResponse(BaseModel):
     totals: Dict[str, Any]
 
 
+# Register the default writeback sink at import time — a journal file
+# under /tmp/rosteriq_writebacks.jsonl (or $ROSTERIQ_WRITEBACK_JOURNAL
+# if set). Real Tanda adapter sinks can be added later via a future
+# /api/v1/tanda/writeback/sinks/register endpoint without touching
+# this default.
+_DEFAULT_WRITEBACK_JOURNAL = os.environ.get(
+    "ROSTERIQ_WRITEBACK_JOURNAL", "/tmp/rosteriq_writebacks.jsonl"
+)
+try:
+    _tanda_writeback.register_sink(
+        _tanda_writeback.JournalSink(_DEFAULT_WRITEBACK_JOURNAL)
+    )
+except Exception:
+    logger.exception("Failed to register default writeback journal sink")
+
+
+class TandaWritebackRequest(BaseModel):
+    """Input to POST /api/v1/tanda/writeback."""
+
+    venue_id: str
+    rec_id: str
+
+
+class TandaWritebackResponse(BaseModel):
+    """Writeback result — shape matches tanda_writeback.writeback_accepted_rec."""
+
+    venue_id: str
+    rec_id: str
+    status: str
+    reason: str
+    delta: Optional[Dict[str, Any]] = None
+    results: List[Dict[str, Any]] = []
+
+
 @app.get("/api/v1/trends/{venue_id}", response_model=TrendResponse)
 async def get_trends(
     venue_id: str,
@@ -1533,6 +1568,80 @@ async def get_trends(
     except Exception:
         logger.exception("Trend fetch failed for %s", venue_id)
         raise HTTPException(status_code=500, detail="Trend fetch failed")
+
+
+# ============================================================================
+# Tanda Writeback — Moment 14a (plugin surface: act on accepted recs)
+# ============================================================================
+
+@app.post("/api/v1/tanda/writeback", response_model=TandaWritebackResponse)
+async def tanda_writeback(
+    request: TandaWritebackRequest,
+) -> TandaWritebackResponse:
+    """
+    Push an accepted recommendation out to registered writeback sinks.
+
+    Only acts on recs with ``status == "accepted"`` — pending and
+    dismissed recs are explicitly skipped (if you dismissed it, you
+    meant it). The composer maps the rec's action suffix to a
+    structured ShiftDelta (cut_staff / send_home / call_in /
+    trim_shift), then fans it out to every registered sink.
+
+    The default sink is a journal file (``/tmp/rosteriq_writebacks.jsonl``
+    or ``$ROSTERIQ_WRITEBACK_JOURNAL``) so every accepted rec leaves an
+    audit trail, even before a real Tanda adapter is wired in.
+
+    Return shape is stable — callers can rely on status being one of:
+    ``ok`` (all sinks succeeded), ``partial`` (some sinks failed),
+    ``skipped`` (rec not found, or not accepted), or ``no_delta``
+    (rec has no mapping — usually a manual rec).
+    """
+    try:
+        result = _tanda_writeback.writeback_accepted_rec(
+            request.venue_id,
+            request.rec_id,
+        )
+        return TandaWritebackResponse(**result)
+    except Exception:
+        logger.exception("Tanda writeback failed")
+        raise HTTPException(status_code=500, detail="Writeback failed")
+
+
+@app.get("/api/v1/tanda/writeback/journal/{venue_id}", response_model=List[Dict[str, Any]])
+async def tanda_writeback_journal(
+    venue_id: str,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """
+    Read back the writeback journal for a venue.
+
+    Returns most-recent-first. Filters on the default journal file;
+    if you've pointed the sink elsewhere (via ``$ROSTERIQ_WRITEBACK_JOURNAL``)
+    this endpoint reads whatever the current default path points to.
+    """
+    try:
+        entries = _tanda_writeback.read_journal(
+            _DEFAULT_WRITEBACK_JOURNAL,
+            venue_id=venue_id,
+            limit=int(limit),
+        )
+        return entries
+    except Exception:
+        logger.exception("Writeback journal read failed")
+        raise HTTPException(status_code=500, detail="Journal read failed")
+
+
+@app.get("/api/v1/tanda/writeback/sinks", response_model=Dict[str, Any])
+async def tanda_writeback_sinks() -> Dict[str, Any]:
+    """List currently registered writeback sink names."""
+    try:
+        return {
+            "sinks": _tanda_writeback.registered_sinks(),
+            "default_journal": _DEFAULT_WRITEBACK_JOURNAL,
+        }
+    except Exception:
+        logger.exception("Writeback sinks list failed")
+        raise HTTPException(status_code=500, detail="Sinks list failed")
 
 
 # ============================================================================
