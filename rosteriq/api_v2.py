@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pydantic import BaseModel, Field
@@ -1068,6 +1068,7 @@ from rosteriq import shift_recap as _shift_recap
 from rosteriq import accountability_store as _acct_store
 from rosteriq import pulse_rec_bridge as _pulse_rec_bridge
 from rosteriq import portfolio_recap as _portfolio_recap
+from rosteriq import morning_brief as _morning_brief
 
 
 async def _build_venue_shift_recap(venue_id: str) -> Dict[str, Any]:
@@ -1256,6 +1257,104 @@ async def get_portfolio_recap(
     except Exception:
         logger.exception("Portfolio recap failed")
         raise HTTPException(status_code=500, detail="Portfolio recap failed")
+
+
+# ============================================================================
+# Morning Brief — Moment 11 (next-day accountability digest)
+# ============================================================================
+
+class MorningBriefResponse(BaseModel):
+    """Morning brief payload — shape matches morning_brief.compose_brief."""
+
+    venue_id: str
+    venue_label: str
+    date: str
+    generated_at: str
+    traffic_light: str
+    headline: str
+    one_thing: str
+    summary: str
+    rollup: Dict[str, Any]
+    top_dismissed: List[Dict[str, Any]]
+    recap_context: Dict[str, Any]
+
+
+@app.get("/api/v1/morning-brief/{venue_id}", response_model=MorningBriefResponse)
+async def get_morning_brief(
+    venue_id: str,
+    date: str = "",
+    venue_label: str = "",
+) -> MorningBriefResponse:
+    """
+    Morning accountability brief — "yesterday cost you $X in dismissed
+    recs, here's the one thing to do differently today."
+
+    Query params:
+        date: YYYY-MM-DD string to review. Defaults to yesterday (UTC).
+        venue_label: Optional human-friendly venue name for the header.
+
+    Pulls events straight from the in-memory accountability store and
+    optionally incorporates the prior-day shift recap if the venue has
+    recap data available. The brief is deterministic — same events +
+    same date always produce the same brief.
+    """
+    try:
+        target_date = date.strip() or None
+        label = venue_label.strip() or None
+
+        # Try to pull yesterday's shift recap for full context. If the
+        # venue has no recap data (or today's compose_recap throws), we
+        # still return a brief — just without the recap_context block.
+        yesterday_recap: Optional[Dict[str, Any]] = None
+        try:
+            recap = await _build_venue_shift_recap(venue_id)
+            if isinstance(recap, dict):
+                yesterday_recap = recap
+        except Exception:
+            logger.debug("Morning brief: no recap available for %s", venue_id)
+
+        brief = _morning_brief.compose_brief_from_store(
+            venue_id,
+            target_date=target_date,
+            yesterday_recap=yesterday_recap,
+            venue_label=label,
+        )
+        return MorningBriefResponse(**brief)
+    except Exception:
+        logger.exception("Morning brief failed for %s", venue_id)
+        raise HTTPException(status_code=500, detail="Morning brief failed")
+
+
+@app.get("/api/v1/morning-brief/{venue_id}/text", response_class=PlainTextResponse)
+async def get_morning_brief_text(
+    venue_id: str,
+    date: str = "",
+    venue_label: str = "",
+) -> str:
+    """
+    Plain-text version of the morning brief — suitable for piping to an
+    email job, a Slack post, or a cron-driven ``curl`` in the meantime.
+
+    Same parameters as the JSON variant.
+    """
+    try:
+        target_date = date.strip() or None
+        label = venue_label.strip() or None
+        yesterday_recap: Optional[Dict[str, Any]] = None
+        try:
+            yesterday_recap = await _build_venue_shift_recap(venue_id)
+        except Exception:
+            yesterday_recap = None
+        brief = _morning_brief.compose_brief_from_store(
+            venue_id,
+            target_date=target_date,
+            yesterday_recap=yesterday_recap,
+            venue_label=label,
+        )
+        return _morning_brief.render_text(brief)
+    except Exception:
+        logger.exception("Morning brief (text) failed for %s", venue_id)
+        raise HTTPException(status_code=500, detail="Morning brief failed")
 
 
 # ============================================================================

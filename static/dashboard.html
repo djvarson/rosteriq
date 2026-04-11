@@ -1527,6 +1527,123 @@
             .portfolio-kpis { grid-template-columns: repeat(2, 1fr); }
         }
 
+        /* -------- Morning Brief card (Moment 11: next-day digest) -------- */
+        .brief-card {
+            background: linear-gradient(135deg, rgba(17, 24, 39, 0.95), rgba(15, 23, 42, 0.9));
+            padding: 22px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            border-left: 4px solid #6b7280;
+            margin-bottom: 24px;
+            transition: border-left-color 0.25s ease, opacity 0.2s ease;
+        }
+        .brief-card.light-green { border-left-color: #10b981; }
+        .brief-card.light-amber { border-left-color: #f59e0b; }
+        .brief-card.light-red   { border-left-color: #ef4444; }
+        .brief-card.hidden { display: none; }
+        .brief-card.dismissed { opacity: 0.4; }
+        .brief-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .brief-eyebrow {
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #93c5fd;
+        }
+        .brief-date {
+            font-size: 11px;
+            color: #9ca3af;
+            font-variant-numeric: tabular-nums;
+        }
+        .brief-headline {
+            font-size: 18px;
+            font-weight: 800;
+            color: #f5f5f7;
+            line-height: 1.35;
+            margin: 6px 0 10px;
+        }
+        .brief-kpi-row {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: #9ca3af;
+            margin-bottom: 12px;
+        }
+        .brief-kpi-row span.v {
+            color: #e5e7eb;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            margin-left: 4px;
+        }
+        .brief-kpi-row span.v.pos { color: #34d399; }
+        .brief-kpi-row span.v.neg { color: #f87171; }
+        .brief-top {
+            margin: 10px 0 14px;
+            padding: 0;
+            list-style: none;
+        }
+        .brief-top li {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 8px 12px;
+            background: var(--darker-bg);
+            border-radius: 6px;
+            font-size: 12px;
+            color: #d1d5db;
+            margin-bottom: 6px;
+            border-left: 2px solid #ef4444;
+        }
+        .brief-top .amt {
+            color: #f87171;
+            font-variant-numeric: tabular-nums;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .brief-one-thing {
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 8px;
+            padding: 12px 14px;
+            font-size: 13px;
+            color: #e5e7eb;
+            line-height: 1.5;
+        }
+        .brief-one-thing::before {
+            content: "▶ One thing to do differently today";
+            display: block;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.8px;
+            color: #93c5fd;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .brief-footer {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 11px;
+            color: #9ca3af;
+        }
+        .brief-dismiss-btn {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            font-size: 11px;
+            cursor: pointer;
+            text-decoration: underline dotted;
+        }
+        .brief-dismiss-btn:hover { color: #e5e7eb; }
+
         /* -------- Demo-data warning pill (Moment 5) -------- */
         .demo-data-pill {
             display: none;
@@ -1823,6 +1940,22 @@
                     <span class="demo-data-pill" id="demoDataPill">Demo data</span>
                 </div>
                 <div class="status-time" id="shiftTime">6:30 PM</div>
+            </div>
+
+            <!-- Morning Brief — Moment 11: next-day accountability digest -->
+            <div class="brief-card hidden" id="briefCard">
+                <div class="brief-header">
+                    <span class="brief-eyebrow">Morning Brief</span>
+                    <span class="brief-date" id="briefDate">—</span>
+                </div>
+                <div class="brief-headline" id="briefHeadline">Loading yesterday's story…</div>
+                <div class="brief-kpi-row" id="briefKpis"></div>
+                <ul class="brief-top" id="briefTop"></ul>
+                <div class="brief-one-thing" id="briefOneThing">—</div>
+                <div class="brief-footer">
+                    <span id="briefGeneratedAt">—</span>
+                    <button type="button" class="brief-dismiss-btn" onclick="dismissBriefCard()">Mark as read</button>
+                </div>
             </div>
 
             <div class="revenue-card">
@@ -2136,6 +2269,7 @@
             initScenarioSolver();
             fetchHeadCount();
             fetchShiftRecap();
+            fetchMorningBrief();
             updateShiftTime();
             setInterval(updateShiftTime, 1000);
             // Refresh wage pulse every 30s — this is the live ticker
@@ -2144,6 +2278,9 @@
             setInterval(fetchHeadCount, 20000);
             // Recap polls less often — data changes at a slower cadence
             setInterval(fetchShiftRecap, 45000);
+            // Morning brief is a once-per-day thing, but a 10-minute poll
+            // catches the flip-over when the clock rolls past midnight.
+            setInterval(fetchMorningBrief, 600000);
         });
 
         function switchTab(tabName) {
@@ -3233,6 +3370,128 @@
                     ${acctLine}
                 </div>
             `;
+        }
+
+        // -------- Morning Brief (Moment 11: next-day digest) --------
+        async function fetchMorningBrief() {
+            const card = document.getElementById('briefCard');
+            if (!card) return;
+            try {
+                const resp = await fetch(`/api/v1/morning-brief/${VENUE_ID}?venue_label=${encodeURIComponent("Mojo's Bar")}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const brief = await resp.json();
+                renderMorningBrief(brief);
+            } catch (err) {
+                console.warn('Morning brief fetch failed', err);
+                card.classList.add('hidden');
+            }
+        }
+
+        function renderMorningBrief(brief) {
+            if (!brief || typeof brief !== 'object') return;
+            const card = document.getElementById('briefCard');
+            if (!card) return;
+
+            const rollup = brief.rollup || {};
+            const dismissed = Number(rollup.dismissed || 0);
+            const accepted = Number(rollup.accepted || 0);
+            // Hide the card entirely on a truly empty day to avoid noise.
+            if (dismissed === 0 && accepted === 0) {
+                card.classList.add('hidden');
+                return;
+            }
+
+            // Respect user dismissal within the same day
+            const dismissKey = `brief_read_${brief.date || ''}`;
+            try {
+                if (window.__briefReadKey === dismissKey) {
+                    card.classList.add('dismissed');
+                }
+            } catch (_) {}
+
+            card.classList.remove('hidden', 'light-green', 'light-amber', 'light-red');
+            const light = String(brief.traffic_light || 'unknown').toLowerCase();
+            if (light === 'green' || light === 'amber' || light === 'red') {
+                card.classList.add('light-' + light);
+            }
+
+            const dateEl = document.getElementById('briefDate');
+            if (dateEl) dateEl.textContent = brief.date || '';
+
+            const headlineEl = document.getElementById('briefHeadline');
+            if (headlineEl) headlineEl.textContent = brief.headline || '';
+
+            // KPI row — compact revenue / wage %Δ / peak from recap_context
+            const kpis = document.getElementById('briefKpis');
+            if (kpis) {
+                const rc = brief.recap_context || {};
+                const parts = [];
+                if (rc.revenue_actual != null) {
+                    const delta = Number(rc.revenue_delta_pct || 0);
+                    const deltaSign = delta >= 0 ? '+' : '';
+                    const cls = delta > 0.005 ? 'pos' : (delta < -0.005 ? 'neg' : '');
+                    parts.push(
+                        `Revenue <span class="v">${formatRecapMoney(rc.revenue_actual)}</span> ` +
+                        `<span class="v ${cls}">${deltaSign}${(delta * 100).toFixed(1)}%</span>`
+                    );
+                }
+                if (rc.wage_pct_actual != null) {
+                    const wpDelta = Number(rc.wage_pct_delta || 0);
+                    const wpSign = wpDelta >= 0 ? '+' : '';
+                    const cls = wpDelta > 0.005 ? 'neg' : (wpDelta < -0.002 ? 'pos' : '');
+                    parts.push(
+                        `Wage % <span class="v">${formatRecapPct(rc.wage_pct_actual)}</span> ` +
+                        `<span class="v ${cls}">${wpSign}${(wpDelta * 100).toFixed(1)}pt</span>`
+                    );
+                }
+                if (rc.peak_headcount != null) {
+                    parts.push(`Peak <span class="v">${rc.peak_headcount}</span>`);
+                }
+                parts.push(
+                    `Actioned <span class="v pos">${accepted}</span> · ` +
+                    `Dismissed <span class="v ${dismissed > 0 ? 'neg' : ''}">${dismissed}</span>`
+                );
+                kpis.innerHTML = parts.join(' · ');
+            }
+
+            // Top dismissed list
+            const topEl = document.getElementById('briefTop');
+            if (topEl) {
+                const top = Array.isArray(brief.top_dismissed) ? brief.top_dismissed : [];
+                if (top.length === 0) {
+                    topEl.innerHTML = '';
+                } else {
+                    topEl.innerHTML = top.map(t => {
+                        const text = escapeHtmlSafe(String(t.text || '').split('.')[0]);
+                        const amt = Number(t.impact_estimate_aud || 0);
+                        const amtStr = amt > 0 ? `~$${Math.round(amt).toLocaleString()}` : '';
+                        return `<li><span>${text}</span><span class="amt">${amtStr}</span></li>`;
+                    }).join('');
+                }
+            }
+
+            const oneThing = document.getElementById('briefOneThing');
+            if (oneThing) oneThing.textContent = brief.one_thing || '';
+
+            const genEl = document.getElementById('briefGeneratedAt');
+            if (genEl && brief.generated_at) {
+                try {
+                    const d = new Date(brief.generated_at);
+                    genEl.textContent = `Generated ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                } catch (_) {
+                    genEl.textContent = 'Generated';
+                }
+            }
+        }
+
+        function dismissBriefCard() {
+            const card = document.getElementById('briefCard');
+            if (card) card.classList.add('dismissed');
+            // Remember for the rest of the session so a poll doesn't re-light it.
+            try {
+                const dateEl = document.getElementById('briefDate');
+                window.__briefReadKey = `brief_read_${dateEl ? dateEl.textContent : ''}`;
+            } catch (_) {}
         }
 
         // -------- Accountability plumbing (Moment 8) --------
