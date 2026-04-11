@@ -391,6 +391,296 @@
             color: var(--alert-red);
         }
 
+        /* -------- Wage Pulse (live wage ticker) -------- */
+        .wage-pulse-card {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+            position: relative;
+        }
+        .wage-pulse-card.trend-overspending {
+            border-left: 4px solid var(--alert-red, #DC2626);
+        }
+        .wage-pulse-card.trend-on_track {
+            border-left: 4px solid var(--success-green, #16A34A);
+        }
+        .wage-pulse-card.trend-underspending {
+            border-left: 4px solid #D97706;
+        }
+        .wage-pulse-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .wage-pulse-title {
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: var(--text-primary);
+        }
+        .wage-pulse-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .wage-pulse-badge.trend-overspending {
+            background: rgba(220, 38, 38, 0.15);
+            color: #DC2626;
+        }
+        .wage-pulse-badge.trend-on_track {
+            background: rgba(22, 163, 74, 0.15);
+            color: #16A34A;
+        }
+        .wage-pulse-badge.trend-underspending {
+            background: rgba(217, 119, 6, 0.15);
+            color: #D97706;
+        }
+        .wage-pulse-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+        .wage-pulse-stat {
+            display: flex;
+            flex-direction: column;
+        }
+        .wage-pulse-stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .wage-pulse-stat-value {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .wage-pulse-bar-wrap {
+            margin-top: 16px;
+            background: rgba(176, 176, 176, 0.15);
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .wage-pulse-bar {
+            height: 100%;
+            transition: width 0.6s ease;
+        }
+        .wage-pulse-bar.trend-overspending { background: #DC2626; }
+        .wage-pulse-bar.trend-on_track    { background: #16A34A; }
+        .wage-pulse-bar.trend-underspending { background: #D97706; }
+        @media (max-width: 900px) {
+            .wage-pulse-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        /* -------- Scenario solver -------- */
+        .scenario-card {
+            background-color: var(--card-bg);
+            padding: 22px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+        .scenario-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .scenario-title {
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: var(--text-primary);
+        }
+        .scenario-mode-tabs {
+            display: flex;
+            gap: 6px;
+        }
+        .scenario-mode-tab {
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 14px;
+            background: rgba(176, 176, 176, 0.08);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+        .scenario-mode-tab.active {
+            background: #0EA5E9;
+            color: #FFFFFF;
+            border-color: #0EA5E9;
+        }
+        .scenario-form {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        @media (max-width: 900px) {
+            .scenario-form { grid-template-columns: repeat(2, 1fr); }
+        }
+        .scenario-field {
+            display: flex;
+            flex-direction: column;
+        }
+        .scenario-field-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+        .scenario-field input {
+            font-family: inherit;
+            font-size: 15px;
+            padding: 10px 12px;
+            background: var(--bg-color, #111);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .scenario-field input:focus {
+            border-color: #0EA5E9;
+        }
+        .scenario-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+        .scenario-solve-btn {
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            padding: 10px 22px;
+            background: #0EA5E9;
+            color: #FFFFFF;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .scenario-solve-btn:hover { background: #0284C7; }
+        .scenario-solve-btn:disabled {
+            background: rgba(14, 165, 233, 0.4);
+            cursor: not-allowed;
+        }
+        .scenario-reset-btn {
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 10px 18px;
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .scenario-result {
+            padding: 16px 18px;
+            border-radius: 8px;
+            background: rgba(14, 165, 233, 0.08);
+            border-left: 4px solid #0EA5E9;
+            min-height: 48px;
+        }
+        .scenario-result.empty {
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-style: italic;
+            background: transparent;
+            border-left-color: var(--border-color);
+        }
+        .scenario-result-headline {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+        .scenario-result-breakdown {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin: 12px 0;
+        }
+        @media (max-width: 900px) {
+            .scenario-result-breakdown { grid-template-columns: repeat(2, 1fr); }
+        }
+        .scenario-result-cell {
+            display: flex;
+            flex-direction: column;
+        }
+        .scenario-result-cell-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .scenario-result-cell-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 2px;
+        }
+        .scenario-result-suggestion {
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.5;
+            margin-top: 6px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(176, 176, 176, 0.15);
+        }
+        .scenario-result-warning {
+            font-size: 12px;
+            color: #D97706;
+            margin-top: 6px;
+        }
+        .scenario-field.disabled input {
+            opacity: 0.3;
+            pointer-events: none;
+        }
+
+        /* -------- Demo-data warning pill (Moment 5) -------- */
+        .demo-data-pill {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            background: rgba(217, 119, 6, 0.15);
+            color: #D97706;
+            text-transform: uppercase;
+            border: 1px solid rgba(217, 119, 6, 0.3);
+            vertical-align: middle;
+            margin-left: 10px;
+        }
+        .demo-data-pill.active {
+            display: inline-flex;
+        }
+        .demo-data-pill::before {
+            content: "⚠";
+            font-size: 11px;
+        }
+
         .staff-list {
             background-color: var(--card-bg);
             padding: 20px;
@@ -659,6 +949,7 @@
                 <div>
                     <span class="live-badge">● LIVE</span>
                     <span class="status-title" id="shiftStatus">Friday Dinner Service</span>
+                    <span class="demo-data-pill" id="demoDataPill">Demo data</span>
                 </div>
                 <div class="status-time" id="shiftTime">6:30 PM</div>
             </div>
@@ -678,6 +969,80 @@
                     <span class="revenue-value" id="revenueVariance">
                         <span class="variance-good">+$250 (+11%)</span>
                     </span>
+                </div>
+            </div>
+
+            <!-- Live Wage Pulse: /api/v1/dashboard/wage-pulse/{venue_id} -->
+            <div class="wage-pulse-card trend-on_track" id="wagePulseCard">
+                <div class="wage-pulse-header">
+                    <span class="wage-pulse-title">Live Wage Pulse</span>
+                    <span class="wage-pulse-badge trend-on_track" id="wagePulseBadge">ON TRACK</span>
+                </div>
+                <div class="wage-pulse-grid">
+                    <div class="wage-pulse-stat">
+                        <span class="wage-pulse-stat-label">Burned so far</span>
+                        <span class="wage-pulse-stat-value" id="wagePulseBurned">$—</span>
+                    </div>
+                    <div class="wage-pulse-stat">
+                        <span class="wage-pulse-stat-label">Forecast today</span>
+                        <span class="wage-pulse-stat-value" id="wagePulseForecast">$—</span>
+                    </div>
+                    <div class="wage-pulse-stat">
+                        <span class="wage-pulse-stat-label">% of revenue</span>
+                        <span class="wage-pulse-stat-value" id="wagePulseRevPct">—%</span>
+                    </div>
+                    <div class="wage-pulse-stat">
+                        <span class="wage-pulse-stat-label">Projected EOD</span>
+                        <span class="wage-pulse-stat-value" id="wagePulseProjPct">—%</span>
+                    </div>
+                </div>
+                <div class="wage-pulse-bar-wrap">
+                    <div class="wage-pulse-bar trend-on_track" id="wagePulseBar" style="width:0%"></div>
+                </div>
+            </div>
+
+            <!-- Scenario Solver: POST /api/v1/scenarios/wage-cost -->
+            <div class="scenario-card" id="scenarioCard">
+                <div class="scenario-header">
+                    <span class="scenario-title">Scenario Solver</span>
+                    <div class="scenario-mode-tabs" id="scenarioModeTabs">
+                        <button type="button" class="scenario-mode-tab active" data-mode="solve_sales">Sales needed</button>
+                        <button type="button" class="scenario-mode-tab" data-mode="solve_wage_budget">Wage budget</button>
+                        <button type="button" class="scenario-mode-tab" data-mode="diagnose">Diagnose</button>
+                    </div>
+                </div>
+                <form class="scenario-form" id="scenarioForm" onsubmit="event.preventDefault(); solveScenario();">
+                    <div class="scenario-field" id="scenarioFieldTarget">
+                        <label class="scenario-field-label" for="scenarioTargetPct">Target wage % (e.g. 18)</label>
+                        <input id="scenarioTargetPct" type="number" step="0.1" placeholder="18" />
+                    </div>
+                    <div class="scenario-field" id="scenarioFieldWageCost">
+                        <label class="scenario-field-label" for="scenarioWageCost">Wage cost ($, loaded)</label>
+                        <input id="scenarioWageCost" type="number" step="1" placeholder="4500" />
+                    </div>
+                    <div class="scenario-field" id="scenarioFieldForecastSales">
+                        <label class="scenario-field-label" for="scenarioForecastSales">Forecast sales ($)</label>
+                        <input id="scenarioForecastSales" type="number" step="1" placeholder="25000" />
+                    </div>
+                    <div class="scenario-field" id="scenarioFieldBlendedRate">
+                        <label class="scenario-field-label" for="scenarioBlendedRate">Blended hourly rate ($)</label>
+                        <input id="scenarioBlendedRate" type="number" step="0.5" placeholder="35" />
+                    </div>
+                    <div class="scenario-field" id="scenarioFieldOnCost">
+                        <label class="scenario-field-label" for="scenarioOnCost">On-cost multiplier</label>
+                        <input id="scenarioOnCost" type="number" step="0.01" placeholder="1.165" />
+                    </div>
+                    <div class="scenario-field" id="scenarioFieldPlanned">
+                        <label class="scenario-field-label" for="scenarioPlanned">Planned wage cost ($)</label>
+                        <input id="scenarioPlanned" type="number" step="1" placeholder="4200" />
+                    </div>
+                </form>
+                <div class="scenario-actions">
+                    <button type="button" class="scenario-solve-btn" id="scenarioSolveBtn" onclick="solveScenario()">Solve</button>
+                    <button type="button" class="scenario-reset-btn" onclick="resetScenario()">Clear</button>
+                </div>
+                <div class="scenario-result empty" id="scenarioResult">
+                    Pick a mode, fill in the numbers above, and hit Solve. The math runs entirely on the server — same engine the wage pulse card uses.
                 </div>
             </div>
 
@@ -738,8 +1103,12 @@
             updateWeekDisplay();
             loadRosterData();
             loadOnShiftData();
+            loadWagePulse();
+            initScenarioSolver();
             updateShiftTime();
             setInterval(updateShiftTime, 1000);
+            // Refresh wage pulse every 30s — this is the live ticker
+            setInterval(loadWagePulse, 30000);
         });
 
         function switchTab(tabName) {
@@ -809,12 +1178,323 @@
                     const data = await response.json();
                     populateOnShiftData(data);
                 } else {
+                    markDemoDataActive();
                     populateOnShiftData(getDemoOnShiftData());
                 }
             } catch (error) {
                 console.warn('API unavailable, using demo data', error);
+                markDemoDataActive();
                 populateOnShiftData(getDemoOnShiftData());
             }
+        }
+
+        async function loadWagePulse() {
+            try {
+                const response = await fetch(`/api/v1/dashboard/wage-pulse/${VENUE_ID}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    populateWagePulse(data);
+                } else {
+                    markDemoDataActive();
+                    populateWagePulse(getDemoWagePulse());
+                }
+            } catch (error) {
+                console.warn('Wage pulse API unavailable, using demo data', error);
+                markDemoDataActive();
+                populateWagePulse(getDemoWagePulse());
+            }
+        }
+
+        function populateWagePulse(data) {
+            // Card + badge + bar all take trend class — drives colour
+            const trend = data.trend || 'on_track';
+            const card = document.getElementById('wagePulseCard');
+            const badge = document.getElementById('wagePulseBadge');
+            const bar = document.getElementById('wagePulseBar');
+            card.className = 'wage-pulse-card trend-' + trend;
+            badge.className = 'wage-pulse-badge trend-' + trend;
+            bar.className = 'wage-pulse-bar trend-' + trend;
+
+            badge.textContent = ({
+                'overspending': 'OVERSPENDING',
+                'underspending': 'UNDERSPENDING',
+                'on_track': 'ON TRACK'
+            })[trend] || 'ON TRACK';
+
+            const fmtMoney = (n) => '$' + Math.round(n || 0).toLocaleString();
+            const fmtPct = (n) => ((n || 0) * 100).toFixed(1) + '%';
+            // wages_pct_of_forecast already arrives as a 0..1 fraction
+            const fmtPctRaw = (n) => (n || 0).toFixed(1) + '%';
+
+            document.getElementById('wagePulseBurned').textContent =
+                fmtMoney(data.wages_burned_so_far);
+            document.getElementById('wagePulseForecast').textContent =
+                fmtMoney(data.wages_forecast_today);
+            // API returns current_wage_pct_of_revenue as a fraction (0..1)
+            document.getElementById('wagePulseRevPct').textContent =
+                fmtPct(data.current_wage_pct_of_revenue);
+            document.getElementById('wagePulseProjPct').textContent =
+                fmtPct(data.projected_wage_pct_of_revenue);
+
+            // Bar width = % of today's forecast that's already been burned
+            const pct = Math.max(0, Math.min(100,
+                (data.wages_pct_of_forecast || 0) * 100));
+            bar.style.width = pct + '%';
+        }
+
+        // -------- Scenario Solver --------
+        // Each mode defines which fields are ACTIVE; all others are disabled
+        // (greyed out + not submitted). Matches backend ScenarioSolveRequest.
+        const SCENARIO_MODE_FIELDS = {
+            solve_sales:        ['scenarioFieldTarget', 'scenarioFieldWageCost', 'scenarioFieldForecastSales'],
+            solve_wage_budget:  ['scenarioFieldTarget', 'scenarioFieldForecastSales', 'scenarioFieldBlendedRate', 'scenarioFieldOnCost', 'scenarioFieldPlanned'],
+            diagnose:           ['scenarioFieldTarget', 'scenarioFieldWageCost', 'scenarioFieldForecastSales'],
+        };
+        let scenarioMode = 'solve_sales';
+
+        function initScenarioSolver() {
+            const tabs = document.querySelectorAll('#scenarioModeTabs .scenario-mode-tab');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => setScenarioMode(tab.dataset.mode));
+            });
+            setScenarioMode('solve_sales');
+        }
+
+        function setScenarioMode(mode) {
+            if (!SCENARIO_MODE_FIELDS[mode]) return;
+            scenarioMode = mode;
+            // Update tab active state
+            document.querySelectorAll('#scenarioModeTabs .scenario-mode-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.mode === mode);
+            });
+            // Enable only the fields this mode uses
+            const activeFields = new Set(SCENARIO_MODE_FIELDS[mode]);
+            const allFields = [
+                'scenarioFieldTarget', 'scenarioFieldWageCost', 'scenarioFieldForecastSales',
+                'scenarioFieldBlendedRate', 'scenarioFieldOnCost', 'scenarioFieldPlanned'
+            ];
+            allFields.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.toggle('disabled', !activeFields.has(id));
+            });
+        }
+
+        function resetScenario() {
+            ['scenarioTargetPct', 'scenarioWageCost', 'scenarioForecastSales',
+             'scenarioBlendedRate', 'scenarioOnCost', 'scenarioPlanned'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            const r = document.getElementById('scenarioResult');
+            r.className = 'scenario-result empty';
+            r.innerHTML = 'Pick a mode, fill in the numbers above, and hit Solve. The math runs entirely on the server — same engine the wage pulse card uses.';
+        }
+
+        function readScenarioField(id) {
+            const el = document.getElementById(id);
+            if (!el || el.value === '') return null;
+            const n = parseFloat(el.value);
+            return isNaN(n) ? null : n;
+        }
+
+        async function solveScenario() {
+            const body = {
+                mode: scenarioMode,
+                target_wage_cost_pct: readScenarioField('scenarioTargetPct'),
+                wage_cost: readScenarioField('scenarioWageCost'),
+                forecast_sales: readScenarioField('scenarioForecastSales'),
+                blended_hourly_rate: readScenarioField('scenarioBlendedRate'),
+                on_cost_multiplier: readScenarioField('scenarioOnCost'),
+                planned_wage_cost: readScenarioField('scenarioPlanned'),
+            };
+            const resultEl = document.getElementById('scenarioResult');
+            const btn = document.getElementById('scenarioSolveBtn');
+            btn.disabled = true;
+            btn.textContent = 'Solving…';
+            try {
+                const resp = await fetch('/api/v1/scenarios/wage-cost', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) {
+                    // Client-side fallback so demos survive a down backend
+                    const detail = await resp.json().catch(() => ({}));
+                    populateScenarioResult(solveScenarioLocally(body), {
+                        error: detail.detail || ('HTTP ' + resp.status),
+                        local: true,
+                    });
+                } else {
+                    const data = await resp.json();
+                    populateScenarioResult(data, {});
+                }
+            } catch (err) {
+                populateScenarioResult(solveScenarioLocally(body), {
+                    error: String(err),
+                    local: true,
+                });
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Solve';
+            }
+        }
+
+        function fmtMoney(n) {
+            if (n === null || n === undefined || isNaN(n)) return '—';
+            const sign = n < 0 ? '-' : '';
+            return sign + '$' + Math.round(Math.abs(n)).toLocaleString();
+        }
+        function fmtPct(n) {
+            if (n === null || n === undefined || isNaN(n)) return '—';
+            return n.toFixed(1) + '%';
+        }
+
+        function populateScenarioResult(data, meta) {
+            const el = document.getElementById('scenarioResult');
+            el.className = 'scenario-result';
+            if (!data || !data.outputs) {
+                el.className = 'scenario-result empty';
+                el.textContent = 'No result.';
+                return;
+            }
+            const out = data.outputs || {};
+            let headline = '';
+            const cells = [];
+            if (data.mode === 'solve_sales') {
+                headline = 'Required sales: ' + fmtMoney(out.required_sales);
+                if (out.forecast_sales != null) cells.push(['Forecast', fmtMoney(out.forecast_sales)]);
+                if (out.gap_to_forecast != null) cells.push(['Gap', fmtMoney(out.gap_to_forecast)]);
+                if (out.current_wage_pct != null) cells.push(['Current wage %', fmtPct(out.current_wage_pct)]);
+            } else if (data.mode === 'solve_wage_budget') {
+                headline = 'Wage budget: ' + fmtMoney(out.target_wage_cost);
+                if (out.affordable_hours != null) cells.push(['Affordable hours', out.affordable_hours + ' h']);
+                if (out.fully_loaded_hourly_rate != null) cells.push(['Loaded rate', fmtMoney(out.fully_loaded_hourly_rate) + '/h']);
+                if (out.headroom_vs_planned != null) cells.push(['Headroom', fmtMoney(out.headroom_vs_planned)]);
+                if (out.current_wage_pct != null) cells.push(['Planned wage %', fmtPct(out.current_wage_pct)]);
+            } else if (data.mode === 'diagnose') {
+                headline = 'Current wage %: ' + fmtPct(out.current_wage_pct);
+                if (out.target_wage_cost != null) cells.push(['Target $', fmtMoney(out.target_wage_cost)]);
+                if (out.gap_vs_target != null) cells.push(['Gap vs target', fmtMoney(out.gap_vs_target)]);
+            }
+
+            let html = '<div class="scenario-result-headline">' + headline + '</div>';
+            if (cells.length) {
+                html += '<div class="scenario-result-breakdown">';
+                cells.forEach(([label, val]) => {
+                    html += '<div class="scenario-result-cell"><span class="scenario-result-cell-label">' +
+                        label + '</span><span class="scenario-result-cell-value">' + val + '</span></div>';
+                });
+                html += '</div>';
+            }
+            const suggestions = data.suggestions || [];
+            suggestions.forEach(s => {
+                html += '<div class="scenario-result-suggestion">' + s + '</div>';
+            });
+            const warnings = data.warnings || [];
+            warnings.forEach(w => {
+                html += '<div class="scenario-result-warning">' + w + '</div>';
+            });
+            if (meta && meta.local) {
+                html += '<div class="scenario-result-warning">Offline mode: result computed in the browser (API unavailable).</div>';
+                markDemoDataActive();
+            }
+            el.innerHTML = html;
+        }
+
+        // Minimal client-side math fallback — only runs if the API is down.
+        // Mirrors scenario_solver.py for the solve_sales and diagnose modes;
+        // solve_wage_budget needs the full Decimal precision, so we stub it.
+        function solveScenarioLocally(body) {
+            const normPct = (v) => {
+                if (v == null) return null;
+                let p = parseFloat(v);
+                if (isNaN(p) || p <= 0) return null;
+                return p > 1 ? p / 100 : p;
+            };
+            const mode = body.mode;
+            const target = normPct(body.target_wage_cost_pct);
+            const out = {};
+            const suggestions = [];
+            try {
+                if (mode === 'solve_sales') {
+                    if (body.wage_cost == null || target == null) throw 0;
+                    const req = body.wage_cost / target;
+                    out.required_sales = req;
+                    if (body.forecast_sales != null) {
+                        out.forecast_sales = body.forecast_sales;
+                        out.gap_to_forecast = req - body.forecast_sales;
+                        out.current_wage_pct = (body.wage_cost / body.forecast_sales) * 100;
+                        if (out.gap_to_forecast > 0) {
+                            suggestions.push('Short on forecast by ' + fmtMoney(out.gap_to_forecast) + '. Cut ~' + fmtMoney(out.gap_to_forecast * target) + ' of labour or accept a higher wage %.');
+                        } else {
+                            suggestions.push('Forecast has ' + fmtMoney(-out.gap_to_forecast) + ' of headroom over your ' + (target * 100).toFixed(1) + '% target.');
+                        }
+                    }
+                } else if (mode === 'solve_wage_budget') {
+                    if (body.forecast_sales == null || target == null) throw 0;
+                    out.target_wage_cost = body.forecast_sales * target;
+                    if (body.blended_hourly_rate != null) {
+                        const mult = body.on_cost_multiplier || 1.165;
+                        const loaded = body.blended_hourly_rate * mult;
+                        out.fully_loaded_hourly_rate = loaded;
+                        out.affordable_hours = +(out.target_wage_cost / loaded).toFixed(2);
+                    }
+                    if (body.planned_wage_cost != null) {
+                        out.planned_wage_cost = body.planned_wage_cost;
+                        out.headroom_vs_planned = out.target_wage_cost - body.planned_wage_cost;
+                        out.current_wage_pct = (body.planned_wage_cost / body.forecast_sales) * 100;
+                    }
+                    suggestions.push('At ' + (target * 100).toFixed(1) + '% on ' + fmtMoney(body.forecast_sales) + ', your wage budget is ' + fmtMoney(out.target_wage_cost) + '.');
+                } else if (mode === 'diagnose') {
+                    if (body.wage_cost == null || body.forecast_sales == null) throw 0;
+                    const pct = (body.wage_cost / body.forecast_sales) * 100;
+                    out.current_wage_pct = pct;
+                    out.wage_cost = body.wage_cost;
+                    out.forecast_sales = body.forecast_sales;
+                    if (target != null) {
+                        out.target_wage_cost = body.forecast_sales * target;
+                        out.gap_vs_target = body.wage_cost - out.target_wage_cost;
+                        suggestions.push('Current wage % ' + pct.toFixed(1) + '% vs target ' + (target * 100).toFixed(1) + '%.');
+                    }
+                }
+            } catch (_) {}
+            return {
+                mode: mode,
+                target_wage_cost_pct: target || 0,
+                inputs: body,
+                outputs: out,
+                assumptions: [],
+                warnings: [],
+                suggestions: suggestions,
+            };
+        }
+
+        // -------- Demo data warning pill --------
+        // Called whenever a fetch falls back to demo data so Dale at least
+        // knows during a live demo that the numbers aren't real.
+        function markDemoDataActive() {
+            const pills = document.querySelectorAll('.demo-data-pill');
+            pills.forEach(p => p.classList.add('active'));
+        }
+
+        function getDemoWagePulse() {
+            // Matches LiveWagePulseResponse shape — used only when API is down
+            return {
+                venue_id: VENUE_ID,
+                timestamp: new Date().toISOString(),
+                current_hour: '18:00',
+                wages_burned_so_far: 1820,
+                wages_forecast_today: 3100,
+                wages_pct_of_forecast: 0.587,
+                revenue_so_far: 5400,
+                revenue_forecast_today: 10500,
+                current_wage_pct_of_revenue: 0.337,
+                projected_wage_pct_of_revenue: 0.295,
+                hourly_burn_rate: 228,
+                trend: 'on_track',
+                minutes_remaining: 300
+            };
         }
 
         function populateSignals(data) {
@@ -928,6 +1608,24 @@
             `).join('');
 
             document.getElementById('actionRecommendations').innerHTML = actionHtml;
+
+            // Wire live revenue numbers from /api/v1/dashboard/on-shift/{venue_id}
+            if (typeof data.revenue_actual === 'number') {
+                document.getElementById('currentRevenue').textContent =
+                    '$' + Math.round(data.revenue_actual).toLocaleString();
+            }
+            if (typeof data.revenue_forecast === 'number') {
+                document.getElementById('expectedRevenue').textContent =
+                    '$' + Math.round(data.revenue_forecast).toLocaleString();
+            }
+            if (typeof data.revenue_variance_pct === 'number') {
+                const pct = data.revenue_variance_pct;
+                const diff = (data.revenue_actual || 0) - (data.revenue_forecast || 0);
+                const sign = diff >= 0 ? '+' : '-';
+                const cls = pct >= 0 ? 'variance-good' : 'variance-bad';
+                document.getElementById('revenueVariance').innerHTML =
+                    `<span class="${cls}">${sign}$${Math.abs(Math.round(diff)).toLocaleString()} (${sign}${Math.abs(pct).toFixed(1)}%)</span>`;
+            }
 
             drawDemandComparisonChart(data.hourly_demand || getDemoHourlyDemand());
         }
