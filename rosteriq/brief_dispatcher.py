@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol
 
 from rosteriq import morning_brief as _morning_brief
+from rosteriq import weekly_digest as _weekly_digest
 
 
 # ---------------------------------------------------------------------------
@@ -107,17 +108,23 @@ class StdoutSink:
 
 
 class FileSink:
-    """Writes both a text and a JSON copy of the brief to ``dir_path``.
+    """Writes both a text and a JSON copy of the payload to ``dir_path``.
 
     The filename template makes it easy for a human to scan the
     directory chronologically:
 
-        morning_brief_{venue_id}_{date}.txt
-        morning_brief_{venue_id}_{date}.json
+        {kind}_{venue_id}_{date}.txt
+        {kind}_{venue_id}_{date}.json
 
-    Previous runs on the same day are overwritten — dispatch is
-    idempotent by design, and we don't want a full day of noisy polls
-    leaving a crumb trail.
+    ``kind`` is read from ``brief["_kind"]`` and defaults to
+    ``morning_brief`` so existing morning-brief dispatch behavior is
+    unchanged. Moment 14-follow-on 1 introduces ``weekly_digest`` as
+    a second kind so a weekly dispatch can share the same FileSink
+    without clobbering the daily file.
+
+    Previous runs on the same (kind, venue, date) are overwritten —
+    dispatch is idempotent by design, and we don't want a full day of
+    noisy polls leaving a crumb trail.
     """
 
     name = "file"
@@ -134,10 +141,11 @@ class FileSink:
     ) -> Dict[str, Any]:
         try:
             os.makedirs(self.dir_path, exist_ok=True)
+            kind = _slug(str(brief.get("_kind") or "morning_brief"))
             date = brief.get("date") or "unknown"
             base = os.path.join(
                 self.dir_path,
-                f"morning_brief_{_slug(venue_id)}_{date}",
+                f"{kind}_{_slug(venue_id)}_{date}",
             )
             txt_path = base + ".txt"
             json_path = base + ".json"
@@ -606,6 +614,194 @@ def dispatch_all(
             "deliveries_ok": ok_count,
             "deliveries_error": err_count,
             "dispatched_at": _now_iso(),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Weekly digest dispatch (Moment 14-follow-on 1)
+# ---------------------------------------------------------------------------
+
+WEEKLY_DIGEST_KIND = "weekly_digest"
+
+
+def _stamp_kind(payload: Dict[str, Any], kind: str) -> Dict[str, Any]:
+    """Return a shallow copy of ``payload`` with ``_kind`` set.
+
+    We copy instead of mutating the composer output so callers that
+    hold the original dict are not surprised by an out-of-band
+    ``_kind`` key appearing in it.
+    """
+    out = dict(payload or {})
+    out["_kind"] = kind
+    return out
+
+
+def dispatch_weekly_digest(
+    venue_id: str,
+    *,
+    week_ending: Optional[str] = None,
+    window_days: int = 7,
+    venue_label: Optional[str] = None,
+    sinks: Optional[Iterable[Sink]] = None,
+    store: Any = None,
+    only_when_should_send: bool = False,
+) -> Dict[str, Any]:
+    """Compose + deliver a single venue's weekly digest.
+
+    Reuses the same sink registry as ``dispatch_brief``: if a venue
+    wants its weekly digest to go to the same Slack webhook as its
+    daily brief, nothing needs to change — the digest flows through
+    the same fan-out as a fresh payload with ``_kind="weekly_digest"``.
+
+    Args:
+        venue_id: The venue to digest.
+        week_ending: YYYY-MM-DD; defaults to yesterday UTC.
+        window_days: 7, 14, or 28. Anything else is clamped by the
+            composer.
+        venue_label: Optional human label for the header. Falls back
+            to the registry entry when absent.
+        sinks: Explicit list of sinks. When omitted, the function uses
+            the venue's registered sink names from the module registry.
+        store: Injectable accountability-store stub for tests.
+        only_when_should_send: When True, skip dispatch entirely if
+            the composer's ``should_send`` heuristic is False (e.g. a
+            clean week with no dismissed dollars — you don't need to
+            wake the whole team up for that).
+
+    Returns:
+        Dict shaped like ``dispatch_brief`` but with ``digest`` and
+        ``weekly`` keys:
+            {
+                "venue_id": str,
+                "digest": {...composed digest...},
+                "delivered": [{"sink": name, "status": ..., "detail": ...}, ...],
+                "text_body": str,
+                "skipped": bool,  # True when only_when_should_send skipped it
+            }
+    """
+    registry_entry = _VENUE_REGISTRY.get(str(venue_id), {})
+    effective_label = venue_label or registry_entry.get("label")
+
+    digest = _weekly_digest.compose_weekly_digest_from_store(
+        venue_id,
+        week_ending=week_ending,
+        window_days=window_days,
+        venue_label=effective_label,
+        store=store,
+    )
+    text_body = _weekly_digest.render_text(digest)
+
+    should_send = bool(digest.get("should_send"))
+    if only_when_should_send and not should_send:
+        return {
+            "venue_id": venue_id,
+            "digest": digest,
+            "delivered": [],
+            "text_body": text_body,
+            "skipped": True,
+        }
+
+    # Stamp the payload so FileSink (and any future kind-aware sink)
+    # can route the file name without clobbering the daily brief.
+    stamped = _stamp_kind(digest, WEEKLY_DIGEST_KIND)
+
+    # Resolve sinks: explicit > venue registry > empty
+    sink_list: List[Sink] = []
+    if sinks is not None:
+        sink_list = list(sinks)
+    else:
+        for name in registry_entry.get("sinks") or []:
+            s = _SINKS.get(name)
+            if s is not None:
+                sink_list.append(s)
+
+    delivered: List[Dict[str, Any]] = []
+    for sink in sink_list:
+        try:
+            res = sink.send(venue_id=venue_id, brief=stamped, text_body=text_body)
+        except Exception as exc:
+            res = {"status": "error", "detail": f"uncaught: {exc}"}
+        sink_name = getattr(sink, "name", "?")
+        delivered.append({
+            "sink": sink_name,
+            "status": res.get("status", "error"),
+            "detail": res.get("detail", ""),
+        })
+
+    return {
+        "venue_id": venue_id,
+        "digest": digest,
+        "delivered": delivered,
+        "text_body": text_body,
+        "skipped": False,
+    }
+
+
+def dispatch_all_weekly_digests(
+    *,
+    week_ending: Optional[str] = None,
+    window_days: int = 7,
+    store: Any = None,
+    only_when_should_send: bool = False,
+) -> Dict[str, Any]:
+    """Walk the venue registry and dispatch a weekly digest for every
+    venue. Intended for a Monday-morning cron/scheduled-task target:
+
+        from rosteriq.brief_dispatcher import dispatch_all_weekly_digests
+        result = dispatch_all_weekly_digests()
+
+    Args:
+        week_ending: YYYY-MM-DD override. Defaults to yesterday UTC.
+        window_days: 7, 14, or 28.
+        store: Injectable accountability store.
+        only_when_should_send: Skip venues whose composer returns
+            ``should_send=False`` (a clean week with nothing dismissed
+            and acceptance in the green).
+
+    Returns:
+        Dict with a ``results`` list (one entry per venue) and a
+        ``summary`` tally. Never raises.
+    """
+    results: List[Dict[str, Any]] = []
+    ok_count = err_count = skipped_count = 0
+
+    for vid, entry in list(_VENUE_REGISTRY.items()):
+        label = entry.get("label") or vid
+        try:
+            res = dispatch_weekly_digest(
+                vid,
+                week_ending=week_ending,
+                window_days=window_days,
+                venue_label=label,
+                store=store,
+                only_when_should_send=only_when_should_send,
+            )
+            if res.get("skipped"):
+                skipped_count += 1
+            for d in res.get("delivered") or []:
+                if d.get("status") == "ok":
+                    ok_count += 1
+                else:
+                    err_count += 1
+            results.append(res)
+        except Exception as exc:
+            err_count += 1
+            results.append({
+                "venue_id": vid,
+                "error": str(exc),
+                "delivered": [],
+            })
+
+    return {
+        "results": results,
+        "summary": {
+            "venues": len(results),
+            "deliveries_ok": ok_count,
+            "deliveries_error": err_count,
+            "skipped": skipped_count,
+            "dispatched_at": _now_iso(),
+            "kind": WEEKLY_DIGEST_KIND,
         },
     }
 

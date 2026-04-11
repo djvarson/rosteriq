@@ -1498,6 +1498,63 @@ async def run_brief_dispatch(date: str = "") -> DispatchResultResponse:
         raise HTTPException(status_code=500, detail="Dispatch failed")
 
 
+@app.post("/api/v1/weekly-digest/dispatch/{venue_id}", response_model=Dict[str, Any])
+async def dispatch_weekly_digest_one(
+    venue_id: str,
+    week_ending: str = "",
+    window_days: int = 7,
+    only_when_should_send: bool = False,
+) -> Dict[str, Any]:
+    """
+    Dispatch a single venue's weekly digest through the same sink
+    fan-out the morning brief uses. Returns the delivered digest plus
+    per-sink status.
+
+    The digest flows through whichever sinks the venue has registered
+    via ``/api/v1/brief-dispatch/register``. ``FileSink`` differentiates
+    the weekly file from the daily file using the ``_kind`` marker.
+    """
+    try:
+        result = _brief_dispatcher.dispatch_weekly_digest(
+            venue_id,
+            week_ending=(week_ending.strip() or None),
+            window_days=int(window_days or 7),
+            only_when_should_send=bool(only_when_should_send),
+        )
+        return result
+    except Exception:
+        logger.exception("Weekly digest dispatch failed for %s", venue_id)
+        raise HTTPException(status_code=500, detail="Weekly digest dispatch failed")
+
+
+@app.post("/api/v1/weekly-digest/dispatch", response_model=Dict[str, Any])
+async def dispatch_weekly_digest_all(
+    week_ending: str = "",
+    window_days: int = 7,
+    only_when_should_send: bool = False,
+) -> Dict[str, Any]:
+    """
+    Walk every registered venue and dispatch a weekly digest. This is
+    the endpoint a Monday-morning scheduled task hits:
+
+        POST /api/v1/weekly-digest/dispatch
+
+    When ``only_when_should_send`` is true, venues with zero events
+    over the window are skipped — no 'nothing to report' emails on
+    quiet weeks.
+    """
+    try:
+        result = _brief_dispatcher.dispatch_all_weekly_digests(
+            week_ending=(week_ending.strip() or None),
+            window_days=int(window_days or 7),
+            only_when_should_send=bool(only_when_should_send),
+        )
+        return result
+    except Exception:
+        logger.exception("Weekly digest dispatch_all failed")
+        raise HTTPException(status_code=500, detail="Weekly digest dispatch failed")
+
+
 # ============================================================================
 # Trends — Moment 13 (accountability over time, sparkline-ready)
 # ============================================================================
