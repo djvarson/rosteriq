@@ -1069,6 +1069,7 @@ from rosteriq import accountability_store as _acct_store
 from rosteriq import pulse_rec_bridge as _pulse_rec_bridge
 from rosteriq import portfolio_recap as _portfolio_recap
 from rosteriq import morning_brief as _morning_brief
+from rosteriq import brief_dispatcher as _brief_dispatcher
 
 
 async def _build_venue_shift_recap(venue_id: str) -> Dict[str, Any]:
@@ -1355,6 +1356,134 @@ async def get_morning_brief_text(
     except Exception:
         logger.exception("Morning brief (text) failed for %s", venue_id)
         raise HTTPException(status_code=500, detail="Morning brief failed")
+
+
+# ============================================================================
+# Brief Dispatcher — Moment 12 (route the daily digest to its audience)
+# ============================================================================
+
+# Default sinks: stdout for the logs, and a file sink writing to
+# /tmp/rosteriq_briefs so Railway deploys have a tail-able artifact.
+# Real deployments can POST to /api/v1/brief-dispatch/sinks to add a
+# webhook without a redeploy.
+_DEFAULT_BRIEF_DIR = os.environ.get("ROSTERIQ_BRIEF_DIR", "/tmp/rosteriq_briefs")
+try:
+    _brief_dispatcher.register_sink(_brief_dispatcher.StdoutSink())
+    _brief_dispatcher.register_sink(_brief_dispatcher.FileSink(_DEFAULT_BRIEF_DIR))
+    logger.info("Brief dispatcher: default sinks registered (stdout, file=%s)", _DEFAULT_BRIEF_DIR)
+except Exception:
+    logger.exception("Brief dispatcher: default sink registration failed")
+
+
+class VenueRegistrationRequest(BaseModel):
+    """Register a venue for the morning brief cron."""
+
+    venue_id: str
+    label: Optional[str] = None
+    sinks: Optional[List[str]] = None
+
+
+class DispatchResultResponse(BaseModel):
+    """Result of a single-venue or fan-out dispatch."""
+
+    results: List[Dict[str, Any]]
+    summary: Dict[str, Any]
+
+
+async def _brief_recap_fetcher(venue_id: str) -> Optional[Dict[str, Any]]:
+    """Adapter so dispatch_all can enrich briefs with the venue's
+    most recent shift recap. Tolerates failures — the dispatcher
+    will fall back to a recap-less brief if this returns None."""
+    try:
+        return await _build_venue_shift_recap(venue_id)
+    except Exception:
+        logger.debug("brief dispatcher: recap fetch failed for %s", venue_id)
+        return None
+
+
+@app.get("/api/v1/brief-dispatch/registry", response_model=Dict[str, Any])
+async def list_brief_registry() -> Dict[str, Any]:
+    """Return the current venue registry + registered sink names."""
+    registry = _brief_dispatcher.get_registry()
+    sinks = sorted(list(_brief_dispatcher.get_sinks().keys()))
+    return {
+        "venues": list(registry.values()),
+        "sinks": sinks,
+    }
+
+
+@app.post("/api/v1/brief-dispatch/register", response_model=Dict[str, Any])
+async def register_brief_venue(request: VenueRegistrationRequest) -> Dict[str, Any]:
+    """
+    Register (or update) a venue for the daily brief.
+
+    Body:
+        venue_id: required
+        label:    optional, defaults to venue_id
+        sinks:    optional list of sink names — must match
+                  names returned from GET /brief-dispatch/registry
+    """
+    try:
+        entry = _brief_dispatcher.register_venue(
+            request.venue_id,
+            label=request.label,
+            sinks=request.sinks,
+        )
+        return {"status": "ok", "venue": entry}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("Brief dispatcher: register_venue failed")
+        raise HTTPException(status_code=500, detail="Registration failed")
+
+
+@app.post("/api/v1/brief-dispatch/unregister/{venue_id}", response_model=Dict[str, Any])
+async def unregister_brief_venue(venue_id: str) -> Dict[str, Any]:
+    """Remove a venue from the dispatch registry."""
+    _brief_dispatcher.unregister_venue(venue_id)
+    return {"status": "ok", "venue_id": venue_id}
+
+
+@app.post("/api/v1/brief-dispatch/run", response_model=DispatchResultResponse)
+async def run_brief_dispatch(date: str = "") -> DispatchResultResponse:
+    """
+    Trigger a dispatch cycle right now — walks every registered venue,
+    composes that venue's brief for ``date`` (defaults to yesterday),
+    and fans out to each venue's configured sinks.
+
+    This is the endpoint a cron or scheduled-tasks worker hits at 7am:
+
+        POST /api/v1/brief-dispatch/run
+
+    Returns the full result dict with per-venue brief bodies and
+    delivery statuses.
+    """
+    target_date = date.strip() or None
+
+    # We need an async-capable recap fetcher, but dispatch_all is
+    # synchronous. Pre-fetch recaps here and hand the dispatcher a
+    # simple sync lookup. The recap fetch is best-effort and tolerates
+    # per-venue failures.
+    registry = _brief_dispatcher.get_registry()
+    recap_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+    for vid in registry.keys():
+        try:
+            recap_cache[vid] = await _build_venue_shift_recap(vid)
+        except Exception:
+            recap_cache[vid] = None
+
+    def fetcher(vid: str) -> Optional[Dict[str, Any]]:
+        return recap_cache.get(vid)
+
+    try:
+        result = _brief_dispatcher.dispatch_all(
+            target_date=target_date,
+            recap_fetcher=fetcher,
+        )
+        return DispatchResultResponse(**result)
+    except Exception:
+        logger.exception("Brief dispatch run failed")
+        raise HTTPException(status_code=500, detail="Dispatch failed")
 
 
 # ============================================================================
