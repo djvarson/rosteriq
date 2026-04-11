@@ -636,14 +636,52 @@ async def get_on_shift_dashboard(venue_id: str) -> DashboardOnShiftResponse:
             }
             for s in (result.get("signals_active", []) or [])
         ]
-        # staffing_recommendations may be list of dicts OR list of strings
+        # staffing_recommendations may be list of dicts OR list of strings.
+        # Normalise to rich dict shape so the dashboard can render Accept /
+        # Dismiss buttons that hit the accountability endpoints directly.
         raw_recs = result.get("staffing_recommendations", []) or []
-        actions: List[str] = []
+        actions: List[Dict[str, Any]] = []
         for r in raw_recs:
             if isinstance(r, str):
-                actions.append(r)
+                actions.append({
+                    "action": r,
+                    "reason": "",
+                    "priority": "med",
+                })
             elif isinstance(r, dict):
-                actions.append(r.get("text") or r.get("description") or str(r))
+                actions.append({
+                    "action": r.get("text") or r.get("description") or str(r),
+                    "reason": r.get("reason") or "",
+                    "priority": (r.get("priority") or "med"),
+                    "impact_estimate_aud": r.get("impact_estimate_aud"),
+                })
+
+        # Moment 10 — merge any pending wage-pulse recs from the
+        # accountability store into the recommended-actions list so the
+        # dashboard's Recommended Actions panel surfaces them alongside
+        # the pipeline's own staffing recommendations. rec_id is
+        # supplied so the dashboard skips its client-side hash and
+        # wires Accept / Dismiss straight to the server-owned id.
+        try:
+            pulse_recs = [
+                ev for ev in _acct_store.history(venue_id)
+                if ev.get("source") == "wage_pulse" and ev.get("status") == "pending"
+            ]
+            # Newest first so the most recent alert lands at the top of the panel.
+            pulse_recs.sort(key=lambda e: e.get("recorded_at") or "", reverse=True)
+            for ev in pulse_recs:
+                actions.insert(0, {
+                    "rec_id": ev.get("id"),
+                    "action": ev.get("text") or "",
+                    "reason": "Live wage pulse",
+                    "priority": ev.get("priority") or "med",
+                    "impact_estimate_aud": ev.get("impact_estimate_aud"),
+                    "source": "wage_pulse",
+                })
+        except Exception:
+            logger.exception(
+                "Failed to merge pulse recs into on-shift response for %s", venue_id,
+            )
         # hourly_curve may be a list of floats OR a list of dicts
         raw_curve = result.get("hourly_curve", []) or []
         hourly: List[Dict[str, Any]] = []
@@ -746,7 +784,7 @@ async def get_live_wage_pulse(venue_id: str) -> LiveWagePulseResponse:
         else:
             trend = "on_track"
 
-        return LiveWagePulseResponse(
+        response = LiveWagePulseResponse(
             venue_id=venue_id,
             timestamp=now.isoformat(),
             current_hour=now.strftime("%H:%M"),
@@ -761,6 +799,23 @@ async def get_live_wage_pulse(venue_id: str) -> LiveWagePulseResponse:
             trend=trend,
             minutes_remaining=int(remaining_mins),
         )
+
+        # Moment 10 — hand the pulse snapshot to the rec bridge. The
+        # bridge is idempotent per (venue, date, severity-bucket) so
+        # calling it on every poll is safe. Recs flow into the
+        # accountability store and surface in the on-shift dashboard
+        # alongside existing staffing recommendations.
+        try:
+            try:
+                pulse_dict = response.model_dump()  # pydantic v2
+            except AttributeError:
+                pulse_dict = response.dict()        # pydantic v1
+            _pulse_rec_bridge.record_pulse_recs(pulse_dict)
+        except Exception:
+            # Never let the bridge break the pulse widget — log and swallow.
+            logger.exception("pulse_rec_bridge failed for %s", venue_id)
+
+        return response
     except Exception as e:
         logger.exception(f"Live wage pulse failed for {venue_id}")
         raise HTTPException(status_code=500, detail="Wage pulse fetch failed")
@@ -1011,6 +1066,7 @@ async def reset_head_count(request: HeadCountResetRequest) -> HeadCountStateResp
 
 from rosteriq import shift_recap as _shift_recap
 from rosteriq import accountability_store as _acct_store
+from rosteriq import pulse_rec_bridge as _pulse_rec_bridge
 
 
 @app.get("/api/v1/shift-recap/{venue_id}", response_model=ShiftRecapResponse)

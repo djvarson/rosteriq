@@ -382,6 +382,34 @@
             display: none;
         }
 
+        /* -------- Pulse-sourced recommendation highlight (Moment 10) -------- */
+        .recommendation-item.from-pulse {
+            background: linear-gradient(
+                90deg,
+                rgba(245, 158, 11, 0.08) 0%,
+                var(--darker-bg) 40%
+            );
+            box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.6);
+        }
+        .rec-source-badge {
+            display: inline-block;
+            margin-left: 8px;
+            padding: 1px 6px;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.6px;
+            color: #fbbf24;
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.5);
+            border-radius: 4px;
+            vertical-align: middle;
+            animation: pulse-badge-blink 2.4s ease-in-out infinite;
+        }
+        @keyframes pulse-badge-blink {
+            0%, 100% { opacity: 0.65; }
+            50%      { opacity: 1; }
+        }
+
         /* -------- Shift Recap: accountability block -------- */
         .recap-accountability {
             background: var(--darker-bg);
@@ -2986,24 +3014,34 @@
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
 
-            // Normalise each action into {rec_id, action, reason, priority, impact}
-            // so we can both render it AND auto-record it in the accountability
-            // store via idempotent rec_id (djb2 hash of the action text).
+            // Normalise each action into {rec_id, action, reason, priority, impact,
+            // server_owned}. Honour a server-supplied rec_id (from the
+            // accountability store, e.g. pulse-source recs merged in by the
+            // on-shift endpoint) — those already exist in the store, so we
+            // skip auto-record for them. For free-form client-side entries we
+            // still compute a stable djb2 hash id so re-renders are idempotent.
             const normalisedActions = actions.map(a => {
                 if (typeof a === 'string') {
-                    return { rec_id: stableRecId(a, 'med'), action: a, reason: '', priority: '', impact: null };
+                    return {
+                        rec_id: stableRecId(a, 'med'),
+                        action: a, reason: '', priority: '', impact: null,
+                        server_owned: false
+                    };
                 }
                 const actionText = a.action || '';
                 const prio = (a.priority || '').toLowerCase();
                 // Normalise 'medium' → 'med' to match backend VALID_PRIORITIES
-                const backendPrio = prio === 'medium' ? 'med' : (prio || 'med');
+                const normPrio = prio === 'medium' ? 'med' : (prio || 'med');
+                const serverRecId = a.rec_id;
                 return {
-                    rec_id: stableRecId(actionText, backendPrio),
+                    rec_id: serverRecId || stableRecId(actionText, normPrio),
                     action: actionText,
                     reason: a.reason || '',
                     priority: prio,
-                    backend_priority: backendPrio,
-                    impact: (typeof a.impact_estimate_aud === 'number') ? a.impact_estimate_aud : null
+                    backend_priority: normPrio,
+                    impact: (typeof a.impact_estimate_aud === 'number') ? a.impact_estimate_aud : null,
+                    source: a.source || '',
+                    server_owned: !!serverRecId
                 };
             });
 
@@ -3018,10 +3056,15 @@
                     ? `<div class="rec-impact">~$${Math.round(a.impact).toLocaleString()} at stake</div>`
                     : '';
                 const recIdAttr = escapeHtml(a.rec_id);
+                // Visual cue on pulse-sourced recs so Dale can tell which ones
+                // came from the live wage pulse vs the pipeline's own staffing recs.
+                const sourceBadge = a.source === 'wage_pulse'
+                    ? `<span class="rec-source-badge">LIVE PULSE</span>`
+                    : '';
                 return `
-                    <div class="recommendation-item priority-${escapeHtml(a.priority)}" data-rec-id="${recIdAttr}">
+                    <div class="recommendation-item priority-${escapeHtml(a.priority)} ${a.source === 'wage_pulse' ? 'from-pulse' : ''}" data-rec-id="${recIdAttr}">
                         <div class="recommendation-header">
-                            <div class="recommendation-action">${actionText}</div>
+                            <div class="recommendation-action">${actionText} ${sourceBadge}</div>
                             ${priorityPill}
                         </div>
                         ${reason}
@@ -3038,9 +3081,11 @@
 
             // Fire-and-forget auto-record of every rendered recommendation
             // into the accountability store. The rec_id is deterministic so
-            // re-renders on the same rec are no-ops on the backend.
+            // re-renders on the same rec are no-ops on the backend. Skip
+            // server-owned recs — they were minted by the server and are
+            // already in the store.
             normalisedActions.forEach(a => {
-                if (!a.action) return;
+                if (!a.action || a.server_owned) return;
                 autoRecordRecommendation(a);
             });
 
