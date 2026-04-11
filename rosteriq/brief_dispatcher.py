@@ -154,12 +154,32 @@ class WebhookSink:
     """POSTs a JSON brief to a URL. Handy for Slack Incoming Webhooks,
     Zapier catches, Discord bots, etc.
 
-    This is the only sink that touches the network. Tests avoid
-    instantiating it so the suite stays offline; the unit tests use
-    ``MemorySink`` instead.
+    Moment 14c made this production-safe:
+
+    - **Retry with exponential backoff.** Configurable attempts
+      (default 3) and base delay (default 0.25s). Transient 5xx
+      responses, timeouts, and connection errors all retry. 4xx
+      (except 408 and 429) fail fast — a 400 won't get better with
+      a retry, and retrying a 401 is worse than useless.
+    - **Dead-letter file.** If all retries are exhausted, the
+      payload is appended to a .jsonl dead-letter file so the caller
+      can inspect, re-drive, or alert on it. Defaults to None (no
+      dead-letter) to keep existing behavior, but production should
+      always set this.
+    - **Injected sleep hook.** Tests can pass ``sleep=lambda s: None``
+      to skip the real time.sleep and still drive the retry loop
+      deterministically.
+
+    Contract: ``send`` never raises. It always returns a result dict
+    so the dispatcher's per-sink error isolation stays intact.
     """
 
     name = "webhook"
+
+    # Status codes that should trigger a retry. 5xx are transient by
+    # spec; 408 (Request Timeout) and 429 (Too Many Requests) are
+    # explicitly retryable even though they're 4xx.
+    RETRYABLE_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 
     def __init__(
         self,
@@ -167,12 +187,122 @@ class WebhookSink:
         *,
         timeout_s: float = 5.0,
         transform: Optional[Callable[[Dict[str, Any], str], Dict[str, Any]]] = None,
+        max_attempts: int = 3,
+        backoff_base_s: float = 0.25,
+        backoff_cap_s: float = 8.0,
+        dead_letter_path: Optional[str] = None,
+        sleep: Optional[Callable[[float], None]] = None,
     ) -> None:
         self.url = url
         self.timeout_s = float(timeout_s)
         # Optional transform lets the caller adapt the payload for
         # Slack's {"text": "..."} shape without subclassing.
         self.transform = transform
+        self.max_attempts = max(1, int(max_attempts))
+        self.backoff_base_s = max(0.0, float(backoff_base_s))
+        self.backoff_cap_s = max(0.0, float(backoff_cap_s))
+        self.dead_letter_path = dead_letter_path
+        # Default to real time.sleep but allow tests to inject a no-op.
+        if sleep is None:
+            import time as _time
+            self._sleep = _time.sleep
+        else:
+            self._sleep = sleep
+
+    def _build_payload(
+        self,
+        venue_id: str,
+        brief: Dict[str, Any],
+        text_body: str,
+    ) -> Dict[str, Any]:
+        if self.transform:
+            out = self.transform(brief, text_body)
+            return out if isinstance(out, dict) else {"raw": out}
+        return {"venue_id": venue_id, "brief": brief, "text": text_body}
+
+    def _compute_backoff(self, attempt_index: int) -> float:
+        """Exponential backoff: base * 2^n, capped. ``attempt_index``
+        is 0-based — the delay AFTER attempt 0 (before attempt 1).
+        """
+        if self.backoff_base_s <= 0:
+            return 0.0
+        delay = self.backoff_base_s * (2 ** attempt_index)
+        if self.backoff_cap_s > 0 and delay > self.backoff_cap_s:
+            delay = self.backoff_cap_s
+        return delay
+
+    def _write_dead_letter(
+        self,
+        venue_id: str,
+        payload: Dict[str, Any],
+        attempts: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        """Append a dead-letter entry and return the path used.
+
+        Catches and swallows I/O errors so the main send() return
+        path stays clean — a dead-letter write failure should never
+        take down the dispatcher.
+        """
+        if not self.dead_letter_path:
+            return None
+        try:
+            directory = os.path.dirname(self.dead_letter_path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            entry = {
+                "ts": _now_iso(),
+                "url": self.url,
+                "venue_id": venue_id,
+                "payload": payload,
+                "attempts": attempts,
+            }
+            with open(self.dead_letter_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+            return self.dead_letter_path
+        except Exception:
+            return None
+
+    def _attempt_once(self, data: bytes) -> Dict[str, Any]:
+        """Single POST attempt. Returns a result dict with a `retryable`
+        flag so the caller knows whether to burn another attempt.
+        """
+        import urllib.request  # lazy
+        import urllib.error
+        try:
+            req = urllib.request.Request(
+                self.url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                code = getattr(resp, "status", 200)
+            return {"ok": True, "status_code": code, "retryable": False}
+        except urllib.error.HTTPError as e:
+            code = getattr(e, "code", 0)
+            retry = code in self.RETRYABLE_STATUSES
+            return {
+                "ok": False,
+                "status_code": code,
+                "error": f"HTTP {code}",
+                "retryable": retry,
+            }
+        except urllib.error.URLError as e:
+            return {
+                "ok": False,
+                "status_code": 0,
+                "error": f"URLError: {e}",
+                "retryable": True,
+            }
+        except Exception as e:
+            # Timeouts (socket.timeout) and anything else: treat as
+            # retryable — the request didn't complete.
+            return {
+                "ok": False,
+                "status_code": 0,
+                "error": str(e),
+                "retryable": True,
+            }
 
     def send(
         self,
@@ -182,24 +312,88 @@ class WebhookSink:
         text_body: str,
     ) -> Dict[str, Any]:
         try:
-            import urllib.request  # lazy
-            payload = (
-                self.transform(brief, text_body)
-                if self.transform
-                else {"venue_id": venue_id, "brief": brief, "text": text_body}
-            )
+            payload = self._build_payload(venue_id, brief, text_body)
             data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(
-                self.url,
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
-                code = getattr(resp, "status", 200)
-            return {"status": "ok", "detail": f"webhook:{code}"}
         except Exception as exc:
-            return {"status": "error", "detail": str(exc)}
+            # Payload could not even be built — nothing retry will fix.
+            return {"status": "error", "detail": f"payload_build_failed: {exc}"}
+
+        attempts: List[Dict[str, Any]] = []
+        last_error: Optional[str] = None
+        last_status: int = 0
+
+        for i in range(self.max_attempts):
+            result = self._attempt_once(data)
+            attempts.append({
+                "attempt": i + 1,
+                "ok": bool(result.get("ok")),
+                "status_code": int(result.get("status_code") or 0),
+                "error": result.get("error"),
+            })
+            if result.get("ok"):
+                return {
+                    "status": "ok",
+                    "detail": f"webhook:{result.get('status_code')}",
+                    "attempts": attempts,
+                }
+            last_error = str(result.get("error") or "unknown")
+            last_status = int(result.get("status_code") or 0)
+            if not result.get("retryable"):
+                # Non-retryable — bail out immediately and dead-letter.
+                break
+            # Don't sleep after the final attempt — it'd just waste time.
+            if i < self.max_attempts - 1:
+                delay = self._compute_backoff(i)
+                if delay > 0:
+                    try:
+                        self._sleep(delay)
+                    except Exception:
+                        pass
+
+        dl_path = self._write_dead_letter(venue_id, payload, attempts)
+        return {
+            "status": "error",
+            "detail": f"webhook_failed:{last_status}:{last_error}",
+            "attempts": attempts,
+            "dead_lettered_to": dl_path,
+        }
+
+
+def read_dead_letter(
+    path: str,
+    *,
+    venue_id: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Read back the webhook dead-letter file, most recent first.
+
+    Mirrors ``tanda_writeback.read_journal`` — filters by venue_id if
+    given, returns empty list on missing file, tolerates malformed
+    lines in the middle of the file.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if venue_id and str(entry.get("venue_id")) != str(venue_id):
+            continue
+        out.append(entry)
+        if len(out) >= limit:
+            break
+    return out
 
 
 # ---------------------------------------------------------------------------
