@@ -1172,6 +1172,8 @@ class PortfolioRecapResponse(BaseModel):
 async def get_portfolio_recap(
     request: Request,
     portfolio_id: str = "",
+    include_trends: bool = False,
+    trend_window_days: int = 7,
 ) -> PortfolioRecapResponse:
     """
     Portfolio recap for 2+ venues — the Tier-3 group-operator view.
@@ -1183,6 +1185,11 @@ async def get_portfolio_recap(
         labels: optional ``{venue_id}={human_name}`` pairs, repeated:
             ``?labels=venue_a=Mojo's&labels=venue_b=Earl's``.
         portfolio_id: optional free-form group identifier.
+        include_trends: when True, each mini-card includes a compact
+            trends overlay (7/14/28-day sparkline + headline) pulled
+            from the accountability store. Defaults False.
+        trend_window_days: window passed to the trends composer when
+            ``include_trends`` is True. 7, 14, or 28.
 
     Returns:
         A rolled-up recap across the requested venues: worst-of traffic
@@ -1254,6 +1261,8 @@ async def get_portfolio_recap(
             venue_recaps,
             portfolio_id=portfolio_id or None,
             venue_labels=venue_labels or None,
+            include_trends=bool(include_trends),
+            trend_window_days=int(trend_window_days or 7),
         )
         return PortfolioRecapResponse(**result)
     except HTTPException:

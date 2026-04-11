@@ -186,8 +186,13 @@ def aggregate_accountability(venue_recaps: List[Dict[str, Any]]) -> Dict[str, An
 # Per-venue mini-summary for dashboard sub-cards
 # ---------------------------------------------------------------------------
 
-def _venue_mini(r: Dict[str, Any], label: Optional[str]) -> Dict[str, Any]:
-    return {
+def _venue_mini(
+    r: Dict[str, Any],
+    label: Optional[str],
+    *,
+    trend: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    mini: Dict[str, Any] = {
         "venue_id": r.get("venue_id") or "",
         "label": label or (r.get("venue_id") or ""),
         "traffic_light": r.get("traffic_light") or "unknown",
@@ -201,6 +206,58 @@ def _venue_mini(r: Dict[str, Any], label: Optional[str]) -> Dict[str, Any]:
             "missed_aud": _safe(r.get("accountability") or {}, "estimated_impact_missed_aud"),
         },
         "summary": r.get("summary") or "",
+    }
+    if trend is not None:
+        mini["trend"] = _compact_trend(trend)
+    return mini
+
+
+def _compact_trend(trend: Dict[str, Any]) -> Dict[str, Any]:
+    """Reduce a full ``trends.compose_trend`` dict to just the fields a
+    dashboard mini-card needs: traffic light, headline, two sparkline
+    series, and the slope deltas. Large ``daily`` arrays are dropped —
+    mini-cards render sparklines from the two series alone.
+    """
+    if not isinstance(trend, dict):
+        return {}
+    series = trend.get("series") or {}
+    slopes = trend.get("slopes") or {}
+    totals = trend.get("totals") or {}
+
+    def _series_list(key: str) -> List[float]:
+        vals = series.get(key) or []
+        out: List[float] = []
+        for v in vals:
+            try:
+                out.append(float(v))
+            except (TypeError, ValueError):
+                out.append(0.0)
+        return out
+
+    def _slope_delta(key: str) -> float:
+        s = slopes.get(key) or {}
+        try:
+            return float(s.get("delta") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    return {
+        "window_days": int(trend.get("window_days") or 0),
+        "traffic_light": str(trend.get("traffic_light") or "unknown"),
+        "headline": str(trend.get("headline") or ""),
+        "series": {
+            "acceptance_rate": _series_list("acceptance_rate"),
+            "missed_aud": _series_list("missed_aud"),
+        },
+        "slopes": {
+            "acceptance_rate_delta": round(_slope_delta("acceptance_rate"), 4),
+            "missed_aud_delta": round(_slope_delta("missed_aud"), 2),
+        },
+        "totals": {
+            "events": int(totals.get("events") or 0),
+            "missed_aud": float(totals.get("missed_aud") or 0.0),
+            "acceptance_rate": float(totals.get("acceptance_rate") or 0.0),
+        },
     }
 
 
@@ -271,6 +328,10 @@ def compose_portfolio(
     portfolio_id: Optional[str] = None,
     shift_date: Optional[str] = None,
     venue_labels: Optional[Dict[str, str]] = None,
+    include_trends: bool = False,
+    trend_window_days: int = 7,
+    trends_module: Any = None,
+    trend_store: Any = None,
 ) -> Dict[str, Any]:
     """
     Roll a list of per-venue recap dicts up into a portfolio view.
@@ -284,6 +345,14 @@ def compose_portfolio(
             ``shift_date`` when present.
         venue_labels: Optional ``{venue_id: human_name}`` mapping so the
             mini-card displays 'Mojo's Bar' rather than 'venue_001'.
+        include_trends: When True, compute a compact trends overlay per
+            venue (sparkline series + headline + slope deltas) by pulling
+            from ``accountability_store``. Defaults False so existing
+            callers pay no cost.
+        trend_window_days: Window passed to ``compose_trend_from_store``
+            when ``include_trends`` is True. 7, 14, or 28.
+        trends_module: Injectable ``rosteriq.trends`` for tests.
+        trend_store: Injectable store for the trends composer.
 
     Returns:
         Dict with keys: ``portfolio_id``, ``shift_date``, ``generated_at``,
@@ -304,7 +373,35 @@ def compose_portfolio(
         accountability=accountability,
     )
 
-    mini_venues = [_venue_mini(r, labels.get(r.get("venue_id") or "")) for r in recaps]
+    trends_by_venue: Dict[str, Dict[str, Any]] = {}
+    if include_trends and recaps:
+        if trends_module is None:
+            from rosteriq import trends as trends_module  # lazy import
+        for r in recaps:
+            vid = str(r.get("venue_id") or "")
+            if not vid:
+                continue
+            try:
+                t = trends_module.compose_trend_from_store(
+                    vid,
+                    window_days=trend_window_days,
+                    store=trend_store,
+                )
+                trends_by_venue[vid] = t
+            except Exception:
+                # A trend fetch failing for one venue must not blow up
+                # the portfolio roll-up — mini-cards just render without
+                # a sparkline in that case.
+                continue
+
+    mini_venues = [
+        _venue_mini(
+            r,
+            labels.get(r.get("venue_id") or ""),
+            trend=trends_by_venue.get(str(r.get("venue_id") or "")) if include_trends else None,
+        )
+        for r in recaps
+    ]
     # Sort so red-light venues float to the top (most urgent first)
     mini_venues.sort(
         key=lambda v: -LIGHT_RANK.get((v.get("traffic_light") or "unknown").lower(), -1)

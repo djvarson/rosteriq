@@ -281,6 +281,179 @@ def test_compose_portfolio_killer_line_3_venues():
     assert all("venue_id" in m for m in out["accountability"]["top_missed"])
 
 
+# ---------------------------------------------------------------------------
+# Moment 14d — trends overlay on mini cards
+# ---------------------------------------------------------------------------
+
+class _FakeTrends:
+    """Stub rosteriq.trends that returns a scripted trend per venue."""
+
+    def __init__(self, by_venue, raise_on=None):
+        self.by_venue = dict(by_venue or {})
+        self.raise_on = set(raise_on or [])
+        self.calls = []
+
+    def compose_trend_from_store(self, venue_id, *, window_days=7, store=None):
+        self.calls.append((venue_id, window_days, store))
+        if venue_id in self.raise_on:
+            raise RuntimeError("boom")
+        return self.by_venue.get(venue_id, {
+            "venue_id": venue_id,
+            "window_days": window_days,
+            "traffic_light": "green",
+            "headline": "Flat",
+            "daily": [],
+            "series": {
+                "acceptance_rate": [0.0] * window_days,
+                "missed_aud": [0.0] * window_days,
+                "total_events": [0] * window_days,
+            },
+            "slopes": {
+                "acceptance_rate": {"first_half": 0, "second_half": 0, "delta": 0.0},
+                "missed_aud":      {"first_half": 0, "second_half": 0, "delta": 0.0},
+                "total_events":    {"first_half": 0, "second_half": 0, "delta": 0.0},
+            },
+            "totals": {"events": 0, "accepted": 0, "dismissed": 0, "missed_aud": 0.0, "acceptance_rate": 0.0},
+        })
+
+
+def _trend_fixture(venue_id, *, light="amber", series_accept=None, series_missed=None, accept_delta=0.0, missed_delta=0.0):
+    series_accept = series_accept if series_accept is not None else [0.5, 0.6, 0.7, 0.55, 0.6, 0.65, 0.7]
+    series_missed = series_missed if series_missed is not None else [50, 40, 60, 80, 30, 20, 10]
+    return {
+        "venue_id": venue_id,
+        "window_days": len(series_accept),
+        "traffic_light": light,
+        "headline": f"{venue_id} trend: {light}",
+        "daily": [{"date": f"2026-04-{i+1:02d}"} for i in range(len(series_accept))],
+        "series": {
+            "acceptance_rate": list(series_accept),
+            "missed_aud": list(series_missed),
+            "total_events": [1] * len(series_accept),
+        },
+        "slopes": {
+            "acceptance_rate": {"first_half": 0.5, "second_half": 0.5 + accept_delta, "delta": accept_delta},
+            "missed_aud":      {"first_half": 50, "second_half": 50 + missed_delta, "delta": missed_delta},
+            "total_events":    {"first_half": 1, "second_half": 1, "delta": 0.0},
+        },
+        "totals": {
+            "events": len(series_accept),
+            "accepted": 4,
+            "dismissed": 3,
+            "missed_aud": sum(series_missed),
+            "acceptance_rate": 0.57,
+        },
+    }
+
+
+def test_compact_trend_drops_daily_and_keeps_series():
+    tr = _trend_fixture("v1")
+    compact = pr._compact_trend(tr)
+    assert "daily" not in compact
+    assert compact["traffic_light"] == "amber"
+    assert compact["headline"].startswith("v1 trend")
+    assert compact["series"]["acceptance_rate"] == tr["series"]["acceptance_rate"]
+    assert compact["series"]["missed_aud"] == tr["series"]["missed_aud"]
+    assert compact["slopes"]["acceptance_rate_delta"] == 0.0
+    assert compact["slopes"]["missed_aud_delta"] == 0.0
+    assert compact["totals"]["events"] == 7
+    assert compact["window_days"] == 7
+
+
+def test_compact_trend_handles_missing_fields_gracefully():
+    compact = pr._compact_trend({})
+    assert compact["traffic_light"] == "unknown"
+    assert compact["headline"] == ""
+    assert compact["series"]["acceptance_rate"] == []
+    assert compact["series"]["missed_aud"] == []
+    assert compact["slopes"]["acceptance_rate_delta"] == 0.0
+    assert compact["totals"]["events"] == 0
+
+
+def test_compact_trend_coerces_non_numeric_series_values_to_zero():
+    tr = {
+        "series": {
+            "acceptance_rate": [0.5, "nope", None, 0.8],
+            "missed_aud": [10, "bad", 20, None],
+        },
+        "slopes": {
+            "acceptance_rate": {"delta": "x"},
+            "missed_aud": {"delta": None},
+        },
+    }
+    compact = pr._compact_trend(tr)
+    assert compact["series"]["acceptance_rate"] == [0.5, 0.0, 0.0, 0.8]
+    assert compact["series"]["missed_aud"] == [10.0, 0.0, 20.0, 0.0]
+    assert compact["slopes"]["acceptance_rate_delta"] == 0.0
+    assert compact["slopes"]["missed_aud_delta"] == 0.0
+
+
+def test_compose_portfolio_without_include_trends_skips_trend_field():
+    recaps = [_mk_recap("a"), _mk_recap("b")]
+    fake = _FakeTrends({})
+    out = pr.compose_portfolio(recaps, trends_module=fake)
+    assert fake.calls == []  # no calls when include_trends=False
+    for v in out["venues"]:
+        assert "trend" not in v
+
+
+def test_compose_portfolio_with_include_trends_attaches_trend_per_venue():
+    recaps = [_mk_recap("a"), _mk_recap("b")]
+    fake = _FakeTrends({
+        "a": _trend_fixture("a", light="red",   accept_delta=-0.15, missed_delta=250.0),
+        "b": _trend_fixture("b", light="green", accept_delta=0.05,  missed_delta=-100.0),
+    })
+    out = pr.compose_portfolio(recaps, include_trends=True, trends_module=fake)
+    # Trends should have been fetched for each venue with the default window
+    assert [c[0] for c in fake.calls] == ["a", "b"]
+    assert all(c[1] == 7 for c in fake.calls)
+    # Each mini-card has a compact trend payload
+    by_id = {v["venue_id"]: v for v in out["venues"]}
+    assert by_id["a"]["trend"]["traffic_light"] == "red"
+    assert by_id["a"]["trend"]["slopes"]["acceptance_rate_delta"] == -0.15
+    assert by_id["a"]["trend"]["slopes"]["missed_aud_delta"] == 250.0
+    assert by_id["b"]["trend"]["traffic_light"] == "green"
+    assert by_id["b"]["trend"]["headline"].startswith("b trend")
+    # daily should NOT be on the compact form
+    assert "daily" not in by_id["a"]["trend"]
+
+
+def test_compose_portfolio_trend_window_days_flows_to_trends():
+    recaps = [_mk_recap("a")]
+    fake = _FakeTrends({})
+    pr.compose_portfolio(recaps, include_trends=True, trend_window_days=28, trends_module=fake)
+    assert fake.calls[0][1] == 28
+
+
+def test_compose_portfolio_trend_fetch_error_is_isolated_per_venue():
+    recaps = [_mk_recap("a"), _mk_recap("b")]
+    fake = _FakeTrends(
+        {"b": _trend_fixture("b", light="amber")},
+        raise_on={"a"},
+    )
+    out = pr.compose_portfolio(recaps, include_trends=True, trends_module=fake)
+    by_id = {v["venue_id"]: v for v in out["venues"]}
+    # Venue "a" had a trend error — mini rendered without the trend key
+    assert "trend" not in by_id["a"]
+    # Venue "b" still gets a trend
+    assert by_id["b"]["trend"]["traffic_light"] == "amber"
+
+
+def test_compose_portfolio_include_trends_on_empty_portfolio_is_noop():
+    fake = _FakeTrends({})
+    out = pr.compose_portfolio([], include_trends=True, trends_module=fake)
+    assert fake.calls == []
+    assert out["venues"] == []
+
+
+def test_compose_portfolio_include_trends_uses_injected_store():
+    recaps = [_mk_recap("a")]
+    fake = _FakeTrends({})
+    sentinel = object()
+    pr.compose_portfolio(recaps, include_trends=True, trends_module=fake, trend_store=sentinel)
+    assert fake.calls[0][2] is sentinel
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     passed = failed = 0

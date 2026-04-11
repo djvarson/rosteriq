@@ -1515,6 +1515,43 @@
             padding-top: 6px;
         }
         .venue-mini-acct.has-missed { color: #fbbf24; }
+        .venue-mini-trend {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border-color);
+        }
+        .venue-mini-trend-cell {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+        .venue-mini-trend-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #9ca3af;
+        }
+        .venue-mini-trend-spark {
+            height: 28px;
+        }
+        .venue-mini-trend-spark svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .venue-mini-trend-head {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+        .venue-mini-trend-head.light-red { color: #fca5a5; }
+        .venue-mini-trend-head.light-amber { color: #fcd34d; }
+        .venue-mini-trend-head.light-green { color: #86efac; }
         .portfolio-footer {
             display: flex;
             justify-content: space-between;
@@ -3321,6 +3358,8 @@
 
             const params = new URLSearchParams();
             params.set('portfolio_id', preset.portfolio_id);
+            params.set('include_trends', 'true');
+            params.set('trend_window_days', '7');
             preset.venue_ids.forEach(v => params.append('venue_ids', v));
             Object.entries(preset.labels || {}).forEach(([k, v]) => {
                 params.append('labels', `${k}=${v}`);
@@ -3485,6 +3524,8 @@
                 acctLine = '<div class="venue-mini-acct">No dismissed recs</div>';
             }
 
+            const trendBlock = renderVenueMiniTrend(v.trend);
+
             return `
                 <div class="venue-mini ${lightCls}">
                     <div class="venue-mini-head">
@@ -3510,7 +3551,43 @@
                         </div>
                     </div>
                     ${acctLine}
+                    ${trendBlock}
                 </div>
+            `;
+        }
+
+        function renderVenueMiniTrend(trend) {
+            if (!trend || typeof trend !== 'object') return '';
+            const series = trend.series || {};
+            const accept = Array.isArray(series.acceptance_rate) ? series.acceptance_rate : [];
+            const missed = Array.isArray(series.missed_aud) ? series.missed_aud : [];
+            const totals = trend.totals || {};
+            // If there were zero events over the whole window, skip the
+            // sparkline block — an empty flat line is more noise than
+            // signal for a mini card.
+            if (!Number(totals.events || 0) && accept.length === 0 && missed.length === 0) {
+                return '';
+            }
+            const trendLight = String(trend.traffic_light || 'unknown').toLowerCase();
+            const trendLightCls = (trendLight === 'green' || trendLight === 'amber' || trendLight === 'red')
+                ? ('light-' + trendLight) : 'light-unknown';
+            const acceptColor = '#60a5fa';
+            const missedColor = '#f87171';
+            const acceptSpark = accept.length > 0 ? sparklineSvg(accept, acceptColor) : '';
+            const missedSpark = missed.length > 0 ? sparklineSvg(missed, missedColor) : '';
+            const headline = escapeHtmlSafe(trend.headline || '');
+            return `
+                <div class="venue-mini-trend">
+                    <div class="venue-mini-trend-cell">
+                        <span class="venue-mini-trend-label">Acceptance ${Number(trend.window_days || 7)}d</span>
+                        <div class="venue-mini-trend-spark">${acceptSpark}</div>
+                    </div>
+                    <div class="venue-mini-trend-cell">
+                        <span class="venue-mini-trend-label">Dismissed $ ${Number(trend.window_days || 7)}d</span>
+                        <div class="venue-mini-trend-spark">${missedSpark}</div>
+                    </div>
+                </div>
+                ${headline ? `<div class="venue-mini-trend-head ${trendLightCls}">${headline}</div>` : ''}
             `;
         }
 
