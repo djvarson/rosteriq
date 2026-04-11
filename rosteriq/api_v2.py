@@ -1067,6 +1067,63 @@ async def reset_head_count(request: HeadCountResetRequest) -> HeadCountStateResp
 from rosteriq import shift_recap as _shift_recap
 from rosteriq import accountability_store as _acct_store
 from rosteriq import pulse_rec_bridge as _pulse_rec_bridge
+from rosteriq import portfolio_recap as _portfolio_recap
+
+
+async def _build_venue_shift_recap(venue_id: str) -> Dict[str, Any]:
+    """Build a single venue's shift-recap dict (pre-pydantic).
+
+    Pulled out so both the per-venue shift-recap endpoint and the
+    portfolio endpoint can reuse the same plumbing.
+    """
+    pipeline = get_pipeline(venue_id=venue_id)
+
+    revenue_actual = 0.0
+    revenue_forecast = 0.0
+    wages_actual: Optional[float] = None
+    wages_forecast: Optional[float] = None
+    shift_date = datetime.now().date().isoformat()
+
+    try:
+        snapshot = await pipeline.get_on_shift_dashboard()
+        rev = snapshot.get("revenue_metrics", {}) or {}
+        revenue_actual = float(rev.get("actual", 0) or 0)
+        revenue_forecast = float(rev.get("forecast", 0) or 0)
+        if snapshot.get("wages_burned_so_far") is not None:
+            wages_actual = float(snapshot.get("wages_burned_so_far") or 0)
+        if snapshot.get("wages_forecast_today") is not None:
+            wages_forecast = float(snapshot.get("wages_forecast_today") or 0)
+        shift_date = snapshot.get("date", shift_date) or shift_date
+    except Exception:
+        logger.exception(
+            "Shift recap: on-shift snapshot failed for %s, recap will use zeros",
+            venue_id,
+        )
+
+    hc_history = _hc_store.history(venue_id)
+    acct_history = _acct_store.history(venue_id)
+
+    wage_target_pct = _shift_recap.DEFAULT_WAGE_TARGET_PCT
+    try:
+        constraints = getattr(pipeline, "constraints", None)
+        if constraints is not None:
+            target = getattr(constraints, "target_wage_cost_pct", None)
+            if target is not None:
+                wage_target_pct = float(target)
+    except Exception:
+        pass
+
+    return _shift_recap.compose_recap(
+        venue_id=venue_id,
+        shift_date=shift_date,
+        revenue_actual=revenue_actual,
+        revenue_forecast=revenue_forecast,
+        wages_actual=wages_actual,
+        wages_forecast=wages_forecast,
+        wage_target_pct=wage_target_pct,
+        headcount_history=hc_history,
+        recommendations=acct_history,
+    )
 
 
 @app.get("/api/v1/shift-recap/{venue_id}", response_model=ShiftRecapResponse)
@@ -1083,73 +1140,122 @@ async def get_shift_recap(venue_id: str) -> ShiftRecapResponse:
     Safe to call mid-shift — the numbers just reflect 'so far'.
     """
     try:
-        pipeline = get_pipeline(venue_id=venue_id)
-
-        # Pull the existing on-shift snapshot for revenue + wages context.
-        # If the adapter chain fails we still return a useful recap built
-        # from whatever head-count data we have.
-        revenue_actual = 0.0
-        revenue_forecast = 0.0
-        wages_actual: Optional[float] = None
-        wages_forecast: Optional[float] = None
-        shift_date = datetime.now().date().isoformat()
-
-        try:
-            snapshot = await pipeline.get_on_shift_dashboard()
-            rev = snapshot.get("revenue_metrics", {}) or {}
-            revenue_actual = float(rev.get("actual", 0) or 0)
-            revenue_forecast = float(rev.get("forecast", 0) or 0)
-            # Optional wage fields — pipeline may or may not surface these.
-            if snapshot.get("wages_burned_so_far") is not None:
-                wages_actual = float(snapshot.get("wages_burned_so_far") or 0)
-            if snapshot.get("wages_forecast_today") is not None:
-                wages_forecast = float(snapshot.get("wages_forecast_today") or 0)
-            shift_date = snapshot.get("date", shift_date) or shift_date
-        except Exception:
-            # Fallthrough — log but still produce a recap so the UI
-            # degrades gracefully.
-            logger.exception(
-                "Shift recap: on-shift snapshot failed for %s, recap will use zeros",
-                venue_id,
-            )
-
-        # Pull head-count history from the in-process store. state() returns
-        # newest-first `recent`, but we want the full history for a real
-        # peak — use history() directly.
-        hc_history = _hc_store.history(venue_id)
-
-        # Pull the accountability ledger — same pattern, full history so
-        # the composer can tally and rank without missing older events.
-        acct_history = _acct_store.history(venue_id)
-
-        # Read venue-specific wage target from constraints if available,
-        # otherwise use the module default.
-        wage_target_pct = _shift_recap.DEFAULT_WAGE_TARGET_PCT
-        try:
-            constraints = getattr(pipeline, "constraints", None)
-            if constraints is not None:
-                target = getattr(constraints, "target_wage_cost_pct", None)
-                if target is not None:
-                    wage_target_pct = float(target)
-        except Exception:
-            pass  # stay on default
-
-        recap = _shift_recap.compose_recap(
-            venue_id=venue_id,
-            shift_date=shift_date,
-            revenue_actual=revenue_actual,
-            revenue_forecast=revenue_forecast,
-            wages_actual=wages_actual,
-            wages_forecast=wages_forecast,
-            wage_target_pct=wage_target_pct,
-            headcount_history=hc_history,
-            recommendations=acct_history,
-        )
-
+        recap = await _build_venue_shift_recap(venue_id)
         return ShiftRecapResponse(**recap)
     except Exception:
         logger.exception(f"Shift recap failed for {venue_id}")
         raise HTTPException(status_code=500, detail="Shift recap failed")
+
+
+# ============================================================================
+# Portfolio Recap — Moment 9 (multi-venue roll-up for group operators)
+# ============================================================================
+
+class PortfolioRecapResponse(BaseModel):
+    """Multi-venue portfolio roll-up — shape matches portfolio_recap.compose_portfolio."""
+    portfolio_id: str
+    shift_date: str
+    generated_at: str
+    traffic_light: str  # "green" | "amber" | "red" | "unknown"
+    summary: str
+    totals: Dict[str, Any]
+    accountability: Dict[str, Any]
+    venues: List[Dict[str, Any]]
+
+
+@app.get("/api/v1/portfolio/recap", response_model=PortfolioRecapResponse)
+async def get_portfolio_recap(
+    request: Request,
+    portfolio_id: str = "",
+) -> PortfolioRecapResponse:
+    """
+    Portfolio recap for 2+ venues — the Tier-3 group-operator view.
+
+    Query params:
+        venue_ids: repeat the param for each venue — e.g.
+            ``?venue_ids=venue_a&venue_ids=venue_b&venue_ids=venue_c``.
+            Also accepts a single comma-separated value for convenience.
+        labels: optional ``{venue_id}={human_name}`` pairs, repeated:
+            ``?labels=venue_a=Mojo's&labels=venue_b=Earl's``.
+        portfolio_id: optional free-form group identifier.
+
+    Returns:
+        A rolled-up recap across the requested venues: worst-of traffic
+        light, aggregated revenue/wages/headcount, aggregated
+        accountability block (counts + missed $), and a per-venue mini
+        summary array sorted red-first for the dashboard's sub-cards.
+    """
+    try:
+        # Parse venue_ids from query params — supports both
+        # ?venue_ids=a&venue_ids=b AND ?venue_ids=a,b,c forms.
+        raw_venue_ids = request.query_params.getlist("venue_ids") if hasattr(
+            request.query_params, "getlist"
+        ) else request.query_params.get("venue_ids", "").split(",")
+        venue_ids: List[str] = []
+        for v in raw_venue_ids:
+            for part in (v or "").split(","):
+                part = part.strip()
+                if part:
+                    venue_ids.append(part)
+        if not venue_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="venue_ids query param is required (at least one venue)",
+            )
+
+        # Parse optional labels — ?labels=venue_a=Mojo's&labels=venue_b=Earl's
+        venue_labels: Dict[str, str] = {}
+        raw_labels = request.query_params.getlist("labels") if hasattr(
+            request.query_params, "getlist"
+        ) else []
+        for lab in raw_labels:
+            if "=" in lab:
+                k, _, v = lab.partition("=")
+                if k:
+                    venue_labels[k.strip()] = v.strip()
+
+        # Build each venue's recap, tolerating per-venue failures —
+        # one broken venue should not black out the whole portfolio.
+        venue_recaps: List[Dict[str, Any]] = []
+        for vid in venue_ids:
+            try:
+                r = await _build_venue_shift_recap(vid)
+                venue_recaps.append(r)
+            except Exception:
+                logger.exception("Portfolio: venue recap failed for %s", vid)
+                # Emit a placeholder zero-recap so the venue still
+                # appears in the UI (marked unknown) rather than
+                # vanishing silently.
+                venue_recaps.append({
+                    "venue_id": vid,
+                    "shift_date": datetime.now().date().isoformat(),
+                    "traffic_light": "unknown",
+                    "summary": "Recap unavailable for this venue.",
+                    "revenue": {"actual": 0, "forecast": 0, "delta": 0, "delta_pct": 0},
+                    "wages": {
+                        "actual": 0, "forecast": 0,
+                        "pct_of_revenue_actual": 0, "pct_of_revenue_target": 0,
+                        "pct_delta": 0,
+                    },
+                    "headcount": {"peak": 0, "peak_time": None, "total_taps": 0},
+                    "accountability": {
+                        "total": 0, "pending": 0, "accepted": 0, "dismissed": 0,
+                        "estimated_impact_missed_aud": 0, "estimated_impact_pending_aud": 0,
+                        "acceptance_rate": 0, "top_missed": [],
+                    },
+                })
+
+        result = _portfolio_recap.compose_portfolio(
+            venue_recaps,
+            portfolio_id=portfolio_id or None,
+            venue_labels=venue_labels or None,
+        )
+        return PortfolioRecapResponse(**result)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Portfolio recap failed")
+        raise HTTPException(status_code=500, detail="Portfolio recap failed")
 
 
 # ============================================================================

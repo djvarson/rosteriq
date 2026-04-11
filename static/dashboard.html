@@ -1341,6 +1341,192 @@
             .recap-kpis { grid-template-columns: repeat(2, 1fr); }
         }
 
+        /* -------- Portfolio View (Moment 9: multi-venue roll-up) -------- */
+        .portfolio-card {
+            background-color: var(--card-bg);
+            padding: 22px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+            border-left: 4px solid #6b7280;
+            transition: border-left-color 0.25s ease;
+        }
+        .portfolio-card.light-green { border-left-color: #10b981; }
+        .portfolio-card.light-amber { border-left-color: #f59e0b; }
+        .portfolio-card.light-red   { border-left-color: #ef4444; }
+        .portfolio-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+        }
+        .portfolio-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #f5f5f7;
+        }
+        .portfolio-subtitle {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 2px;
+        }
+        .portfolio-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .portfolio-controls select {
+            background: var(--darker-bg);
+            border: 1px solid var(--border-color);
+            color: #e5e7eb;
+            font-size: 12px;
+            border-radius: 6px;
+            padding: 6px 10px;
+        }
+        .portfolio-refresh-btn {
+            background: none;
+            border: 1px solid #334155;
+            color: #93c5fd;
+            font-size: 11px;
+            padding: 5px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .portfolio-refresh-btn:hover { color: #60a5fa; border-color: #475569; }
+        .portfolio-summary {
+            background: var(--darker-bg);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            line-height: 1.55;
+            color: #d1d5db;
+            margin-bottom: 14px;
+        }
+        .portfolio-summary.empty {
+            color: #9ca3af;
+            font-style: italic;
+        }
+        .portfolio-kpis {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .portfolio-kpi {
+            background: var(--darker-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 14px;
+        }
+        .portfolio-kpi-label {
+            font-size: 10px;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: #9ca3af;
+            margin-bottom: 6px;
+        }
+        .portfolio-kpi-value {
+            font-size: 20px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            color: #f5f5f7;
+            line-height: 1.1;
+        }
+        .portfolio-kpi-sub {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 4px;
+            font-variant-numeric: tabular-nums;
+        }
+        .portfolio-kpi-sub.pos { color: #34d399; }
+        .portfolio-kpi-sub.neg { color: #f87171; }
+        .portfolio-venues {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .venue-mini {
+            background: var(--darker-bg);
+            border: 1px solid var(--border-color);
+            border-left: 3px solid #6b7280;
+            border-radius: 8px;
+            padding: 12px 14px;
+            font-size: 12px;
+            color: #d1d5db;
+        }
+        .venue-mini.light-green { border-left-color: #10b981; }
+        .venue-mini.light-amber { border-left-color: #f59e0b; }
+        .venue-mini.light-red   { border-left-color: #ef4444; }
+        .venue-mini-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .venue-mini-name {
+            font-weight: 700;
+            font-size: 13px;
+            color: #f5f5f7;
+        }
+        .venue-mini-badge {
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            padding: 3px 7px;
+            border-radius: 10px;
+            border: 1px solid currentColor;
+        }
+        .venue-mini-badge.light-green { color: #34d399; background: rgba(52, 211, 153, 0.08); }
+        .venue-mini-badge.light-amber { color: #fbbf24; background: rgba(251, 191, 36, 0.08); }
+        .venue-mini-badge.light-red   { color: #f87171; background: rgba(248, 113, 113, 0.08); }
+        .venue-mini-badge.light-unknown { color: #9ca3af; background: rgba(156, 163, 175, 0.08); }
+        .venue-mini-metrics {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px 12px;
+            margin-bottom: 8px;
+        }
+        .venue-mini-metric {
+            display: flex;
+            flex-direction: column;
+        }
+        .venue-mini-metric-label {
+            font-size: 9px;
+            letter-spacing: 0.5px;
+            color: #9ca3af;
+            text-transform: uppercase;
+        }
+        .venue-mini-metric-value {
+            font-size: 13px;
+            font-weight: 700;
+            color: #e5e7eb;
+            font-variant-numeric: tabular-nums;
+        }
+        .venue-mini-metric-value.pos { color: #34d399; }
+        .venue-mini-metric-value.neg { color: #f87171; }
+        .venue-mini-acct {
+            font-size: 11px;
+            color: #9ca3af;
+            border-top: 1px solid var(--border-color);
+            padding-top: 6px;
+        }
+        .venue-mini-acct.has-missed { color: #fbbf24; }
+        .portfolio-footer {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 6px;
+        }
+        .portfolio-card.hidden { display: none; }
+        @media (max-width: 720px) {
+            .portfolio-kpis { grid-template-columns: repeat(2, 1fr); }
+        }
+
         /* -------- Demo-data warning pill (Moment 5) -------- */
         .demo-data-pill {
             display: none;
@@ -1839,6 +2025,53 @@
                 <div class="recap-footer">
                     <span id="recapGeneratedAt">—</span>
                     <button type="button" class="recap-refresh-btn" onclick="fetchShiftRecap()">Refresh recap</button>
+                </div>
+            </div>
+
+            <!-- Portfolio View — Moment 9: multi-venue roll-up (Tier 3) -->
+            <div class="portfolio-card hidden" id="portfolioCard">
+                <div class="portfolio-header">
+                    <div>
+                        <div class="portfolio-title">Portfolio View</div>
+                        <div class="portfolio-subtitle">Worst-of traffic light, group revenue &amp; wage %, and accountability across every venue.</div>
+                    </div>
+                    <div class="portfolio-controls">
+                        <select id="portfolioPreset" onchange="fetchPortfolioRecap()">
+                            <option value="">Select portfolio…</option>
+                            <option value="dale_group">Dale's Group (demo 001 + 002 + 003)</option>
+                            <option value="mojos_only">Mojo's only (demo 001)</option>
+                        </select>
+                        <span class="recap-light-badge light-unknown" id="portfolioLight">—</span>
+                        <button type="button" class="portfolio-refresh-btn" onclick="fetchPortfolioRecap()">Refresh</button>
+                    </div>
+                </div>
+                <div class="portfolio-summary empty" id="portfolioSummary">Select a portfolio to roll up your venues.</div>
+                <div class="portfolio-kpis">
+                    <div class="portfolio-kpi">
+                        <div class="portfolio-kpi-label">Portfolio revenue</div>
+                        <div class="portfolio-kpi-value" id="pfRevenue">—</div>
+                        <div class="portfolio-kpi-sub" id="pfRevenueSub">vs forecast</div>
+                    </div>
+                    <div class="portfolio-kpi">
+                        <div class="portfolio-kpi-label">Group wages</div>
+                        <div class="portfolio-kpi-value" id="pfWages">—</div>
+                        <div class="portfolio-kpi-sub" id="pfWagesSub">of revenue</div>
+                    </div>
+                    <div class="portfolio-kpi">
+                        <div class="portfolio-kpi-label">Group wage % Δ</div>
+                        <div class="portfolio-kpi-value" id="pfWagePctDelta">—</div>
+                        <div class="portfolio-kpi-sub" id="pfWagePctSub">vs target</div>
+                    </div>
+                    <div class="portfolio-kpi">
+                        <div class="portfolio-kpi-label">Peak head count</div>
+                        <div class="portfolio-kpi-value" id="pfPeak">—</div>
+                        <div class="portfolio-kpi-sub" id="pfPeakSub">busiest venue</div>
+                    </div>
+                </div>
+                <div class="portfolio-venues" id="portfolioVenues"></div>
+                <div class="portfolio-footer">
+                    <span id="portfolioGeneratedAt">—</span>
+                    <span id="portfolioAcctLine"></span>
                 </div>
             </div>
 
@@ -2767,6 +3000,239 @@
                     }).join('');
                 }
             }
+        }
+
+        // -------- Portfolio View (Moment 9: multi-venue roll-up) --------
+        // Maps preset keys from the dropdown to (venue_ids, labels, portfolio_id).
+        // This keeps the demo flow deterministic while the real picker lives
+        // on the Tier-3 settings page where group operators register their
+        // venue list once.
+        const PORTFOLIO_PRESETS = {
+            dale_group: {
+                portfolio_id: 'dale_group',
+                venue_ids: ['venue_demo_001', 'venue_demo_002', 'venue_demo_003'],
+                labels: {
+                    venue_demo_001: "Mojo's Bar",
+                    venue_demo_002: "Earl's Kitchen",
+                    venue_demo_003: "Francine's",
+                },
+            },
+            mojos_only: {
+                portfolio_id: 'mojos_only',
+                venue_ids: ['venue_demo_001'],
+                labels: { venue_demo_001: "Mojo's Bar" },
+            },
+        };
+
+        async function fetchPortfolioRecap() {
+            const sel = document.getElementById('portfolioPreset');
+            const card = document.getElementById('portfolioCard');
+            if (!sel || !card) return;
+            const key = sel.value;
+            if (!key) {
+                card.classList.add('hidden');
+                return;
+            }
+            const preset = PORTFOLIO_PRESETS[key];
+            if (!preset) {
+                card.classList.add('hidden');
+                return;
+            }
+            card.classList.remove('hidden');
+
+            const params = new URLSearchParams();
+            params.set('portfolio_id', preset.portfolio_id);
+            preset.venue_ids.forEach(v => params.append('venue_ids', v));
+            Object.entries(preset.labels || {}).forEach(([k, v]) => {
+                params.append('labels', `${k}=${v}`);
+            });
+
+            const summaryEl = document.getElementById('portfolioSummary');
+            if (summaryEl) {
+                summaryEl.classList.add('empty');
+                summaryEl.textContent = 'Rolling up venues…';
+            }
+            try {
+                const resp = await fetch(`/api/v1/portfolio/recap?${params.toString()}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                renderPortfolioRecap(data);
+            } catch (err) {
+                console.warn('Portfolio recap fetch failed', err);
+                if (summaryEl) {
+                    summaryEl.classList.add('empty');
+                    summaryEl.textContent = 'Portfolio recap unavailable — the API is offline.';
+                }
+            }
+        }
+
+        function renderPortfolioRecap(data) {
+            if (!data || typeof data !== 'object') return;
+            const totals = data.totals || {};
+            const rev = totals.revenue || {};
+            const wg = totals.wages || {};
+            const hc = totals.headcount || {};
+            const acct = data.accountability || {};
+            const light = (data.traffic_light || 'unknown').toLowerCase();
+
+            const card = document.getElementById('portfolioCard');
+            if (card) {
+                card.classList.remove('light-green', 'light-amber', 'light-red');
+                if (light === 'green' || light === 'amber' || light === 'red') {
+                    card.classList.add('light-' + light);
+                }
+            }
+
+            const badge = document.getElementById('portfolioLight');
+            if (badge) {
+                badge.classList.remove('light-green', 'light-amber', 'light-red', 'light-unknown');
+                const cls = (light === 'green' || light === 'amber' || light === 'red') ? ('light-' + light) : 'light-unknown';
+                badge.classList.add(cls);
+                badge.textContent = light === 'unknown' ? '—' : light.toUpperCase();
+            }
+
+            // Summary line
+            const summaryEl = document.getElementById('portfolioSummary');
+            if (summaryEl) {
+                if (data.summary) {
+                    summaryEl.classList.remove('empty');
+                    summaryEl.textContent = data.summary;
+                } else {
+                    summaryEl.classList.add('empty');
+                    summaryEl.textContent = 'No venues in this portfolio yet.';
+                }
+            }
+
+            // Revenue KPI
+            const revEl = document.getElementById('pfRevenue');
+            if (revEl) revEl.textContent = formatRecapMoney(rev.actual);
+            const revSub = document.getElementById('pfRevenueSub');
+            if (revSub) {
+                const pct = Number(rev.delta_pct || 0);
+                revSub.textContent = `${formatRecapPct(pct, { signed: true })} vs ${formatRecapMoney(rev.forecast)}`;
+                revSub.classList.remove('pos', 'neg');
+                if (pct > 0.005) revSub.classList.add('pos');
+                else if (pct < -0.005) revSub.classList.add('neg');
+            }
+
+            // Wages KPI
+            const wgEl = document.getElementById('pfWages');
+            if (wgEl) wgEl.textContent = formatRecapMoney(wg.actual);
+            const wgSub = document.getElementById('pfWagesSub');
+            if (wgSub) wgSub.textContent = `${formatRecapPct(wg.pct_of_revenue_actual)} of revenue`;
+
+            // Group wage % delta KPI
+            const wgDeltaEl = document.getElementById('pfWagePctDelta');
+            if (wgDeltaEl) {
+                const pts = Number(wg.pct_delta || 0) * 100;
+                const sign = pts >= 0 ? '+' : '';
+                wgDeltaEl.textContent = `${sign}${pts.toFixed(1)}pt`;
+            }
+            const wgDeltaSub = document.getElementById('pfWagePctSub');
+            if (wgDeltaSub) {
+                wgDeltaSub.textContent = `target ${formatRecapPct(wg.pct_of_revenue_target)}`;
+                wgDeltaSub.classList.remove('pos', 'neg');
+                const pts = Number(wg.pct_delta || 0);
+                if (pts < -0.002) wgDeltaSub.classList.add('pos');
+                else if (pts > 0.005) wgDeltaSub.classList.add('neg');
+            }
+
+            // Peak head count KPI
+            const peakEl = document.getElementById('pfPeak');
+            if (peakEl) peakEl.textContent = (hc.peak_across_portfolio != null ? hc.peak_across_portfolio : 0);
+            const peakSub = document.getElementById('pfPeakSub');
+            if (peakSub) peakSub.textContent = `across ${totals.venue_count || 0} venue${totals.venue_count === 1 ? '' : 's'}`;
+
+            // Venue mini-cards
+            const venuesEl = document.getElementById('portfolioVenues');
+            if (venuesEl) {
+                const venues = Array.isArray(data.venues) ? data.venues : [];
+                if (venues.length === 0) {
+                    venuesEl.innerHTML = '<div class="venue-mini">No venues reporting.</div>';
+                } else {
+                    venuesEl.innerHTML = venues.map(v => renderVenueMini(v)).join('');
+                }
+            }
+
+            // Footer: timestamp + group accountability headline
+            const tsEl = document.getElementById('portfolioGeneratedAt');
+            if (tsEl && data.generated_at) {
+                try {
+                    const d = new Date(data.generated_at);
+                    tsEl.textContent = `Updated ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                } catch (_) {
+                    tsEl.textContent = 'Updated';
+                }
+            }
+            const acctLine = document.getElementById('portfolioAcctLine');
+            if (acctLine) {
+                const dismissed = Number(acct.dismissed || 0);
+                const missed = Number(acct.estimated_impact_missed_aud || 0);
+                if (dismissed > 0 && missed > 0) {
+                    acctLine.textContent = `${dismissed} dismissed · ~$${Math.round(missed).toLocaleString()} at stake`;
+                } else if (dismissed > 0) {
+                    acctLine.textContent = `${dismissed} dismissed across the group`;
+                } else {
+                    acctLine.textContent = '';
+                }
+            }
+        }
+
+        function renderVenueMini(v) {
+            const light = String(v.traffic_light || 'unknown').toLowerCase();
+            const lightCls = (light === 'green' || light === 'amber' || light === 'red') ? ('light-' + light) : 'light-unknown';
+            const label = escapeHtmlSafe(v.label || v.venue_id || 'Venue');
+            const rev = formatRecapMoney(v.revenue_actual);
+            const revDelta = Number(v.revenue_delta_pct || 0);
+            const revDeltaStr = formatRecapPct(revDelta, { signed: true });
+            const revDeltaCls = revDelta > 0.005 ? 'pos' : (revDelta < -0.005 ? 'neg' : '');
+            const wagePct = formatRecapPct(v.wage_pct_actual);
+            const wageDelta = Number(v.wage_pct_delta || 0);
+            const wageDeltaPts = (wageDelta * 100);
+            const wageDeltaSign = wageDeltaPts >= 0 ? '+' : '';
+            const wageDeltaStr = `${wageDeltaSign}${wageDeltaPts.toFixed(1)}pt`;
+            const wageDeltaCls = wageDelta > 0.005 ? 'neg' : (wageDelta < -0.002 ? 'pos' : '');
+            const peak = Number(v.peak_headcount || 0);
+
+            const acctObj = v.accountability || {};
+            const dismissed = Number(acctObj.dismissed || 0);
+            const missed = Number(acctObj.missed_aud || 0);
+            let acctLine = '';
+            if (dismissed > 0 && missed > 0) {
+                acctLine = `<div class="venue-mini-acct has-missed">${dismissed} dismissed · ~$${Math.round(missed).toLocaleString()} at stake</div>`;
+            } else if (dismissed > 0) {
+                acctLine = `<div class="venue-mini-acct has-missed">${dismissed} dismissed</div>`;
+            } else {
+                acctLine = '<div class="venue-mini-acct">No dismissed recs</div>';
+            }
+
+            return `
+                <div class="venue-mini ${lightCls}">
+                    <div class="venue-mini-head">
+                        <span class="venue-mini-name">${label}</span>
+                        <span class="venue-mini-badge ${lightCls}">${light === 'unknown' ? '—' : light.toUpperCase()}</span>
+                    </div>
+                    <div class="venue-mini-metrics">
+                        <div class="venue-mini-metric">
+                            <span class="venue-mini-metric-label">Revenue</span>
+                            <span class="venue-mini-metric-value">${rev}</span>
+                        </div>
+                        <div class="venue-mini-metric">
+                            <span class="venue-mini-metric-label">Δ vs forecast</span>
+                            <span class="venue-mini-metric-value ${revDeltaCls}">${revDeltaStr}</span>
+                        </div>
+                        <div class="venue-mini-metric">
+                            <span class="venue-mini-metric-label">Wage %</span>
+                            <span class="venue-mini-metric-value">${wagePct}</span>
+                        </div>
+                        <div class="venue-mini-metric">
+                            <span class="venue-mini-metric-label">Δ vs target</span>
+                            <span class="venue-mini-metric-value ${wageDeltaCls}">${wageDeltaStr}</span>
+                        </div>
+                    </div>
+                    ${acctLine}
+                </div>
+            `;
         }
 
         // -------- Accountability plumbing (Moment 8) --------
