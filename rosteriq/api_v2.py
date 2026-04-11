@@ -1070,6 +1070,7 @@ from rosteriq import pulse_rec_bridge as _pulse_rec_bridge
 from rosteriq import portfolio_recap as _portfolio_recap
 from rosteriq import morning_brief as _morning_brief
 from rosteriq import brief_dispatcher as _brief_dispatcher
+from rosteriq import trends as _trends
 
 
 async def _build_venue_shift_recap(venue_id: str) -> Dict[str, Any]:
@@ -1484,6 +1485,54 @@ async def run_brief_dispatch(date: str = "") -> DispatchResultResponse:
     except Exception:
         logger.exception("Brief dispatch run failed")
         raise HTTPException(status_code=500, detail="Dispatch failed")
+
+
+# ============================================================================
+# Trends — Moment 13 (accountability over time, sparkline-ready)
+# ============================================================================
+
+class TrendResponse(BaseModel):
+    """Trend payload — shape matches trends.compose_trend."""
+
+    venue_id: str
+    window_days: int
+    generated_at: str
+    traffic_light: str
+    headline: str
+    daily: List[Dict[str, Any]]
+    series: Dict[str, List[Any]]
+    slopes: Dict[str, Any]
+    totals: Dict[str, Any]
+
+
+@app.get("/api/v1/trends/{venue_id}", response_model=TrendResponse)
+async def get_trends(
+    venue_id: str,
+    window: int = 7,
+) -> TrendResponse:
+    """
+    Accountability trend for a venue over the last N days.
+
+    Query params:
+        window: 7, 14, or 28 days. Other values are clamped to [1, 90].
+
+    Returns daily zero-filled rollups plus sparkline-friendly series
+    arrays (acceptance_rate, missed_aud, total_events), first-half vs
+    second-half slope deltas, and a single worst-axis-first headline
+    like "Your acceptance rate is down 18 pts over the last 7 days."
+
+    The trend is fully deterministic — same events + same window always
+    produce the same response.
+    """
+    try:
+        trend = _trends.compose_trend_from_store(
+            venue_id,
+            window_days=int(window),
+        )
+        return TrendResponse(**trend)
+    except Exception:
+        logger.exception("Trend fetch failed for %s", venue_id)
+        raise HTTPException(status_code=500, detail="Trend fetch failed")
 
 
 # ============================================================================

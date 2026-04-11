@@ -1644,6 +1644,124 @@
         }
         .brief-dismiss-btn:hover { color: #e5e7eb; }
 
+        /* -------- Trends card (Moment 13: accountability over time) -------- */
+        .trend-card {
+            background: var(--card-bg);
+            padding: 22px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            border-left: 4px solid #6b7280;
+            margin-bottom: 24px;
+            transition: border-left-color 0.25s ease;
+        }
+        .trend-card.light-green { border-left-color: #10b981; }
+        .trend-card.light-amber { border-left-color: #f59e0b; }
+        .trend-card.light-red   { border-left-color: #ef4444; }
+        .trend-card.light-unknown { border-left-color: #6b7280; }
+        .trend-card.hidden { display: none; }
+        .trend-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .trend-eyebrow {
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #93c5fd;
+        }
+        .trend-window-tabs {
+            display: inline-flex;
+            gap: 4px;
+            background: var(--darker-bg);
+            border-radius: 6px;
+            padding: 3px;
+            border: 1px solid var(--border-color);
+        }
+        .trend-window-tab {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .trend-window-tab:hover { color: #e5e7eb; }
+        .trend-window-tab.active {
+            background: rgba(59, 130, 246, 0.18);
+            color: #93c5fd;
+        }
+        .trend-headline {
+            font-size: 16px;
+            font-weight: 700;
+            color: #f5f5f7;
+            line-height: 1.4;
+            margin: 6px 0 14px;
+        }
+        .trend-spark-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
+            margin-bottom: 10px;
+        }
+        @media (max-width: 720px) {
+            .trend-spark-grid { grid-template-columns: 1fr; }
+        }
+        .trend-spark-cell {
+            background: var(--darker-bg);
+            border-radius: 8px;
+            padding: 12px 14px;
+            border: 1px solid var(--border-color);
+        }
+        .trend-spark-label {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: #9ca3af;
+            margin-bottom: 4px;
+        }
+        .trend-spark-value {
+            font-size: 18px;
+            font-weight: 800;
+            color: #f5f5f7;
+            font-variant-numeric: tabular-nums;
+        }
+        .trend-spark-delta {
+            font-size: 11px;
+            font-variant-numeric: tabular-nums;
+            margin-left: 6px;
+        }
+        .trend-spark-delta.pos { color: #34d399; }
+        .trend-spark-delta.neg { color: #f87171; }
+        .trend-spark-delta.flat { color: #9ca3af; }
+        .trend-spark-svg {
+            display: block;
+            width: 100%;
+            height: 36px;
+            margin-top: 6px;
+        }
+        .trend-footer {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 11px;
+            color: #9ca3af;
+        }
+        .trend-empty {
+            font-size: 13px;
+            color: #9ca3af;
+            text-align: center;
+            padding: 18px 0;
+        }
+
         /* -------- Demo-data warning pill (Moment 5) -------- */
         .demo-data-pill {
             display: none;
@@ -1955,6 +2073,25 @@
                 <div class="brief-footer">
                     <span id="briefGeneratedAt">—</span>
                     <button type="button" class="brief-dismiss-btn" onclick="dismissBriefCard()">Mark as read</button>
+                </div>
+            </div>
+
+            <!-- Trends card — Moment 13: accountability over time -->
+            <div class="trend-card hidden" id="trendCard">
+                <div class="trend-header">
+                    <span class="trend-eyebrow">Accountability Trend</span>
+                    <div class="trend-window-tabs" id="trendWindowTabs">
+                        <button type="button" class="trend-window-tab active" data-window="7">7D</button>
+                        <button type="button" class="trend-window-tab" data-window="14">14D</button>
+                        <button type="button" class="trend-window-tab" data-window="28">28D</button>
+                    </div>
+                </div>
+                <div class="trend-headline" id="trendHeadline">Loading your trend…</div>
+                <div class="trend-spark-grid" id="trendSparkGrid"></div>
+                <div class="trend-empty hidden" id="trendEmpty">No accountability events in this window yet.</div>
+                <div class="trend-footer">
+                    <span id="trendGeneratedAt">—</span>
+                    <span id="trendTotals">—</span>
                 </div>
             </div>
 
@@ -2270,6 +2407,8 @@
             fetchHeadCount();
             fetchShiftRecap();
             fetchMorningBrief();
+            wireTrendWindowTabs();
+            fetchTrend();
             updateShiftTime();
             setInterval(updateShiftTime, 1000);
             // Refresh wage pulse every 30s — this is the live ticker
@@ -2281,6 +2420,9 @@
             // Morning brief is a once-per-day thing, but a 10-minute poll
             // catches the flip-over when the clock rolls past midnight.
             setInterval(fetchMorningBrief, 600000);
+            // Trends move slowly — a 5-minute poll is plenty to keep
+            // sparklines fresh after new recs get accepted/dismissed.
+            setInterval(fetchTrend, 300000);
         });
 
         function switchTab(tabName) {
@@ -3492,6 +3634,215 @@
                 const dateEl = document.getElementById('briefDate');
                 window.__briefReadKey = `brief_read_${dateEl ? dateEl.textContent : ''}`;
             } catch (_) {}
+        }
+
+        // -------- Trends (Moment 13: accountability over time) --------
+        // Current window selection — defaults to 7 days. The window tabs
+        // above the sparklines write to this when clicked.
+        let _trendWindow = 7;
+
+        async function fetchTrend() {
+            const card = document.getElementById('trendCard');
+            if (!card) return;
+            try {
+                const resp = await fetch(`/api/v1/trends/${VENUE_ID}?window=${_trendWindow}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const trend = await resp.json();
+                renderTrend(trend);
+            } catch (err) {
+                console.warn('Trend fetch failed', err);
+                card.classList.add('hidden');
+            }
+        }
+
+        function renderTrend(trend) {
+            if (!trend || typeof trend !== 'object') return;
+            const card = document.getElementById('trendCard');
+            if (!card) return;
+            card.classList.remove('hidden', 'light-green', 'light-amber', 'light-red', 'light-unknown');
+            const light = String(trend.traffic_light || 'unknown').toLowerCase();
+            if (['green', 'amber', 'red', 'unknown'].indexOf(light) >= 0) {
+                card.classList.add('light-' + light);
+            }
+
+            const headlineEl = document.getElementById('trendHeadline');
+            if (headlineEl) headlineEl.textContent = trend.headline || '';
+
+            const totals = trend.totals || {};
+            const totalEvents = Number(totals.events || 0);
+            const emptyEl = document.getElementById('trendEmpty');
+            const gridEl = document.getElementById('trendSparkGrid');
+
+            if (totalEvents === 0) {
+                if (emptyEl) emptyEl.classList.remove('hidden');
+                if (gridEl) gridEl.innerHTML = '';
+            } else {
+                if (emptyEl) emptyEl.classList.add('hidden');
+                if (gridEl) {
+                    const series = trend.series || {};
+                    const slopes = trend.slopes || {};
+                    gridEl.innerHTML = [
+                        renderSparkCell({
+                            label: 'Acceptance',
+                            value: formatPct(latestNonNull(series.acceptance_rate), 0),
+                            delta: slopes.acceptance_rate,
+                            deltaFormat: 'pt',
+                            betterWhenHigher: true,
+                            values: series.acceptance_rate || [],
+                            colorHint: 'acceptance'
+                        }),
+                        renderSparkCell({
+                            label: 'Dismissed $',
+                            value: formatMoneyShort(latestNumber(series.missed_aud)),
+                            delta: slopes.missed_aud,
+                            deltaFormat: 'money',
+                            betterWhenHigher: false,
+                            values: series.missed_aud || [],
+                            colorHint: 'missed'
+                        }),
+                        renderSparkCell({
+                            label: 'Events/day',
+                            value: formatNumberShort(latestNumber(series.total_events)),
+                            delta: slopes.total_events,
+                            deltaFormat: 'num',
+                            betterWhenHigher: true,
+                            values: series.total_events || [],
+                            colorHint: 'events'
+                        })
+                    ].join('');
+                }
+            }
+
+            const totalsEl = document.getElementById('trendTotals');
+            if (totalsEl) {
+                const accepted = Number(totals.accepted || 0);
+                const dismissed = Number(totals.dismissed || 0);
+                const missedAud = Number(totals.missed_aud || 0);
+                totalsEl.textContent =
+                    `${totalEvents} events · ${accepted} actioned · ` +
+                    `${dismissed} dismissed ($${Math.round(missedAud).toLocaleString()})`;
+            }
+
+            const genEl = document.getElementById('trendGeneratedAt');
+            if (genEl && trend.generated_at) {
+                try {
+                    const d = new Date(trend.generated_at);
+                    genEl.textContent = `Last ${trend.window_days}D · ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                } catch (_) {
+                    genEl.textContent = `Last ${trend.window_days}D`;
+                }
+            }
+        }
+
+        function renderSparkCell(opts) {
+            const delta = Number(opts.delta || 0);
+            let deltaCls = 'flat';
+            if (Math.abs(delta) > 0.0001) {
+                const up = delta > 0;
+                // Better-when-higher: up is pos (green), down is neg (red).
+                // Better-when-lower: up is neg (red), down is pos (green).
+                if (opts.betterWhenHigher) {
+                    deltaCls = up ? 'pos' : 'neg';
+                } else {
+                    deltaCls = up ? 'neg' : 'pos';
+                }
+            }
+            let deltaStr = '';
+            if (opts.deltaFormat === 'pt') {
+                // slopes for acceptance_rate are stored as proportion (0..1)
+                const pts = delta * 100;
+                deltaStr = (pts >= 0 ? '+' : '') + pts.toFixed(1) + 'pt';
+            } else if (opts.deltaFormat === 'money') {
+                deltaStr = (delta >= 0 ? '+' : '−') + '$' + Math.abs(Math.round(delta)).toLocaleString();
+            } else {
+                deltaStr = (delta >= 0 ? '+' : '') + delta.toFixed(1);
+            }
+            const sparkColor = opts.colorHint === 'missed'
+                ? '#f87171'
+                : (opts.colorHint === 'acceptance' ? '#34d399' : '#93c5fd');
+            const svg = sparklineSvg(opts.values || [], sparkColor);
+            return `
+                <div class="trend-spark-cell">
+                    <div class="trend-spark-label">${opts.label}</div>
+                    <div>
+                        <span class="trend-spark-value">${opts.value}</span>
+                        <span class="trend-spark-delta ${deltaCls}">${deltaStr}</span>
+                    </div>
+                    ${svg}
+                </div>
+            `;
+        }
+
+        function sparklineSvg(values, stroke) {
+            const nums = (values || []).map(v => (v == null ? 0 : Number(v)));
+            if (nums.length === 0) {
+                return '<svg class="trend-spark-svg" viewBox="0 0 100 36" preserveAspectRatio="none"></svg>';
+            }
+            const w = 100;
+            const h = 36;
+            const pad = 2;
+            let lo = Math.min(...nums);
+            let hi = Math.max(...nums);
+            if (hi === lo) { hi = lo + 1; }
+            const span = hi - lo;
+            const step = nums.length > 1 ? (w - 2 * pad) / (nums.length - 1) : 0;
+            const pts = nums.map((v, i) => {
+                const x = pad + i * step;
+                const y = h - pad - ((v - lo) / span) * (h - 2 * pad);
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+            });
+            const line = pts.join(' ');
+            // Build a filled area underneath the line for visual weight.
+            const areaBottom = `${(pad + (nums.length - 1) * step).toFixed(1)},${(h - pad).toFixed(1)} ${pad.toFixed(1)},${(h - pad).toFixed(1)}`;
+            const area = line + ' ' + areaBottom;
+            return (
+                `<svg class="trend-spark-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
+                `<polygon points="${area}" fill="${stroke}" fill-opacity="0.12" />` +
+                `<polyline points="${line}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />` +
+                `</svg>`
+            );
+        }
+
+        function latestNonNull(arr) {
+            if (!Array.isArray(arr)) return null;
+            for (let i = arr.length - 1; i >= 0; i--) {
+                if (arr[i] != null) return Number(arr[i]);
+            }
+            return null;
+        }
+
+        function latestNumber(arr) {
+            if (!Array.isArray(arr) || arr.length === 0) return 0;
+            const v = arr[arr.length - 1];
+            return v == null ? 0 : Number(v);
+        }
+
+        function formatPct(v, digits) {
+            if (v == null || Number.isNaN(v)) return '—';
+            return (Number(v) * 100).toFixed(digits || 0) + '%';
+        }
+
+        function formatMoneyShort(v) {
+            const n = Number(v || 0);
+            if (n >= 1000) return '$' + (n / 1000).toFixed(1) + 'k';
+            return '$' + Math.round(n).toLocaleString();
+        }
+
+        function formatNumberShort(v) {
+            const n = Number(v || 0);
+            return n.toFixed(n >= 10 ? 0 : 1);
+        }
+
+        function wireTrendWindowTabs() {
+            const tabs = document.querySelectorAll('#trendWindowTabs .trend-window-tab');
+            tabs.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const w = parseInt(btn.getAttribute('data-window'), 10) || 7;
+                    _trendWindow = w;
+                    tabs.forEach(b => b.classList.toggle('active', b === btn));
+                    fetchTrend();
+                });
+            });
         }
 
         // -------- Accountability plumbing (Moment 8) --------
