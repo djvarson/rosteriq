@@ -512,6 +512,457 @@ def test_writeback_against_real_store_full_accepted_flow():
 # Test runner
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# TandaApiSink (Moment 14-follow-on 2 — real plugin surface)
+# ---------------------------------------------------------------------------
+
+class _RecordingSleep:
+    """Captures sleep durations without actually blocking."""
+    def __init__(self):
+        self.calls = []
+    def __call__(self, s):
+        self.calls.append(float(s))
+
+
+def _install_attempt_once(sink, sequence):
+    """Replace sink._attempt_once with a scripted sequence of result dicts."""
+    i = {"n": 0}
+    def _fake(data, headers):
+        n = i["n"]
+        i["n"] = n + 1
+        if n < len(sequence):
+            return dict(sequence[n])
+        return dict(sequence[-1])
+    sink._attempt_once = _fake
+
+
+def _sample_delta():
+    rec = _rec(
+        "rec_pulse_vA_2026-04-10_over_wage_high",
+        status="accepted",
+        impact=120.0,
+        text="Cut two staff.",
+    )
+    return tw.compose_delta_from_rec(rec)
+
+
+def test_tanda_api_sink_builds_default_payload_with_venue_and_delta():
+    sink = tw.TandaApiSink("https://tanda.example/api/writeback")
+    delta = _sample_delta()
+    payload = sink._build_payload("vA", delta)
+    assert payload["venue_id"] == "vA"
+    assert payload["rec_id"] == "rec_pulse_vA_2026-04-10_over_wage_high"
+    assert payload["delta"]["kind"] == tw.DELTA_CUT_STAFF
+    assert payload["delta"]["count"] == 2
+
+
+def test_tanda_api_sink_transform_overrides_payload_shape():
+    def reshape(venue_id, delta):
+        return {"shift_delta": delta, "v": venue_id}
+    sink = tw.TandaApiSink("https://tanda.example/api", transform=reshape)
+    delta = _sample_delta()
+    payload = sink._build_payload("vA", delta)
+    assert payload == {"shift_delta": delta.to_dict(), "v": "vA"}
+
+
+def test_tanda_api_sink_non_dict_transform_result_is_wrapped():
+    sink = tw.TandaApiSink("https://tanda.example/api", transform=lambda v, d: "nope")
+    payload = sink._build_payload("vA", _sample_delta())
+    assert payload == {"raw": "nope"}
+
+
+def test_tanda_api_sink_headers_include_bearer_and_idempotency_key():
+    sink = tw.TandaApiSink(
+        "https://tanda.example/api",
+        api_token="secret_abc",
+        extra_headers={"X-Tanda-Org": "dale_group"},
+    )
+    headers = sink._build_headers(_sample_delta())
+    assert headers["Authorization"] == "Bearer secret_abc"
+    assert headers["Idempotency-Key"] == "rec_pulse_vA_2026-04-10_over_wage_high"
+    assert headers["Content-Type"] == "application/json"
+    assert headers["Accept"] == "application/json"
+    assert headers["X-Tanda-Org"] == "dale_group"
+
+
+def test_tanda_api_sink_headers_skip_auth_when_no_token():
+    sink = tw.TandaApiSink("https://tanda.example/api")
+    headers = sink._build_headers(_sample_delta())
+    assert "Authorization" not in headers
+
+
+def test_tanda_api_sink_compute_backoff_exponential_with_cap():
+    sink = tw.TandaApiSink("https://tanda.example/api", backoff_base_s=1.0, backoff_cap_s=5.0)
+    assert sink._compute_backoff(0) == 1.0
+    assert sink._compute_backoff(1) == 2.0
+    assert sink._compute_backoff(2) == 4.0
+    assert sink._compute_backoff(3) == 5.0  # capped
+    assert sink._compute_backoff(10) == 5.0
+
+
+def test_tanda_api_sink_compute_backoff_zero_base_is_zero():
+    sink = tw.TandaApiSink("https://tanda.example/api", backoff_base_s=0)
+    assert sink._compute_backoff(0) == 0.0
+    assert sink._compute_backoff(5) == 0.0
+
+
+def test_tanda_api_sink_succeeds_first_attempt_no_sleep():
+    sleeper = _RecordingSleep()
+    sink = tw.TandaApiSink(
+        "https://tanda.example/api",
+        max_attempts=3,
+        sleep=sleeper,
+    )
+    _install_attempt_once(sink, [
+        {"ok": True, "status_code": 200, "retryable": False, "response": {"accepted": True}},
+    ])
+    result = sink.apply("vA", _sample_delta())
+    assert result["ok"] is True
+    assert result["status_code"] == 200
+    assert result["response"] == {"accepted": True}
+    assert len(result["attempts"]) == 1
+    assert sleeper.calls == []  # no retries, no sleep
+    assert result["idempotency_key"] == "rec_pulse_vA_2026-04-10_over_wage_high"
+
+
+def test_tanda_api_sink_retries_then_succeeds():
+    sleeper = _RecordingSleep()
+    sink = tw.TandaApiSink(
+        "https://tanda.example/api",
+        max_attempts=3,
+        backoff_base_s=0.1,
+        sleep=sleeper,
+    )
+    _install_attempt_once(sink, [
+        {"ok": False, "status_code": 503, "error": "HTTP 503", "retryable": True},
+        {"ok": False, "status_code": 502, "error": "HTTP 502", "retryable": True},
+        {"ok": True,  "status_code": 200, "retryable": False, "response": None},
+    ])
+    result = sink.apply("vA", _sample_delta())
+    assert result["ok"] is True
+    assert len(result["attempts"]) == 3
+    # Two sleeps between three attempts
+    assert len(sleeper.calls) == 2
+
+
+def test_tanda_api_sink_bails_on_non_retryable_4xx():
+    sleeper = _RecordingSleep()
+    sink = tw.TandaApiSink(
+        "https://tanda.example/api",
+        max_attempts=5,
+        sleep=sleeper,
+        dead_letter_path=None,
+    )
+    _install_attempt_once(sink, [
+        {"ok": False, "status_code": 400, "error": "HTTP 400", "retryable": False},
+        {"ok": True,  "status_code": 200, "retryable": False},
+    ])
+    result = sink.apply("vA", _sample_delta())
+    assert result["ok"] is False
+    # Only one attempt — non-retryable bailed immediately
+    assert len(result["attempts"]) == 1
+    assert result["status_code"] == 400
+    assert sleeper.calls == []
+
+
+def test_tanda_api_sink_exhausts_retries_and_dead_letters():
+    tmpdir = tempfile.mkdtemp(prefix="rq_tanda_dl_")
+    try:
+        dl = os.path.join(tmpdir, "tanda_dl.jsonl")
+        sleeper = _RecordingSleep()
+        sink = tw.TandaApiSink(
+            "https://tanda.example/api",
+            max_attempts=3,
+            backoff_base_s=0.1,
+            sleep=sleeper,
+            dead_letter_path=dl,
+        )
+        _install_attempt_once(sink, [
+            {"ok": False, "status_code": 503, "error": "HTTP 503", "retryable": True},
+        ])
+        result = sink.apply("vA", _sample_delta())
+        assert result["ok"] is False
+        assert len(result["attempts"]) == 3
+        assert result["dead_lettered_to"] == dl
+        # Verify the file was appended with a full entry
+        with open(dl) as f:
+            lines = [ln for ln in f.read().splitlines() if ln]
+        assert len(lines) == 1
+        entry = json.loads(lines[0])
+        assert entry["venue_id"] == "vA"
+        assert entry["payload"]["delta"]["kind"] == tw.DELTA_CUT_STAFF
+        assert len(entry["attempts"]) == 3
+    finally:
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_tanda_api_sink_never_raises_on_payload_build_failure():
+    def bomb(v, d):
+        raise RuntimeError("cannot serialize")
+    sink = tw.TandaApiSink("https://tanda.example/api", transform=bomb)
+    result = sink.apply("vA", _sample_delta())
+    assert result["ok"] is False
+    assert "payload_build_failed" in result["error"]
+
+
+def test_tanda_api_sink_url_error_is_retryable():
+    sleeper = _RecordingSleep()
+    sink = tw.TandaApiSink(
+        "https://tanda.example/api",
+        max_attempts=3,
+        backoff_base_s=0.1,
+        sleep=sleeper,
+    )
+    _install_attempt_once(sink, [
+        {"ok": False, "status_code": 0, "error": "URLError: conn refused", "retryable": True},
+        {"ok": False, "status_code": 0, "error": "URLError: conn refused", "retryable": True},
+        {"ok": True,  "status_code": 200, "retryable": False},
+    ])
+    result = sink.apply("vA", _sample_delta())
+    assert result["ok"] is True
+    assert len(result["attempts"]) == 3
+
+
+def test_tanda_api_sink_single_attempt_mode():
+    sleeper = _RecordingSleep()
+    sink = tw.TandaApiSink(
+        "https://tanda.example/api",
+        max_attempts=1,
+        sleep=sleeper,
+    )
+    _install_attempt_once(sink, [
+        {"ok": False, "status_code": 500, "error": "HTTP 500", "retryable": True},
+    ])
+    result = sink.apply("vA", _sample_delta())
+    assert result["ok"] is False
+    assert len(result["attempts"]) == 1
+    # max_attempts=1 → no sleeps ever
+    assert sleeper.calls == []
+
+
+def test_read_dead_letter_returns_empty_on_missing_file():
+    assert tw.read_dead_letter("/tmp/nope_does_not_exist_rq.jsonl") == []
+
+
+def test_read_dead_letter_filters_by_venue_and_reverses_order():
+    tmpdir = tempfile.mkdtemp(prefix="rq_tanda_dl_read_")
+    try:
+        dl = os.path.join(tmpdir, "dl.jsonl")
+        with open(dl, "w") as f:
+            f.write(json.dumps({"ts": "2026-04-10T00:00:00Z", "venue_id": "a", "payload": {"i": 1}}) + "\n")
+            f.write("not json\n")  # tolerated
+            f.write(json.dumps({"ts": "2026-04-11T00:00:00Z", "venue_id": "b", "payload": {"i": 2}}) + "\n")
+            f.write(json.dumps({"ts": "2026-04-12T00:00:00Z", "venue_id": "a", "payload": {"i": 3}}) + "\n")
+        all_entries = tw.read_dead_letter(dl)
+        assert [e["payload"]["i"] for e in all_entries] == [3, 2, 1]  # reversed
+        only_a = tw.read_dead_letter(dl, venue_id="a")
+        assert [e["payload"]["i"] for e in only_a] == [3, 1]
+        limited = tw.read_dead_letter(dl, limit=1)
+        assert len(limited) == 1
+        assert limited[0]["payload"]["i"] == 3
+    finally:
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Integration: real in-process HTTPServer
+# ---------------------------------------------------------------------------
+
+def _start_http_server(handler_cls):
+    """Start an HTTPServer on 127.0.0.1:<ephemeral> in a daemon thread.
+
+    Returns (server, thread, base_url). Caller must call server.shutdown().
+    """
+    from http.server import HTTPServer
+    import threading
+    server = HTTPServer(("127.0.0.1", 0), handler_cls)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, f"http://127.0.0.1:{port}"
+
+
+class _TandaRecordingHandler:
+    """Factory for a BaseHTTPRequestHandler that records requests and
+    replies with a scripted sequence of (status, body) tuples."""
+    @staticmethod
+    def make(script):
+        from http.server import BaseHTTPRequestHandler
+        received: List[Dict[str, Any]] = []
+        # Closure-captured mutable list so a fresh factory per test
+        # isolates state. Class-body names aren't visible to methods
+        # in Python, which is why this uses a closure rather than a
+        # class attribute.
+        script_box = list(script)
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length) if length else b""
+                received.append({
+                    "path": self.path,
+                    "headers": {k: v for k, v in self.headers.items()},
+                    "body": body.decode("utf-8") if body else "",
+                })
+                if script_box:
+                    status, resp_body = script_box.pop(0)
+                else:
+                    status, resp_body = 200, "{}"
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp_body.encode("utf-8"))))
+                self.end_headers()
+                self.wfile.write(resp_body.encode("utf-8"))
+
+            def log_message(self, *args, **kwargs):
+                pass  # silence default stderr logging
+
+        return _Handler, received
+
+
+def test_tanda_api_sink_integration_posts_to_real_server_and_sends_headers():
+    handler, received = _TandaRecordingHandler.make([(200, '{"accepted": true}')])
+    server, thread, base = _start_http_server(handler)
+    try:
+        sink = tw.TandaApiSink(
+            base + "/writeback",
+            api_token="live_token_xyz",
+            timeout_s=3.0,
+            max_attempts=1,
+        )
+        result = sink.apply("vA", _sample_delta())
+        assert result["ok"] is True
+        assert result["status_code"] == 200
+        assert result["response"] == {"accepted": True}
+        assert len(received) == 1
+        req = received[0]
+        assert req["path"] == "/writeback"
+        assert req["headers"].get("Authorization") == "Bearer live_token_xyz"
+        assert req["headers"].get("Idempotency-Key") == "rec_pulse_vA_2026-04-10_over_wage_high"
+        assert req["headers"].get("Content-Type") == "application/json"
+        body = json.loads(req["body"])
+        assert body["venue_id"] == "vA"
+        assert body["delta"]["kind"] == tw.DELTA_CUT_STAFF
+    finally:
+        server.shutdown()
+
+
+def test_tanda_api_sink_integration_retries_503_then_succeeds():
+    handler, received = _TandaRecordingHandler.make([
+        (503, '{"error":"unavailable"}'),
+        (502, '{"error":"bad gateway"}'),
+        (200, '{"ok":true}'),
+    ])
+    server, thread, base = _start_http_server(handler)
+    try:
+        sink = tw.TandaApiSink(
+            base + "/writeback",
+            max_attempts=3,
+            backoff_base_s=0.01,
+            sleep=_RecordingSleep(),
+        )
+        result = sink.apply("vA", _sample_delta())
+        assert result["ok"] is True
+        assert len(result["attempts"]) == 3
+        assert len(received) == 3
+    finally:
+        server.shutdown()
+
+
+def test_tanda_api_sink_integration_bails_on_400_no_retry():
+    handler, received = _TandaRecordingHandler.make([
+        (400, '{"error":"bad payload"}'),
+        (200, '{"ok":true}'),
+    ])
+    server, thread, base = _start_http_server(handler)
+    try:
+        sink = tw.TandaApiSink(
+            base + "/writeback",
+            max_attempts=5,
+            sleep=_RecordingSleep(),
+        )
+        result = sink.apply("vA", _sample_delta())
+        assert result["ok"] is False
+        assert result["status_code"] == 400
+        assert len(received) == 1  # no retry on 400
+    finally:
+        server.shutdown()
+
+
+def test_tanda_api_sink_integration_dead_letters_persistent_5xx():
+    tmpdir = tempfile.mkdtemp(prefix="rq_tanda_dl_int_")
+    try:
+        dl = os.path.join(tmpdir, "dl.jsonl")
+        handler, received = _TandaRecordingHandler.make([
+            (503, '{"error":"x"}'),
+            (503, '{"error":"x"}'),
+            (503, '{"error":"x"}'),
+        ])
+        server, thread, base = _start_http_server(handler)
+        try:
+            sink = tw.TandaApiSink(
+                base + "/writeback",
+                max_attempts=3,
+                backoff_base_s=0.01,
+                sleep=_RecordingSleep(),
+                dead_letter_path=dl,
+            )
+            result = sink.apply("vA", _sample_delta())
+            assert result["ok"] is False
+            assert result["dead_lettered_to"] == dl
+            entries = tw.read_dead_letter(dl, venue_id="vA")
+            assert len(entries) == 1
+            assert entries[0]["payload"]["delta"]["kind"] == tw.DELTA_CUT_STAFF
+        finally:
+            server.shutdown()
+    finally:
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_tanda_api_sink_integration_writeback_accepted_rec_end_to_end():
+    """Full pipeline: writeback_accepted_rec → TandaApiSink → real HTTP."""
+    handler, received = _TandaRecordingHandler.make([(200, '{"applied":true}')])
+    server, thread, base = _start_http_server(handler)
+    try:
+        rec = _rec(
+            "rec_pulse_vA_2026-04-10_over_wage_high",
+            status="accepted",
+            impact=300.0,
+            text="Cut two staff now.",
+        )
+        store = StubStore([rec])
+        sink = tw.TandaApiSink(
+            base + "/writeback",
+            max_attempts=1,
+        )
+        result = tw.writeback_accepted_rec(
+            "vA",
+            "rec_pulse_vA_2026-04-10_over_wage_high",
+            store=store,
+            sinks=[sink],
+        )
+        assert result["status"] == "ok"
+        assert result["delta"]["kind"] == tw.DELTA_CUT_STAFF
+        assert len(result["results"]) == 1
+        assert result["results"][0]["ok"] is True
+        assert result["results"][0]["sink"] == "tanda_api"
+        # And the real HTTP server got exactly one POST
+        assert len(received) == 1
+        body = json.loads(received[0]["body"])
+        assert body["venue_id"] == "vA"
+        assert body["delta"]["kind"] == tw.DELTA_CUT_STAFF
+    finally:
+        server.shutdown()
+
+
+def test_tanda_api_sink_custom_name_overrides_default():
+    sink = tw.TandaApiSink("https://tanda.example/api", name="tanda_prod")
+    assert sink.name == "tanda_prod"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     passed = failed = 0

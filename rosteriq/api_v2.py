@@ -1575,9 +1575,8 @@ class TrendResponse(BaseModel):
 
 # Register the default writeback sink at import time — a journal file
 # under /tmp/rosteriq_writebacks.jsonl (or $ROSTERIQ_WRITEBACK_JOURNAL
-# if set). Real Tanda adapter sinks can be added later via a future
-# /api/v1/tanda/writeback/sinks/register endpoint without touching
-# this default.
+# if set). This gives Dale a durable audit trail even when no real
+# Tanda adapter is in the loop.
 _DEFAULT_WRITEBACK_JOURNAL = os.environ.get(
     "ROSTERIQ_WRITEBACK_JOURNAL", "/tmp/rosteriq_writebacks.jsonl"
 )
@@ -1587,6 +1586,33 @@ try:
     )
 except Exception:
     logger.exception("Failed to register default writeback journal sink")
+
+# Moment 14-follow-on 2: live Tanda plugin surface. When the env vars
+# TANDA_WRITEBACK_URL is set, we wire a real TandaApiSink behind the
+# journal sink so every accepted rec is both logged locally AND pushed
+# to Tanda. If TANDA_WRITEBACK_URL is not set, the sink is skipped —
+# existing deployments keep their journal-only behavior.
+_TANDA_WRITEBACK_URL = os.environ.get("TANDA_WRITEBACK_URL", "").strip()
+_TANDA_WRITEBACK_TOKEN = os.environ.get("TANDA_WRITEBACK_TOKEN", "").strip() or None
+_TANDA_WRITEBACK_DEAD_LETTER = os.environ.get(
+    "TANDA_WRITEBACK_DEAD_LETTER", "/tmp/rosteriq_tanda_dead_letter.jsonl"
+).strip() or None
+if _TANDA_WRITEBACK_URL:
+    try:
+        _tanda_writeback.register_sink(
+            _tanda_writeback.TandaApiSink(
+                _TANDA_WRITEBACK_URL,
+                api_token=_TANDA_WRITEBACK_TOKEN,
+                dead_letter_path=_TANDA_WRITEBACK_DEAD_LETTER,
+                max_attempts=3,
+                backoff_base_s=0.5,
+                backoff_cap_s=8.0,
+                timeout_s=float(os.environ.get("TANDA_WRITEBACK_TIMEOUT_S", "5.0")),
+            )
+        )
+        logger.info("TandaApiSink registered against %s", _TANDA_WRITEBACK_URL)
+    except Exception:
+        logger.exception("Failed to register TandaApiSink")
 
 
 class TandaWritebackRequest(BaseModel):
@@ -1794,10 +1820,37 @@ async def tanda_writeback_sinks() -> Dict[str, Any]:
         return {
             "sinks": _tanda_writeback.registered_sinks(),
             "default_journal": _DEFAULT_WRITEBACK_JOURNAL,
+            "tanda_api_url": _TANDA_WRITEBACK_URL or None,
+            "tanda_api_dead_letter": _TANDA_WRITEBACK_DEAD_LETTER or None,
         }
     except Exception:
         logger.exception("Writeback sinks list failed")
         raise HTTPException(status_code=500, detail="Sinks list failed")
+
+
+@app.get("/api/v1/tanda/writeback/dead-letter/{venue_id}", response_model=List[Dict[str, Any]])
+async def tanda_writeback_dead_letter(
+    venue_id: str,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """
+    Read back the Tanda API writeback dead-letter file for a venue.
+
+    Most-recent-first. Returns empty list when no dead-letter file is
+    configured or when the file doesn't exist yet. Use this to inspect
+    writebacks that exhausted retries against a real Tanda endpoint.
+    """
+    if not _TANDA_WRITEBACK_DEAD_LETTER:
+        return []
+    try:
+        return _tanda_writeback.read_dead_letter(
+            _TANDA_WRITEBACK_DEAD_LETTER,
+            venue_id=venue_id,
+            limit=int(limit),
+        )
+    except Exception:
+        logger.exception("Writeback dead-letter read failed")
+        raise HTTPException(status_code=500, detail="Dead-letter read failed")
 
 
 # ============================================================================
