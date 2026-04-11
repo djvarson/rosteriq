@@ -407,9 +407,23 @@ async def lifespan(app: FastAPI):
     app.state.pipelines = {}
     logger.info("Pipeline cache initialized (lazy, per-venue)")
 
+    # Moment 14-follow-on 4: in-process scheduler for weekly digest +
+    # Tanda writeback retry sweep. Runs in a daemon thread; jobs are
+    # registered further down in the module via _ensure_scheduled_jobs.
+    try:
+        _ensure_scheduled_jobs()
+        _start_scheduler_thread_if_enabled()
+    except Exception:
+        logger.exception("Failed to start scheduled jobs")
+
     yield
 
     logger.info("RosterIQ API v2 shutting down")
+    try:
+        from rosteriq import scheduled_jobs as _sj
+        _sj.get_global_scheduler().stop(join_timeout_s=2.0)
+    except Exception:
+        logger.exception("Scheduler shutdown failed")
 
 
 # ============================================================================
@@ -1615,6 +1629,115 @@ if _TANDA_WRITEBACK_URL:
         logger.exception("Failed to register TandaApiSink")
 
 
+# ---------------------------------------------------------------------------
+# Moment 14-follow-on 4: scheduled jobs
+#
+# Two in-process jobs:
+#   - weekly digest: walks the venue registry on Monday mornings and
+#     fires brief_dispatcher.dispatch_all_weekly_digests for venues that
+#     have had events in the last window. only_when_should_send=True so
+#     quiet weeks stay quiet.
+#   - tanda retry sweep: every N minutes, replays entries in the Tanda
+#     writeback dead-letter file through the registered sinks. Entries
+#     that still fail get written back to the file; resolved entries
+#     drop out. The TandaApiSink Idempotency-Key header protects against
+#     double-apply if upstream already processed an earlier attempt.
+#
+# Controlled by env vars — scheduled jobs are opt-in so existing
+# deployments don't suddenly start firing Monday-morning emails or
+# sweeping dead-letters they weren't expecting.
+# ---------------------------------------------------------------------------
+
+_SCHEDULED_JOBS_READY = False
+
+_SCHEDULER_ENABLED = (
+    os.environ.get("ROSTERIQ_SCHEDULER_ENABLED", "false").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+_WEEKLY_DIGEST_JOB_ENABLED = (
+    os.environ.get("ROSTERIQ_WEEKLY_DIGEST_JOB_ENABLED", "true").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+_TANDA_SWEEP_JOB_ENABLED = (
+    os.environ.get("ROSTERIQ_TANDA_SWEEP_JOB_ENABLED", "true").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+
+
+def _ensure_scheduled_jobs() -> None:
+    """Register the weekly-digest and Tanda retry-sweep jobs exactly once.
+
+    Idempotent so the lifespan handler can call it on every startup
+    without duplicating jobs when a hot-reload reuses the module.
+    """
+    global _SCHEDULED_JOBS_READY
+    if _SCHEDULED_JOBS_READY:
+        return
+
+    from rosteriq import scheduled_jobs as _sj
+    scheduler = _sj.get_global_scheduler()
+
+    if _WEEKLY_DIGEST_JOB_ENABLED and scheduler.get("weekly_digest") is None:
+        try:
+            job = _sj.make_weekly_digest_job(
+                # Check every hour; the Monday-morning gate decides
+                # whether to actually fire.
+                interval_s=float(
+                    os.environ.get("ROSTERIQ_WEEKLY_DIGEST_INTERVAL_S", "3600")
+                ),
+            )
+            scheduler.add(job)
+            logger.info("Scheduled weekly_digest job registered")
+        except Exception:
+            logger.exception("Failed to register weekly_digest job")
+
+    if (
+        _TANDA_SWEEP_JOB_ENABLED
+        and _TANDA_WRITEBACK_DEAD_LETTER
+        and scheduler.get("tanda_retry_sweep") is None
+    ):
+        try:
+            job = _sj.make_tanda_retry_sweep_job(
+                dead_letter_path=_TANDA_WRITEBACK_DEAD_LETTER,
+                interval_s=float(
+                    os.environ.get("ROSTERIQ_TANDA_SWEEP_INTERVAL_S", "300")
+                ),
+                max_entries=int(
+                    os.environ.get("ROSTERIQ_TANDA_SWEEP_MAX_ENTRIES", "100")
+                ),
+            )
+            scheduler.add(job)
+            logger.info(
+                "Scheduled tanda_retry_sweep job registered (path=%s)",
+                _TANDA_WRITEBACK_DEAD_LETTER,
+            )
+        except Exception:
+            logger.exception("Failed to register tanda_retry_sweep job")
+
+    _SCHEDULED_JOBS_READY = True
+
+
+def _start_scheduler_thread_if_enabled() -> None:
+    """Spin up the background thread when ROSTERIQ_SCHEDULER_ENABLED is set.
+
+    The scheduler ticks every minute by default — jobs use their own
+    ``interval_s`` to decide whether to fire.
+    """
+    if not _SCHEDULER_ENABLED:
+        logger.info(
+            "Scheduler loop disabled (set ROSTERIQ_SCHEDULER_ENABLED=true "
+            "to turn on in-process jobs)"
+        )
+        return
+    try:
+        from rosteriq import scheduled_jobs as _sj
+        poll = float(os.environ.get("ROSTERIQ_SCHEDULER_POLL_S", "60"))
+        _sj.get_global_scheduler().run_forever(poll_interval_s=poll)
+        logger.info("Scheduler loop started (poll=%ss)", poll)
+    except Exception:
+        logger.exception("Failed to start scheduler loop")
+
+
 class TandaWritebackRequest(BaseModel):
     """Input to POST /api/v1/tanda/writeback."""
 
@@ -1851,6 +1974,73 @@ async def tanda_writeback_dead_letter(
     except Exception:
         logger.exception("Writeback dead-letter read failed")
         raise HTTPException(status_code=500, detail="Dead-letter read failed")
+
+
+# ============================================================================
+# Moment 14-follow-on 4: scheduled jobs status + manual triggers
+# ============================================================================
+
+@app.get("/api/v1/scheduler/status", response_model=Dict[str, Any])
+async def scheduler_status() -> Dict[str, Any]:
+    """
+    Return the current state of the in-process scheduler.
+
+    Includes per-job run counts, last run timestamps, and whether the
+    background loop is enabled. Useful for monitoring — hook this up
+    to a Railway health check or a uptime ping if desired.
+    """
+    try:
+        from rosteriq import scheduled_jobs as _sj
+        _ensure_scheduled_jobs()
+        scheduler = _sj.get_global_scheduler()
+        return {
+            "loop_enabled": _SCHEDULER_ENABLED,
+            "jobs": scheduler.status(),
+            "weekly_digest_enabled": _WEEKLY_DIGEST_JOB_ENABLED,
+            "tanda_sweep_enabled": _TANDA_SWEEP_JOB_ENABLED,
+            "tanda_dead_letter_path": _TANDA_WRITEBACK_DEAD_LETTER,
+        }
+    except Exception:
+        logger.exception("Scheduler status read failed")
+        raise HTTPException(status_code=500, detail="Scheduler status failed")
+
+
+@app.post("/api/v1/scheduler/run/{job_name}", response_model=Dict[str, Any])
+async def scheduler_run_job(job_name: str) -> Dict[str, Any]:
+    """
+    Fire a named scheduled job immediately, bypassing its interval gate.
+
+    Intended for manual runs from the Railway shell or for wiring to
+    an external cron (Railway cron → POST here) instead of relying on
+    the in-process loop. The job's gate (e.g. "Monday morning only") is
+    also bypassed, since a manual trigger is an explicit ask.
+
+    Returns the job result (shape depends on the job — weekly digest
+    returns a dispatch summary, Tanda sweep returns a sweep summary).
+    """
+    from rosteriq import scheduled_jobs as _sj
+    _ensure_scheduled_jobs()
+    scheduler = _sj.get_global_scheduler()
+    job = scheduler.get(job_name)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"No such job: {job_name}")
+    try:
+        result = job.fn(datetime.now(timezone.utc))
+        if not isinstance(result, dict):
+            result = {"raw": result}
+        job.last_result = result
+        job.last_error = None
+        job.runs += 1
+        # Stamp last_run_ts using monotonic clock so the interval
+        # gate respects this manual run on the next tick.
+        import time as _time
+        job.last_run_ts = _time.monotonic()
+        return {"ok": True, "job": job_name, "result": result}
+    except Exception as exc:
+        logger.exception("Manual scheduler run failed for %s", job_name)
+        job.errors += 1
+        job.last_error = str(exc)
+        raise HTTPException(status_code=500, detail=f"Job {job_name} failed: {exc}")
 
 
 # ============================================================================
