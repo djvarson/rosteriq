@@ -1072,6 +1072,7 @@ from rosteriq import morning_brief as _morning_brief
 from rosteriq import brief_dispatcher as _brief_dispatcher
 from rosteriq import trends as _trends
 from rosteriq import tanda_writeback as _tanda_writeback
+from rosteriq import weekly_digest as _weekly_digest
 
 
 async def _build_venue_shift_recap(venue_id: str) -> Dict[str, Any]:
@@ -1568,6 +1569,95 @@ async def get_trends(
     except Exception:
         logger.exception("Trend fetch failed for %s", venue_id)
         raise HTTPException(status_code=500, detail="Trend fetch failed")
+
+
+# ============================================================================
+# Weekly Digest — Moment 14b (roll 7 days of accountability into one summary)
+# ============================================================================
+
+class WeeklyDigestResponse(BaseModel):
+    """Weekly digest payload — shape matches weekly_digest.compose_weekly_digest."""
+
+    venue_id: str
+    venue_label: str
+    date: str
+    week_start: str
+    week_end: str
+    window_days: int
+    generated_at: str
+    traffic_light: str
+    headline: str
+    one_pattern: str
+    summary: str
+    rollup: Dict[str, Any]
+    patterns: List[Dict[str, Any]]
+    should_send: bool
+
+
+@app.get("/api/v1/weekly-digest/{venue_id}", response_model=WeeklyDigestResponse)
+async def get_weekly_digest(
+    venue_id: str,
+    week_ending: str = "",
+    window_days: int = 7,
+    venue_label: str = "",
+) -> WeeklyDigestResponse:
+    """
+    Weekly accountability digest — "last week cost you $X across
+    these 3 patterns, here's the one thing to fix next week."
+
+    Query params:
+        week_ending: YYYY-MM-DD anchor (last day of the window,
+            inclusive). Defaults to yesterday (UTC).
+        window_days: how many days back from week_ending to include.
+            Clamped to [1, 90]. Defaults to 7.
+        venue_label: optional human-friendly name for the header.
+
+    Deterministic — same events + same week_ending + same window
+    always produce the same digest. Rolls up the current
+    accountability store directly.
+    """
+    try:
+        week_arg = week_ending.strip() or None
+        label = venue_label.strip() or None
+        digest = _weekly_digest.compose_weekly_digest_from_store(
+            venue_id,
+            week_ending=week_arg,
+            window_days=int(window_days),
+            venue_label=label,
+        )
+        return WeeklyDigestResponse(**digest)
+    except Exception:
+        logger.exception("Weekly digest failed for %s", venue_id)
+        raise HTTPException(status_code=500, detail="Weekly digest failed")
+
+
+@app.get(
+    "/api/v1/weekly-digest/{venue_id}/text",
+    response_class=PlainTextResponse,
+)
+async def get_weekly_digest_text(
+    venue_id: str,
+    week_ending: str = "",
+    window_days: int = 7,
+    venue_label: str = "",
+) -> str:
+    """
+    Plain-text version of the weekly digest — suitable for piping
+    into an email job or a Monday-morning Slack post.
+    """
+    try:
+        week_arg = week_ending.strip() or None
+        label = venue_label.strip() or None
+        digest = _weekly_digest.compose_weekly_digest_from_store(
+            venue_id,
+            week_ending=week_arg,
+            window_days=int(window_days),
+            venue_label=label,
+        )
+        return _weekly_digest.render_text(digest)
+    except Exception:
+        logger.exception("Weekly digest (text) failed for %s", venue_id)
+        raise HTTPException(status_code=500, detail="Weekly digest failed")
 
 
 # ============================================================================
