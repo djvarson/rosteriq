@@ -1059,6 +1059,116 @@
         }
         .headcount-reset-btn:hover { color: #f87171; }
 
+        /* -------- Shift Recap card (Moment 7: end-of-shift) -------- */
+        .recap-card {
+            background-color: var(--card-bg);
+            padding: 22px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 30px;
+            border-left: 4px solid #6b7280;
+            transition: border-left-color 0.25s ease;
+        }
+        .recap-card.light-green { border-left-color: #10b981; }
+        .recap-card.light-amber { border-left-color: #f59e0b; }
+        .recap-card.light-red   { border-left-color: #ef4444; }
+        .recap-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .recap-title-block { flex: 1; }
+        .recap-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #f5f5f7;
+        }
+        .recap-subtitle {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 2px;
+        }
+        .recap-light-badge {
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            padding: 4px 10px;
+            border-radius: 12px;
+            border: 1px solid currentColor;
+        }
+        .recap-light-badge.light-green { color: #34d399; background: rgba(52, 211, 153, 0.08); }
+        .recap-light-badge.light-amber { color: #fbbf24; background: rgba(251, 191, 36, 0.08); }
+        .recap-light-badge.light-red   { color: #f87171; background: rgba(248, 113, 113, 0.08); }
+        .recap-light-badge.light-unknown { color: #9ca3af; background: rgba(156, 163, 175, 0.08); }
+        .recap-kpis {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .recap-kpi {
+            background: var(--darker-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 14px;
+        }
+        .recap-kpi-label {
+            font-size: 10px;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: #9ca3af;
+            margin-bottom: 6px;
+        }
+        .recap-kpi-value {
+            font-size: 20px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            color: #f5f5f7;
+            line-height: 1.1;
+        }
+        .recap-kpi-sub {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 4px;
+            font-variant-numeric: tabular-nums;
+        }
+        .recap-kpi-sub.pos { color: #34d399; }
+        .recap-kpi-sub.neg { color: #f87171; }
+        .recap-summary {
+            background: var(--darker-bg);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            line-height: 1.55;
+            color: #d1d5db;
+            margin-bottom: 10px;
+        }
+        .recap-summary.empty {
+            color: #9ca3af;
+            font-style: italic;
+        }
+        .recap-footer {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #9ca3af;
+        }
+        .recap-refresh-btn {
+            background: none;
+            border: none;
+            color: #93c5fd;
+            text-decoration: underline dotted;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .recap-refresh-btn:hover { color: #60a5fa; }
+        @media (max-width: 720px) {
+            .recap-kpis { grid-template-columns: repeat(2, 1fr); }
+        }
+
         /* -------- Demo-data warning pill (Moment 5) -------- */
         .demo-data-pill {
             display: none;
@@ -1514,6 +1624,44 @@
                 </div>
             </div>
 
+            <!-- Shift Recap — Moment 7: end-of-shift 'what just happened' card -->
+            <div class="recap-card" id="recapCard">
+                <div class="recap-header">
+                    <div class="recap-title-block">
+                        <div class="recap-title">Shift Recap</div>
+                        <div class="recap-subtitle">Revenue vs forecast, wage % vs target, and head-count peak — the story of today's shift.</div>
+                    </div>
+                    <span class="recap-light-badge light-unknown" id="recapLight">—</span>
+                </div>
+                <div class="recap-kpis">
+                    <div class="recap-kpi">
+                        <div class="recap-kpi-label">Revenue</div>
+                        <div class="recap-kpi-value" id="recapRevenue">—</div>
+                        <div class="recap-kpi-sub" id="recapRevenueSub">vs forecast</div>
+                    </div>
+                    <div class="recap-kpi">
+                        <div class="recap-kpi-label">Wages</div>
+                        <div class="recap-kpi-value" id="recapWages">—</div>
+                        <div class="recap-kpi-sub" id="recapWagesSub">of revenue</div>
+                    </div>
+                    <div class="recap-kpi">
+                        <div class="recap-kpi-label">Wage % Δ</div>
+                        <div class="recap-kpi-value" id="recapWagePctDelta">—</div>
+                        <div class="recap-kpi-sub" id="recapWagePctSub">vs target</div>
+                    </div>
+                    <div class="recap-kpi">
+                        <div class="recap-kpi-label">Peak head count</div>
+                        <div class="recap-kpi-value" id="recapPeak">—</div>
+                        <div class="recap-kpi-sub" id="recapPeakSub">—</div>
+                    </div>
+                </div>
+                <div class="recap-summary empty" id="recapSummary">Recap loading…</div>
+                <div class="recap-footer">
+                    <span id="recapGeneratedAt">—</span>
+                    <button type="button" class="recap-refresh-btn" onclick="fetchShiftRecap()">Refresh recap</button>
+                </div>
+            </div>
+
             <div class="two-column">
                 <div>
                     <div class="staff-list">
@@ -1574,12 +1722,15 @@
             loadWagePulse();
             initScenarioSolver();
             fetchHeadCount();
+            fetchShiftRecap();
             updateShiftTime();
             setInterval(updateShiftTime, 1000);
             // Refresh wage pulse every 30s — this is the live ticker
             setInterval(loadWagePulse, 30000);
             // Refresh head count every 20s so multiple tabs stay in sync
             setInterval(fetchHeadCount, 20000);
+            // Recap polls less often — data changes at a slower cadence
+            setInterval(fetchShiftRecap, 45000);
         });
 
         function switchTab(tabName) {
@@ -2243,6 +2394,11 @@
                     </div>
                 `;
             }).join('');
+            // Any change in head-count invalidates the recap peak — refresh it.
+            // fetchShiftRecap is a no-op on error so this is safe to fire-and-forget.
+            if (typeof fetchShiftRecap === 'function') {
+                fetchShiftRecap();
+            }
         }
 
         function pulseHeadCountNumber() {
@@ -2250,6 +2406,132 @@
             if (!el) return;
             el.classList.add('pulse');
             setTimeout(() => el.classList.remove('pulse'), 180);
+        }
+
+        // -------- Shift Recap (Moment 7: end-of-shift card) --------
+        // Reads /api/v1/shift-recap/{venue_id} which composes revenue +
+        // wages + head-count into a single recap dict. Safe to poll
+        // mid-shift; refreshes automatically every time head count changes.
+        async function fetchShiftRecap() {
+            try {
+                const resp = await fetch(`/api/v1/shift-recap/${VENUE_ID}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                renderShiftRecap(await resp.json());
+            } catch (err) {
+                console.warn('Shift recap fetch failed', err);
+                const summary = document.getElementById('recapSummary');
+                if (summary) {
+                    summary.classList.add('empty');
+                    summary.textContent = 'Recap unavailable — the API is offline.';
+                }
+            }
+        }
+
+        function formatRecapMoney(v) {
+            const n = Number(v || 0);
+            if (!isFinite(n)) return '$0';
+            if (Math.abs(n) >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+            return `$${Math.round(n).toLocaleString()}`;
+        }
+
+        function formatRecapPct(v, opts) {
+            const pts = Number(v || 0) * 100;
+            const signed = opts && opts.signed;
+            const sign = (signed && pts >= 0) ? '+' : '';
+            return `${sign}${pts.toFixed(1)}%`;
+        }
+
+        function renderShiftRecap(recap) {
+            if (!recap || typeof recap !== 'object') return;
+            const rev = recap.revenue || {};
+            const wg = recap.wages || {};
+            const hc = recap.headcount || {};
+            const light = (recap.traffic_light || 'unknown').toLowerCase();
+
+            const card = document.getElementById('recapCard');
+            if (card) {
+                card.classList.remove('light-green', 'light-amber', 'light-red');
+                if (light === 'green' || light === 'amber' || light === 'red') {
+                    card.classList.add('light-' + light);
+                }
+            }
+
+            const badge = document.getElementById('recapLight');
+            if (badge) {
+                badge.classList.remove('light-green', 'light-amber', 'light-red', 'light-unknown');
+                const cls = (light === 'green' || light === 'amber' || light === 'red') ? ('light-' + light) : 'light-unknown';
+                badge.classList.add(cls);
+                badge.textContent = light === 'unknown' ? '—' : light.toUpperCase();
+            }
+
+            // Revenue KPI
+            const revEl = document.getElementById('recapRevenue');
+            if (revEl) revEl.textContent = formatRecapMoney(rev.actual);
+            const revSub = document.getElementById('recapRevenueSub');
+            if (revSub) {
+                const pct = Number(rev.delta_pct || 0);
+                const txt = `${formatRecapPct(pct, { signed: true })} vs ${formatRecapMoney(rev.forecast)}`;
+                revSub.textContent = txt;
+                revSub.classList.remove('pos', 'neg');
+                if (pct > 0.005) revSub.classList.add('pos');
+                else if (pct < -0.005) revSub.classList.add('neg');
+            }
+
+            // Wages KPI — show $ wages; sub shows wage % of revenue
+            const wgEl = document.getElementById('recapWages');
+            if (wgEl) wgEl.textContent = formatRecapMoney(wg.actual);
+            const wgSub = document.getElementById('recapWagesSub');
+            if (wgSub) wgSub.textContent = `${formatRecapPct(wg.pct_of_revenue_actual)} of revenue`;
+
+            // Wage % delta KPI (the interesting number for a manager)
+            const wgDeltaEl = document.getElementById('recapWagePctDelta');
+            if (wgDeltaEl) {
+                const pts = Number(wg.pct_delta || 0) * 100;
+                const sign = pts >= 0 ? '+' : '';
+                wgDeltaEl.textContent = `${sign}${pts.toFixed(1)}pt`;
+            }
+            const wgDeltaSub = document.getElementById('recapWagePctSub');
+            if (wgDeltaSub) {
+                wgDeltaSub.textContent = `target ${formatRecapPct(wg.pct_of_revenue_target)}`;
+                wgDeltaSub.classList.remove('pos', 'neg');
+                const pts = Number(wg.pct_delta || 0);
+                if (pts < -0.002) wgDeltaSub.classList.add('pos');
+                else if (pts > 0.005) wgDeltaSub.classList.add('neg');
+            }
+
+            // Peak head count KPI
+            const peakEl = document.getElementById('recapPeak');
+            if (peakEl) peakEl.textContent = (hc.peak != null ? hc.peak : 0);
+            const peakSub = document.getElementById('recapPeakSub');
+            if (peakSub) {
+                const parts = [];
+                if (hc.peak_time) parts.push(`at ${hc.peak_time}`);
+                if (hc.total_taps) parts.push(`${hc.total_taps} taps`);
+                peakSub.textContent = parts.length ? parts.join(' · ') : 'no taps yet';
+            }
+
+            // Summary line
+            const summaryEl = document.getElementById('recapSummary');
+            if (summaryEl) {
+                if (recap.summary) {
+                    summaryEl.classList.remove('empty');
+                    summaryEl.textContent = recap.summary;
+                } else {
+                    summaryEl.classList.add('empty');
+                    summaryEl.textContent = 'Recap loading…';
+                }
+            }
+
+            // Timestamp
+            const tsEl = document.getElementById('recapGeneratedAt');
+            if (tsEl && recap.generated_at) {
+                try {
+                    const d = new Date(recap.generated_at);
+                    tsEl.textContent = `Updated ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                } catch (_) {
+                    tsEl.textContent = 'Updated';
+                }
+            }
         }
 
         // -------- Demo data warning pill --------

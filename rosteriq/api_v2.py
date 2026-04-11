@@ -216,6 +216,49 @@ class HeadCountStateResponse(BaseModel):
     total_logged_today: int
 
 
+class ShiftRecapRevenue(BaseModel):
+    """Revenue block inside a shift recap."""
+    actual: float
+    forecast: float
+    delta: float
+    delta_pct: float
+
+
+class ShiftRecapWages(BaseModel):
+    """Wages block inside a shift recap."""
+    actual: float
+    forecast: float
+    delta: float
+    pct_of_revenue_actual: float
+    pct_of_revenue_target: float
+    pct_delta: float
+
+
+class ShiftRecapHeadcount(BaseModel):
+    """Head-count roll-up inside a shift recap."""
+    peak: int
+    peak_time: Optional[str] = None
+    last_count: int
+    total_taps: int
+    reset_count: int
+
+
+class ShiftRecapResponse(BaseModel):
+    """End-of-shift recap — the Moment 7 'what just happened' card.
+
+    Produced by rosteriq.shift_recap.compose_recap and consumed by
+    static/dashboard.html::renderShiftRecap(). Keep shapes in sync.
+    """
+    venue_id: str
+    shift_date: str
+    generated_at: str
+    revenue: ShiftRecapRevenue
+    wages: ShiftRecapWages
+    headcount: ShiftRecapHeadcount
+    traffic_light: str  # "green" | "amber" | "red"
+    summary: str
+
+
 class CallInRequest(BaseModel):
     """Request to handle staff call-in."""
     venue_id: str
@@ -896,6 +939,90 @@ async def reset_head_count(request: HeadCountResetRequest) -> HeadCountStateResp
     except Exception:
         logger.exception("Head-count RESET failed")
         raise HTTPException(status_code=500, detail="Head-count reset failed")
+
+
+# ============================================================================
+# Shift Recap — Moment 7 (end-of-shift "what just happened" card)
+# ============================================================================
+
+from rosteriq import shift_recap as _shift_recap
+
+
+@app.get("/api/v1/shift-recap/{venue_id}", response_model=ShiftRecapResponse)
+async def get_shift_recap(venue_id: str) -> ShiftRecapResponse:
+    """
+    Composite end-of-shift recap for a venue.
+
+    Pulls today's revenue/wages from the on-shift snapshot, reads the
+    head-count timeline from the in-process head-count store, and
+    delegates to rosteriq.shift_recap.compose_recap for all the maths
+    and the one-line natural-language summary.
+
+    Safe to call mid-shift — the numbers just reflect 'so far'.
+    """
+    try:
+        pipeline = get_pipeline(venue_id=venue_id)
+
+        # Pull the existing on-shift snapshot for revenue + wages context.
+        # If the adapter chain fails we still return a useful recap built
+        # from whatever head-count data we have.
+        revenue_actual = 0.0
+        revenue_forecast = 0.0
+        wages_actual: Optional[float] = None
+        wages_forecast: Optional[float] = None
+        shift_date = datetime.now().date().isoformat()
+
+        try:
+            snapshot = await pipeline.get_on_shift_dashboard()
+            rev = snapshot.get("revenue_metrics", {}) or {}
+            revenue_actual = float(rev.get("actual", 0) or 0)
+            revenue_forecast = float(rev.get("forecast", 0) or 0)
+            # Optional wage fields — pipeline may or may not surface these.
+            if snapshot.get("wages_burned_so_far") is not None:
+                wages_actual = float(snapshot.get("wages_burned_so_far") or 0)
+            if snapshot.get("wages_forecast_today") is not None:
+                wages_forecast = float(snapshot.get("wages_forecast_today") or 0)
+            shift_date = snapshot.get("date", shift_date) or shift_date
+        except Exception:
+            # Fallthrough — log but still produce a recap so the UI
+            # degrades gracefully.
+            logger.exception(
+                "Shift recap: on-shift snapshot failed for %s, recap will use zeros",
+                venue_id,
+            )
+
+        # Pull head-count history from the in-process store. state() returns
+        # newest-first `recent`, but we want the full history for a real
+        # peak — use history() directly.
+        hc_history = _hc_store.history(venue_id)
+
+        # Read venue-specific wage target from constraints if available,
+        # otherwise use the module default.
+        wage_target_pct = _shift_recap.DEFAULT_WAGE_TARGET_PCT
+        try:
+            constraints = getattr(pipeline, "constraints", None)
+            if constraints is not None:
+                target = getattr(constraints, "target_wage_cost_pct", None)
+                if target is not None:
+                    wage_target_pct = float(target)
+        except Exception:
+            pass  # stay on default
+
+        recap = _shift_recap.compose_recap(
+            venue_id=venue_id,
+            shift_date=shift_date,
+            revenue_actual=revenue_actual,
+            revenue_forecast=revenue_forecast,
+            wages_actual=wages_actual,
+            wages_forecast=wages_forecast,
+            wage_target_pct=wage_target_pct,
+            headcount_history=hc_history,
+        )
+
+        return ShiftRecapResponse(**recap)
+    except Exception:
+        logger.exception(f"Shift recap failed for {venue_id}")
+        raise HTTPException(status_code=500, detail="Shift recap failed")
 
 
 # ============================================================================
