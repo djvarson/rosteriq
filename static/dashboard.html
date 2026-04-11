@@ -1523,6 +1523,20 @@
             padding-top: 8px;
             border-top: 1px solid var(--border-color);
         }
+        .venue-mini-trend.is-clickable {
+            cursor: pointer;
+            transition: background 0.18s ease;
+            border-radius: 6px;
+            padding: 8px 6px 4px;
+            margin: 8px -6px 0;
+        }
+        .venue-mini-trend.is-clickable:hover {
+            background: rgba(96, 165, 250, 0.08);
+        }
+        .venue-mini-trend.is-clickable:focus {
+            outline: 2px solid rgba(96, 165, 250, 0.6);
+            outline-offset: 2px;
+        }
         .venue-mini-trend-cell {
             display: flex;
             flex-direction: column;
@@ -1710,6 +1724,23 @@
             letter-spacing: 1px;
             text-transform: uppercase;
             color: #93c5fd;
+        }
+        .trend-venue-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: #e5e7eb;
+            margin-left: 8px;
+            padding-left: 8px;
+            border-left: 1px solid var(--border-color);
+        }
+        .trend-venue-label.hidden { display: none; }
+        .trend-card.trend-flash {
+            animation: trend-flash-pulse 1.4s ease-out;
+        }
+        @keyframes trend-flash-pulse {
+            0%   { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.55); }
+            60%  { box-shadow: 0 0 0 14px rgba(96, 165, 250, 0.0); }
+            100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.0); }
         }
         .trend-window-tabs {
             display: inline-flex;
@@ -2116,7 +2147,10 @@
             <!-- Trends card — Moment 13: accountability over time -->
             <div class="trend-card hidden" id="trendCard">
                 <div class="trend-header">
-                    <span class="trend-eyebrow">Accountability Trend</span>
+                    <div>
+                        <span class="trend-eyebrow">Accountability Trend</span>
+                        <span class="trend-venue-label hidden" id="trendVenueLabel"></span>
+                    </div>
                     <div class="trend-window-tabs" id="trendWindowTabs">
                         <button type="button" class="trend-window-tab active" data-window="7">7D</button>
                         <button type="button" class="trend-window-tab" data-window="14">14D</button>
@@ -2445,6 +2479,7 @@
             fetchShiftRecap();
             fetchMorningBrief();
             wireTrendWindowTabs();
+            wirePortfolioTrendClicks();
             fetchTrend();
             updateShiftTime();
             setInterval(updateShiftTime, 1000);
@@ -3524,7 +3559,10 @@
                 acctLine = '<div class="venue-mini-acct">No dismissed recs</div>';
             }
 
-            const trendBlock = renderVenueMiniTrend(v.trend);
+            const trendBlock = renderVenueMiniTrend(v.trend, {
+                venueId: v.venue_id,
+                venueLabel: v.label || v.venue_id || ''
+            });
 
             return `
                 <div class="venue-mini ${lightCls}">
@@ -3556,7 +3594,7 @@
             `;
         }
 
-        function renderVenueMiniTrend(trend) {
+        function renderVenueMiniTrend(trend, opts) {
             if (!trend || typeof trend !== 'object') return '';
             const series = trend.series || {};
             const accept = Array.isArray(series.acceptance_rate) ? series.acceptance_rate : [];
@@ -3576,8 +3614,24 @@
             const acceptSpark = accept.length > 0 ? sparklineSvg(accept, acceptColor) : '';
             const missedSpark = missed.length > 0 ? sparklineSvg(missed, missedColor) : '';
             const headline = escapeHtmlSafe(trend.headline || '');
+
+            // Click-through: if we know which venue this trend belongs to,
+            // make the whole block clickable so it retargets the trend card.
+            // We use data-* attributes and an event-delegated handler on the
+            // portfolio container (see wirePortfolioTrendClicks) so that
+            // venue labels containing apostrophes don't break inline onclick.
+            const venueId = opts && opts.venueId ? String(opts.venueId) : '';
+            const venueLabel = opts && opts.venueLabel ? String(opts.venueLabel) : '';
+            const clickable = !!venueId;
+            const clickAttrs = clickable
+                ? ` class="venue-mini-trend is-clickable"`
+                  + ` role="button" tabindex="0"`
+                  + ` data-venue-id="${escapeHtmlSafe(venueId)}"`
+                  + ` data-venue-label="${escapeHtmlSafe(venueLabel)}"`
+                  + ` title="View ${escapeHtmlSafe(venueLabel || 'venue')} in trends"`
+                : ` class="venue-mini-trend"`;
             return `
-                <div class="venue-mini-trend">
+                <div${clickAttrs}>
                     <div class="venue-mini-trend-cell">
                         <span class="venue-mini-trend-label">Acceptance ${Number(trend.window_days || 7)}d</span>
                         <div class="venue-mini-trend-spark">${acceptSpark}</div>
@@ -3717,18 +3771,59 @@
         // Current window selection — defaults to 7 days. The window tabs
         // above the sparklines write to this when clicked.
         let _trendWindow = 7;
+        // Which venue the trend card is currently focused on. Defaults to
+        // the dashboard's own VENUE_ID, but portfolio mini-card click-through
+        // can retarget this so the trends card shows a different venue.
+        let _trendVenueId = (typeof VENUE_ID !== 'undefined') ? VENUE_ID : null;
+        let _trendVenueLabel = null;
 
-        async function fetchTrend() {
+        async function fetchTrend(venueId) {
             const card = document.getElementById('trendCard');
             if (!card) return;
+            const targetId = venueId || _trendVenueId || (typeof VENUE_ID !== 'undefined' ? VENUE_ID : null);
+            if (!targetId) return;
+            _trendVenueId = targetId;
             try {
-                const resp = await fetch(`/api/v1/trends/${VENUE_ID}?window=${_trendWindow}`);
+                const resp = await fetch(`/api/v1/trends/${targetId}?window=${_trendWindow}`);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const trend = await resp.json();
                 renderTrend(trend);
             } catch (err) {
                 console.warn('Trend fetch failed', err);
                 card.classList.add('hidden');
+            }
+        }
+
+        // Portfolio mini-card click-through: retarget the trends card at a
+        // different venue, scroll it into view, and briefly pulse it so the
+        // eye lands in the right place.
+        async function loadPortfolioVenueTrend(venueId, venueLabel) {
+            if (!venueId) return;
+            _trendVenueId = venueId;
+            _trendVenueLabel = venueLabel || null;
+            const card = document.getElementById('trendCard');
+            const labelEl = document.getElementById('trendVenueLabel');
+            if (labelEl) {
+                if (venueLabel) {
+                    labelEl.textContent = venueLabel;
+                    labelEl.classList.remove('hidden');
+                } else {
+                    labelEl.textContent = '';
+                    labelEl.classList.add('hidden');
+                }
+            }
+            await fetchTrend(venueId);
+            if (card && !card.classList.contains('hidden')) {
+                try {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } catch (_) {
+                    card.scrollIntoView();
+                }
+                card.classList.remove('trend-flash');
+                // force reflow so re-adding the class restarts the animation
+                void card.offsetWidth;
+                card.classList.add('trend-flash');
+                setTimeout(() => card.classList.remove('trend-flash'), 1500);
             }
         }
 
@@ -3919,6 +4014,37 @@
                     tabs.forEach(b => b.classList.toggle('active', b === btn));
                     fetchTrend();
                 });
+            });
+        }
+
+        // Delegated handler for the portfolio mini sparkline blocks. The
+        // blocks are rerendered each poll, so binding on the container
+        // (which is stable) avoids having to rewire after every refresh.
+        function wirePortfolioTrendClicks() {
+            const root = document.getElementById('portfolioVenues');
+            if (!root || root._trendClickBound) return;
+            root._trendClickBound = true;
+            const handle = (target) => {
+                const block = target && target.closest ? target.closest('.venue-mini-trend.is-clickable') : null;
+                if (!block) return false;
+                const vid = block.getAttribute('data-venue-id');
+                const vlabel = block.getAttribute('data-venue-label') || '';
+                if (vid) {
+                    loadPortfolioVenueTrend(vid, vlabel);
+                    return true;
+                }
+                return false;
+            };
+            root.addEventListener('click', (ev) => {
+                if (handle(ev.target)) {
+                    ev.preventDefault();
+                }
+            });
+            root.addEventListener('keydown', (ev) => {
+                if (ev.key !== 'Enter' && ev.key !== ' ') return;
+                if (handle(ev.target)) {
+                    ev.preventDefault();
+                }
             });
         }
 
