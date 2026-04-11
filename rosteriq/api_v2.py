@@ -95,7 +95,7 @@ class DashboardOnShiftResponse(BaseModel):
     current_time: str
     staff_on_deck: List[Dict[str, Any]]       # [{name, role, hours, break}]
     active_signals: List[Dict[str, Any]]      # [{text, alert}]
-    recommended_actions: List[str]
+    recommended_actions: List[Dict[str, Any]]  # [{action, reason, priority}]
     hourly_demand: List[Dict[str, Any]]       # [{hour, expected, actual}]
     revenue_actual: float
     revenue_forecast: float

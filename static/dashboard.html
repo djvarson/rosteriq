@@ -257,6 +257,67 @@
             border-left-color: var(--success-green);
         }
 
+        .recommendation-item.priority-high {
+            border-left-color: var(--alert-red);
+        }
+
+        .recommendation-item.priority-medium {
+            border-left-color: #f59e0b;
+        }
+
+        .recommendation-item.priority-low {
+            border-left-color: var(--success-green);
+        }
+
+        .recommendation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .recommendation-action {
+            font-weight: 600;
+            color: var(--text-primary, #f5f5f7);
+            flex: 1;
+        }
+
+        .recommendation-reason {
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--text-secondary, #9ca3af);
+            opacity: 0.85;
+        }
+
+        .priority-pill {
+            display: inline-block;
+            padding: 2px 8px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-radius: 999px;
+            flex-shrink: 0;
+        }
+
+        .priority-pill.priority-high {
+            background: rgba(239, 68, 68, 0.15);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+
+        .priority-pill.priority-medium {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fcd34d;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+        }
+
+        .priority-pill.priority-low {
+            background: rgba(34, 197, 94, 0.15);
+            color: #86efac;
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+
         .labour-cost {
             background-color: var(--card-bg);
             padding: 20px;
@@ -650,6 +711,15 @@
             font-size: 12px;
             color: #D97706;
             margin-top: 6px;
+        }
+        .scenario-result-empty {
+            font-size: 13px;
+            color: #9ca3af;
+            padding: 10px 0;
+            line-height: 1.5;
+        }
+        .scenario-result-empty strong {
+            color: #f5f5f7;
         }
         .scenario-field.disabled input {
             opacity: 0.3;
@@ -1298,6 +1368,24 @@
             return isNaN(n) ? null : n;
         }
 
+        // Minimum fields required for each mode — used for inline validation
+        // before the API call so we can show useful errors instead of a
+        // misleading "API unavailable" fallback.
+        const SCENARIO_REQUIRED_FIELDS = {
+            solve_sales: [
+                { key: 'target_wage_cost_pct', label: 'Target wage %' },
+                { key: 'wage_cost', label: 'Wage cost' },
+            ],
+            solve_wage_budget: [
+                { key: 'target_wage_cost_pct', label: 'Target wage %' },
+                { key: 'forecast_sales', label: 'Forecast sales' },
+            ],
+            diagnose: [
+                { key: 'wage_cost', label: 'Wage cost' },
+                { key: 'forecast_sales', label: 'Forecast sales' },
+            ],
+        };
+
         async function solveScenario() {
             const body = {
                 mode: scenarioMode,
@@ -1308,6 +1396,21 @@
                 on_cost_multiplier: readScenarioField('scenarioOnCost'),
                 planned_wage_cost: readScenarioField('scenarioPlanned'),
             };
+
+            // Client-side validation so we don't send half-filled requests
+            // and get back a confusing validation error.
+            const required = SCENARIO_REQUIRED_FIELDS[scenarioMode] || [];
+            const missing = required.filter(f => body[f.key] == null).map(f => f.label);
+            if (missing.length > 0) {
+                const resultEl = document.getElementById('scenarioResult');
+                resultEl.innerHTML =
+                    '<div class="scenario-result-empty">' +
+                    'Please fill in <strong>' + missing.join('</strong> and <strong>') + '</strong> to solve.' +
+                    '</div>';
+                resultEl.classList.add('visible');
+                return;
+            }
+
             const resultEl = document.getElementById('scenarioResult');
             const btn = document.getElementById('scenarioSolveBtn');
             btn.disabled = true;
@@ -1319,20 +1422,24 @@
                     body: JSON.stringify(body),
                 });
                 if (!resp.ok) {
-                    // Client-side fallback so demos survive a down backend
+                    // Backend rejected the input (validation, etc.) — fall
+                    // back to local compute but surface the actual error.
                     const detail = await resp.json().catch(() => ({}));
                     populateScenarioResult(solveScenarioLocally(body), {
                         error: detail.detail || ('HTTP ' + resp.status),
                         local: true,
+                        reason: 'validation',
                     });
                 } else {
                     const data = await resp.json();
                     populateScenarioResult(data, {});
                 }
             } catch (err) {
+                // True network failure — show a different message
                 populateScenarioResult(solveScenarioLocally(body), {
                     error: String(err),
                     local: true,
+                    reason: 'network',
                 });
             } finally {
                 btn.disabled = false;
@@ -1396,8 +1503,17 @@
                 html += '<div class="scenario-result-warning">' + w + '</div>';
             });
             if (meta && meta.local) {
-                html += '<div class="scenario-result-warning">Offline mode: result computed in the browser (API unavailable).</div>';
-                markDemoDataActive();
+                let msg;
+                if (meta.reason === 'network') {
+                    msg = 'Network issue — result computed locally. Retry when back online.';
+                    markDemoDataActive();
+                } else if (meta.reason === 'validation') {
+                    msg = 'Server couldn\u2019t validate the inputs (' + (meta.error || 'bad request') +
+                          '). Local fallback shown below.';
+                } else {
+                    msg = 'Computed locally: ' + (meta.error || 'fallback used');
+                }
+                html += '<div class="scenario-result-warning">' + msg + '</div>';
             }
             el.innerHTML = html;
         }
@@ -1595,17 +1711,40 @@
             document.getElementById('activeSignalsContainer').innerHTML = signalHtml;
 
             const actions = data.recommended_actions || [
-                'Consider sending home 1 bar staff after 9pm',
-                'Call in backup — 20% above forecast',
-                'Monitor kitchen workload (on track)',
-                'Revenue tracking 11% above expected'
+                { action: 'Consider sending home 1 bar staff after 9pm', reason: 'Demand dropping after peak', priority: 'medium' },
+                { action: 'Call in backup bar staff', reason: '20% above forecast', priority: 'high' },
+                { action: 'Monitor kitchen workload', reason: 'On track with demand', priority: 'low' },
+                { action: 'Increase service levels, check for bottlenecks', reason: 'Revenue tracking 11% above expected', priority: 'medium' }
             ];
 
-            const actionHtml = actions.map(a => `
-                <div class="recommendation-item">
-                    ${a}
-                </div>
-            `).join('');
+            const escapeHtml = (str) => String(str == null ? '' : str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+
+            const actionHtml = actions.map(a => {
+                // Back-compat: if a is a string, render it plainly.
+                if (typeof a === 'string') {
+                    return `<div class="recommendation-item">${escapeHtml(a)}</div>`;
+                }
+                const actionText = escapeHtml(a.action || '');
+                const reason = a.reason ? `<div class="recommendation-reason">${escapeHtml(a.reason)}</div>` : '';
+                const priority = (a.priority || '').toLowerCase();
+                const priorityPill = priority
+                    ? `<span class="priority-pill priority-${escapeHtml(priority)}">${escapeHtml(priority)}</span>`
+                    : '';
+                return `
+                    <div class="recommendation-item priority-${escapeHtml(priority)}">
+                        <div class="recommendation-header">
+                            <div class="recommendation-action">${actionText}</div>
+                            ${priorityPill}
+                        </div>
+                        ${reason}
+                    </div>
+                `;
+            }).join('');
 
             document.getElementById('actionRecommendations').innerHTML = actionHtml;
 
@@ -1820,10 +1959,9 @@
                     { text: 'Foot traffic: +18% above average', alert: true }
                 ],
                 recommended_actions: [
-                    'Consider sending home 1 bar staff after 9pm',
-                    'Call in backup — 20% above forecast',
-                    'Monitor kitchen workload (on track)',
-                    'Revenue tracking 11% above expected'
+                    { action: 'Call in 1 backup bar staff', reason: 'Demand 20%+ above normal', priority: 'high' },
+                    { action: 'Increase service levels, check for bottlenecks', reason: 'Revenue tracking 11% above forecast', priority: 'medium' },
+                    { action: 'Monitor kitchen workload', reason: 'On track with demand curve', priority: 'low' }
                 ]
             };
         }

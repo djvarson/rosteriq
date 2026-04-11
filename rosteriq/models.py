@@ -436,7 +436,7 @@ class OnShiftDashboard(BaseModel):
     revenue_variance_pct: float
     staff_on_shift: int
     staff_roster: List[Dict[str, Any]]
-    recommended_actions: List[str]
+    recommended_actions: List[Dict[str, Any]]
     active_signals: List[Signal]
     hourly_demand_curve: List[HourlyDemandPoint]
 
