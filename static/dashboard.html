@@ -2202,9 +2202,49 @@
     </style>
 </head>
 <body>
+    <!-- ── Login overlay (shown only when auth is enforced) ───────── -->
+    <div id="loginOverlay" class="login-overlay hidden">
+        <div class="login-card">
+            <div class="login-logo">RosterIQ</div>
+            <p class="login-subtitle">Sign in to your venue dashboard</p>
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <label for="loginEmail">Email</label>
+                <input type="email" id="loginEmail" required placeholder="you@venue.com.au" autocomplete="email">
+                <label for="loginPassword" style="margin-top:12px">Password</label>
+                <input type="password" id="loginPassword" required placeholder="••••••••" autocomplete="current-password">
+                <div id="loginError" class="login-error hidden"></div>
+                <button type="submit" class="login-btn" id="loginBtn">Sign In</button>
+            </form>
+            <p class="login-demo-hint">Demo: demo@rosteriq.com.au / DemoPassword1!</p>
+        </div>
+    </div>
+    <style>
+        .login-overlay{position:fixed;inset:0;z-index:9999;background:var(--bg-primary,#0d1117);display:flex;align-items:center;justify-content:center}
+        .login-overlay.hidden{display:none}
+        .login-card{background:var(--bg-card,#161b22);border:1px solid var(--border,#30363d);border-radius:12px;padding:40px;width:100%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+        .login-logo{font-size:28px;font-weight:700;text-align:center;margin-bottom:4px;color:var(--accent,#58a6ff)}
+        .login-subtitle{text-align:center;color:var(--text-secondary,#8b949e);margin-bottom:24px;font-size:14px}
+        .login-card label{display:block;font-size:13px;font-weight:500;color:var(--text-secondary,#8b949e);margin-bottom:4px}
+        .login-card input{width:100%;padding:10px 12px;border:1px solid var(--border,#30363d);border-radius:6px;background:var(--bg-primary,#0d1117);color:var(--text-primary,#e6edf3);font-size:14px;box-sizing:border-box}
+        .login-card input:focus{outline:none;border-color:var(--accent,#58a6ff);box-shadow:0 0 0 3px rgba(88,166,255,.15)}
+        .login-btn{margin-top:20px;width:100%;padding:10px;border:none;border-radius:6px;background:var(--accent,#58a6ff);color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+        .login-btn:hover{background:#79c0ff}
+        .login-btn:disabled{opacity:.5;cursor:not-allowed}
+        .login-error{margin-top:12px;padding:8px 12px;border-radius:6px;background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);color:#f85149;font-size:13px}
+        .login-error.hidden{display:none}
+        .login-demo-hint{margin-top:16px;text-align:center;font-size:12px;color:var(--text-secondary,#8b949e);opacity:.6}
+        .user-badge{font-size:12px;font-weight:400;color:var(--text-secondary,#8b949e);margin-left:12px;vertical-align:middle}
+        .user-badge.hidden,.logout-btn.hidden{display:none}
+        .logout-btn{font-size:12px;padding:4px 10px;margin-left:8px;border:1px solid var(--border,#30363d);border-radius:6px;background:transparent;color:var(--text-secondary,#8b949e);cursor:pointer;vertical-align:middle}
+        .logout-btn:hover{border-color:var(--accent,#58a6ff);color:var(--accent,#58a6ff)}
+    </style>
+
     <div class="container">
         <header>
-            <div class="logo">RosterIQ Dashboard</div>
+            <div class="logo">RosterIQ Dashboard
+                <span id="userBadge" class="user-badge hidden"></span>
+                <button id="logoutBtn" class="logout-btn hidden" onclick="handleLogout()">Sign Out</button>
+            </div>
             <div class="venue-switcher" id="venueSwitcher">
                 <select id="venueSelect" onchange="switchVenue(this.value)">
                     <option value="">Loading venues…</option>
@@ -2808,8 +2848,110 @@
             switchTab('onshift');
         }
 
+        // ── Auth helpers ──────────────────────────────────────────────
+        let _authToken = sessionStorage.getItem('riq_token');
+        let _authUser  = null;
+
+        function _authHeaders() {
+            if (!_authToken) return {};
+            return { 'Authorization': 'Bearer ' + _authToken };
+        }
+
+        // Patch the global fetch so every /api/ call includes the token
+        const _origFetch = window.fetch;
+        window.fetch = function(url, opts = {}) {
+            if (_authToken && typeof url === 'string' && url.startsWith('/api/')) {
+                opts.headers = { ...(opts.headers || {}), ..._authHeaders() };
+            }
+            return _origFetch.call(this, url, opts);
+        };
+
+        async function checkAuthRequired() {
+            // Hit /api/v1/health — if it returns 401, auth is enforced.
+            try {
+                const r = await _origFetch('/api/v1/health');
+                if (r.status === 401) return true;
+                return false;
+            } catch { return false; }
+        }
+
+        async function handleLogin(ev) {
+            ev.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const pw    = document.getElementById('loginPassword').value;
+            const btn   = document.getElementById('loginBtn');
+            const errEl = document.getElementById('loginError');
+            errEl.classList.add('hidden');
+            btn.disabled = true;
+            btn.textContent = 'Signing in…';
+            try {
+                const r = await _origFetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password: pw }),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    throw new Error(d.detail || 'Login failed');
+                }
+                const data = await r.json();
+                _authToken = data.access_token;
+                sessionStorage.setItem('riq_token', _authToken);
+                _authUser = data.user || { email };
+                document.getElementById('loginOverlay').classList.add('hidden');
+                showUserBadge();
+                // Now load the dashboard data
+                await loadVenueList();
+                refreshAllVenueData();
+            } catch (e) {
+                errEl.textContent = e.message;
+                errEl.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
+            }
+        }
+
+        function handleLogout() {
+            _authToken = null;
+            _authUser = null;
+            sessionStorage.removeItem('riq_token');
+            location.reload();
+        }
+
+        function showUserBadge() {
+            if (_authUser) {
+                const badge = document.getElementById('userBadge');
+                badge.textContent = _authUser.email || _authUser.name || '';
+                badge.classList.remove('hidden');
+                document.getElementById('logoutBtn').classList.remove('hidden');
+            }
+        }
+
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
+            // If auth is enforced and we don't have a valid token, show login
+            const needsAuth = await checkAuthRequired();
+            if (needsAuth && !_authToken) {
+                document.getElementById('loginOverlay').classList.remove('hidden');
+                return; // Don't load data until logged in
+            }
+            if (needsAuth && _authToken) {
+                // Validate existing token
+                const r = await fetch('/api/v1/health');
+                if (r.status === 401) {
+                    sessionStorage.removeItem('riq_token');
+                    _authToken = null;
+                    document.getElementById('loginOverlay').classList.remove('hidden');
+                    return;
+                }
+                // Fetch user info
+                try {
+                    const me = await fetch('/api/v1/auth/me');
+                    if (me.ok) _authUser = await me.json();
+                    showUserBadge();
+                } catch {}
+            }
             await loadVenueList();
             updateWeekDisplay();
             refreshAllVenueData();

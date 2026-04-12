@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -36,6 +36,11 @@ STATIC_DIR = PROJECT_ROOT / "static"
 # Application version and startup time
 APP_VERSION = "2.0.0"
 STARTUP_TIME = datetime.now(timezone.utc)
+
+# ── Auth configuration ─────────────────────────────────────────────────────
+# Set ROSTERIQ_AUTH_ENABLED=1 to enforce JWT auth on all data endpoints.
+# Default: off (demo mode — endpoints are open, no login required).
+AUTH_ENABLED = os.getenv("ROSTERIQ_AUTH_ENABLED", "").lower() in ("1", "true", "yes")
 
 
 # ============================================================================
@@ -416,6 +421,17 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to start scheduled jobs")
 
+    # Auth: mount routes + create demo user if auth is enabled
+    try:
+        from rosteriq.auth import setup_auth
+        setup_auth(app)
+        if AUTH_ENABLED:
+            logger.info("Authentication ENABLED — JWT required on data endpoints")
+        else:
+            logger.info("Authentication routes mounted (demo mode — endpoints open)")
+    except Exception:
+        logger.exception("Failed to setup auth module (non-fatal)")
+
     yield
 
     logger.info("RosterIQ API v2 shutting down")
@@ -449,6 +465,94 @@ app.add_middleware(
 # Mount static files directory
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+# ── Auth middleware (path-based) ───────────────────────────────────────────
+# When ROSTERIQ_AUTH_ENABLED=1, all /api/v1/* endpoints except health,
+# auth routes, and the static dashboard require a valid JWT Bearer token.
+_AUTH_OPEN_PREFIXES = (
+    "/api/v1/health",
+    "/api/v1/auth/",     # login, register, refresh
+    "/docs",
+    "/openapi.json",
+)
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Enforce JWT auth on /api/v1/* paths when auth is enabled."""
+    path = request.url.path
+
+    # Skip auth check entirely if disabled or path is open
+    if (
+        not AUTH_ENABLED
+        or not path.startswith("/api/")
+        or any(path.startswith(p) for p in _AUTH_OPEN_PREFIXES)
+    ):
+        return await call_next(request)
+
+    # Validate Bearer token
+    from rosteriq.auth import decode_token, get_user_by_id
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return PlainTextResponse("Missing Bearer token", status_code=401)
+    token = auth_header.split(" ", 1)[1]
+    try:
+        payload = decode_token(token)
+    except Exception as e:
+        return PlainTextResponse(f"Invalid token: {e}", status_code=401)
+
+    user = get_user_by_id(payload.get("sub", ""))
+    if not user:
+        return PlainTextResponse("User not found", status_code=401)
+
+    # Attach user to request state for downstream use
+    request.state.user = user
+    return await call_next(request)
+
+
+# ============================================================================
+# Auth Dependencies
+# ============================================================================
+
+async def _get_current_user_if_auth():
+    """Return the current User when auth is enabled, None otherwise.
+
+    This is a FastAPI dependency — endpoints can declare it but never
+    block callers in demo mode."""
+    if not AUTH_ENABLED:
+        return None
+    # Lazy import so the module loads even when pyjwt / passlib aren't installed
+    from rosteriq.auth import get_current_user
+    from fastapi.security import HTTPBearer, HTTPAuthenticationCredentials
+    bearer = HTTPBearer(auto_error=True)
+    # get_current_user is itself an async dependency; we can't call it
+    # directly because it expects an HTTPAuthenticationCredentials.  Return
+    # it as a sub-dependency instead.
+    return get_current_user
+
+
+async def require_auth(request: Request):
+    """FastAPI dependency that enforces JWT auth when AUTH_ENABLED.
+
+    In demo mode this is a no-op.  In auth mode it extracts and validates
+    the Bearer token, returning the User or raising 401.
+    """
+    if not AUTH_ENABLED:
+        return None
+    from rosteriq.auth import decode_token, get_user_by_id
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    token = auth_header.split(" ", 1)[1]
+    try:
+        payload = decode_token(token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    user = get_user_by_id(payload.get("sub", ""))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 
 # ============================================================================
