@@ -1,0 +1,16 @@
+# RosterIQ Development Dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Production deps
+-r requirements.txt
+
+# Linting
+ruff>=0.3.0
+
+# Type checking (optional)
+mypy>=1.8.0
+
+# Testing — the test suite runs without pytest, but pytest
+# can be used for discovery and richer output if preferred.
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
