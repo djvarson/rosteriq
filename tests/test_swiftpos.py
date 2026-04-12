@@ -4,7 +4,8 @@ Tests for SwiftPOS Data Feed Adapter
 """
 
 import asyncio
-import pytest
+import sys
+import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -456,4 +457,22 @@ class TestLocationDepartment:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--tb=short"])
+    # Discover all test classes and run their test_ methods
+    passed = failed = 0
+    for name, obj in list(globals().items()):
+        if isinstance(obj, type) and name.startswith("Test"):
+            inst = obj()
+            for mname in sorted(dir(inst)):
+                if mname.startswith("test_"):
+                    try:
+                        getattr(inst, mname)()
+                        passed += 1
+                        print(f"  PASS {name}.{mname}")
+                    except AssertionError as e:
+                        failed += 1
+                        print(f"  FAIL {name}.{mname}: {e}")
+                    except Exception as e:
+                        failed += 1
+                        print(f"  ERROR {name}.{mname}: {type(e).__name__}: {e}")
+    print(f"\n{passed}/{passed + failed} tests passed")
+    sys.exit(0 if failed == 0 else 1)

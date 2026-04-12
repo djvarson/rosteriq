@@ -15,9 +15,14 @@ Comprehensive unit tests for Square API integration covering:
 Tests are isolated and do not require network access.
 """
 
-import pytest
+import sys
+from pathlib import Path
+import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT)) if str(ROOT) not in sys.path else None
 
 from rosteriq.data_feeds.square import (
     SquareCredentials,
@@ -37,11 +42,10 @@ from rosteriq.data_feeds.square import (
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Helper Functions (formerly fixtures)
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def credentials():
+def _credentials():
     """Valid Square credentials."""
     return SquareCredentials(
         access_token="sq_live_test123xyz",
@@ -50,8 +54,7 @@ def credentials():
     )
 
 
-@pytest.fixture
-def credentials_sandbox():
+def _credentials_sandbox():
     """Square sandbox credentials."""
     return SquareCredentials(
         access_token="sq_sandbox_test123xyz",
@@ -60,15 +63,15 @@ def credentials_sandbox():
     )
 
 
-@pytest.fixture
-def mock_client(credentials):
+def _mock_client():
     """Mock Square client."""
+    credentials = _credentials()
     return SquareClient(credentials)
 
 
-@pytest.fixture
-def mock_adapter(credentials):
+def _mock_adapter():
     """Mock Square adapter."""
+    credentials = _credentials()
     return SquareAdapter(
         credentials=credentials,
         location_id="LNHCCCCAAA111BBB",
@@ -78,8 +81,7 @@ def mock_adapter(credentials):
     )
 
 
-@pytest.fixture
-def sample_orders():
+def _sample_orders():
     """Sample order data from Square API."""
     now = datetime.now(AU_TZ)
     return [
@@ -124,8 +126,7 @@ def sample_orders():
     ]
 
 
-@pytest.fixture
-def sample_locations():
+def _sample_locations():
     """Sample locations from Square API."""
     return {
         "locations": [
@@ -154,14 +155,16 @@ def sample_locations():
 class TestSquareCredentials:
     """Test SquareCredentials dataclass."""
 
-    def test_credentials_creation(self, credentials):
+    def test_credentials_creation(self):
         """Test creating credentials."""
+        credentials = _credentials()
         assert credentials.access_token == "sq_live_test123xyz"
         assert credentials.location_id == "LNHCCCCAAA111BBB"
         assert credentials.environment == "production"
 
-    def test_credentials_sandbox_environment(self, credentials_sandbox):
+    def test_credentials_sandbox_environment(self):
         """Test sandbox environment."""
+        credentials_sandbox = _credentials_sandbox()
         assert credentials_sandbox.environment == "sandbox"
 
     def test_credentials_invalid_environment_defaults(self):
@@ -175,18 +178,27 @@ class TestSquareCredentials:
 
     def test_credentials_required_fields(self):
         """Test credentials require access_token and location_id."""
-        with pytest.raises(TypeError):
+        try:
             SquareCredentials()
+            assert False, "Should have raised TypeError"
+        except TypeError:
+            pass
 
     def test_credentials_access_token_required(self):
         """Test access_token is required."""
-        with pytest.raises(TypeError):
+        try:
             SquareCredentials(location_id="loc")
+            assert False, "Should have raised TypeError"
+        except TypeError:
+            pass
 
     def test_credentials_location_id_required(self):
         """Test location_id is required."""
-        with pytest.raises(TypeError):
+        try:
             SquareCredentials(access_token="token")
+            assert False, "Should have raised TypeError"
+        except TypeError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -196,48 +208,47 @@ class TestSquareCredentials:
 class TestSquareClient:
     """Test SquareClient API client."""
 
-    @pytest.mark.asyncio
-    async def test_client_creation(self, mock_client):
+    async def test_client_creation(self):
         """Test client creation."""
+        mock_client = _mock_client()
         assert mock_client.creds.access_token == "sq_live_test123xyz"
         assert mock_client.creds.location_id == "LNHCCCCAAA111BBB"
         assert mock_client._client is None
 
-    @pytest.mark.asyncio
-    async def test_client_get_client(self, mock_client):
+    async def test_client_get_client(self):
         """Test _get_client creates httpx client."""
+        mock_client = _mock_client()
         client = await mock_client._get_client()
         assert client is not None
         assert client.base_url == "https://connect.squareup.com/v2"
         await mock_client.close()
 
-    @pytest.mark.asyncio
-    async def test_client_reuses_connection(self, mock_client):
+    async def test_client_reuses_connection(self):
         """Test client reuses same httpx connection."""
+        mock_client = _mock_client()
         client1 = await mock_client._get_client()
         client2 = await mock_client._get_client()
         assert client1 is client2
         await mock_client.close()
 
-    @pytest.mark.asyncio
-    async def test_client_close(self, mock_client):
+    async def test_client_close(self):
         """Test closing client."""
+        mock_client = _mock_client()
         client = await mock_client._get_client()
         assert not client.is_closed
         await mock_client.close()
         assert client.is_closed
 
-    @pytest.mark.asyncio
-    async def test_client_auth_header_included(self, mock_client):
+    async def test_client_auth_header_included(self):
         """Test Authorization header is set."""
+        mock_client = _mock_client()
         client = await mock_client._get_client()
-        # Header is set in the client's default headers during _request
         assert mock_client.creds.access_token in "sq_live_test123xyz"
         await mock_client.close()
 
-    @pytest.mark.asyncio
-    async def test_client_get_locations(self, mock_client):
+    async def test_client_get_locations(self):
         """Test get_locations endpoint."""
+        mock_client = _mock_client()
         with patch.object(mock_client, "get") as mock_get:
             mock_get.return_value = {
                 "locations": [
@@ -250,9 +261,10 @@ class TestSquareClient:
             assert locations[0]["id"] == "loc1"
             mock_get.assert_called_once_with("/locations")
 
-    @pytest.mark.asyncio
-    async def test_client_search_orders_basic(self, mock_client, sample_orders):
+    async def test_client_search_orders_basic(self):
         """Test search_orders endpoint."""
+        mock_client = _mock_client()
+        sample_orders = _sample_orders()
         with patch.object(mock_client, "post") as mock_post:
             mock_post.return_value = {
                 "orders": sample_orders,
@@ -269,9 +281,10 @@ class TestSquareClient:
             assert cursor is None
             mock_post.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_client_search_orders_with_cursor(self, mock_client, sample_orders):
+    async def test_client_search_orders_with_cursor(self):
         """Test search_orders with pagination cursor."""
+        mock_client = _mock_client()
+        sample_orders = _sample_orders()
         with patch.object(mock_client, "post") as mock_post:
             mock_post.return_value = {
                 "orders": sample_orders[:2],
@@ -286,9 +299,9 @@ class TestSquareClient:
             assert cursor == "next_page_cursor"
             assert len(orders) == 2
 
-    @pytest.mark.asyncio
-    async def test_client_get_payments(self, mock_client):
+    async def test_client_get_payments(self):
         """Test get_payments endpoint."""
+        mock_client = _mock_client()
         with patch.object(mock_client, "get") as mock_get:
             mock_get.return_value = {
                 "payments": [
@@ -305,9 +318,9 @@ class TestSquareClient:
             assert len(payments) == 1
             assert cursor is None
 
-    @pytest.mark.asyncio
-    async def test_client_get_catalog(self, mock_client):
+    async def test_client_get_catalog(self):
         """Test get_catalog endpoint."""
+        mock_client = _mock_client()
         with patch.object(mock_client, "get") as mock_get:
             mock_get.return_value = {
                 "objects": [
@@ -331,10 +344,11 @@ class TestOrderAnalyser:
         analyser = OrderAnalyser(lookback_weeks=8)
         assert analyser.lookback_weeks == 8
 
-    def test_build_order_snapshot_basic(self, sample_orders):
+    def test_build_order_snapshot_basic(self):
         """Test building snapshot from orders."""
         analyser = OrderAnalyser()
         now = datetime.now(AU_TZ)
+        sample_orders = _sample_orders()
 
         snapshot = analyser.build_order_snapshot(
             location_id="loc123",
@@ -351,9 +365,10 @@ class TestOrderAnalyser:
         assert snapshot.open_orders == 1
         assert snapshot.canceled_orders == 0
 
-    def test_build_order_snapshot_avg_order_value(self, sample_orders):
+    def test_build_order_snapshot_avg_order_value(self):
         """Test average order value calculation."""
         analyser = OrderAnalyser()
+        sample_orders = _sample_orders()
         snapshot = analyser.build_order_snapshot(
             "loc123", "Venue", sample_orders
         )
@@ -361,9 +376,10 @@ class TestOrderAnalyser:
         # (4500 + 3200 + 2800) / 100 / 3 = 35.00
         assert snapshot.avg_order_value == 35.0
 
-    def test_build_order_snapshot_payment_methods(self, sample_orders):
+    def test_build_order_snapshot_payment_methods(self):
         """Test payment method tracking."""
         analyser = OrderAnalyser()
+        sample_orders = _sample_orders()
         snapshot = analyser.build_order_snapshot(
             "loc123", "Venue", sample_orders
         )
@@ -599,8 +615,9 @@ class TestOrderAnalyser:
 class TestSquareAdapter:
     """Test SquareAdapter integration."""
 
-    def test_adapter_creation(self, mock_adapter):
+    def test_adapter_creation(self):
         """Test creating adapter."""
+        mock_adapter = _mock_adapter()
         assert mock_adapter.location_id == "LNHCCCCAAA111BBB"
         assert mock_adapter.location_name == "The Royal Oak"
         assert mock_adapter.lookback_weeks == 8
@@ -611,9 +628,9 @@ class TestSquareAdapter:
         assert SquareAdapter.FEED_CATEGORY == "pos_sales"
         assert SquareAdapter.SIGNAL_TYPE == "foot_traffic"
 
-    @pytest.mark.asyncio
-    async def test_adapter_initialise(self, mock_adapter):
+    async def test_adapter_initialise(self):
         """Test adapter initialization."""
+        mock_adapter = _mock_adapter()
         with patch.object(mock_adapter.client, "search_orders") as mock_search:
             mock_search.return_value = ([], None)
 
@@ -622,9 +639,10 @@ class TestSquareAdapter:
             assert mock_adapter._patterns is not None
             assert mock_adapter._last_pattern_build is not None
 
-    @pytest.mark.asyncio
-    async def test_adapter_fetch_signals_basic(self, mock_adapter, sample_orders):
+    async def test_adapter_fetch_signals_basic(self):
         """Test fetching signals."""
+        mock_adapter = _mock_adapter()
+        sample_orders = _sample_orders()
         mock_adapter._patterns = [
             TradingPattern(
                 day_of_week=datetime.now(AU_TZ).weekday(),
@@ -645,9 +663,9 @@ class TestSquareAdapter:
             assert signals[0]["source"] == "square"
             assert signals[0]["category"] == "pos_sales"
 
-    @pytest.mark.asyncio
-    async def test_adapter_fetch_signals_empty(self, mock_adapter):
+    async def test_adapter_fetch_signals_empty(self):
         """Test fetch_signals with no orders."""
+        mock_adapter = _mock_adapter()
         mock_adapter._patterns = []
 
         with patch.object(mock_adapter.client, "search_orders") as mock_search:
@@ -656,8 +674,9 @@ class TestSquareAdapter:
             signals = await mock_adapter.fetch_signals()
             assert signals == []
 
-    def test_adapter_calculate_confidence(self, mock_adapter):
+    def test_adapter_calculate_confidence(self):
         """Test confidence calculation."""
+        mock_adapter = _mock_adapter()
         snapshot = OrderSnapshot(
             timestamp=datetime.now(AU_TZ),
             location_id="loc1",
@@ -672,8 +691,9 @@ class TestSquareAdapter:
         confidence = mock_adapter._calculate_confidence(snapshot)
         assert 0.5 <= confidence <= 1.0
 
-    def test_adapter_analyse_payment_shift_card_heavy(self, mock_adapter):
+    def test_adapter_analyse_payment_shift_card_heavy(self):
         """Test payment method shift detection (card-heavy)."""
+        mock_adapter = _mock_adapter()
         snapshot = OrderSnapshot(
             timestamp=datetime.now(AU_TZ),
             location_id="loc1",
@@ -692,8 +712,9 @@ class TestSquareAdapter:
         assert signal["category"] == "pos_payment_mix"
         assert signal["metadata"]["card_ratio"] == 0.85
 
-    def test_adapter_analyse_payment_shift_normal(self, mock_adapter):
+    def test_adapter_analyse_payment_shift_normal(self):
         """Test payment method shift detection (normal mix)."""
+        mock_adapter = _mock_adapter()
         snapshot = OrderSnapshot(
             timestamp=datetime.now(AU_TZ),
             location_id="loc1",
@@ -710,8 +731,9 @@ class TestSquareAdapter:
         signal = mock_adapter._analyse_payment_shift(snapshot)
         assert signal is None
 
-    def test_adapter_analyse_velocity_rush(self, mock_adapter):
+    def test_adapter_analyse_velocity_rush(self):
         """Test velocity detection (rush)."""
+        mock_adapter = _mock_adapter()
         now = datetime.now(AU_TZ)
         mock_adapter._patterns = [
             TradingPattern(
@@ -738,8 +760,9 @@ class TestSquareAdapter:
         assert signal is not None
         assert signal["category"] == "pos_velocity"
 
-    def test_adapter_analyse_velocity_normal(self, mock_adapter):
+    def test_adapter_analyse_velocity_normal(self):
         """Test velocity detection (normal)."""
+        mock_adapter = _mock_adapter()
         now = datetime.now(AU_TZ)
         mock_adapter._patterns = [
             TradingPattern(
@@ -765,8 +788,9 @@ class TestSquareAdapter:
         signal = mock_adapter._analyse_velocity(snapshot)
         assert signal is None
 
-    def test_adapter_analyse_avg_order_value_increased(self, mock_adapter):
+    def test_adapter_analyse_avg_order_value_increased(self):
         """Test AOV shift detection (increased)."""
+        mock_adapter = _mock_adapter()
         now = datetime.now(AU_TZ)
         mock_adapter._patterns = [
             TradingPattern(
@@ -794,8 +818,9 @@ class TestSquareAdapter:
         assert signal["category"] == "pos_avg_order_value"
         assert signal["metadata"]["direction"] == "increased"
 
-    def test_adapter_analyse_avg_order_value_decreased(self, mock_adapter):
+    def test_adapter_analyse_avg_order_value_decreased(self):
         """Test AOV shift detection (decreased)."""
+        mock_adapter = _mock_adapter()
         now = datetime.now(AU_TZ)
         mock_adapter._patterns = [
             TradingPattern(
@@ -823,8 +848,9 @@ class TestSquareAdapter:
         assert signal["category"] == "pos_avg_order_value"
         assert signal["metadata"]["direction"] == "decreased"
 
-    def test_adapter_analyse_avg_order_value_normal(self, mock_adapter):
+    def test_adapter_analyse_avg_order_value_normal(self):
         """Test AOV shift detection (normal)."""
+        mock_adapter = _mock_adapter()
         now = datetime.now(AU_TZ)
         mock_adapter._patterns = [
             TradingPattern(
@@ -850,9 +876,9 @@ class TestSquareAdapter:
         signal = mock_adapter._analyse_avg_order_value(snapshot)
         assert signal is None
 
-    @pytest.mark.asyncio
-    async def test_adapter_get_locations(self, mock_adapter):
+    async def test_adapter_get_locations(self):
         """Test fetching locations."""
+        mock_adapter = _mock_adapter()
         with patch.object(mock_adapter.client, "get_locations") as mock_get:
             mock_get.return_value = [
                 {
@@ -869,9 +895,9 @@ class TestSquareAdapter:
             assert locations[0].location_id == "loc1"
             assert isinstance(locations[0], LocationInfo)
 
-    @pytest.mark.asyncio
-    async def test_adapter_health_check_healthy(self, mock_adapter):
+    async def test_adapter_health_check_healthy(self):
         """Test health check (healthy)."""
+        mock_adapter = _mock_adapter()
         with patch.object(mock_adapter.client, "get_locations") as mock_get:
             mock_get.return_value = [
                 {"id": "LNHCCCCAAA111BBB", "name": "The Royal Oak", "status": "ACTIVE"},
@@ -881,9 +907,9 @@ class TestSquareAdapter:
             assert health["status"] == "healthy"
             assert health["connected"] is True
 
-    @pytest.mark.asyncio
-    async def test_adapter_health_check_auth_failed(self, mock_adapter):
+    async def test_adapter_health_check_auth_failed(self):
         """Test health check (auth failed)."""
+        mock_adapter = _mock_adapter()
         with patch.object(mock_adapter.client, "get_locations") as mock_get:
             mock_get.side_effect = SquareAuthError("Invalid token")
 
@@ -891,9 +917,9 @@ class TestSquareAdapter:
             assert health["status"] == "auth_failed"
             assert health["connected"] is False
 
-    @pytest.mark.asyncio
-    async def test_adapter_health_check_error(self, mock_adapter):
+    async def test_adapter_health_check_error(self):
         """Test health check (error)."""
+        mock_adapter = _mock_adapter()
         with patch.object(mock_adapter.client, "get_locations") as mock_get:
             mock_get.side_effect = SquareError("Connection error")
 
@@ -901,9 +927,9 @@ class TestSquareAdapter:
             assert health["status"] == "error"
             assert health["connected"] is False
 
-    @pytest.mark.asyncio
-    async def test_adapter_close(self, mock_adapter):
+    async def test_adapter_close(self):
         """Test closing adapter."""
+        mock_adapter = _mock_adapter()
         with patch.object(mock_adapter.client, "close") as mock_close:
             await mock_adapter.close()
             mock_close.assert_called_once()
@@ -1035,4 +1061,24 @@ class TestDataModels:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    import asyncio as _asyncio
+    passed = failed = 0
+    for name, obj in list(globals().items()):
+        if isinstance(obj, type) and name.startswith("Test"):
+            inst = obj()
+            for mname in sorted(dir(inst)):
+                if mname.startswith("test_"):
+                    try:
+                        result = getattr(inst, mname)()
+                        if _asyncio.iscoroutine(result):
+                            _asyncio.run(result)
+                        passed += 1
+                        print(f"  PASS {name}.{mname}")
+                    except AssertionError as e:
+                        failed += 1
+                        print(f"  FAIL {name}.{mname}: {e}")
+                    except Exception as e:
+                        failed += 1
+                        print(f"  ERROR {name}.{mname}: {type(e).__name__}: {e}")
+    print(f"\n{passed}/{passed + failed} tests passed")
+    sys.exit(0 if failed == 0 else 1)

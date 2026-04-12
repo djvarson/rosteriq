@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
+          pip install httpx fastapi
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Lint — syntax check all modules
@@ -37,7 +37,7 @@ jobs:
       - name: Run core tests (no external deps)
         run: python run_all_tests.py --fast
 
-      - name: Run full test suite (with pytest)
+      - name: Run full test suite (with all deps)
         run: python run_all_tests.py
 
   lint:

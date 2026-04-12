@@ -18,12 +18,16 @@ Run with: python -m pytest tests/test_ask_context.py -q
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date
+from pathlib import Path
 
-import pytest
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from rosteriq.ask_context import build_demo_query_context
-from rosteriq.query_library import route_question, list_supported_queries
+from rosteriq.ask_context import build_demo_query_context  # noqa: E402
+from rosteriq.query_library import route_question, list_supported_queries  # noqa: E402
 
 
 FIXED_TODAY = date(2026, 4, 11)  # a Saturday — gives the demo some weekend data
@@ -101,25 +105,23 @@ def test_all_supported_queries_have_an_example_phrasing():
     )
 
 
-@pytest.mark.parametrize("phrasing", list(EXAMPLE_PHRASINGS.values()))
-def test_example_phrasings_route_cleanly(phrasing):
+def test_example_phrasings_route_cleanly():
     """Every example phrasing must return matched=True with a non-None
     query_result against the demo context. A failure means either (a)
     the router regex stopped matching, or (b) the demo context doesn't
     have enough data to produce a result for that query."""
     ctx = build_demo_query_context(VENUE, today=FIXED_TODAY)
-    result = route_question(phrasing, ctx)
-    assert result.matched, (
-        f"{phrasing!r} did not match. Reason: {result.reason}"
-    )
-    assert result.query_result is not None
-    qr = result.query_result
-    assert qr.query, "query name must be set"
-    # headline_value can legitimately be 0 for some queries (e.g. 0
-    # overtime hours), but None is never OK.
-    assert qr.headline_value is not None, (
-        f"{phrasing!r} routed to {qr.query} but returned None headline_value"
-    )
+    for name, phrasing in EXAMPLE_PHRASINGS.items():
+        result = route_question(phrasing, ctx)
+        assert result.matched, (
+            f"{phrasing!r} ({name}) did not match. Reason: {result.reason}"
+        )
+        assert result.query_result is not None
+        qr = result.query_result
+        assert qr.query, f"query name must be set for {name}"
+        assert qr.headline_value is not None, (
+            f"{phrasing!r} routed to {qr.query} but returned None headline_value"
+        )
 
 
 def test_empty_question_returns_unmatched():
@@ -140,16 +142,34 @@ def test_gibberish_returns_unmatched_with_helpful_reason():
 # 3. JSON-safety of QueryResult.to_dict()
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("phrasing", list(EXAMPLE_PHRASINGS.values()))
-def test_query_result_dict_is_json_serialisable(phrasing):
+def test_query_result_dict_is_json_serialisable():
     """Every QueryResult.to_dict() must be JSON-safe (no Decimal, no
     datetime objects). If this fails, FastAPI will 500 on the /ask
     endpoint."""
     ctx = build_demo_query_context(VENUE, today=FIXED_TODAY)
-    result = route_question(phrasing, ctx)
-    assert result.matched
-    d = result.query_result.to_dict()
-    # This will raise TypeError if anything isn't JSON-safe
-    json_str = json.dumps(d)
-    assert isinstance(json_str, str)
-    assert len(json_str) > 0
+    for name, phrasing in EXAMPLE_PHRASINGS.items():
+        result = route_question(phrasing, ctx)
+        assert result.matched, f"{name} didn't match"
+        d = result.query_result.to_dict()
+        json_str = json.dumps(d)
+        assert isinstance(json_str, str) and len(json_str) > 0, (
+            f"{name} to_dict() not JSON-serialisable"
+        )
+
+
+if __name__ == "__main__":
+    tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
+    passed = failed = 0
+    for t in tests:
+        try:
+            t()
+            passed += 1
+            print(f"  PASS {t.__name__}")
+        except AssertionError as e:
+            failed += 1
+            print(f"  FAIL {t.__name__}: {e}")
+        except Exception as e:
+            failed += 1
+            print(f"  ERROR {t.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{passed}/{passed + failed} tests passed")
+    sys.exit(0 if failed == 0 else 1)

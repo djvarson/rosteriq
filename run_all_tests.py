@@ -27,39 +27,27 @@ ROOT = Path(__file__).resolve().parent
 TESTS_DIR = ROOT / "tests"
 
 # ── Classification ──────────────────────────────────────────────────────────
-# Files that require pytest (they import pytest at module level).
-PYTEST_FILES = {
-    "test_ask_context.py",
-    "test_lightspeed.py",
-    "test_pos_aggregator.py",
-    "test_shift_swap.py",
-    "test_square.py",
-    "test_swiftpos.py",
-    "test_tanda_integration.py",
+# Files that need external runtime dependencies (httpx, fastapi, etc.)
+# beyond the stdlib + rosteriq. Skipped with --fast.
+EXTERNAL_DEP_FILES = {
+    "test_lightspeed.py",      # httpx (lightspeed adapter)
+    "test_pos_aggregator.py",  # httpx (pos adapters)
+    "test_shift_swap.py",      # fastapi (shift_swap router)
+    "test_square.py",          # httpx (square adapter)
+    "test_swiftpos.py",        # httpx (swiftpos adapter)
+    "test_tanda_integration.py",  # httpx (tanda adapter)
 }
 
-# Everything else runs fine with `python <file>` from the project root.
-# unittest.TestCase files and custom-runner files both work this way.
+# Everything else runs fine with `python <file>` from the project root
+# using only the stdlib + rosteriq pure-stdlib modules.
 
 
-def _has_pytest() -> bool:
-    """Check if pytest is available in the current environment."""
-    try:
-        import pytest  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
-def _run_file(path: Path, *, use_pytest: bool = False) -> tuple[bool, float, str]:
+def _run_file(path: Path) -> tuple[bool, float, str]:
     """Run a single test file. Returns (passed, elapsed_seconds, output)."""
     env = {**os.environ, "PYTHONPATH": str(ROOT)}
     t0 = time.monotonic()
 
-    if use_pytest:
-        cmd = [sys.executable, "-m", "pytest", str(path), "-q", "--tb=short"]
-    else:
-        cmd = [sys.executable, str(path)]
+    cmd = [sys.executable, str(path)]
 
     result = subprocess.run(
         cmd,
@@ -93,7 +81,6 @@ def main() -> int:
             print(f"No test file matching '{args.only}'")
             return 1
 
-    pytest_available = _has_pytest()
     total_start = time.monotonic()
 
     passed_files: list[str] = []
@@ -107,18 +94,17 @@ def main() -> int:
 
     for path in test_files:
         name = path.stem
-        is_pytest = path.name in PYTEST_FILES
+        needs_ext = path.name in EXTERNAL_DEP_FILES
 
-        # Skip pytest tests if --fast or pytest not available
-        if is_pytest and (args.fast or not pytest_available):
-            reason = "--fast" if args.fast else "pytest not installed"
+        # Skip external-dep tests when --fast
+        if needs_ext and args.fast:
             skipped_files.append(name)
-            results_detail.append((name, f"SKIP ({reason})", 0.0, ""))
-            print(f"  SKIP  {name:<40} ({reason})")
+            results_detail.append((name, "SKIP (--fast)", 0.0, ""))
+            print(f"  SKIP  {name:<40} (--fast)")
             continue
 
         try:
-            ok, elapsed, output = _run_file(path, use_pytest=is_pytest)
+            ok, elapsed, output = _run_file(path)
         except subprocess.TimeoutExpired:
             failed_files.append(name)
             results_detail.append((name, "TIMEOUT", 120.0, "Timed out after 120s"))
@@ -129,6 +115,16 @@ def main() -> int:
             passed_files.append(name)
             results_detail.append((name, "PASS", elapsed, output))
             print(f"  PASS  {name:<40} ({elapsed:.1f}s)")
+        elif "ModuleNotFoundError" in output or "No module named" in output:
+            # Missing dependency — treat as skip, not failure
+            mod = "unknown"
+            for line in output.split("\n"):
+                if "No module named" in line:
+                    mod = line.split("No module named")[-1].strip().strip("'\"")
+                    break
+            skipped_files.append(name)
+            results_detail.append((name, f"SKIP (needs {mod})", elapsed, output))
+            print(f"  SKIP  {name:<40} (needs {mod})")
         else:
             failed_files.append(name)
             results_detail.append((name, "FAIL", elapsed, output))

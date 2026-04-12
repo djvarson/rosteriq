@@ -11,15 +11,16 @@ Tests cover:
 - Factory and health checks
 """
 
-import pytest
 import asyncio
 from datetime import date, time, datetime, timedelta
 from typing import Dict, Any, List
 from unittest.mock import AsyncMock, MagicMock, patch, call
+import sys
+from pathlib import Path
 
 # Import integration module
-import sys
-sys.path.insert(0, "/sessions/fervent-adoring-goodall/mnt/outputs/rosteriq-deploy")
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT)) if str(ROOT) not in sys.path else None
 
 from rosteriq.tanda_integration import (
     TandaCredentials,
@@ -45,11 +46,10 @@ from rosteriq.tanda_integration import (
 
 
 # ============================================================================
-# Fixtures
+# Helper Functions (formerly fixtures)
 # ============================================================================
 
-@pytest.fixture
-def credentials():
+def _credentials():
     """Sample Tanda credentials."""
     return TandaCredentials(
         client_id="test_client_id",
@@ -60,20 +60,19 @@ def credentials():
     )
 
 
-@pytest.fixture
-def tanda_client(credentials):
+def _tanda_client():
     """Sample Tanda API client."""
+    credentials = _credentials()
     return TandaClient(credentials)
 
 
-@pytest.fixture
-def tanda_sync(tanda_client):
+def _tanda_sync():
     """Sample Tanda sync manager."""
+    tanda_client = _tanda_client()
     return TandaSync(tanda_client)
 
 
-@pytest.fixture
-def sample_tanda_employee():
+def _sample_tanda_employee():
     """Sample employee from Tanda API."""
     return {
         "id": "emp_001",
@@ -92,8 +91,7 @@ def sample_tanda_employee():
     }
 
 
-@pytest.fixture
-def sample_rosteriq_shift():
+def _sample_rosteriq_shift():
     """Sample shift from RosterIQ."""
     return {
         "id": "shift_001",
@@ -107,8 +105,7 @@ def sample_rosteriq_shift():
     }
 
 
-@pytest.fixture
-def sample_tanda_department():
+def _sample_tanda_department():
     """Sample department from Tanda."""
     return TandaDepartment(
         id="dept_001",
@@ -119,8 +116,7 @@ def sample_tanda_department():
     )
 
 
-@pytest.fixture
-def sample_tanda_shift():
+def _sample_tanda_shift():
     """Sample shift from Tanda."""
     return TandaShift(
         id="shift_001",
@@ -135,8 +131,7 @@ def sample_tanda_shift():
     )
 
 
-@pytest.fixture
-def sample_tanda_leave():
+def _sample_tanda_leave():
     """Sample leave record from Tanda."""
     return TandaLeave(
         id="leave_001",
@@ -149,8 +144,7 @@ def sample_tanda_leave():
     )
 
 
-@pytest.fixture
-def sample_tanda_availability():
+def _sample_tanda_availability():
     """Sample availability from Tanda."""
     return TandaAvailability(
         user_id="emp_001",
@@ -168,16 +162,18 @@ def sample_tanda_availability():
 class TestTandaCredentials:
     """Tests for TandaCredentials dataclass."""
 
-    def test_credentials_initialization(self, credentials):
+    def test_credentials_initialization(self):
         """Test credentials initialization."""
+        credentials = _credentials()
         assert credentials.client_id == "test_client_id"
         assert credentials.client_secret == "test_client_secret"
         assert credentials.access_token == "test_access_token"
         assert credentials.refresh_token == "test_refresh_token"
         assert credentials.organisation_id == "test_org_id"
 
-    def test_credentials_to_dict(self, credentials):
+    def test_credentials_to_dict(self):
         """Test credentials to_dict method."""
+        credentials = _credentials()
         cred_dict = credentials.to_dict()
         assert cred_dict["client_id"] == "test_client_id"
         assert cred_dict["access_token"] == "test_access_token"
@@ -213,21 +209,24 @@ class TestTandaCredentials:
 class TestTandaClient:
     """Tests for TandaClient HTTP client."""
 
-    def test_client_initialization(self, tanda_client, credentials):
+    def test_client_initialization(self):
         """Test client initialization."""
+        credentials = _credentials()
+        tanda_client = _tanda_client()
         assert tanda_client.credentials == credentials
         assert tanda_client.base_url == "https://my.tanda.co/api/v2"
         assert tanda_client.timeout == 30
 
-    def test_get_headers(self, tanda_client):
+    def test_get_headers(self):
         """Test HTTP headers generation."""
+        tanda_client = _tanda_client()
         headers = tanda_client._get_headers()
         assert headers["Authorization"] == "Bearer test_access_token"
         assert headers["Content-Type"] == "application/json"
 
-    @pytest.mark.asyncio
-    async def test_rate_limiting(self, tanda_client):
+    async def test_rate_limiting(self):
         """Test rate limiting mechanism."""
+        tanda_client = _tanda_client()
         # First request should work
         await tanda_client._check_rate_limit()
         assert tanda_client.request_count == 1
@@ -237,9 +236,9 @@ class TestTandaClient:
             await tanda_client._check_rate_limit()
         assert tanda_client.request_count == 6
 
-    @pytest.mark.asyncio
-    async def test_token_refresh(self, tanda_client):
+    async def test_token_refresh(self):
         """Test OAuth token refresh."""
+        tanda_client = _tanda_client()
         new_token = "new_access_token"
 
         with patch("httpx.AsyncClient.post") as mock_post:
@@ -255,9 +254,9 @@ class TestTandaClient:
             assert result is True
             assert tanda_client.credentials.access_token == new_token
 
-    @pytest.mark.asyncio
-    async def test_request_with_bearer_auth(self, tanda_client):
+    async def test_request_with_bearer_auth(self):
         """Test authenticated request."""
+        tanda_client = _tanda_client()
         with patch("httpx.AsyncClient.request") as mock_request:
             mock_response = AsyncMock()
             mock_response.status_code = 200
@@ -280,8 +279,9 @@ class TestTandaClient:
 class TestEmployeeMapping:
     """Tests for employee sync and mapping."""
 
-    def test_tanda_employee_to_rosteriq(self, sample_tanda_employee):
+    def test_tanda_employee_to_rosteriq(self):
         """Test converting Tanda employee to RosterIQ format."""
+        sample_tanda_employee = _sample_tanda_employee()
         employee = tanda_employee_to_rosteriq(sample_tanda_employee)
 
         assert employee.id == "emp_001"
@@ -292,8 +292,9 @@ class TestEmployeeMapping:
         assert employee.hourly_rate == 25.50
         assert employee.active is True
 
-    def test_employee_mapping_with_dates(self, sample_tanda_employee):
+    def test_employee_mapping_with_dates(self):
         """Test employee mapping with date fields."""
+        sample_tanda_employee = _sample_tanda_employee()
         employee = tanda_employee_to_rosteriq(sample_tanda_employee)
 
         assert isinstance(employee.date_of_birth, date)
@@ -328,9 +329,10 @@ class TestEmployeeMapping:
         assert emp_dict["id"] == "emp_001"
         assert emp_dict["start_date"] == "2020-06-01"
 
-    @pytest.mark.asyncio
-    async def test_sync_employees(self, tanda_sync, sample_tanda_employee):
+    async def test_sync_employees(self):
         """Test syncing employees from Tanda."""
+        tanda_sync = _tanda_sync()
+        sample_tanda_employee = _sample_tanda_employee()
         tanda_sync.client.paginate = AsyncMock(
             return_value=[sample_tanda_employee]
         )
@@ -350,8 +352,9 @@ class TestEmployeeMapping:
 class TestAvailability:
     """Tests for availability sync and parsing."""
 
-    def test_availability_initialization(self, sample_tanda_availability):
+    def test_availability_initialization(self):
         """Test availability initialization."""
+        sample_tanda_availability = _sample_tanda_availability()
         avail = sample_tanda_availability
 
         assert avail.user_id == "emp_001"
@@ -360,17 +363,18 @@ class TestAvailability:
         assert avail.end_time == time(17, 0)
         assert avail.recurring is True
 
-    def test_availability_to_dict(self, sample_tanda_availability):
+    def test_availability_to_dict(self):
         """Test availability to_dict method."""
+        sample_tanda_availability = _sample_tanda_availability()
         avail_dict = sample_tanda_availability.to_dict()
 
         assert avail_dict["user_id"] == "emp_001"
         assert avail_dict["day_of_week"] == 0
         assert avail_dict["start_time"] == "09:00:00"
 
-    @pytest.mark.asyncio
-    async def test_sync_availability(self, tanda_sync):
+    async def test_sync_availability(self):
         """Test syncing availability from Tanda."""
+        tanda_sync = _tanda_sync()
         mock_response = {
             "availability": [
                 {
@@ -394,9 +398,9 @@ class TestAvailability:
         assert len(availability["emp_001"]) == 1
         assert availability["emp_001"][0].day_of_week == 0
 
-    @pytest.mark.asyncio
-    async def test_sync_availability_date_defaults(self, tanda_sync):
+    async def test_sync_availability_date_defaults(self):
         """Test availability sync uses default dates."""
+        tanda_sync = _tanda_sync()
         mock_response = {"availability": []}
 
         tanda_sync.client.get = AsyncMock(return_value=mock_response)
@@ -406,6 +410,7 @@ class TestAvailability:
         # Should call with default dates
         tanda_sync.client.get.assert_called_once()
         call_kwargs = tanda_sync.client.get.call_args[1]
+        assert "params" in call_kwargs
         assert "from" in call_kwargs["params"]
 
 
@@ -416,8 +421,9 @@ class TestAvailability:
 class TestShiftPushing:
     """Tests for pushing shifts to Tanda."""
 
-    def test_rosteriq_shift_to_tanda(self, sample_rosteriq_shift):
+    def test_rosteriq_shift_to_tanda(self):
         """Test converting RosterIQ shift to Tanda format."""
+        sample_rosteriq_shift = _sample_rosteriq_shift()
         tanda_shift = rosteriq_shift_to_tanda(
             sample_rosteriq_shift,
             employee_id="emp_001",
@@ -430,8 +436,9 @@ class TestShiftPushing:
         assert tanda_shift.start_time == time(9, 0, 0)
         assert tanda_shift.finish_time == time(17, 0, 0)
 
-    def test_shift_to_dict(self, sample_tanda_shift):
+    def test_shift_to_dict(self):
         """Test shift to_dict method."""
+        sample_tanda_shift = _sample_tanda_shift()
         shift_dict = sample_tanda_shift.to_dict()
 
         assert shift_dict["id"] == "shift_001"
@@ -439,9 +446,10 @@ class TestShiftPushing:
         assert shift_dict["date"] == "2026-04-10"
         assert shift_dict["start_time"] == "09:00:00"
 
-    @pytest.mark.asyncio
-    async def test_push_shift_create(self, tanda_sync, sample_rosteriq_shift):
+    async def test_push_shift_create(self):
         """Test creating a new shift in Tanda."""
+        tanda_sync = _tanda_sync()
+        sample_rosteriq_shift = _sample_rosteriq_shift()
         mock_response = {
             "id": "shift_new",
             "user_id": "emp_001",
@@ -458,9 +466,10 @@ class TestShiftPushing:
         assert result["id"] == "shift_new"
         tanda_sync.client.post.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_push_shift_update(self, tanda_sync, sample_rosteriq_shift):
+    async def test_push_shift_update(self):
         """Test updating an existing shift in Tanda."""
+        tanda_sync = _tanda_sync()
+        sample_rosteriq_shift = _sample_rosteriq_shift()
         sample_rosteriq_shift["id"] = "shift_existing"
 
         mock_response = {
@@ -479,9 +488,9 @@ class TestShiftPushing:
         assert result["id"] == "shift_existing"
         tanda_sync.client.patch.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_push_shifts_multiple(self, tanda_sync):
+    async def test_push_shifts_multiple(self):
         """Test pushing multiple shifts."""
+        tanda_sync = _tanda_sync()
         shifts = [
             {
                 "employee_id": "emp_001",
@@ -509,9 +518,9 @@ class TestShiftPushing:
         assert len(results) == 2
         assert tanda_sync.client.post.call_count == 2
 
-    @pytest.mark.asyncio
-    async def test_push_roster(self, tanda_sync):
+    async def test_push_roster(self):
         """Test pushing entire roster."""
+        tanda_sync = _tanda_sync()
         roster = {
             "emp_001": [
                 {
@@ -598,9 +607,9 @@ class TestDepartmentMapping:
         role = map_department_to_role(dept)
         assert role == "chef"
 
-    @pytest.mark.asyncio
-    async def test_sync_departments(self, tanda_sync):
+    async def test_sync_departments(self):
         """Test syncing departments from Tanda."""
+        tanda_sync = _tanda_sync()
         mock_departments = [
             {
                 "id": "dept_001",
@@ -652,9 +661,9 @@ class TestTimesheets:
         assert ts_dict["id"] == "ts_001"
         assert ts_dict["date"] == "2026-04-10"
 
-    @pytest.mark.asyncio
-    async def test_sync_timesheets(self, tanda_sync):
+    async def test_sync_timesheets(self):
         """Test syncing timesheets from Tanda."""
+        tanda_sync = _tanda_sync()
         mock_timesheets = [
             {
                 "id": "ts_001",
@@ -677,9 +686,9 @@ class TestTimesheets:
         assert timesheets[0].id == "ts_001"
         assert timesheets[0].total_hours == 8.0
 
-    @pytest.mark.asyncio
-    async def test_sync_timesheets_date_defaults(self, tanda_sync):
+    async def test_sync_timesheets_date_defaults(self):
         """Test timesheet sync uses default date range."""
+        tanda_sync = _tanda_sync()
         mock_timesheets = []
 
         tanda_sync.client.paginate = AsyncMock(return_value=mock_timesheets)
@@ -689,6 +698,7 @@ class TestTimesheets:
         # Should call with default dates
         tanda_sync.client.paginate.assert_called_once()
         call_kwargs = tanda_sync.client.paginate.call_args[1]
+        assert "params" in call_kwargs
         assert "from" in call_kwargs["params"]
         assert "to" in call_kwargs["params"]
 
@@ -713,9 +723,9 @@ class TestQualifications:
         assert qual.name == "Food Handler Certification"
         assert "chef" in qual.required_for_roles
 
-    @pytest.mark.asyncio
-    async def test_sync_qualifications(self, tanda_sync):
+    async def test_sync_qualifications(self):
         """Test syncing qualifications from Tanda."""
+        tanda_sync = _tanda_sync()
         mock_quals = [
             {
                 "id": "qual_001",
@@ -733,9 +743,9 @@ class TestQualifications:
         assert "qual_001" in qualifications
         assert qualifications["qual_001"].name == "Food Handler"
 
-    @pytest.mark.asyncio
-    async def test_get_award_tags(self, tanda_sync):
+    async def test_get_award_tags(self):
         """Test getting award tags."""
+        tanda_sync = _tanda_sync()
         mock_tags = [
             {"id": "tag_001", "name": "Award Type A"},
             {"id": "tag_002", "name": "Award Type B"},
@@ -756,9 +766,9 @@ class TestQualifications:
 class TestHealthCheck:
     """Tests for health check functionality."""
 
-    @pytest.mark.asyncio
-    async def test_health_check_healthy(self, tanda_sync):
+    async def test_health_check_healthy(self):
         """Test successful health check."""
+        tanda_sync = _tanda_sync()
         tanda_sync.client.get = AsyncMock(
             return_value={"status": "ok", "data": []}
         )
@@ -768,9 +778,9 @@ class TestHealthCheck:
         assert result["status"] == "healthy"
         assert "timestamp" in result
 
-    @pytest.mark.asyncio
-    async def test_health_check_unhealthy(self, tanda_sync):
+    async def test_health_check_unhealthy(self):
         """Test failed health check."""
+        tanda_sync = _tanda_sync()
         tanda_sync.client.get = AsyncMock(
             side_effect=Exception("Connection error")
         )
@@ -788,15 +798,17 @@ class TestHealthCheck:
 class TestTandaWebhook:
     """Tests for webhook handling."""
 
-    def test_webhook_initialization(self, tanda_sync):
+    def test_webhook_initialization(self):
         """Test webhook initialization."""
+        tanda_sync = _tanda_sync()
         webhook = TandaWebhook(tanda_sync)
 
         assert webhook.sync == tanda_sync
         assert webhook.router is not None
 
-    def test_webhook_get_router(self, tanda_sync):
+    def test_webhook_get_router(self):
         """Test getting FastAPI router from webhook."""
+        tanda_sync = _tanda_sync()
         webhook = TandaWebhook(tanda_sync)
         router = webhook.get_router()
 
@@ -804,9 +816,9 @@ class TestTandaWebhook:
         # Router should have routes
         assert len(router.routes) > 0
 
-    @pytest.mark.asyncio
-    async def test_webhook_user_created(self, tanda_sync):
+    async def test_webhook_user_created(self):
         """Test user created webhook handler."""
+        tanda_sync = _tanda_sync()
         tanda_sync.sync_employees = AsyncMock()
 
         webhook = TandaWebhook(tanda_sync)
@@ -814,17 +826,17 @@ class TestTandaWebhook:
 
         tanda_sync.sync_employees.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_webhook_shift_created(self, tanda_sync):
+    async def test_webhook_shift_created(self):
         """Test shift created webhook handler."""
+        tanda_sync = _tanda_sync()
         webhook = TandaWebhook(tanda_sync)
 
         # Should not raise
         await webhook._handle_shift_created({"id": "shift_001"})
 
-    @pytest.mark.asyncio
-    async def test_webhook_timesheet_submitted(self, tanda_sync):
+    async def test_webhook_timesheet_submitted(self):
         """Test timesheet submitted webhook handler."""
+        tanda_sync = _tanda_sync()
         webhook = TandaWebhook(tanda_sync)
 
         # Should not raise
@@ -838,9 +850,9 @@ class TestTandaWebhook:
 class TestFactory:
     """Tests for factory function."""
 
-    @pytest.mark.asyncio
-    async def test_create_tanda_integration(self, credentials):
+    async def test_create_tanda_integration(self):
         """Test creating Tanda integration."""
+        credentials = _credentials()
         sync, webhook = await create_tanda_integration(credentials)
 
         assert sync is not None
@@ -848,9 +860,9 @@ class TestFactory:
         assert isinstance(sync, TandaSync)
         assert isinstance(webhook, TandaWebhook)
 
-    @pytest.mark.asyncio
-    async def test_factory_returns_connected_instances(self, credentials):
+    async def test_factory_returns_connected_instances(self):
         """Test factory returns properly connected instances."""
+        credentials = _credentials()
         sync, webhook = await create_tanda_integration(credentials)
 
         assert sync.client is not None
@@ -864,9 +876,11 @@ class TestFactory:
 class TestIntegration:
     """End-to-end integration tests."""
 
-    @pytest.mark.asyncio
-    async def test_employee_to_shift_workflow(self, tanda_sync, sample_tanda_employee):
+    async def test_employee_to_shift_workflow(self):
         """Test workflow from syncing employees to pushing shifts."""
+        tanda_sync = _tanda_sync()
+        sample_tanda_employee = _sample_tanda_employee()
+
         # Mock employee sync
         tanda_sync.client.paginate = AsyncMock(
             return_value=[sample_tanda_employee]
@@ -886,9 +900,9 @@ class TestIntegration:
         departments = await tanda_sync.sync_departments()
         assert len(departments) == 1
 
-    @pytest.mark.asyncio
-    async def test_full_sync_cycle(self, credentials):
+    async def test_full_sync_cycle(self):
         """Test full sync cycle from integration factory."""
+        credentials = _credentials()
         sync, webhook = await create_tanda_integration(credentials)
 
         assert sync is not None
@@ -903,24 +917,27 @@ class TestIntegration:
 class TestErrorHandling:
     """Tests for error handling."""
 
-    @pytest.mark.asyncio
-    async def test_sync_employees_error_handling(self, tanda_sync):
+    async def test_sync_employees_error_handling(self):
         """Test error handling in employee sync."""
+        tanda_sync = _tanda_sync()
         tanda_sync.client.paginate = AsyncMock(
             side_effect=Exception("API Error")
         )
 
-        with pytest.raises(Exception):
+        try:
             await tanda_sync.sync_employees()
+            assert False, "Should have raised Exception"
+        except Exception:
+            pass
 
-    @pytest.mark.asyncio
-    async def test_push_shift_error_handling(self, tanda_sync):
+    async def test_push_shift_error_handling(self):
         """Test error handling in shift push."""
+        tanda_sync = _tanda_sync()
         tanda_sync.client.post = AsyncMock(
             side_effect=Exception("API Error")
         )
 
-        with pytest.raises(Exception):
+        try:
             await tanda_sync.push_shift(
                 {
                     "date": date(2026, 4, 10),
@@ -929,10 +946,13 @@ class TestErrorHandling:
                 },
                 "emp_001",
             )
+            assert False, "Should have raised Exception"
+        except Exception:
+            pass
 
-    @pytest.mark.asyncio
-    async def test_push_shifts_partial_failure(self, tanda_sync):
+    async def test_push_shifts_partial_failure(self):
         """Test push shifts with partial failures."""
+        tanda_sync = _tanda_sync()
         shifts = [
             {
                 "employee_id": "emp_001",
@@ -966,4 +986,24 @@ class TestErrorHandling:
 # ============================================================================
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--tb=short"])
+    import asyncio as _asyncio
+    passed = failed = 0
+    for name, obj in list(globals().items()):
+        if isinstance(obj, type) and name.startswith("Test"):
+            inst = obj()
+            for mname in sorted(dir(inst)):
+                if mname.startswith("test_"):
+                    try:
+                        result = getattr(inst, mname)()
+                        if _asyncio.iscoroutine(result):
+                            _asyncio.run(result)
+                        passed += 1
+                        print(f"  PASS {name}.{mname}")
+                    except AssertionError as e:
+                        failed += 1
+                        print(f"  FAIL {name}.{mname}: {e}")
+                    except Exception as e:
+                        failed += 1
+                        print(f"  ERROR {name}.{mname}: {type(e).__name__}: {e}")
+    print(f"\n{passed}/{passed + failed} tests passed")
+    sys.exit(0 if failed == 0 else 1)

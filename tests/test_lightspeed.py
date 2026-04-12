@@ -16,10 +16,15 @@ Tests cover:
 No network calls required - all tests use mocked httpx client.
 """
 
-import pytest
+import sys
+import asyncio
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from dataclasses import dataclass
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from rosteriq.data_feeds.lightspeed import (
     LightspeedCredentials,
@@ -39,11 +44,10 @@ from rosteriq.data_feeds.lightspeed import (
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Helper Functions (formerly fixtures)
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def valid_credentials():
+def _valid_credentials():
     """Valid test credentials."""
     return LightspeedCredentials(
         client_id="test_client_id",
@@ -53,8 +57,7 @@ def valid_credentials():
     )
 
 
-@pytest.fixture
-def sample_sales_data():
+def _sample_sales_data():
     """Sample Lightspeed API sales response."""
     now = datetime.now(AU_TZ)
     return [
@@ -85,8 +88,7 @@ def sample_sales_data():
     ]
 
 
-@pytest.fixture
-def sample_historical_sales():
+def _sample_historical_sales():
     """Generate 8 weeks of sample historical sales."""
     base_date = datetime.now(AU_TZ) - timedelta(weeks=8)
     sales = []
@@ -120,8 +122,9 @@ def sample_historical_sales():
 class TestLightspeedCredentials:
     """Test credential validation."""
 
-    def test_valid_credentials(self, valid_credentials):
+    def test_valid_credentials(self):
         """Test valid credentials creation."""
+        valid_credentials = _valid_credentials()
         assert valid_credentials.client_id == "test_client_id"
         assert valid_credentials.client_secret == "test_client_secret"
         assert valid_credentials.refresh_token == "test_refresh_token"
@@ -129,43 +132,55 @@ class TestLightspeedCredentials:
 
     def test_empty_client_id_raises_error(self):
         """Test that empty client_id raises ValueError."""
-        with pytest.raises(ValueError):
+        try:
             LightspeedCredentials(
                 client_id="",
                 client_secret="secret",
                 refresh_token="token",
                 business_location_id="loc_123",
             )
+            raise AssertionError("expected ValueError")
+        except ValueError:
+            pass
 
     def test_empty_client_secret_raises_error(self):
         """Test that empty client_secret raises ValueError."""
-        with pytest.raises(ValueError):
+        try:
             LightspeedCredentials(
                 client_id="client",
                 client_secret="",
                 refresh_token="token",
                 business_location_id="loc_123",
             )
+            raise AssertionError("expected ValueError")
+        except ValueError:
+            pass
 
     def test_empty_refresh_token_raises_error(self):
         """Test that empty refresh_token raises ValueError."""
-        with pytest.raises(ValueError):
+        try:
             LightspeedCredentials(
                 client_id="client",
                 client_secret="secret",
                 refresh_token="",
                 business_location_id="loc_123",
             )
+            raise AssertionError("expected ValueError")
+        except ValueError:
+            pass
 
     def test_empty_location_id_raises_error(self):
         """Test that empty business_location_id raises ValueError."""
-        with pytest.raises(ValueError):
+        try:
             LightspeedCredentials(
                 client_id="client",
                 client_secret="secret",
                 refresh_token="token",
                 business_location_id="",
             )
+            raise AssertionError("expected ValueError")
+        except ValueError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -175,17 +190,17 @@ class TestLightspeedCredentials:
 class TestLightspeedClient:
     """Test low-level Lightspeed API client."""
 
-    @pytest.mark.asyncio
-    async def test_client_initialization(self, valid_credentials):
+    def test_client_initialization(self):
         """Test client initializes correctly."""
+        valid_credentials = _valid_credentials()
         client = LightspeedClient(valid_credentials)
         assert client.creds == valid_credentials
         assert client._token_cache.token is None
-        await client.close()
+        asyncio.run(client.close())
 
-    @pytest.mark.asyncio
-    async def test_token_cache_validity(self, valid_credentials):
+    def test_token_cache_validity(self):
         """Test token cache expiry tracking."""
+        valid_credentials = _valid_credentials()
         client = LightspeedClient(valid_credentials)
 
         # Token not yet set
@@ -200,11 +215,11 @@ class TestLightspeedClient:
         client._token_cache.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
         assert not client._token_cache.is_valid
 
-        await client.close()
+        asyncio.run(client.close())
 
-    @pytest.mark.asyncio
-    async def test_token_refresh_success(self, valid_credentials):
+    def test_token_refresh_success(self):
         """Test successful OAuth token refresh."""
+        valid_credentials = _valid_credentials()
         client = LightspeedClient(valid_credentials)
 
         # Mock httpx response
@@ -219,15 +234,15 @@ class TestLightspeedClient:
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = mock_response
 
-            token = await client._refresh_oauth_token()
+            token = asyncio.run(client._refresh_oauth_token())
             assert token == "new_access_token"
             assert client._token_cache.token == "new_access_token"
 
-        await client.close()
+        asyncio.run(client.close())
 
-    @pytest.mark.asyncio
-    async def test_token_refresh_auth_error(self, valid_credentials):
+    def test_token_refresh_auth_error(self):
         """Test token refresh auth error handling."""
+        valid_credentials = _valid_credentials()
         client = LightspeedClient(valid_credentials)
 
         mock_response = MagicMock()
@@ -237,14 +252,17 @@ class TestLightspeedClient:
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = mock_response
 
-            with pytest.raises(LightspeedAuthError):
-                await client._refresh_oauth_token()
+            try:
+                asyncio.run(client._refresh_oauth_token())
+                raise AssertionError("expected LightspeedAuthError")
+            except LightspeedAuthError:
+                pass
 
-        await client.close()
+        asyncio.run(client.close())
 
-    @pytest.mark.asyncio
-    async def test_token_cache_reuse(self, valid_credentials):
+    def test_token_cache_reuse(self):
         """Test that valid cached token is reused."""
+        valid_credentials = _valid_credentials()
         client = LightspeedClient(valid_credentials)
 
         # Set valid token in cache
@@ -253,11 +271,11 @@ class TestLightspeedClient:
 
         # Should not make HTTP call
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-            token = await client._refresh_oauth_token()
+            token = asyncio.run(client._refresh_oauth_token())
             assert token == "cached_token"
             mock_post.assert_not_called()
 
-        await client.close()
+        asyncio.run(client.close())
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +344,9 @@ class TestSalesAnalyser:
         assert snapshot.avg_transaction_value == 100.00
         assert snapshot.covers == 2
 
-    def test_build_sales_snapshot_multiple_sales(self, sample_sales_data):
+    def test_build_sales_snapshot_multiple_sales(self):
         """Test snapshot building with multiple sales."""
+        sample_sales_data = _sample_sales_data()
         analyser = SalesAnalyser()
         snapshot = analyser.build_sales_snapshot(
             location_id="loc_123",
@@ -335,11 +354,13 @@ class TestSalesAnalyser:
             sales=sample_sales_data,
         )
         assert snapshot.transaction_count == 3
-        assert snapshot.total_revenue == pytest.approx(256.25, rel=0.01)
+        # Use custom approx check instead of pytest.approx
+        assert abs(snapshot.total_revenue - 256.25) / max(abs(256.25), 1e-9) < 0.01
         assert snapshot.covers == 4
 
-    def test_build_sales_snapshot_revenue_centres(self, sample_sales_data):
+    def test_build_sales_snapshot_revenue_centres(self):
         """Test revenue centre breakdown in snapshot."""
+        sample_sales_data = _sample_sales_data()
         analyser = SalesAnalyser()
         snapshot = analyser.build_sales_snapshot(
             location_id="loc_123",
@@ -352,8 +373,9 @@ class TestSalesAnalyser:
         assert "Dining" in snapshot.top_revenue_centers
         assert "Takeaway" in snapshot.top_revenue_centers
 
-    def test_build_sales_snapshot_hourly_breakdown(self, sample_sales_data):
+    def test_build_sales_snapshot_hourly_breakdown(self):
         """Test hourly breakdown in snapshot."""
+        sample_sales_data = _sample_sales_data()
         analyser = SalesAnalyser()
         snapshot = analyser.build_sales_snapshot(
             location_id="loc_123",
@@ -364,8 +386,9 @@ class TestSalesAnalyser:
         assert len(snapshot.hourly_breakdown) > 0
         assert len(snapshot.hourly_covers) > 0
 
-    def test_analyse_trading_patterns_basic(self, sample_historical_sales):
+    def test_analyse_trading_patterns_basic(self):
         """Test trading pattern analysis."""
+        sample_historical_sales = _sample_historical_sales()
         analyser = SalesAnalyser()
 
         # Build snapshots from historical sales
@@ -562,8 +585,9 @@ class TestSalesAnalyser:
 class TestLightspeedAdapter:
     """Test high-level Lightspeed adapter."""
 
-    def test_adapter_initialization(self, valid_credentials):
+    def test_adapter_initialization(self):
         """Test adapter initializes correctly."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(
             credentials=valid_credentials,
             location_name="The Eagle Hotel",
@@ -575,8 +599,9 @@ class TestLightspeedAdapter:
         assert adapter.lookback_weeks == 8
         assert adapter.fetch_interval_minutes == 15
 
-    def test_calculate_confidence_no_data(self, valid_credentials):
+    def test_calculate_confidence_no_data(self):
         """Test confidence calculation with no data."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(valid_credentials)
 
         snapshot = SalesSnapshot(
@@ -591,8 +616,10 @@ class TestLightspeedAdapter:
         confidence = adapter._calculate_confidence(snapshot)
         assert confidence == 0.5  # base confidence only
 
-    def test_calculate_confidence_full_data(self, valid_credentials, sample_sales_data):
+    def test_calculate_confidence_full_data(self):
         """Test confidence calculation with complete data."""
+        valid_credentials = _valid_credentials()
+        sample_sales_data = _sample_sales_data()
         adapter = LightspeedAdapter(valid_credentials)
 
         now = datetime.now(AU_TZ)
@@ -625,8 +652,9 @@ class TestLightspeedAdapter:
         assert confidence > 0.5
         assert confidence <= 1.0
 
-    def test_analyse_revenue_centres_dominant(self, valid_credentials):
+    def test_analyse_revenue_centres_dominant(self):
         """Test revenue centre analysis with one dominant centre."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(valid_credentials)
 
         now = datetime.now(AU_TZ)
@@ -648,8 +676,9 @@ class TestLightspeedAdapter:
         assert signal["metadata"]["dominant_centre"] == "Bar"
         assert signal["metadata"]["centre_revenue_pct"] == 75.0
 
-    def test_analyse_revenue_centres_balanced(self, valid_credentials):
+    def test_analyse_revenue_centres_balanced(self):
         """Test revenue centre analysis with balanced centres."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(valid_credentials)
 
         now = datetime.now(AU_TZ)
@@ -668,8 +697,9 @@ class TestLightspeedAdapter:
         signal = adapter._analyse_revenue_centres(snapshot)
         assert signal is None  # No dominant centre
 
-    def test_analyse_covers_velocity_high(self, valid_credentials):
+    def test_analyse_covers_velocity_high(self):
         """Test covers velocity analysis with high velocity."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(valid_credentials)
 
         now = datetime.now(AU_TZ)
@@ -704,8 +734,9 @@ class TestLightspeedAdapter:
         assert signal["category"] == "pos_covers_velocity"
         assert "velocity_ratio" in signal["metadata"]
 
-    def test_analyse_covers_velocity_normal(self, valid_credentials):
+    def test_analyse_covers_velocity_normal(self):
         """Test covers velocity analysis with normal velocity."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(valid_credentials)
 
         now = datetime.now(AU_TZ)
@@ -738,8 +769,9 @@ class TestLightspeedAdapter:
         signal = adapter._analyse_covers_velocity(snapshot)
         assert signal is None  # No high velocity alert
 
-    def test_health_check_success(self, valid_credentials):
+    def test_health_check_success(self):
         """Test health check success."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(valid_credentials)
 
         # Mock successful auth and venue fetch
@@ -749,21 +781,20 @@ class TestLightspeedAdapter:
                 mock_venue.return_value = {"name": "The Eagle Hotel"}
 
                 # Run async health check in sync test
-                import asyncio
                 result = asyncio.run(adapter.health_check())
 
                 assert result["status"] == "healthy"
                 assert result["connected"] is True
                 assert result["venue_id"] == "loc_12345"
 
-    def test_health_check_auth_failure(self, valid_credentials):
+    def test_health_check_auth_failure(self):
         """Test health check with auth failure."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(valid_credentials)
 
         with patch.object(adapter.client, "_refresh_oauth_token", new_callable=AsyncMock) as mock_auth:
             mock_auth.side_effect = LightspeedAuthError("Auth failed")
 
-            import asyncio
             result = asyncio.run(adapter.health_check())
 
             assert result["status"] == "auth_failed"
@@ -811,9 +842,10 @@ class TestFactoryFunction:
 class TestLightspeedIntegration:
     """Integration tests with mocked HTTP."""
 
-    @pytest.mark.asyncio
-    async def test_fetch_signals_success(self, valid_credentials, sample_sales_data):
+    def test_fetch_signals_success(self):
         """Test successful signal fetching."""
+        valid_credentials = _valid_credentials()
+        sample_sales_data = _sample_sales_data()
         adapter = LightspeedAdapter(valid_credentials)
 
         # Mock initialise and client methods
@@ -833,17 +865,17 @@ class TestLightspeedIntegration:
             with patch.object(adapter.client, "get_sales", new_callable=AsyncMock) as mock_get_sales:
                 mock_get_sales.return_value = sample_sales_data
 
-                signals = await adapter.fetch_signals()
+                signals = asyncio.run(adapter.fetch_signals())
 
                 assert len(signals) > 0
                 # Should have primary demand signal
                 assert any(s["source"] == "lightspeed" for s in signals)
 
-        await adapter.close()
+        asyncio.run(adapter.close())
 
-    @pytest.mark.asyncio
-    async def test_fetch_signals_no_sales(self, valid_credentials):
+    def test_fetch_signals_no_sales(self):
         """Test signal fetching with no current sales."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(valid_credentials)
 
         with patch.object(adapter, "initialise", new_callable=AsyncMock):
@@ -852,28 +884,29 @@ class TestLightspeedIntegration:
             with patch.object(adapter.client, "get_sales", new_callable=AsyncMock) as mock_get_sales:
                 mock_get_sales.return_value = []
 
-                signals = await adapter.fetch_signals()
+                signals = asyncio.run(adapter.fetch_signals())
 
                 assert signals == []
 
-        await adapter.close()
+        asyncio.run(adapter.close())
 
-    @pytest.mark.asyncio
-    async def test_get_revenue_centres(self, valid_credentials, sample_sales_data):
+    def test_get_revenue_centres(self):
         """Test revenue centre breakdown."""
+        valid_credentials = _valid_credentials()
+        sample_sales_data = _sample_sales_data()
         adapter = LightspeedAdapter(valid_credentials)
 
         with patch.object(adapter.client, "get_sales", new_callable=AsyncMock) as mock_get_sales:
             mock_get_sales.return_value = sample_sales_data
 
-            centres = await adapter.get_revenue_centres()
+            centres = asyncio.run(adapter.get_revenue_centres())
 
             assert len(centres) == 3
             assert all(isinstance(c, RevenueCenterBreakdown) for c in centres)
             # Should be sorted by revenue descending
             assert centres[0].revenue >= centres[-1].revenue
 
-        await adapter.close()
+        asyncio.run(adapter.close())
 
 
 # ---------------------------------------------------------------------------
@@ -883,31 +916,64 @@ class TestLightspeedIntegration:
 class TestErrorHandling:
     """Test error handling."""
 
-    @pytest.mark.asyncio
-    async def test_lightspeed_error_on_get_sales(self, valid_credentials):
+    def test_lightspeed_error_on_get_sales(self):
         """Test LightspeedError handling during sales fetch."""
+        valid_credentials = _valid_credentials()
         adapter = LightspeedAdapter(valid_credentials)
 
         with patch.object(adapter.client, "get_sales", new_callable=AsyncMock) as mock_get_sales:
             mock_get_sales.side_effect = LightspeedError("API error")
 
-            signals = await adapter.fetch_signals()
+            signals = asyncio.run(adapter.fetch_signals())
 
             assert signals == []
 
-        await adapter.close()
+        asyncio.run(adapter.close())
 
     def test_rate_limit_error(self):
         """Test RateLimitError exception."""
-        with pytest.raises(LightspeedRateLimitError):
+        try:
             raise LightspeedRateLimitError("Rate limit hit")
+        except LightspeedRateLimitError:
+            pass
 
     def test_auth_error(self):
         """Test AuthError exception."""
-        with pytest.raises(LightspeedAuthError):
+        try:
             raise LightspeedAuthError("Auth failed")
+        except LightspeedAuthError:
+            pass
 
     def test_base_error(self):
         """Test base LightspeedError exception."""
-        with pytest.raises(LightspeedError):
+        try:
             raise LightspeedError("Generic error")
+        except LightspeedError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Custom Test Runner
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    passed = failed = 0
+    for name, obj in list(globals().items()):
+        if isinstance(obj, type) and name.startswith("Test"):
+            inst = obj()
+            for mname in sorted(dir(inst)):
+                if mname.startswith("test_"):
+                    try:
+                        result = getattr(inst, mname)()
+                        if asyncio.iscoroutine(result):
+                            asyncio.run(result)
+                        passed += 1
+                        print(f"  PASS {name}.{mname}")
+                    except AssertionError as e:
+                        failed += 1
+                        print(f"  FAIL {name}.{mname}: {e}")
+                    except Exception as e:
+                        failed += 1
+                        print(f"  ERROR {name}.{mname}: {type(e).__name__}: {e}")
+    print(f"\n{passed}/{passed + failed} tests passed")
+    sys.exit(0 if failed == 0 else 1)
