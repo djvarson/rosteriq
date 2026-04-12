@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 64" fill="none">
+  <!-- Clock/roster icon -->
+  <g transform="translate(4, 4)">
+    <!-- Outer circle -->
+    <circle cx="28" cy="28" r="26" fill="#0ea5e9" />
+    <!-- Inner face -->
+    <circle cx="28" cy="28" r="22" fill="white" />
+    <!-- Hour marks -->
+    <circle cx="28" cy="9" r="2" fill="#111" />
+    <circle cx="28" cy="47" r="2" fill="#111" />
+    <circle cx="9" cy="28" r="2" fill="#111" />
+    <circle cx="47" cy="28" r="2" fill="#111" />
+    <!-- Clock hands -->
+    <line x1="28" y1="28" x2="28" y2="13" stroke="#111" stroke-width="3" stroke-linecap="round" />
+    <line x1="28" y1="28" x2="40" y2="38" stroke="#0ea5e9" stroke-width="3" stroke-linecap="round" />
+    <!-- Staff dots -->
+    <circle cx="17" cy="14" r="3" fill="#0ea5e9" opacity="0.8" />
+    <circle cx="39" cy="14" r="3" fill="#22c55e" opacity="0.8" />
+    <circle cx="43" cy="24" r="3" fill="#f59e0b" opacity="0.75" />
+  </g>
+  <!-- Wordmark -->
+  <text x="72" y="43" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="34" font-weight="900" letter-spacing="-1.5" fill="#111111">
+    Roster<tspan fill="#0ea5e9">IQ</tspan>
+  </text>
+</svg>
