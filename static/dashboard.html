@@ -31,6 +31,73 @@
             line-height: 1.6;
         }
 
+        /* -------- Loading skeleton system -------- */
+        .skel-pulse {
+            animation: skel-shimmer 1.5s ease-in-out infinite;
+        }
+        @keyframes skel-shimmer {
+            0%, 100% { opacity: 0.35; }
+            50%      { opacity: 0.65; }
+        }
+        .skel-bar {
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 4px;
+            height: 16px;
+            margin-bottom: 8px;
+        }
+        .skel-bar.w80  { width: 80%; }
+        .skel-bar.w60  { width: 60%; }
+        .skel-bar.w40  { width: 40%; }
+        .skel-bar.tall { height: 28px; }
+        .skel-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        .skel-cell {
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 6px;
+            height: 72px;
+        }
+        .card-loading-overlay {
+            padding: 16px;
+        }
+        /* -------- Error / retry states -------- */
+        .card-error-msg {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 8px;
+            font-size: 13px;
+            color: #fca5a5;
+            margin-bottom: 8px;
+        }
+        .card-error-msg .err-icon {
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        .card-error-msg .err-text {
+            flex: 1;
+        }
+        .card-error-msg .retry-btn {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 6px;
+            color: #e5e7eb;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 5px 12px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s ease;
+        }
+        .card-error-msg .retry-btn:hover {
+            background: rgba(255,255,255,0.14);
+        }
+
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -75,6 +142,42 @@
 
         .tab:hover {
             color: var(--text-primary);
+        }
+
+        .venue-switcher {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .venue-switcher select {
+            background: var(--darker-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 32px 8px 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%239ca3af' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            min-width: 180px;
+            transition: border-color 0.15s ease;
+        }
+        .venue-switcher select:hover {
+            border-color: #60a5fa;
+        }
+        .venue-switcher select:focus {
+            outline: none;
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
+        }
+        .venue-switcher-label {
+            font-size: 11px;
+            color: #9ca3af;
+            white-space: nowrap;
         }
 
         .view {
@@ -1471,6 +1574,20 @@
             font-size: 13px;
             color: #f5f5f7;
         }
+        .venue-mini-name-link {
+            cursor: pointer;
+            text-decoration: underline dotted rgba(96, 165, 250, 0.4);
+            text-underline-offset: 3px;
+            transition: color 0.15s ease;
+        }
+        .venue-mini-name-link:hover {
+            color: #60a5fa;
+        }
+        .venue-mini-name-link:focus {
+            outline: 2px solid rgba(96, 165, 250, 0.6);
+            outline-offset: 2px;
+            border-radius: 2px;
+        }
         .venue-mini-badge {
             font-size: 9px;
             font-weight: 800;
@@ -1997,6 +2114,58 @@
             .labour-cost-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
+
+            .venue-switcher {
+                width: 100%;
+                order: -1;
+            }
+
+            .venue-switcher select {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .skel-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .trend-header {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .trend-spark-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .portfolio-kpis {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .venue-mini-metrics {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .wage-pulse-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .headcount-controls {
+                flex-wrap: wrap;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .venue-switcher select {
+                font-size: 13px;
+                padding: 6px 28px 6px 10px;
+            }
+            .portfolio-kpis {
+                grid-template-columns: 1fr;
+            }
+            .skel-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         .spinner {
@@ -2036,9 +2205,15 @@
     <div class="container">
         <header>
             <div class="logo">RosterIQ Dashboard</div>
+            <div class="venue-switcher" id="venueSwitcher">
+                <select id="venueSelect" onchange="switchVenue(this.value)">
+                    <option value="">Loading venues…</option>
+                </select>
+                <span class="venue-switcher-label" id="venueSwitcherLabel"></span>
+            </div>
             <div class="tabs">
-                <button class="tab active" onclick="switchTab('roster')">Roster Maker</button>
-                <button class="tab" onclick="switchTab('onshift')">On-Shift</button>
+                <button class="tab active" data-tab="roster" onclick="switchTab('roster', event)">Roster Maker</button>
+                <button class="tab" data-tab="onshift" onclick="switchTab('onshift', event)">On-Shift</button>
             </div>
         </header>
 
@@ -2463,24 +2638,184 @@
     </div>
 
     <script>
-        const VENUE_ID = 'venue_demo_001';
+        // -------- Active venue state --------
+        // _activeVenueId / _activeVenueLabel drive every fetch. The old
+        // hardcoded `const VENUE_ID` is replaced by this mutable pair so
+        // the venue dropdown, portfolio mini-card clicks, and URL ?venue=
+        // param all converge to a single source of truth.
+        let _activeVenueId = 'venue_demo_001';
+        let _activeVenueLabel = "Mojo's Bar";
+        // Backward compat shim — a few demo helpers reference VENUE_ID
+        // as a const. This getter keeps them working.
+        Object.defineProperty(window, 'VENUE_ID', { get() { return _activeVenueId; } });
+
+        // Known venues — populated from /api/v1/venues on init.
+        let _knownVenues = [];
+
         let currentWeekStart = new Date('2026-04-07');
         let demandChart = null;
         let demandComparisonChart = null;
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            updateWeekDisplay();
+        // -------- Venue switcher --------
+        async function loadVenueList() {
+            try {
+                const resp = await fetch('/api/v1/venues');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                _knownVenues = data.venues || [];
+                populateVenueDropdown(_knownVenues, data.default_venue_id);
+            } catch (err) {
+                console.warn('Venue list fetch failed, using built-in fallback', err);
+                _knownVenues = [
+                    { id: 'venue_demo_001', label: "Mojo's Bar" },
+                    { id: 'venue_demo_002', label: "Earl's Kitchen" },
+                    { id: 'venue_demo_003', label: "Francine's" },
+                ];
+                populateVenueDropdown(_knownVenues, 'venue_demo_001');
+            }
+        }
+
+        function populateVenueDropdown(venues, defaultId) {
+            const sel = document.getElementById('venueSelect');
+            if (!sel) return;
+            // Check URL for ?venue= override.
+            const urlVenue = new URLSearchParams(window.location.search).get('venue');
+            const targetId = urlVenue || defaultId || (venues.length > 0 ? venues[0].id : '');
+            sel.innerHTML = venues.map(v =>
+                `<option value="${escapeHtmlSafe(v.id)}" ${v.id === targetId ? 'selected' : ''}>${escapeHtmlSafe(v.label)}</option>`
+            ).join('');
+            // Apply the initial selection.
+            const match = venues.find(v => v.id === targetId) || venues[0];
+            if (match) {
+                _activeVenueId = match.id;
+                _activeVenueLabel = match.label;
+            }
+        }
+
+        function switchVenue(venueId) {
+            if (!venueId || venueId === _activeVenueId) return;
+            const match = _knownVenues.find(v => v.id === venueId);
+            _activeVenueId = venueId;
+            _activeVenueLabel = match ? match.label : venueId;
+            // Update URL without full reload.
+            const url = new URL(window.location);
+            url.searchParams.set('venue', venueId);
+            history.replaceState(null, '', url);
+            // Update the label next to the dropdown.
+            const lbl = document.getElementById('venueSwitcherLabel');
+            if (lbl) lbl.textContent = '';
+            // Reset trend venue tracking to follow the new active venue.
+            _trendVenueId = venueId;
+            _trendVenueLabel = _activeVenueLabel;
+            const trendLabel = document.getElementById('trendVenueLabel');
+            if (trendLabel) { trendLabel.textContent = ''; trendLabel.classList.add('hidden'); }
+            // Re-fetch everything for the new venue.
+            refreshAllVenueData();
+        }
+
+        // -------- Card loading state helpers --------
+        // showCardLoading(cardId) injects a skeleton overlay; hideCardLoading
+        // removes it. Fast fetches may resolve before the browser paints, so
+        // the skeleton is only visible on slower connections.
+        function showCardLoading(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            card.classList.remove('hidden');
+            // Don't double-add.
+            if (card.querySelector('.card-loading-overlay')) return;
+            const overlay = document.createElement('div');
+            overlay.className = 'card-loading-overlay skel-pulse';
+            overlay.innerHTML = `
+                <div class="skel-bar w80 tall"></div>
+                <div class="skel-bar w60"></div>
+                <div class="skel-grid">
+                    <div class="skel-cell"></div>
+                    <div class="skel-cell"></div>
+                    <div class="skel-cell"></div>
+                </div>
+            `;
+            card.prepend(overlay);
+        }
+        function hideCardLoading(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            const overlay = card.querySelector('.card-loading-overlay');
+            if (overlay) overlay.remove();
+        }
+        // showCardError(cardId, message, retryFn) — shows an inline error
+        // with a retry button. Calling hideCardError or showCardLoading
+        // clears it. Multiple calls replace, not stack.
+        function showCardError(cardId, message, retryFn) {
+            hideCardError(cardId);
+            hideCardLoading(cardId);
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            card.classList.remove('hidden');
+            const el = document.createElement('div');
+            el.className = 'card-error-msg';
+            el.innerHTML = `<span class="err-icon">⚠</span><span class="err-text">${escapeHtmlSafe(message)}</span>`;
+            if (retryFn) {
+                const btn = document.createElement('button');
+                btn.className = 'retry-btn';
+                btn.textContent = 'Retry';
+                btn.addEventListener('click', () => {
+                    hideCardError(cardId);
+                    retryFn();
+                });
+                el.appendChild(btn);
+            }
+            card.prepend(el);
+        }
+        function hideCardError(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            const msg = card.querySelector('.card-error-msg');
+            if (msg) msg.remove();
+        }
+
+        // Called on venue switch and also for periodic refreshes.
+        function refreshAllVenueData() {
+            // Flash loading skeletons on the main cards.
+            showCardLoading('wagePulseCard');
+            showCardLoading('trendCard');
+            showCardLoading('briefCard');
             loadRosterData();
             loadOnShiftData();
             loadWagePulse();
-            initScenarioSolver();
             fetchHeadCount();
             fetchShiftRecap();
             fetchMorningBrief();
+            fetchTrend();
+        }
+
+        // switchVenueFromPortfolio is the full-venue-switch version:
+        // retargets everything (not just trends) when you click a
+        // portfolio mini-card.
+        function switchVenueFromPortfolio(venueId, venueLabel) {
+            if (!venueId) return;
+            // Update the dropdown to match.
+            const sel = document.getElementById('venueSelect');
+            if (sel) sel.value = venueId;
+            _activeVenueId = venueId;
+            _activeVenueLabel = venueLabel || venueId;
+            // Update URL.
+            const url = new URL(window.location);
+            url.searchParams.set('venue', venueId);
+            history.replaceState(null, '', url);
+            // Re-fetch everything.
+            refreshAllVenueData();
+            // Scroll to the On-Shift tab (the "single venue" view).
+            switchTab('onshift');
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadVenueList();
+            updateWeekDisplay();
+            refreshAllVenueData();
+            initScenarioSolver();
             wireTrendWindowTabs();
             wirePortfolioTrendClicks();
-            fetchTrend();
             updateShiftTime();
             setInterval(updateShiftTime, 1000);
             // Refresh wage pulse every 30s — this is the live ticker
@@ -2497,11 +2832,17 @@
             setInterval(fetchTrend, 300000);
         });
 
-        function switchTab(tabName) {
+        function switchTab(tabName, ev) {
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.getElementById(tabName).classList.add('active');
-            event.target.classList.add('active');
+            const view = document.getElementById(tabName);
+            if (view) view.classList.add('active');
+            // Mark the correct tab button active — accept an explicit
+            // event.target or fall back to finding the button by a
+            // data-tab attr. This allows programmatic calls from
+            // switchVenueFromPortfolio to work without an event.
+            const clicked = (ev && ev.target) || document.querySelector(`.tab[data-tab="${tabName}"]`);
+            if (clicked) clicked.classList.add('active');
 
             if (tabName === 'roster') {
                 setTimeout(() => {
@@ -2541,7 +2882,7 @@
         async function loadRosterData() {
             const dateStr = currentWeekStart.toISOString().split('T')[0];
             try {
-                const response = await fetch(`/api/v1/signals/${VENUE_ID}/${dateStr}`);
+                const response = await fetch(`/api/v1/signals/${_activeVenueId}/${dateStr}`);
                 if (response.ok) {
                     const data = await response.json();
                     populateSignals(data);
@@ -2559,7 +2900,7 @@
 
         async function loadOnShiftData() {
             try {
-                const response = await fetch(`/api/v1/dashboard/on-shift/${VENUE_ID}`);
+                const response = await fetch(`/api/v1/dashboard/on-shift/${_activeVenueId}`);
                 if (response.ok) {
                     const data = await response.json();
                     populateOnShiftData(data);
@@ -2576,7 +2917,7 @@
 
         async function loadWagePulse() {
             try {
-                const response = await fetch(`/api/v1/dashboard/wage-pulse/${VENUE_ID}`);
+                const response = await fetch(`/api/v1/dashboard/wage-pulse/${_activeVenueId}`);
                 if (response.ok) {
                     const data = await response.json();
                     populateWagePulse(data);
@@ -2586,12 +2927,15 @@
                 }
             } catch (error) {
                 console.warn('Wage pulse API unavailable, using demo data', error);
+                hideCardLoading('wagePulseCard');
+                showCardError('wagePulseCard', 'Wage pulse offline — showing demo data', loadWagePulse);
                 markDemoDataActive();
                 populateWagePulse(getDemoWagePulse());
             }
         }
 
         function populateWagePulse(data) {
+            hideCardLoading('wagePulseCard');
             // Card + badge + bar all take trend class — drives colour
             const trend = data.trend || 'on_track';
             const card = document.getElementById('wagePulseCard');
@@ -2930,7 +3274,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        venue_id: VENUE_ID,
+                        venue_id: _activeVenueId,
                         question: question,
                     }),
                 });
@@ -3041,15 +3385,16 @@
 
         async function fetchHeadCount() {
             try {
-                const resp = await fetch(`/api/v1/headcount/${VENUE_ID}`);
+                const resp = await fetch(`/api/v1/headcount/${_activeVenueId}`);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 renderHeadCount(await resp.json());
             } catch (err) {
                 console.warn('Head count fetch failed', err);
+                showCardError('headcountCard', 'Head count offline — taps won\u2019t persist until API is back', fetchHeadCount);
                 const el = document.getElementById('headcountNumber');
                 if (el) el.textContent = '—';
                 const tl = document.getElementById('headcountTimeline');
-                if (tl) tl.innerHTML = '<div class="headcount-timeline-empty">Offline — taps will not persist until the API is back.</div>';
+                if (tl) tl.innerHTML = '';
             }
         }
 
@@ -3061,7 +3406,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        venue_id: VENUE_ID,
+                        venue_id: _activeVenueId,
                         delta: delta,
                         source: 'button',
                     }),
@@ -3092,7 +3437,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        venue_id: VENUE_ID,
+                        venue_id: _activeVenueId,
                         delta: delta,
                         note: note,
                         source: 'group',
@@ -3117,7 +3462,7 @@
                 const resp = await fetch('/api/v1/headcount/reset', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ venue_id: VENUE_ID, count: 0, note: 'Manual reset' }),
+                    body: JSON.stringify({ venue_id: _activeVenueId, count: 0, note: 'Manual reset' }),
                 });
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 renderHeadCount(await resp.json());
@@ -3178,16 +3523,12 @@
         // mid-shift; refreshes automatically every time head count changes.
         async function fetchShiftRecap() {
             try {
-                const resp = await fetch(`/api/v1/shift-recap/${VENUE_ID}`);
+                const resp = await fetch(`/api/v1/shift-recap/${_activeVenueId}`);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 renderShiftRecap(await resp.json());
             } catch (err) {
                 console.warn('Shift recap fetch failed', err);
-                const summary = document.getElementById('recapSummary');
-                if (summary) {
-                    summary.classList.add('empty');
-                    summary.textContent = 'Recap unavailable — the API is offline.';
-                }
+                showCardError('recapCard', 'Shift recap offline', fetchShiftRecap);
             }
         }
 
@@ -3564,10 +3905,13 @@
                 venueLabel: v.label || v.venue_id || ''
             });
 
+            const vid = escapeHtmlSafe(v.venue_id || '');
+            const vLabel = escapeHtmlSafe(v.label || v.venue_id || 'Venue');
             return `
-                <div class="venue-mini ${lightCls}">
+                <div class="venue-mini ${lightCls}" data-venue-id="${vid}" data-venue-label="${vLabel}">
                     <div class="venue-mini-head">
-                        <span class="venue-mini-name">${label}</span>
+                        <span class="venue-mini-name venue-mini-name-link" role="button" tabindex="0"
+                              title="Switch dashboard to ${vLabel}">${label}</span>
                         <span class="venue-mini-badge ${lightCls}">${light === 'unknown' ? '—' : light.toUpperCase()}</span>
                     </div>
                     <div class="venue-mini-metrics">
@@ -3650,17 +3994,19 @@
             const card = document.getElementById('briefCard');
             if (!card) return;
             try {
-                const resp = await fetch(`/api/v1/morning-brief/${VENUE_ID}?venue_label=${encodeURIComponent("Mojo's Bar")}`);
+                const resp = await fetch(`/api/v1/morning-brief/${_activeVenueId}?venue_label=${encodeURIComponent(_activeVenueLabel)}`);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const brief = await resp.json();
                 renderMorningBrief(brief);
             } catch (err) {
                 console.warn('Morning brief fetch failed', err);
+                hideCardLoading('briefCard');
                 card.classList.add('hidden');
             }
         }
 
         function renderMorningBrief(brief) {
+            hideCardLoading('briefCard');
             if (!brief || typeof brief !== 'object') return;
             const card = document.getElementById('briefCard');
             if (!card) return;
@@ -3774,13 +4120,13 @@
         // Which venue the trend card is currently focused on. Defaults to
         // the dashboard's own VENUE_ID, but portfolio mini-card click-through
         // can retarget this so the trends card shows a different venue.
-        let _trendVenueId = (typeof VENUE_ID !== 'undefined') ? VENUE_ID : null;
+        let _trendVenueId = _activeVenueId;
         let _trendVenueLabel = null;
 
         async function fetchTrend(venueId) {
             const card = document.getElementById('trendCard');
             if (!card) return;
-            const targetId = venueId || _trendVenueId || (typeof VENUE_ID !== 'undefined' ? VENUE_ID : null);
+            const targetId = venueId || _trendVenueId || _activeVenueId;
             if (!targetId) return;
             _trendVenueId = targetId;
             try {
@@ -3790,6 +4136,7 @@
                 renderTrend(trend);
             } catch (err) {
                 console.warn('Trend fetch failed', err);
+                hideCardLoading('trendCard');
                 card.classList.add('hidden');
             }
         }
@@ -3828,6 +4175,7 @@
         }
 
         function renderTrend(trend) {
+            hideCardLoading('trendCard');
             if (!trend || typeof trend !== 'object') return;
             const card = document.getElementById('trendCard');
             if (!card) return;
@@ -4017,14 +4365,16 @@
             });
         }
 
-        // Delegated handler for the portfolio mini sparkline blocks. The
-        // blocks are rerendered each poll, so binding on the container
-        // (which is stable) avoids having to rewire after every refresh.
+        // Delegated handlers for the portfolio mini-cards. The cards are
+        // rerendered each poll, so binding on the stable container avoids
+        // having to rewire after every refresh. Two click targets:
+        //   1. Sparkline block → retarget just the trends card
+        //   2. Venue name link → full venue switch (all cards)
         function wirePortfolioTrendClicks() {
             const root = document.getElementById('portfolioVenues');
             if (!root || root._trendClickBound) return;
             root._trendClickBound = true;
-            const handle = (target) => {
+            const handleTrend = (target) => {
                 const block = target && target.closest ? target.closest('.venue-mini-trend.is-clickable') : null;
                 if (!block) return false;
                 const vid = block.getAttribute('data-venue-id');
@@ -4035,16 +4385,27 @@
                 }
                 return false;
             };
-            root.addEventListener('click', (ev) => {
-                if (handle(ev.target)) {
-                    ev.preventDefault();
+            const handleNameClick = (target) => {
+                const nameEl = target && target.closest ? target.closest('.venue-mini-name-link') : null;
+                if (!nameEl) return false;
+                const card = nameEl.closest('.venue-mini');
+                if (!card) return false;
+                const vid = card.getAttribute('data-venue-id');
+                const vlabel = card.getAttribute('data-venue-label') || '';
+                if (vid) {
+                    switchVenueFromPortfolio(vid, vlabel);
+                    return true;
                 }
+                return false;
+            };
+            root.addEventListener('click', (ev) => {
+                if (handleNameClick(ev.target)) { ev.preventDefault(); return; }
+                if (handleTrend(ev.target)) { ev.preventDefault(); }
             });
             root.addEventListener('keydown', (ev) => {
                 if (ev.key !== 'Enter' && ev.key !== ' ') return;
-                if (handle(ev.target)) {
-                    ev.preventDefault();
-                }
+                if (handleNameClick(ev.target)) { ev.preventDefault(); return; }
+                if (handleTrend(ev.target)) { ev.preventDefault(); }
             });
         }
 
@@ -4082,7 +4443,7 @@
             if (_recStatusMap[a.rec_id]) return;
             _recStatusMap[a.rec_id] = 'pending';
             const body = {
-                venue_id: VENUE_ID,
+                venue_id: _activeVenueId,
                 text: a.action,
                 source: 'dashboard',
                 priority: a.backend_priority || 'med',
@@ -4110,7 +4471,7 @@
 
         async function respondToRecommendation(recId, status, note) {
             if (!recId) return;
-            const body = { venue_id: VENUE_ID, rec_id: recId, status: status };
+            const body = { venue_id: _activeVenueId, rec_id: recId, status: status };
             if (note) body.note = note;
             try {
                 const resp = await fetch('/api/v1/accountability/respond', {
@@ -4166,7 +4527,7 @@
         function getDemoWagePulse() {
             // Matches LiveWagePulseResponse shape — used only when API is down
             return {
-                venue_id: VENUE_ID,
+                venue_id: _activeVenueId,
                 timestamp: new Date().toISOString(),
                 current_hour: '18:00',
                 wages_burned_so_far: 1820,
@@ -4506,7 +4867,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        venue_id: VENUE_ID,
+                        venue_id: _activeVenueId,
                         week_start: weekStart
                     })
                 });

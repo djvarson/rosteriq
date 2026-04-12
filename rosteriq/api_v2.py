@@ -1182,6 +1182,72 @@ class PortfolioRecapResponse(BaseModel):
     venues: List[Dict[str, Any]]
 
 
+# ============================================================================
+# Venue list — lightweight discovery endpoint
+# ============================================================================
+# Consolidates venue IDs + labels from:
+# 1. An env-var JSON string (ROSTERIQ_VENUES), e.g.
+#    [{"id":"venue_demo_001","label":"Mojo's Bar"}, ...]
+# 2. The brief_dispatcher venue registry (runtime-registered venues).
+# The result is deduplicated by venue_id (env-var wins).
+
+_STATIC_VENUES: List[Dict[str, str]] = []
+_raw_venues_json = os.environ.get("ROSTERIQ_VENUES", "").strip()
+if _raw_venues_json:
+    try:
+        _STATIC_VENUES = json.loads(_raw_venues_json)
+    except Exception:
+        logger.warning("Could not parse ROSTERIQ_VENUES JSON, falling back to empty")
+
+# If no env-var, fall back to the demo set so the dashboard works
+# out of the box. Production deployments should set ROSTERIQ_VENUES
+# or register venues at runtime via /api/v1/brief-dispatch/register.
+if not _STATIC_VENUES:
+    _STATIC_VENUES = [
+        {"id": "venue_demo_001", "label": "Mojo's Bar"},
+        {"id": "venue_demo_002", "label": "Earl's Kitchen"},
+        {"id": "venue_demo_003", "label": "Francine's"},
+    ]
+
+
+@app.get("/api/v1/venues", response_model=Dict[str, Any])
+async def list_venues() -> Dict[str, Any]:
+    """
+    Return the known venue list.
+
+    Sources: the ROSTERIQ_VENUES env var (or demo fallback) plus any
+    venues registered at runtime through the brief-dispatch registry.
+    Deduplicated by venue_id (static config wins over registry).
+
+    Response::
+
+        {
+            "venues": [
+                {"id": "venue_demo_001", "label": "Mojo's Bar"},
+                ...
+            ],
+            "default_venue_id": "venue_demo_001"
+        }
+    """
+    seen: Dict[str, Dict[str, str]] = {}
+    # Static / env-var venues first — they win on conflict.
+    for v in _STATIC_VENUES:
+        vid = str(v.get("id") or "").strip()
+        if vid:
+            seen[vid] = {"id": vid, "label": str(v.get("label") or vid)}
+    # Runtime-registered venues fill in any gaps.
+    for vid, entry in _brief_dispatcher.get_registry().items():
+        vid = str(vid).strip()
+        if vid and vid not in seen:
+            seen[vid] = {"id": vid, "label": str(entry.get("label") or vid)}
+    venues = sorted(seen.values(), key=lambda v: v["label"])
+    default_id = _STATIC_VENUES[0]["id"] if _STATIC_VENUES else (venues[0]["id"] if venues else "")
+    return {
+        "venues": venues,
+        "default_venue_id": default_id,
+    }
+
+
 @app.get("/api/v1/portfolio/recap", response_model=PortfolioRecapResponse)
 async def get_portfolio_recap(
     request: Request,
