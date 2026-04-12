@@ -2441,6 +2441,230 @@
         .portfolio-card {
             animation: fadeInLoad 0.2s ease;
         }
+
+        /* ──────── Dark-mode toggle button ──────── */
+        .theme-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 20px;
+            background: rgba(255,255,255,0.08);
+            color: #c2d2ff;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-height: 36px;
+            white-space: nowrap;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .theme-toggle:hover {
+            background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.3);
+            color: #ffffff;
+        }
+        .theme-toggle-icon {
+            font-size: 16px;
+            line-height: 1;
+        }
+        @media (max-width: 768px) {
+            .theme-toggle span:not(.theme-toggle-icon) { display: none; }
+            .theme-toggle { padding: 6px 10px; }
+        }
+
+        /* ──────── Dark mode overrides ──────── */
+        html.dark {
+            --dark-bg: #0d1117;
+            --darker-bg: #010409;
+            --card-bg: #161b22;
+            --alert-red: #f85149;
+            --success-green: #3fb950;
+            --info-blue: #F9C74F;
+            --accent-gold: #F9C74F;
+            --accent-amber: #FBBF24;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --border-color: #30363d;
+        }
+
+        html.dark body {
+            background-color: #0d1117;
+            color: #e6edf3;
+        }
+
+        html.dark header {
+            background: #0d1117;
+            border-top: 3px solid #F9C74F;
+            border-bottom-color: #30363d;
+        }
+
+        html.dark .logo { color: #F9C74F; }
+
+        html.dark .tab { color: #8b949e; }
+        html.dark .tab.active { color: #e6edf3; border-bottom-color: #F9C74F; }
+
+        html.dark .venue-switcher select {
+            background: #161b22;
+            color: #e6edf3;
+            border-color: #30363d;
+        }
+        html.dark .venue-switcher select:hover { border-color: #F9C74F; }
+
+        html.dark .signal-card,
+        html.dark .recommendations,
+        html.dark .roster-grid,
+        html.dark .labour-cost,
+        html.dark .chart-container,
+        html.dark .brief-card,
+        html.dark .trend-card,
+        html.dark .wage-pulse-card,
+        html.dark .scenario-card,
+        html.dark .ask-card,
+        html.dark .headcount-card,
+        html.dark .recap-card,
+        html.dark .portfolio-card,
+        html.dark .week-selector {
+            background-color: #161b22;
+            border-color: #30363d;
+            box-shadow: none;
+        }
+
+        html.dark .signal-card:hover {
+            box-shadow: 0 4px 12px rgba(249, 199, 79, 0.08);
+        }
+
+        html.dark .signal-card-value { color: #F9C74F; }
+        html.dark .cost-value { color: #F9C74F; }
+
+        html.dark .section-title,
+        html.dark .chart-title,
+        html.dark .roster-grid-title { color: #e6edf3; }
+
+        html.dark .recommendation-item {
+            background-color: #0d1117;
+            border-left-color: #F9C74F;
+        }
+        html.dark .recommendation-action { color: #e6edf3; }
+        html.dark .recommendation-reason { color: #8b949e; }
+
+        html.dark .roster-table th {
+            background-color: #0d1117;
+            color: #8b949e;
+            border-bottom-color: #30363d;
+        }
+        html.dark .roster-table td {
+            color: #8b949e;
+            border-bottom-color: #30363d;
+        }
+
+        html.dark .shift-cell { background-color: #0d1117; }
+
+        html.dark .generate-button {
+            background: linear-gradient(135deg, #F9C74F, #F4A261);
+            color: #0d1117;
+        }
+        html.dark .generate-button:hover:not(.loading) {
+            background: linear-gradient(135deg, #F4A261, #FBBF24);
+            box-shadow: 0 4px 12px rgba(249, 199, 79, 0.25);
+        }
+
+        html.dark .week-selector button {
+            background: #0d1117;
+            color: #e6edf3;
+            border-color: #30363d;
+        }
+        html.dark .week-selector button:hover {
+            background: #F9C74F;
+            border-color: #F9C74F;
+            color: #0d1117;
+        }
+
+        html.dark .action-button {
+            background: #161b22;
+            border-color: #30363d;
+            color: #8b949e;
+        }
+        html.dark .action-button:hover {
+            border-color: #F9C74F;
+            color: #F9C74F;
+            background: rgba(249, 199, 79, 0.08);
+        }
+
+        html.dark .status-header {
+            background: #161b22;
+            border-color: #30363d;
+        }
+        html.dark .status-title { color: #e6edf3; }
+
+        html.dark .skel-bar { background: rgba(255,255,255,0.06); }
+        html.dark .skel-cell { background: rgba(255,255,255,0.04); }
+
+        html.dark .card-error-msg {
+            background: rgba(248, 81, 73, 0.08);
+            border-color: rgba(248, 81, 73, 0.2);
+            color: #fca5a5;
+        }
+
+        html.dark .offline-banner { background: #161b22; }
+
+        html.dark .recap-accountability { background: #0d1117; border-color: #30363d; }
+
+        html.dark .scenario-input,
+        html.dark .ask-input { background: #0d1117; color: #e6edf3; border-color: #30363d; }
+        html.dark .scenario-input:focus,
+        html.dark .ask-input:focus { border-color: #F9C74F; }
+
+        html.dark .ask-result { background: #0d1117; border-color: #30363d; color: #e6edf3; }
+
+        html.dark .hc-btn { border-color: #30363d; color: #8b949e; background: #0d1117; }
+        html.dark .hc-btn:hover { border-color: #F9C74F; color: #F9C74F; background: rgba(249,199,79,0.06); }
+
+        html.dark .scenario-mode-tab { background: #0d1117; color: #8b949e; border-color: #30363d; }
+        html.dark .scenario-mode-tab.active { background: #F9C74F; color: #0d1117; border-color: #F9C74F; }
+
+        html.dark .solve-btn { background: #F9C74F; color: #0d1117; }
+        html.dark .solve-btn:hover { background: #FBBF24; }
+
+        html.dark .ask-submit { background: #F9C74F; color: #0d1117; }
+
+        html.dark .trend-window-tab { background: #0d1117; color: #8b949e; border-color: #30363d; }
+        html.dark .trend-window-tab.active { background: #F9C74F; color: #0d1117; }
+
+        html.dark .theme-toggle {
+            border-color: #30363d;
+            background: rgba(249, 199, 79, 0.08);
+            color: #F9C74F;
+        }
+        html.dark .theme-toggle:hover {
+            background: rgba(249, 199, 79, 0.15);
+            border-color: #F9C74F;
+            color: #FBBF24;
+        }
+
+        /* Dark login overlay */
+        html.dark .login-overlay { background: #0d1117; }
+        html.dark .login-card { background: #161b22; border-color: #30363d; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+        html.dark .login-logo { color: #F9C74F; }
+        html.dark .login-subtitle { color: #8b949e; }
+        html.dark .login-card label { color: #8b949e; }
+        html.dark .login-card input { background: #0d1117; color: #e6edf3; border-color: #30363d; }
+        html.dark .login-card input:focus { border-color: #F9C74F; box-shadow: 0 0 0 3px rgba(249,199,79,.15); }
+        html.dark .login-btn { background: #F9C74F; color: #0d1117; }
+        html.dark .login-btn:hover { background: #FBBF24; }
+        html.dark .login-demo-hint { color: #8b949e; }
+        html.dark .user-badge { color: #8b949e; }
+        html.dark .logout-btn { border-color: #30363d; color: #8b949e; }
+        html.dark .logout-btn:hover { border-color: #F9C74F; color: #F9C74F; }
+
+        /* Dark mode signal items */
+        html.dark .signal-item { background: #0d1117; border-left-color: #F9C74F; }
+
+        /* Dark portfolio venue mini cards */
+        html.dark .venue-mini { background: #0d1117; border-color: #30363d; }
+        html.dark .venue-mini:hover { border-color: #F9C74F; box-shadow: 0 2px 8px rgba(249,199,79,0.1); }
     </style>
 </head>
 <body>
@@ -2503,6 +2727,10 @@
             <div class="tabs">
                 <button class="tab active" data-tab="roster" onclick="switchTab('roster', event)">Roster Maker</button>
                 <button class="tab" data-tab="onshift" onclick="switchTab('onshift', event)">On-Shift</button>
+                <button class="theme-toggle" id="themeToggle" onclick="toggleDarkMode()" title="Toggle dark mode">
+                    <span class="theme-toggle-icon" id="themeIcon">🌙</span>
+                    <span id="themeLabel">Dark</span>
+                </button>
             </div>
         </header>
 
@@ -2927,6 +3155,30 @@
     </div>
 
     <script>
+        // -------- Dark mode toggle --------
+        function initTheme() {
+            const saved = localStorage.getItem('riq_theme');
+            if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+            updateThemeButton();
+        }
+        function toggleDarkMode() {
+            document.documentElement.classList.toggle('dark');
+            const isDark = document.documentElement.classList.contains('dark');
+            localStorage.setItem('riq_theme', isDark ? 'dark' : 'light');
+            updateThemeButton();
+        }
+        function updateThemeButton() {
+            const isDark = document.documentElement.classList.contains('dark');
+            const icon = document.getElementById('themeIcon');
+            const label = document.getElementById('themeLabel');
+            if (icon) icon.textContent = isDark ? '☀️' : '🌙';
+            if (label) label.textContent = isDark ? 'Light' : 'Dark';
+        }
+        // Apply theme before paint to avoid flash
+        initTheme();
+
         // -------- Active venue state --------
         // _activeVenueId / _activeVenueLabel drive every fetch. The old
         // hardcoded `const VENUE_ID` is replaced by this mutable pair so
