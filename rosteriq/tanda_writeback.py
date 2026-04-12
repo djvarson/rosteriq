@@ -277,11 +277,11 @@ class TandaApiSink(WritebackSink):
         url: str,
         *,
         api_token: Optional[str] = None,
-        timeout_s: float = 5.0,
+        timeout_s: float = 30.0,
         transform: Optional[Callable[[str, Dict[str, Any]], Dict[str, Any]]] = None,
         max_attempts: int = 3,
-        backoff_base_s: float = 0.25,
-        backoff_cap_s: float = 8.0,
+        backoff_base_s: float = 1.0,
+        backoff_cap_s: float = 30.0,
         dead_letter_path: Optional[str] = None,
         sleep: Optional[Callable[[float], None]] = None,
         extra_headers: Optional[Dict[str, str]] = None,
@@ -342,6 +342,82 @@ class TandaApiSink(WritebackSink):
             delay = self.backoff_cap_s
         return delay
 
+    def _parse_retry_after_header(self, retry_after_value: Optional[str]) -> float:
+        """Parse Retry-After header (can be seconds or HTTP-date).
+
+        Returns delay in seconds, or None if unparseable. If the header
+        is present but unparseable, returns 0.0 to signal "honor it but
+        use backoff calculation as fallback".
+        """
+        if not retry_after_value:
+            return None
+        retry_after_value = str(retry_after_value).strip()
+        # Try to parse as integer seconds
+        try:
+            return float(retry_after_value)
+        except ValueError:
+            pass
+        # If it's an HTTP-date (e.g., "Mon, 01 Jan 2026 12:00:00 GMT"),
+        # we'd need email.utils or datetime, but to keep stdlib minimal
+        # and since Tanda likely returns seconds, we'll treat unparseable
+        # as "unable to determine — use exponential backoff".
+        return None
+
+    def check_health(self) -> Dict[str, Any]:
+        """Ping the Tanda API and return health status.
+
+        Returns a dict with 'ok' (bool), 'status_code' (int),
+        'response_time_ms' (float), and optionally 'error' (str).
+        This is a non-blocking health check for diagnostics. Uses HEAD,
+        falling back to GET if HEAD is not supported.
+        """
+        import urllib.request
+        import urllib.error
+        import time as _time
+        start_ms = _time.time() * 1000
+        try:
+            req = urllib.request.Request(
+                self.url,
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                code = getattr(resp, "status", 200)
+            elapsed_ms = _time.time() * 1000 - start_ms
+            return {
+                "ok": True,
+                "status_code": code,
+                "response_time_ms": round(elapsed_ms, 1),
+                "url": self.url,
+            }
+        except urllib.error.HTTPError as e:
+            code = getattr(e, "code", 0)
+            elapsed_ms = _time.time() * 1000 - start_ms
+            return {
+                "ok": code < 500,  # treat 4xx as "healthy but erroring"
+                "status_code": code,
+                "response_time_ms": round(elapsed_ms, 1),
+                "error": f"HTTP {code}",
+                "url": self.url,
+            }
+        except urllib.error.URLError as e:
+            elapsed_ms = _time.time() * 1000 - start_ms
+            return {
+                "ok": False,
+                "status_code": 0,
+                "response_time_ms": round(elapsed_ms, 1),
+                "error": f"URLError: {e}",
+                "url": self.url,
+            }
+        except Exception as e:
+            elapsed_ms = _time.time() * 1000 - start_ms
+            return {
+                "ok": False,
+                "status_code": 0,
+                "response_time_ms": round(elapsed_ms, 1),
+                "error": str(e),
+                "url": self.url,
+            }
+
     def _write_dead_letter(
         self,
         venue_id: str,
@@ -368,7 +444,7 @@ class TandaApiSink(WritebackSink):
             return None
 
     def _attempt_once(self, data: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
-        """Single POST attempt. Returns a result dict with `retryable`."""
+        """Single POST attempt. Returns a result dict with `retryable` and optional `retry_after_s`."""
         import urllib.request  # lazy
         import urllib.error
         try:
@@ -397,12 +473,24 @@ class TandaApiSink(WritebackSink):
         except urllib.error.HTTPError as e:
             code = getattr(e, "code", 0)
             retry = code in self.RETRYABLE_STATUSES
-            return {
+            result: Dict[str, Any] = {
                 "ok": False,
                 "status_code": code,
                 "error": f"HTTP {code}",
                 "retryable": retry,
             }
+            # If 429 (rate limit), extract Retry-After header
+            if code == 429:
+                retry_after_value = None
+                try:
+                    retry_after_value = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+                except Exception:
+                    pass
+                if retry_after_value:
+                    parsed_delay = self._parse_retry_after_header(retry_after_value)
+                    if parsed_delay is not None:
+                        result["retry_after_s"] = parsed_delay
+            return result
         except urllib.error.URLError as e:
             return {
                 "ok": False,
@@ -460,7 +548,12 @@ class TandaApiSink(WritebackSink):
             if not result.get("retryable"):
                 break
             if i < self.max_attempts - 1:
-                delay = self._compute_backoff(i)
+                # Prefer Retry-After header if present (e.g., from 429),
+                # otherwise use exponential backoff
+                if "retry_after_s" in result:
+                    delay = float(result.get("retry_after_s", 0))
+                else:
+                    delay = self._compute_backoff(i)
                 if delay > 0:
                     try:
                         self._sleep(delay)

@@ -963,6 +963,269 @@ def test_tanda_api_sink_custom_name_overrides_default():
     assert sink.name == "tanda_prod"
 
 
+# ---------------------------------------------------------------------------
+# NEW: Timeout, health check, and rate-limit enhancements
+# ---------------------------------------------------------------------------
+
+def test_tanda_api_sink_default_timeout_is_30s():
+    """Default timeout should be 30 seconds (not 5s)."""
+    sink = tw.TandaApiSink("https://tanda.example/api")
+    assert sink.timeout_s == 30.0
+
+
+def test_tanda_api_sink_default_backoff_base_is_1s():
+    """Default backoff base should be 1 second."""
+    sink = tw.TandaApiSink("https://tanda.example/api")
+    assert sink.backoff_base_s == 1.0
+
+
+def test_tanda_api_sink_default_backoff_cap_is_30s():
+    """Default backoff cap should be 30 seconds."""
+    sink = tw.TandaApiSink("https://tanda.example/api")
+    assert sink.backoff_cap_s == 30.0
+
+
+def test_tanda_api_sink_parse_retry_after_seconds():
+    """_parse_retry_after_header should parse numeric seconds."""
+    sink = tw.TandaApiSink("https://tanda.example/api")
+    assert sink._parse_retry_after_header("60") == 60.0
+    assert sink._parse_retry_after_header("0") == 0.0
+    assert sink._parse_retry_after_header("3.5") == 3.5
+
+
+def test_tanda_api_sink_parse_retry_after_none_on_invalid():
+    """_parse_retry_after_header should return None for non-numeric."""
+    sink = tw.TandaApiSink("https://tanda.example/api")
+    # HTTP-date format is not parsed (would need email.utils)
+    assert sink._parse_retry_after_header("Mon, 01 Jan 2026 12:00:00 GMT") is None
+    assert sink._parse_retry_after_header("invalid") is None
+    assert sink._parse_retry_after_header("") is None
+    assert sink._parse_retry_after_header(None) is None
+
+
+def test_tanda_api_sink_health_check_returns_dict_with_required_fields():
+    """check_health() should return a dict with ok, status_code, response_time_ms, url."""
+    from http.server import BaseHTTPRequestHandler
+
+    class _HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args, **kwargs):
+            pass
+
+    server, thread, base = _start_http_server(_HealthHandler)
+    try:
+        sink = tw.TandaApiSink(base + "/health", timeout_s=1.0)
+        health = sink.check_health()
+        assert isinstance(health, dict)
+        assert "ok" in health
+        assert "status_code" in health
+        assert "response_time_ms" in health
+        assert "url" in health
+        assert health["url"] == base + "/health"
+    finally:
+        server.shutdown()
+
+
+def test_tanda_api_sink_health_check_success_returns_ok_true():
+    """check_health() should return ok=True on 2xx response."""
+    # Create a simple handler that supports GET for health checks
+    from http.server import BaseHTTPRequestHandler
+
+    class _HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args, **kwargs):
+            pass
+
+    server, thread, base = _start_http_server(_HealthHandler)
+    try:
+        sink = tw.TandaApiSink(base + "/health", timeout_s=1.0)
+        health = sink.check_health()
+        assert health["ok"] is True
+        assert health["status_code"] == 200
+        assert health["response_time_ms"] > 0
+    finally:
+        server.shutdown()
+
+
+def test_tanda_api_sink_health_check_timeout_returns_ok_false():
+    """check_health() should handle timeout gracefully."""
+    # Use a URL that won't respond (127.0.0.1:1 is typically not listening)
+    sink = tw.TandaApiSink("http://127.0.0.1:1/health", timeout_s=0.1)
+    health = sink.check_health()
+    assert health["ok"] is False
+    assert "error" in health
+    assert health["response_time_ms"] > 0
+
+
+def test_tanda_api_sink_respects_retry_after_on_429():
+    """When 429 is returned with Retry-After header, use that delay."""
+    sleeper = _RecordingSleep()
+    sink = tw.TandaApiSink(
+        "https://tanda.example/api",
+        max_attempts=3,
+        backoff_base_s=1.0,
+        sleep=sleeper,
+    )
+    # Simulate 429 with Retry-After: 5
+    # We need to mock the HTTPError to include headers
+    def _fake_attempt(data, headers):
+        if not hasattr(_fake_attempt, 'call_count'):
+            _fake_attempt.call_count = 0
+        _fake_attempt.call_count += 1
+        if _fake_attempt.call_count == 1:
+            # First attempt: 429 with Retry-After
+            return {
+                "ok": False,
+                "status_code": 429,
+                "error": "HTTP 429",
+                "retryable": True,
+                "retry_after_s": 5.0,
+            }
+        else:
+            # Retry succeeds
+            return {
+                "ok": True,
+                "status_code": 200,
+                "retryable": False,
+                "response": None,
+            }
+
+    sink._attempt_once = _fake_attempt
+    result = sink.apply("vA", _sample_delta())
+    assert result["ok"] is True
+    assert len(result["attempts"]) == 2
+    # Should have slept with the Retry-After value (5.0), not backoff
+    assert sleeper.calls == [5.0]
+
+
+def test_tanda_api_sink_falls_back_to_backoff_without_retry_after():
+    """When 429 without Retry-After, use exponential backoff."""
+    sleeper = _RecordingSleep()
+    sink = tw.TandaApiSink(
+        "https://tanda.example/api",
+        max_attempts=3,
+        backoff_base_s=1.0,
+        sleep=sleeper,
+    )
+    # Simulate 429 without Retry-After
+    def _fake_attempt(data, headers):
+        if not hasattr(_fake_attempt, 'call_count'):
+            _fake_attempt.call_count = 0
+        _fake_attempt.call_count += 1
+        if _fake_attempt.call_count == 1:
+            # First attempt: 429 without Retry-After
+            return {
+                "ok": False,
+                "status_code": 429,
+                "error": "HTTP 429",
+                "retryable": True,
+            }
+        else:
+            # Retry succeeds
+            return {
+                "ok": True,
+                "status_code": 200,
+                "retryable": False,
+                "response": None,
+            }
+
+    sink._attempt_once = _fake_attempt
+    result = sink.apply("vA", _sample_delta())
+    assert result["ok"] is True
+    assert len(result["attempts"]) == 2
+    # Should have slept with exponential backoff (base=1.0, attempt 0 → 1.0 * 2^0 = 1.0)
+    assert sleeper.calls == [1.0]
+
+
+def test_tanda_api_sink_timeout_is_enforced_in_health_check():
+    """check_health() should respect the timeout_s setting."""
+    # A very short timeout should fail quickly
+    sink = tw.TandaApiSink("http://127.0.0.1:1/health", timeout_s=0.05)
+    health = sink.check_health()
+    assert health["ok"] is False
+    # Response time should be < 1 second (much less than a full retry)
+    assert health["response_time_ms"] < 1000
+
+
+def test_tanda_api_sink_custom_timeout_applied_to_posts():
+    """Custom timeout_s should be applied to POST requests."""
+    handler, received = _TandaRecordingHandler.make([(200, '{"ok":true}')])
+    server, thread, base = _start_http_server(handler)
+    try:
+        sink = tw.TandaApiSink(base + "/writeback", timeout_s=2.0, max_attempts=1)
+        result = sink.apply("vA", _sample_delta())
+        assert result["ok"] is True
+        # If we reach here, the timeout was sufficient for the request
+    finally:
+        server.shutdown()
+
+
+def test_tanda_api_sink_integration_429_with_real_retry_after_header():
+    """Integration: 429 with real Retry-After header from HTTP server."""
+    class _RetryAfterHandler:
+        @staticmethod
+        def make():
+            from http.server import BaseHTTPRequestHandler
+            received = []
+            script_box = [
+                (429, '{"error":"rate_limited"}'),
+                (200, '{"ok":true}'),
+            ]
+
+            class _Handler(BaseHTTPRequestHandler):
+                def do_POST(self):
+                    length = int(self.headers.get("Content-Length") or 0)
+                    body = self.rfile.read(length) if length else b""
+                    received.append({"path": self.path, "body": body.decode("utf-8")})
+                    if script_box:
+                        status, resp_body = script_box.pop(0)
+                    else:
+                        status, resp_body = 200, "{}"
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    if status == 429:
+                        # Send Retry-After header
+                        self.send_header("Retry-After", "2")
+                    self.send_header("Content-Length", str(len(resp_body.encode("utf-8"))))
+                    self.end_headers()
+                    self.wfile.write(resp_body.encode("utf-8"))
+
+                def log_message(self, *args, **kwargs):
+                    pass
+            return _Handler, received
+
+    handler, received = _RetryAfterHandler.make()
+    server, thread, base = _start_http_server(handler)
+    try:
+        sleeper = _RecordingSleep()
+        sink = tw.TandaApiSink(
+            base + "/writeback",
+            max_attempts=3,
+            backoff_base_s=1.0,
+            sleep=sleeper,
+            timeout_s=3.0,
+        )
+        result = sink.apply("vA", _sample_delta())
+        assert result["ok"] is True
+        assert len(result["attempts"]) == 2
+        # Should have slept with the Retry-After value (2.0)
+        assert sleeper.calls == [2.0]
+    finally:
+        server.shutdown()
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     passed = failed = 0

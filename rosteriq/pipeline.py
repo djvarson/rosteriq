@@ -16,6 +16,7 @@ Full async, type-hinted, comprehensive error handling and logging.
 """
 
 import logging
+import os
 from datetime import datetime, date, timedelta, time
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import asdict
@@ -45,6 +46,19 @@ from rosteriq.tanda_adapter import (
 from rosteriq.pos_adapter import get_pos_adapter, POSAdapter
 
 logger = logging.getLogger("rosteriq.pipeline")
+
+# ============================================================================
+# Data Mode Configuration
+# ============================================================================
+# ROSTERIQ_DATA_MODE controls whether the pipeline uses real Tanda data or demo data
+# - "demo" (default): Always use generated demo data
+# - "live": Attempt to fetch real data from Tanda, fall back to demo on error
+DATA_MODE = os.getenv("ROSTERIQ_DATA_MODE", "demo").lower()
+if DATA_MODE not in ("demo", "live"):
+    DATA_MODE = "demo"
+    logger.warning("Invalid ROSTERIQ_DATA_MODE; defaulting to 'demo'")
+else:
+    logger.info(f"RosterIQ pipeline initialized in {DATA_MODE} data mode")
 
 
 # ============================================================================
@@ -93,7 +107,11 @@ class RosterIQPipeline:
         self._tanda_adapter: Optional[SchedulingPlatformAdapter] = None
         self._pos_adapter: Optional[POSAdapter] = None
 
-        logger.info(f"RosterIQ pipeline initialized for venue {venue_id}")
+        # Data mode tracking
+        self.data_mode = DATA_MODE
+        self._tanda_connected: Optional[bool] = None  # Cached connection status
+
+        logger.info(f"RosterIQ pipeline initialized for venue {venue_id} in {self.data_mode} mode")
 
     async def _get_tanda_adapter(self) -> SchedulingPlatformAdapter:
         """Lazy load Tanda adapter."""
@@ -578,18 +596,80 @@ class RosterIQPipeline:
 
     async def _fetch_employees(self) -> List[TandaEmployee]:
         """
-        Fetch all active employees from Tanda adapter.
+        Fetch all active employees based on configured data mode.
 
-        Handles failures gracefully by returning empty list.
+        In 'live' mode: Attempt to fetch real data from Tanda adapter.
+                       Fall back to demo data gracefully on connection failure.
+        In 'demo' mode: Always use demo data.
+
+        Returns empty list as a safe fallback if all attempts fail.
         """
-        try:
-            adapter = await self._get_tanda_adapter()
-            employees = await adapter.get_employees(self.venue_id)
-            logger.debug(f"Fetched {len(employees)} employees")
-            return employees
-        except Exception as e:
-            logger.warning(f"Failed to fetch employees from Tanda: {e}")
-            return []
+        # In demo mode, always skip Tanda and go straight to demo
+        if self.data_mode == "demo":
+            try:
+                from rosteriq.tanda_adapter import DemoTandaAdapter
+                demo_adapter = DemoTandaAdapter()
+                employees = await demo_adapter.get_employees(self.venue_id)
+                logger.debug(f"Fetched {len(employees)} employees from demo adapter")
+                self._tanda_connected = False
+                return employees
+            except Exception as e:
+                logger.error(f"Failed to fetch demo employees: {e}")
+                self._tanda_connected = False
+                return []
+
+        # In live mode, try real Tanda first, fall back to demo
+        if self.data_mode == "live":
+            try:
+                adapter = await self._get_tanda_adapter()
+                employees = await adapter.get_employees(self.venue_id)
+                logger.debug(f"Fetched {len(employees)} employees from real Tanda")
+                self._tanda_connected = True
+                return employees
+            except Exception as e:
+                logger.warning(f"Failed to fetch from real Tanda: {e}; falling back to demo")
+                self._tanda_connected = False
+
+                # Fallback to demo
+                try:
+                    from rosteriq.tanda_adapter import DemoTandaAdapter
+                    demo_adapter = DemoTandaAdapter()
+                    employees = await demo_adapter.get_employees(self.venue_id)
+                    logger.info(f"Fallback: Fetched {len(employees)} employees from demo adapter")
+                    return employees
+                except Exception as demo_error:
+                    logger.error(f"Fallback demo adapter also failed: {demo_error}")
+                    return []
+
+        # Should not reach here, but return empty as safe default
+        logger.error(f"Unknown data mode: {self.data_mode}")
+        return []
+
+    async def get_data_mode_status(self) -> Dict[str, Any]:
+        """
+        Get current data mode status and Tanda connection health.
+
+        Returns:
+            Dict with 'mode' ('demo' or 'live') and 'tanda_connected' (bool)
+        """
+        # If we haven't fetched yet, do a quick test
+        if self._tanda_connected is None:
+            if self.data_mode == "live":
+                try:
+                    adapter = await self._get_tanda_adapter()
+                    # Quick connection test
+                    employees = await adapter.get_employees(self.venue_id)
+                    self._tanda_connected = len(employees) > 0
+                except Exception as e:
+                    logger.debug(f"Tanda connection test failed: {e}")
+                    self._tanda_connected = False
+            else:
+                self._tanda_connected = False
+
+        return {
+            "mode": self.data_mode,
+            "tanda_connected": self._tanda_connected is True,
+        }
 
     async def _collect_demand_signals(self, target_date: str) -> List[Any]:
         """

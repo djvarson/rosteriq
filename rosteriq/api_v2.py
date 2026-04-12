@@ -57,6 +57,12 @@ class HealthResponse(BaseModel):
     connected_services: Dict[str, bool]
 
 
+class DataModeResponse(BaseModel):
+    """Data mode status response."""
+    mode: str = Field(..., description="Current data mode: 'demo' or 'live'")
+    tanda_connected: bool = Field(..., description="Whether real Tanda connection is active")
+
+
 class RosterGenerateRequest(BaseModel):
     """Request to generate a new roster."""
     venue_id: str = Field(..., description="Venue identifier")
@@ -641,6 +647,30 @@ async def health_check() -> HealthResponse:
             "pipeline": pipeline_ok,
         },
     )
+
+
+@app.get("/api/v1/data-mode", response_model=DataModeResponse)
+async def get_data_mode() -> DataModeResponse:
+    """
+    Get current data mode status and Tanda connection health.
+
+    Returns:
+        mode: 'demo' or 'live' - the currently active data mode
+        tanda_connected: True if real Tanda connection is active, False otherwise
+    """
+    try:
+        pipeline = get_pipeline()
+        status = await pipeline.get_data_mode_status()
+        return DataModeResponse(
+            mode=status["mode"],
+            tanda_connected=status["tanda_connected"],
+        )
+    except Exception as e:
+        logger.warning(f"Error getting data mode status: {e}")
+        return DataModeResponse(
+            mode="demo",
+            tanda_connected=False,
+        )
 
 
 # ============================================================================
