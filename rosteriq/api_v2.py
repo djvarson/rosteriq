@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -2472,6 +2472,100 @@ async def calculate_award(request: AwardCalculateRequest) -> AwardCalculateRespo
     except Exception as e:
         logger.exception("Award calculation failed")
         raise HTTPException(status_code=500, detail="Award calculation failed")
+
+
+# ============================================================================
+# Tanda Forecast Revenue — benchmark our forecast against Tanda's own
+# ============================================================================
+#
+# The Roster Maker uses this to show a side-by-side: "Tanda thinks
+# $11,500, we think $13,200 — here's why." Over time the delta tells
+# operators which signals RosterIQ is picking up that Tanda's forecast
+# misses (weather, stadium games, event spillover).
+
+
+class TandaForecastDay(BaseModel):
+    """One day of Tanda revenue forecast."""
+    date: str = Field(..., description="ISO date string YYYY-MM-DD")
+    tanda_forecast: float = Field(..., description="Tanda's forecast revenue for the day")
+    department_breakdown: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-department forecast split (friendly dept names → $)",
+    )
+
+
+class TandaForecastRevenueResponse(BaseModel):
+    """Response for GET /api/v1/tanda/forecast-revenue/{venue_id}."""
+    venue_id: str
+    date_from: str
+    date_to: str
+    source: str = Field(..., description="'tanda' (live) or 'tanda_demo' (fallback)")
+    days: List[TandaForecastDay]
+
+
+@app.get(
+    "/api/v1/tanda/forecast-revenue/{venue_id}",
+    response_model=TandaForecastRevenueResponse,
+)
+async def get_tanda_forecast_revenue(
+    venue_id: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> TandaForecastRevenueResponse:
+    """
+    Return Tanda's own revenue forecast for the venue over a date range.
+
+    Defaults to the next 7 days if date_from/date_to are omitted. Used by
+    the Roster Maker dashboard to benchmark RosterIQ's forecast against
+    Tanda's — the delta is the value the forecast engine is adding.
+    """
+    from rosteriq.tanda_adapter import get_tanda_adapter
+
+    try:
+        if date_from:
+            start = date.fromisoformat(date_from)
+        else:
+            start = date.today()
+        if date_to:
+            end = date.fromisoformat(date_to)
+        else:
+            end = start + timedelta(days=6)
+        if end < start:
+            raise HTTPException(
+                status_code=400,
+                detail="date_to must be on or after date_from",
+            )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date: {e}")
+
+    try:
+        adapter = get_tanda_adapter()
+        forecasts = await adapter.get_forecast_revenue(venue_id, (start, end))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to fetch Tanda forecast revenue")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Tanda forecast revenue unavailable: {e}",
+        )
+
+    # Infer source from first forecast (adapter stamps "tanda" vs "tanda_demo")
+    source = forecasts[0].source if forecasts else "tanda"
+    return TandaForecastRevenueResponse(
+        venue_id=venue_id,
+        date_from=start.isoformat(),
+        date_to=end.isoformat(),
+        source=source,
+        days=[
+            TandaForecastDay(
+                date=f.date.isoformat(),
+                tanda_forecast=f.forecast,
+                department_breakdown=f.department_breakdown,
+            )
+            for f in forecasts
+        ],
+    )
 
 
 # ============================================================================
