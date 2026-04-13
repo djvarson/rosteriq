@@ -2149,12 +2149,12 @@
 
         .staff-name {
             font-weight: 500;
-            color: #223f6f;
+            color: var(--text-primary, #0f172a);
         }
 
         .staff-role {
             font-size: 12px;
-            color: #7180aa;
+            color: var(--text-secondary, #64748b);
         }
 
         .staff-info {
@@ -2164,12 +2164,12 @@
         }
 
         .quick-actions {
-            background-color: #ffffff;
+            background-color: var(--card-bg, #ffffff);
             padding: 20px;
-            border-radius: 16px;
-            border: 1px solid #dee6ee;
+            border-radius: 12px;
+            border: 1px solid var(--border-color, #e2e8f0);
             margin-bottom: 30px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         }
 
         .action-buttons {
@@ -2181,8 +2181,8 @@
         .action-button {
             padding: 10px 15px;
             background-color: #f8fafc;
-            color: #223f6f;
-            border: 1px solid #dee6ee;
+            color: var(--text-primary, #0f172a);
+            border: 1px solid var(--border-color, #e2e8f0);
             border-radius: 12px;
             cursor: pointer;
             font-size: 13px;
@@ -2217,7 +2217,7 @@
             border-radius: 12px;
             margin-bottom: 10px;
             font-size: 14px;
-            color: #223f6f;
+            color: var(--text-primary, #0f172a);
         }
 
         .signal-item.alert {
@@ -2225,11 +2225,11 @@
         }
 
         .action-recommendations {
-            background-color: #ffffff;
+            background-color: var(--card-bg, #ffffff);
             padding: 20px;
-            border-radius: 16px;
-            border: 1px solid #dee6ee;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+            border-radius: 12px;
+            border: 1px solid var(--border-color, #e2e8f0);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         }
 
         @media (max-width: 768px) {
@@ -2780,6 +2780,39 @@
             background-color: #0f172a;
             border-color: #334155;
             border-left-color: #0ea5e9;
+        }
+
+        html.dark .staff-item {
+            background-color: #0f172a;
+        }
+
+        html.dark .signal-item {
+            background-color: #0f172a;
+            border-color: #334155;
+        }
+
+        html.dark .signal-item.alert {
+            background-color: rgba(14, 165, 233, 0.08);
+        }
+
+        html.dark .quick-actions {
+            background-color: #1e293b;
+            border-color: #334155;
+        }
+
+        html.dark .action-button {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            border-color: #334155;
+        }
+
+        html.dark .action-button:hover {
+            background-color: #1e293b;
+        }
+
+        html.dark .action-recommendations {
+            background-color: #1e293b;
+            border-color: #334155;
         }
 
         html.dark .tab {
@@ -5413,11 +5446,33 @@
             // still compute a stable djb2 hash id so re-renders are idempotent.
             const normalisedActions = actions.map(a => {
                 if (typeof a === 'string') {
-                    return {
-                        rec_id: stableRecId(a, 'med'),
-                        action: a, reason: '', priority: '', impact: null,
-                        server_owned: false
-                    };
+                    // Try to parse Python-style dict strings like
+                    // "{'action': 'Call in extra staff', 'reason': '...', 'priority': 'high'}"
+                    const trimmed = a.trim();
+                    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                        try {
+                            // Replace single quotes with double quotes for JSON parsing
+                            // Handle Python's True/False/None too
+                            const jsonStr = trimmed
+                                .replace(/'/g, '"')
+                                .replace(/\bTrue\b/g, 'true')
+                                .replace(/\bFalse\b/g, 'false')
+                                .replace(/\bNone\b/g, 'null');
+                            const parsed = JSON.parse(jsonStr);
+                            if (parsed && typeof parsed === 'object' && parsed.action) {
+                                a = parsed; // Fall through to the object handling below
+                            }
+                        } catch (e) {
+                            // Not parseable — treat as plain text
+                        }
+                    }
+                    if (typeof a === 'string') {
+                        return {
+                            rec_id: stableRecId(a, 'med'),
+                            action: a, reason: '', priority: '', impact: null,
+                            server_owned: false
+                        };
+                    }
                 }
                 const actionText = a.action || '';
                 const prio = (a.priority || '').toLowerCase();
@@ -5514,6 +5569,10 @@
             const labels = hourlyData.map(d => d.hour || '');
             const data = hourlyData.map(d => d.covers || 0);
 
+            const isDark = document.documentElement.classList.contains('dark');
+            const tickColor = isDark ? '#94a3b8' : '#64748b';
+            const gridColor = isDark ? 'rgba(148,163,184,0.12)' : 'rgba(15,23,42,0.06)';
+
             demandChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
@@ -5521,8 +5580,8 @@
                     datasets: [{
                         label: 'Expected Covers',
                         data: data,
-                        backgroundColor: '#F9C74F',
-                        borderColor: '#F9C74F',
+                        backgroundColor: '#0ea5e9',
+                        borderColor: '#0ea5e9',
                         borderWidth: 1,
                         borderRadius: 4
                     }]
@@ -5534,12 +5593,12 @@
                     scales: {
                         y: {
                             beginAtZero: true,
-                            grid: { color: 'rgba(176, 176, 176, 0.1)' },
-                            ticks: { color: '#b0b0b0' }
+                            grid: { color: gridColor },
+                            ticks: { color: tickColor }
                         },
                         x: {
                             grid: { display: false },
-                            ticks: { color: '#b0b0b0' }
+                            ticks: { color: tickColor }
                         }
                     }
                 }
@@ -5556,6 +5615,10 @@
             const expected = hourlyData.map(d => d.expected || 0);
             const actual = hourlyData.map(d => d.actual || 0);
 
+            const isDark2 = document.documentElement.classList.contains('dark');
+            const tickColor2 = isDark2 ? '#94a3b8' : '#64748b';
+            const gridColor2 = isDark2 ? 'rgba(148,163,184,0.12)' : 'rgba(15,23,42,0.06)';
+
             demandComparisonChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -5564,8 +5627,8 @@
                         {
                             label: 'Expected',
                             data: expected,
-                            borderColor: '#F9C74F',
-                            backgroundColor: 'rgba(249, 199, 79, 0.1)',
+                            borderColor: '#0ea5e9',
+                            backgroundColor: 'rgba(14, 165, 233, 0.1)',
                             borderWidth: 2,
                             tension: 0.4,
                             fill: true
@@ -5573,8 +5636,8 @@
                         {
                             label: 'Actual',
                             data: actual,
-                            borderColor: '#53d769',
-                            backgroundColor: 'rgba(83, 215, 105, 0.1)',
+                            borderColor: '#22c55e',
+                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
                             borderWidth: 2,
                             tension: 0.4,
                             fill: true
@@ -5586,19 +5649,19 @@
                     maintainAspectRatio: false,
                     plugins: {
                         legend: {
-                            labels: { color: '#b0b0b0' },
+                            labels: { color: tickColor2 },
                             position: 'bottom'
                         }
                     },
                     scales: {
                         y: {
                             beginAtZero: true,
-                            grid: { color: 'rgba(176, 176, 176, 0.1)' },
-                            ticks: { color: '#b0b0b0' }
+                            grid: { color: gridColor2 },
+                            ticks: { color: tickColor2 }
                         },
                         x: {
                             grid: { display: false },
-                            ticks: { color: '#b0b0b0' }
+                            ticks: { color: tickColor2 }
                         }
                     }
                 }
