@@ -2579,11 +2579,17 @@ from rosteriq.availability_router import router as _availability_router
 from rosteriq.weather_router import router as _weather_router
 from rosteriq.events_router import router as _events_router
 from rosteriq.call_in_router import router as _call_in_router
+from rosteriq.ask_router import ask_router as _ask_router
+from rosteriq.roi_router import router as _roi_router
+from rosteriq.shift_events_router import router as _shift_events_router
 
 app.include_router(_availability_router)
 app.include_router(_weather_router)
 app.include_router(_events_router)
 app.include_router(_call_in_router)
+app.include_router(_ask_router)
+app.include_router(_roi_router)
+app.include_router(_shift_events_router)
 
 
 # ============================================================================

@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosterIQ ROI Calculator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --dark-bg: #f1f5f9;
+            --darker-bg: #e2e8f0;
+            --card-bg: #ffffff;
+            --success-green: #10b981;
+            --info-blue: #0ea5e9;
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --border-color: #e2e8f0;
+            --navy-dark: #001d70;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, system-ui, sans-serif;
+            background-color: var(--dark-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        header {
+            background-color: var(--navy-dark);
+            color: #ffffff;
+            padding: 24px;
+            text-align: center;
+            margin-bottom: 40px;
+            border-radius: 0;
+        }
+
+        header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        header p {
+            font-size: 16px;
+            color: #c2d2ff;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .form-section {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 32px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .form-section h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+
+        .form-group input,
+        .form-group select {
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'Inter', system-ui, sans-serif;
+            color: var(--text-primary);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--info-blue);
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+        }
+
+        .form-group input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .tier-selector {
+            display: flex;
+            gap: 12px;
+            grid-column: 1 / -1;
+            margin-bottom: 16px;
+        }
+
+        .tier-option {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid var(--border-color);
+            border-radius: 6px;
+            background-color: #f8fafc;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.15s ease;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .tier-option input[type="radio"] {
+            display: none;
+        }
+
+        .tier-option input[type="radio"]:checked + label {
+            display: none;
+        }
+
+        .tier-option input[type="radio"]:checked ~ .tier-name {
+            color: var(--info-blue);
+            font-weight: 600;
+        }
+
+        .tier-option:has(input:checked) {
+            border-color: var(--info-blue);
+            background-color: rgba(14, 165, 233, 0.05);
+        }
+
+        .tier-option:hover {
+            border-color: var(--info-blue);
+            background-color: rgba(14, 165, 233, 0.02);
+        }
+
+        .tier-name {
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .tier-price {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .button-row {
+            display: flex;
+            gap: 12px;
+            grid-column: 1 / -1;
+        }
+
+        button[type="submit"] {
+            flex: 1;
+            padding: 12px 24px;
+            background-color: var(--info-blue);
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+
+        button[type="submit"]:hover {
+            background-color: #0284c7;
+        }
+
+        button[type="submit"]:disabled {
+            background-color: #cbd5e1;
+            cursor: not-allowed;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #ffffff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .results-section {
+            display: none;
+        }
+
+        .results-section.show {
+            display: block;
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .result-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .result-card.highlight {
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.05) 0%, rgba(16, 185, 129, 0.05) 100%);
+            border-color: var(--info-blue);
+        }
+
+        .result-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .result-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+        }
+
+        .result-subtext {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+        }
+
+        .result-range {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            font-weight: 500;
+        }
+
+        .result-good {
+            color: var(--success-green);
+        }
+
+        .payback-card {
+            grid-column: 1 / -1;
+        }
+
+        .assumptions-section {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .assumptions-section h3 {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .assumptions-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .assumptions-list li {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            padding-left: 16px;
+            position: relative;
+        }
+
+        .assumptions-list li:last-child {
+            margin-bottom: 0;
+        }
+
+        .assumptions-list li:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: var(--info-blue);
+        }
+
+        .cta-section {
+            background: linear-gradient(135deg, var(--navy-dark) 0%, #003399 100%);
+            color: #ffffff;
+            border-radius: 8px;
+            padding: 32px;
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .cta-section h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .cta-section p {
+            font-size: 14px;
+            color: #c2d2ff;
+            margin-bottom: 20px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .cta-button {
+            display: inline-block;
+            padding: 12px 28px;
+            background-color: var(--success-green);
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background-color 0.15s ease;
+            border: none;
+            cursor: pointer;
+        }
+
+        .cta-button:hover {
+            background-color: #059669;
+        }
+
+        .error-message {
+            background-color: #fee;
+            color: #c33;
+            border: 1px solid #fcc;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 16px;
+            }
+
+            header h1 {
+                font-size: 24px;
+            }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .results-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .payback-card {
+                grid-column: auto;
+            }
+
+            .tier-selector {
+                flex-direction: column;
+            }
+
+            .tier-option {
+                padding: 16px;
+            }
+
+            button[type="submit"] {
+                padding: 14px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>See how much RosterIQ can save your venue</h1>
+        <p>Plug in your numbers. We'll show you the honest range.</p>
+    </header>
+
+    <div class="container">
+        <div class="error-message" id="errorMessage"></div>
+
+        <form class="form-section" id="roiForm">
+            <h2>Your Venue Details</h2>
+
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="venueName">Venue Name (optional)</label>
+                    <input
+                        type="text"
+                        id="venueName"
+                        name="venueName"
+                        placeholder="e.g., The Local Pub"
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="staffCount">Number of Staff</label>
+                    <input
+                        type="number"
+                        id="staffCount"
+                        name="staffCount"
+                        min="1"
+                        placeholder="e.g., 30"
+                        required
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="weeklyWage">Weekly Wage Cost (AUD)</label>
+                    <input
+                        type="number"
+                        id="weeklyWage"
+                        name="weeklyWage"
+                        min="0"
+                        step="100"
+                        placeholder="e.g., 35000"
+                        required
+                    />
+                </div>
+
+                <div class="form-group full-width">
+                    <label>RosterIQ Tier</label>
+                    <div class="tier-selector">
+                        <label class="tier-option">
+                            <input type="radio" name="tier" value="startup" />
+                            <span class="tier-name">Startup</span>
+                            <span class="tier-price">$1.50 per person/month</span>
+                        </label>
+                        <label class="tier-option">
+                            <input type="radio" name="tier" value="pro" checked />
+                            <span class="tier-name">Pro</span>
+                            <span class="tier-price">$3.00 per person/month</span>
+                        </label>
+                        <label class="tier-option">
+                            <input type="radio" name="tier" value="enterprise" />
+                            <span class="tier-name">Enterprise</span>
+                            <span class="tier-price">$5.50 per person/month</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="button-row">
+                    <button type="submit" id="submitBtn">
+                        <span id="btnText">Calculate My ROI</span>
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        <div class="results-section" id="resultsSection">
+            <div class="results-grid">
+                <div class="result-card">
+                    <div class="result-label">Annual Labour Cost</div>
+                    <div class="result-value" id="annualWageCost">$0</div>
+                </div>
+
+                <div class="result-card highlight">
+                    <div class="result-label">Potential Annual Saving</div>
+                    <div class="result-value result-good" id="annualSaving">$0</div>
+                    <div class="result-range">
+                        <span id="savingRange">$0 – $0</span>
+                    </div>
+                </div>
+
+                <div class="result-card">
+                    <div class="result-label">Annual RosterIQ Cost</div>
+                    <div class="result-value" id="annualSubscription">$0</div>
+                    <div class="result-subtext" id="monthlySubscription">$0/month</div>
+                </div>
+
+                <div class="result-card highlight">
+                    <div class="result-label">Net Annual Saving (Year 1)</div>
+                    <div class="result-value result-good" id="netAnnualSaving">$0</div>
+                    <div class="result-range">
+                        <span id="netRange">$0 – $0</span>
+                    </div>
+                </div>
+
+                <div class="result-card payback-card">
+                    <div class="result-label">ROI Ratio & Payback</div>
+                    <div class="result-value" id="roiRatio">0:1</div>
+                    <div class="result-subtext">
+                        Payback in <span id="paybackWeeks">52</span> weeks
+                    </div>
+                </div>
+            </div>
+
+            <div class="assumptions-section">
+                <h3>Assumptions & Disclaimers</h3>
+                <ul class="assumptions-list" id="assumptionsList"></ul>
+            </div>
+
+            <div class="cta-section">
+                <h2>Ready to see real numbers?</h2>
+                <p>Let's chat about how RosterIQ can transform your venue's rostering.</p>
+                <a href="mailto:ingvarson@iinet.net.au?subject=RosterIQ%20pilot%20enquiry" class="cta-button">
+                    Book a Pilot
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('roiForm');
+        const resultsSection = document.getElementById('resultsSection');
+        const errorMessage = document.getElementById('errorMessage');
+        const submitBtn = document.getElementById('submitBtn');
+        const btnText = document.getElementById('btnText');
+
+        // Format currency
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('en-AU', {
+                style: 'currency',
+                currency: 'AUD',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0,
+            }).format(value);
+        }
+
+        // Submit form
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await calculateROI();
+        });
+
+        // Also allow Enter in inputs
+        const inputs = form.querySelectorAll('input[type="number"]');
+        inputs.forEach(input => {
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    calculateROI();
+                }
+            });
+        });
+
+        async function calculateROI() {
+            errorMessage.classList.remove('show');
+            submitBtn.disabled = true;
+            btnText.textContent = 'Calculating...';
+
+            const staffCount = parseInt(document.getElementById('staffCount').value, 10);
+            const weeklyWage = parseFloat(document.getElementById('weeklyWage').value);
+            const venueName = document.getElementById('venueName').value;
+            const tier = document.querySelector('input[name="tier"]:checked').value;
+
+            if (!staffCount || staffCount < 1 || !weeklyWage || weeklyWage <= 0) {
+                showError('Please enter valid staff count and weekly wage cost.');
+                submitBtn.disabled = false;
+                btnText.textContent = 'Calculate My ROI';
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/v1/roi/calculate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        venue_name: venueName,
+                        staff_count: staffCount,
+                        weekly_wage_cost: weeklyWage,
+                        tier: tier,
+                        wage_reduction_pct_low: 0.08,
+                        wage_reduction_pct_high: 0.15,
+                    }),
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Calculation failed');
+                }
+
+                const result = await response.json();
+                displayResults(result);
+            } catch (error) {
+                showError('Error calculating ROI: ' + error.message);
+            } finally {
+                submitBtn.disabled = false;
+                btnText.textContent = 'Calculate My ROI';
+            }
+        }
+
+        function displayResults(result) {
+            document.getElementById('annualWageCost').textContent = formatCurrency(
+                result.annual_wage_cost
+            );
+            document.getElementById('annualSaving').textContent = formatCurrency(
+                result.annual_saving_midpoint
+            );
+            document.getElementById('savingRange').textContent =
+                formatCurrency(result.annual_saving_low) + ' – ' +
+                formatCurrency(result.annual_saving_high);
+
+            document.getElementById('annualSubscription').textContent = formatCurrency(
+                result.annual_subscription
+            );
+            document.getElementById('monthlySubscription').textContent = formatCurrency(
+                result.monthly_subscription
+            ) + '/month';
+
+            document.getElementById('netAnnualSaving').textContent = formatCurrency(
+                result.net_annual_saving_midpoint || result.annual_saving_midpoint - result.annual_subscription
+            );
+            document.getElementById('netRange').textContent =
+                formatCurrency(result.net_annual_saving_low) + ' – ' +
+                formatCurrency(result.net_annual_saving_high);
+
+            const roiMid = (result.roi_ratio_low + result.roi_ratio_high) / 2;
+            document.getElementById('roiRatio').textContent = roiMid.toFixed(1) + ':1';
+            document.getElementById('paybackWeeks').textContent = result.payback_weeks;
+
+            const assumptionsList = document.getElementById('assumptionsList');
+            assumptionsList.innerHTML = '';
+            result.assumptions.forEach(assumption => {
+                const li = document.createElement('li');
+                li.textContent = assumption;
+                assumptionsList.appendChild(li);
+            });
+
+            resultsSection.classList.add('show');
+            resultsSection.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function showError(msg) {
+            errorMessage.textContent = msg;
+            errorMessage.classList.add('show');
+        }
+
+        // Load sample on page load for demo
+        async function loadSample() {
+            try {
+                const response = await fetch('/api/v1/roi/sample');
+                if (!response.ok) return;
+                const sample = await response.json();
+                document.getElementById('staffCount').value = 30;
+                document.getElementById('weeklyWage').value = 35000;
+            } catch (e) {
+                // Silently fail, user can enter their own values
+            }
+        }
+
+        // Uncomment to auto-load sample:
+        // loadSample();
+    </script>
+</body>
+</html>

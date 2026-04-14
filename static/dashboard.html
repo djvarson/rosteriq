@@ -740,6 +740,519 @@
             cursor: not-allowed;
         }
 
+        /* -------- Weather Card -------- */
+        .weather-card {
+            background-color: var(--card-bg);
+            padding: 24px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .weather-card:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+        }
+        .weather-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+        .weather-current {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .weather-icon {
+            font-size: 48px;
+            line-height: 1;
+        }
+        .weather-main {
+            display: flex;
+            flex-direction: column;
+        }
+        .weather-temp {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .weather-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        .weather-refresh {
+            background: none;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.15s ease;
+        }
+        .weather-refresh:hover {
+            background: var(--darker-bg);
+        }
+        .weather-forecast {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+        }
+        .weather-chip {
+            background: var(--darker-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            text-align: center;
+        }
+        .weather-chip-date {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .weather-chip-temp {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        .weather-chip-rain {
+            font-size: 11px;
+            color: var(--info-blue);
+            margin-top: 2px;
+        }
+        .weather-empty {
+            color: var(--text-secondary);
+            font-size: 13px;
+            padding: 16px 0;
+        }
+
+        /* -------- Events Strip -------- */
+        .events-strip {
+            background-color: var(--card-bg);
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .events-strip:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+        }
+        .events-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+        .events-list {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+        }
+        .event-chip {
+            background: var(--darker-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 12px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .event-chip:hover {
+            background: var(--border-color);
+        }
+        .event-chip.stadium {
+            border-color: var(--accent-gold);
+            background: rgba(14, 165, 233, 0.08);
+        }
+        .event-chip-title {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .event-chip-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        .events-empty {
+            color: var(--text-secondary);
+            font-size: 13px;
+            padding: 12px 0;
+        }
+        .event-drawer {
+            position: fixed;
+            right: -400px;
+            top: 0;
+            width: 400px;
+            height: 100vh;
+            background: var(--card-bg);
+            border-left: 1px solid var(--border-color);
+            box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+            transition: right 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+            padding: 24px;
+        }
+        .event-drawer.open {
+            right: 0;
+        }
+        .event-drawer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .event-drawer-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .event-drawer-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+        .event-drawer-content {
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .event-drawer-row {
+            margin-bottom: 12px;
+        }
+        .event-drawer-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+        .event-drawer-value {
+            color: var(--text-primary);
+            margin-top: 4px;
+        }
+
+        /* -------- Availability Conflicts Panel -------- */
+        .availability-panel {
+            background-color: var(--card-bg);
+            padding: 24px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .availability-panel:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+        }
+        .availability-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+        .conflict-item {
+            padding: 12px;
+            background: var(--darker-bg);
+            border-left: 3px solid var(--alert-red);
+            border-radius: 4px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+        .availability-grid {
+            overflow-x: auto;
+        }
+        .availability-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .availability-table th {
+            background: var(--darker-bg);
+            padding: 10px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-primary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .availability-table td {
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+        .availability-empty {
+            color: var(--text-secondary);
+            padding: 16px;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        /* -------- Call-In Panel -------- */
+        .callin-panel {
+            background-color: var(--card-bg);
+            padding: 24px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .callin-panel:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+        }
+        .callin-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+        .callin-button {
+            width: 100%;
+            padding: 12px 24px;
+            background: var(--info-blue);
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            min-height: 44px;
+            margin-bottom: 16px;
+        }
+        .callin-button:hover {
+            background: var(--accent-amber);
+        }
+        .callin-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .callin-request {
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+        .callin-request-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .callin-request-name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .callin-status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .callin-status-pending {
+            background: rgba(250, 204, 21, 0.15);
+            color: #d97706;
+        }
+        .callin-status-sent {
+            background: rgba(14, 165, 233, 0.15);
+            color: var(--info-blue);
+        }
+        .callin-status-accepted {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success-green);
+        }
+        .callin-status-declined {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--alert-red);
+        }
+        .callin-status-expired {
+            background: rgba(100, 116, 139, 0.15);
+            color: var(--text-secondary);
+        }
+        .callin-request-details {
+            color: var(--text-secondary);
+            margin-top: 6px;
+        }
+        .callin-empty {
+            color: var(--text-secondary);
+            padding: 24px;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        /* -------- Call-In Modal -------- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            transition: opacity 0.3s ease;
+        }
+        .modal-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .modal-content {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 32px;
+            max-width: 450px;
+            width: 90%;
+            box-shadow: 0 20px 25px rgba(0, 0, 0, 0.15);
+        }
+        .modal-header {
+            margin-bottom: 20px;
+        }
+        .modal-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .modal-subtitle {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        .modal-form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+        .form-input,
+        .form-select {
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 13px;
+            color: var(--text-primary);
+            background: var(--card-bg);
+            font-family: inherit;
+            min-height: 40px;
+        }
+        .form-input:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: var(--info-blue);
+            box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.1);
+        }
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+        .modal-submit {
+            flex: 1;
+            padding: 12px 24px;
+            background: var(--info-blue);
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            min-height: 44px;
+        }
+        .modal-submit:hover {
+            background: var(--accent-amber);
+        }
+        .modal-cancel {
+            flex: 1;
+            padding: 12px 24px;
+            background: var(--darker-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            min-height: 44px;
+        }
+        .modal-cancel:hover {
+            background: var(--border-color);
+        }
+
+        /* -------- Hidden state -------- */
+        .hidden {
+            display: none !important;
+        }
+
+        /* -------- Toast Notification -------- */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 16px 24px;
+            background: var(--success-green);
+            color: #ffffff;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 3000;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        .toast.error {
+            background: var(--alert-red);
+        }
+
+        /* -------- Dark Mode Support -------- */
+        html.dark .weather-card,
+        html.dark .events-strip,
+        html.dark .availability-panel,
+        html.dark .callin-panel,
+        html.dark .modal-content {
+            --card-bg: #1e293b;
+            --darker-bg: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --border-color: #475569;
+        }
+        html.dark .form-input,
+        html.dark .form-select {
+            background: #334155;
+            color: #f1f5f9;
+        }
+
         /* On-Shift View */
         .status-header {
             background: linear-gradient(135deg, #001d70, #0c2d8a);
@@ -2917,6 +3430,22 @@
                 </div>
             </div>
 
+            <!-- Events Strip -->
+            <div class="events-strip" id="rosterEventsStrip">
+                <div class="events-title">Upcoming Events</div>
+                <div class="events-list" id="rosterEventsList">
+                    <div class="events-empty">Loading events…</div>
+                </div>
+            </div>
+
+            <!-- Availability Conflicts Panel -->
+            <div class="availability-panel" id="availabilityPanel">
+                <div class="availability-title">Availability Conflicts</div>
+                <div id="availabilityContent">
+                    <div class="availability-empty">Loading availability…</div>
+                </div>
+            </div>
+
             <div class="recommendations">
                 <div class="section-title">AI Recommendations</div>
                 <div id="recommendationsContainer">
@@ -2959,6 +3488,40 @@
                     <span class="demo-data-pill" id="demoDataPill">Demo data</span>
                 </div>
                 <div class="status-time" id="shiftTime">6:30 PM</div>
+            </div>
+
+            <!-- Weather Card -->
+            <div class="weather-card" id="weatherCard">
+                <div class="weather-header">
+                    <div class="weather-current">
+                        <div class="weather-icon" id="weatherIcon">☀</div>
+                        <div class="weather-main">
+                            <div class="weather-temp" id="weatherTemp">—°</div>
+                            <div class="weather-desc" id="weatherDesc">—</div>
+                        </div>
+                    </div>
+                    <button class="weather-refresh" onclick="refreshWeather()">Refresh</button>
+                </div>
+                <div class="weather-forecast" id="weatherForecast">
+                    <div class="events-empty">Loading forecast…</div>
+                </div>
+            </div>
+
+            <!-- Events Strip -->
+            <div class="events-strip" id="onshiftEventsStrip">
+                <div class="events-title">Nearby Events</div>
+                <div class="events-list" id="onshiftEventsList">
+                    <div class="events-empty">Loading events…</div>
+                </div>
+            </div>
+
+            <!-- Call-In Panel -->
+            <div class="callin-panel" id="callinPanel">
+                <div class="callin-title">Call-In Requests</div>
+                <button class="callin-button" onclick="openCallInModal()">Call in staff</button>
+                <div class="callin-list" id="callinList">
+                    <div class="callin-empty">No requests yet</div>
+                </div>
             </div>
 
             <!-- Morning Brief — Moment 11: next-day accountability digest -->
@@ -3292,6 +3855,55 @@
                     <button class="action-button" onclick="quickAction('adjust')">Adjust Staffing</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Call-In Modal -->
+    <div class="modal-overlay hidden" id="callInModalOverlay" onclick="closeCallInModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">Call in staff</div>
+                <div class="modal-subtitle">Request a staff member to come in for a shift</div>
+            </div>
+            <form class="modal-form" id="callInForm" onsubmit="event.preventDefault(); submitCallIn();">
+                <div class="form-group">
+                    <label class="form-label">Employee</label>
+                    <select id="callInEmployee" class="form-select">
+                        <option value="">Select or type employee name</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Phone</label>
+                    <input id="callInPhone" class="form-input" type="tel" placeholder="e.g. +61 2 1234 5678" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Shift start</label>
+                    <input id="callInStart" class="form-input" type="datetime-local" required />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Shift end</label>
+                    <input id="callInEnd" class="form-input" type="datetime-local" required />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Role (optional)</label>
+                    <input id="callInRole" class="form-input" type="text" placeholder="e.g. Head Chef" />
+                </div>
+                <div class="modal-actions">
+                    <button type="submit" class="modal-submit">Send request</button>
+                    <button type="button" class="modal-cancel" onclick="closeCallInModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Event Details Drawer -->
+    <div class="event-drawer" id="eventDrawer">
+        <div class="event-drawer-header">
+            <div class="event-drawer-title" id="eventDrawerTitle">Event Details</div>
+            <button class="event-drawer-close" onclick="closeEventDrawer()">×</button>
+        </div>
+        <div class="event-drawer-content" id="eventDrawerContent">
+            <!-- Populated by JS -->
         </div>
     </div>
 
@@ -5817,9 +6429,384 @@
             }
         }
 
+        // ========== WEATHER WIDGET ==========
+        let _weatherIntervalId = null;
+
+        function getWeatherIcon(conditions) {
+            const cond = (conditions || '').toLowerCase();
+            if (cond.includes('sun') || cond.includes('clear')) return '☀️';
+            if (cond.includes('cloud')) return '☁️';
+            if (cond.includes('rain')) return '🌧️';
+            if (cond.includes('storm')) return '⛈️';
+            if (cond.includes('snow')) return '❄️';
+            return '🌤️';
+        }
+
+        async function refreshWeather() {
+            const btn = document.querySelector('.weather-refresh');
+            if (btn) btn.disabled = true;
+
+            try {
+                const res = await fetch(`/api/v1/weather/current/${_activeVenueId}`);
+                if (!res.ok) throw new Error('Failed to fetch weather');
+                const data = await res.json();
+                const obs = data.observation || {};
+
+                const temp = Math.round(obs.temperature_c || 0);
+                const desc = obs.conditions || 'Unknown';
+                const icon = getWeatherIcon(obs.conditions);
+
+                document.getElementById('weatherTemp').textContent = temp + '°';
+                document.getElementById('weatherDesc').textContent = desc;
+                document.getElementById('weatherIcon').textContent = icon;
+
+                await loadWeatherForecast();
+            } catch (err) {
+                console.error('Weather error:', err);
+                document.getElementById('weatherDesc').textContent = 'No data';
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function loadWeatherForecast() {
+            try {
+                const res = await fetch(`/api/v1/weather/forecast/${_activeVenueId}?days=7`);
+                if (!res.ok) throw new Error('Failed to fetch forecast');
+                const data = res.json();
+                const forecast = (await data).forecast || [];
+
+                const container = document.getElementById('weatherForecast');
+                if (!forecast.length) {
+                    container.innerHTML = '<div class="weather-empty">No forecast available</div>';
+                    return;
+                }
+
+                container.innerHTML = forecast.map(f => {
+                    const d = new Date(f.date);
+                    const dateStr = d.toLocaleDateString('en-AU', { weekday: 'short', month: 'short', day: 'numeric' });
+                    const maxC = f.max_c || '—';
+                    const rainPct = f.rain_probability_pct || 0;
+                    return `
+                        <div class="weather-chip">
+                            <div class="weather-chip-date">${dateStr}</div>
+                            <div class="weather-chip-temp">${maxC}°</div>
+                            <div class="weather-chip-rain">${rainPct}% rain</div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Forecast error:', err);
+                document.getElementById('weatherForecast').innerHTML = '<div class="weather-empty">No forecast</div>';
+            }
+        }
+
+        function initWeatherWidget() {
+            refreshWeather();
+            if (_weatherIntervalId) clearInterval(_weatherIntervalId);
+            _weatherIntervalId = setInterval(refreshWeather, 15 * 60 * 1000);
+        }
+
+        // ========== EVENTS WIDGET ==========
+        let _currentEventData = null;
+
+        async function loadEvents(stripId) {
+            const today = new Date();
+            const from = today.toISOString().split('T')[0];
+            const to = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+            try {
+                const res = await fetch(`/api/v1/events/${_activeVenueId}?from=${from}&to=${to}`);
+                if (!res.ok) throw new Error('Failed to fetch events');
+                const data = await res.json();
+                _currentEventData = data.events || [];
+
+                const listContainer = document.getElementById(stripId);
+                if (!_currentEventData.length) {
+                    listContainer.innerHTML = '<div class="events-empty">No events in the next 7 days</div>';
+                    return;
+                }
+
+                listContainer.innerHTML = _currentEventData.map((e, idx) => {
+                    const eventDate = new Date(e.start_time);
+                    const dateStr = eventDate.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric' });
+                    const isStadium = (e.category || '').toLowerCase().includes('stadium');
+                    return `
+                        <div class="event-chip ${isStadium ? 'stadium' : ''}" onclick="showEventDetails(${idx})">
+                            <div class="event-chip-title">${escapeHtmlSafe(e.title || 'Event')}</div>
+                            <div class="event-chip-meta">${dateStr}</div>
+                            <div class="event-chip-meta">${e.distance_km_from_venue || '?'} km • ${e.expected_attendance || '?'} people</div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Events error:', err);
+                document.getElementById(stripId).innerHTML = '<div class="events-empty">Unable to load events</div>';
+            }
+        }
+
+        function showEventDetails(idx) {
+            if (!_currentEventData || !_currentEventData[idx]) return;
+            const event = _currentEventData[idx];
+            const eventDate = new Date(event.start_time);
+            const endDate = event.end_time ? new Date(event.end_time) : null;
+
+            document.getElementById('eventDrawerTitle').textContent = escapeHtmlSafe(event.title || 'Event');
+            document.getElementById('eventDrawerContent').innerHTML = `
+                <div class="event-drawer-row">
+                    <div class="event-drawer-label">Date</div>
+                    <div class="event-drawer-value">${eventDate.toLocaleDateString('en-AU', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                </div>
+                <div class="event-drawer-row">
+                    <div class="event-drawer-label">Time</div>
+                    <div class="event-drawer-value">${eventDate.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })} ${endDate ? '– ' + endDate.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+                </div>
+                <div class="event-drawer-row">
+                    <div class="event-drawer-label">Location</div>
+                    <div class="event-drawer-value">${escapeHtmlSafe(event.location_name || 'Unknown')} (${event.distance_km_from_venue || '?'} km away)</div>
+                </div>
+                <div class="event-drawer-row">
+                    <div class="event-drawer-label">Expected Attendance</div>
+                    <div class="event-drawer-value">${event.expected_attendance || '?'} people</div>
+                </div>
+                <div class="event-drawer-row">
+                    <div class="event-drawer-label">Category</div>
+                    <div class="event-drawer-value">${escapeHtmlSafe(event.category || 'General')}</div>
+                </div>
+            `;
+            document.getElementById('eventDrawer').classList.add('open');
+        }
+
+        function closeEventDrawer() {
+            document.getElementById('eventDrawer').classList.remove('open');
+        }
+
+        // ========== AVAILABILITY WIDGET ==========
+        let _rosterData = null;
+
+        async function loadAvailability() {
+            try {
+                const res = await fetch(`/api/v1/tanda/availability/${_activeVenueId}`);
+                if (!res.ok) throw new Error('Failed to fetch availability');
+                const data = await res.json();
+                const windows = data.windows || [];
+
+                const container = document.getElementById('availabilityContent');
+
+                // If no windows, show empty state
+                if (!windows.length) {
+                    container.innerHTML = '<div class="availability-empty">No availability data</div>';
+                    return;
+                }
+
+                // If roster is available, check for conflicts
+                if (_rosterData && _rosterData.shifts && _rosterData.shifts.length) {
+                    const conflicts = [];
+                    _rosterData.shifts.forEach(shift => {
+                        const empName = shift.employee || 'Unknown';
+                        const shiftStart = new Date(shift.start_time);
+                        const shiftEnd = new Date(shift.end_time);
+
+                        // Check if employee has a window that covers this shift
+                        const match = windows.find(w =>
+                            w.employee_id === shift.employee_id &&
+                            w.day_of_week === shiftStart.toLocaleDateString('en-AU', { weekday: 'long' }).toLowerCase() &&
+                            (new Date(`2000-01-01T${w.start_time}`)).getTime() <= shiftStart.getHours() * 60 + shiftStart.getMinutes() &&
+                            (new Date(`2000-01-01T${w.end_time}`)).getTime() >= shiftEnd.getHours() * 60 + shiftEnd.getMinutes()
+                        );
+
+                        if (!match) {
+                            conflicts.push(`${escapeHtmlSafe(empName)} not available ${shiftStart.toLocaleDateString('en-AU', { weekday: 'short', month: '2-digit', day: '2-digit' })} ${shiftStart.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })}`);
+                        }
+                    });
+
+                    if (conflicts.length) {
+                        container.innerHTML = conflicts.map(c => `<div class="conflict-item">${c}</div>`).join('');
+                    } else {
+                        container.innerHTML = '<div class="availability-empty">No conflicts detected ✓</div>';
+                    }
+                    return;
+                }
+
+                // Show read-only availability grid
+                container.innerHTML = `
+                    <div class="availability-grid">
+                        <table class="availability-table">
+                            <thead>
+                                <tr>
+                                    <th>Employee</th>
+                                    <th>Day</th>
+                                    <th>Available</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${windows.map(w => `
+                                    <tr>
+                                        <td>${escapeHtmlSafe(w.employee_id || '—')}</td>
+                                        <td>${escapeHtmlSafe(w.day_of_week || '—')}</td>
+                                        <td>${w.start_time || '—'} to ${w.end_time || '—'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } catch (err) {
+                console.error('Availability error:', err);
+                document.getElementById('availabilityContent').innerHTML = '<div class="availability-empty">Unable to load availability</div>';
+            }
+        }
+
+        // ========== CALL-IN WIDGET ==========
+        let _callInIntervalId = null;
+
+        function openCallInModal() {
+            const select = document.getElementById('callInEmployee');
+            select.innerHTML = '<option value="">Select employee</option>';
+
+            // Populate from roster if available
+            if (_rosterData && _rosterData.employees) {
+                _rosterData.employees.forEach(emp => {
+                    const opt = document.createElement('option');
+                    opt.value = emp.id;
+                    opt.textContent = escapeHtmlSafe(emp.name || emp.id);
+                    select.appendChild(opt);
+                });
+            }
+
+            document.getElementById('callInModalOverlay').classList.remove('hidden');
+        }
+
+        function closeCallInModal(event) {
+            if (event && event.target !== document.getElementById('callInModalOverlay')) return;
+            document.getElementById('callInModalOverlay').classList.add('hidden');
+        }
+
+        async function submitCallIn() {
+            const form = document.getElementById('callInForm');
+            const empSelect = document.getElementById('callInEmployee');
+            const empId = empSelect.value;
+            const empName = empSelect.options[empSelect.selectedIndex]?.text || empId;
+            const phone = document.getElementById('callInPhone').value;
+            const start = document.getElementById('callInStart').value;
+            const end = document.getElementById('callInEnd').value;
+            const role = document.getElementById('callInRole').value;
+
+            if (!empId || !phone || !start || !end) {
+                showToast('Please fill in all required fields', 'error');
+                return;
+            }
+
+            try {
+                const startIso = new Date(start).toISOString();
+                const endIso = new Date(end).toISOString();
+                const res = await fetch('/api/v1/call-in', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        venue_id: _activeVenueId,
+                        employee_id: empId,
+                        employee_name: empName,
+                        phone: phone,
+                        shift_start: startIso,
+                        shift_end: endIso,
+                        role: role || undefined
+                    })
+                });
+
+                if (!res.ok) throw new Error('Failed to submit call-in');
+                showToast('Call-in request sent successfully');
+                closeCallInModal();
+                form.reset();
+                pollCallInRequests();
+            } catch (err) {
+                console.error('Call-in error:', err);
+                showToast('Error sending call-in request', 'error');
+            }
+        }
+
+        async function pollCallInRequests() {
+            try {
+                const res = await fetch(`/api/v1/call-in/${_activeVenueId}`);
+                if (!res.ok) throw new Error('Failed to fetch call-ins');
+                const requests = await res.json();
+
+                const container = document.getElementById('callinList');
+                if (!requests || requests.length === 0) {
+                    container.innerHTML = '<div class="callin-empty">No requests yet</div>';
+                    return;
+                }
+
+                container.innerHTML = requests.map(req => {
+                    const status = (req.status || 'PENDING').toUpperCase();
+                    const statusClass = `callin-status-${status.toLowerCase()}`;
+                    const shiftStart = new Date(req.shift_start);
+                    return `
+                        <div class="callin-request">
+                            <div class="callin-request-header">
+                                <span class="callin-request-name">${escapeHtmlSafe(req.employee_name || req.employee_id || 'Unknown')}</span>
+                                <span class="callin-status-badge ${statusClass}">${status}</span>
+                            </div>
+                            <div class="callin-request-details">
+                                ${shiftStart.toLocaleDateString('en-AU', { weekday: 'short', month: 'short', day: 'numeric' })} ${shiftStart.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })} • ${escapeHtmlSafe(req.phone || '—')}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Call-in poll error:', err);
+            }
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease forwards';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // ========== WIDGET INITIALIZATION ==========
+        function initWidgets() {
+            // Weather widget (on-shift only)
+            const weatherCard = document.getElementById('weatherCard');
+            if (weatherCard) {
+                initWeatherWidget();
+            }
+
+            // Events widgets (both sections)
+            loadEvents('rosterEventsList');
+            loadEvents('onshiftEventsList');
+
+            // Availability widget (roster maker only)
+            const availPanel = document.getElementById('availabilityPanel');
+            if (availPanel) {
+                loadAvailability();
+            }
+
+            // Call-in widget (on-shift only)
+            const callinPanel = document.getElementById('callinPanel');
+            if (callinPanel) {
+                pollCallInRequests();
+                if (_callInIntervalId) clearInterval(_callInIntervalId);
+                _callInIntervalId = setInterval(pollCallInRequests, 10 * 1000);
+            }
+        }
+
+        // Initialize widgets when switching tabs
+        const origSwitchTab = window.switchTab;
+        window.switchTab = function(tabName, event) {
+            if (origSwitchTab) origSwitchTab(tabName, event);
+            initWidgets();
+        };
+
         // Call offline detection on page load
         document.addEventListener('DOMContentLoaded', () => {
             initOfflineDetection();
+            initWidgets();
         });
 
         // Fallback if DOMContentLoaded already fired

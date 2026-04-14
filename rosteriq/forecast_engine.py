@@ -681,6 +681,78 @@ async def get_forecast_engine(
     return engine
 
 
+async def get_enriched_forecast_engine(
+    pos_adapter: Optional[object] = None,
+    weather_adapter: Optional[object] = None,
+    events_adapter: Optional[object] = None,
+    demo_mode: Optional[bool] = None,
+) -> ForecastEngine:
+    """
+    Factory function to create a ForecastEngine with EnrichedSignalAggregator.
+
+    EnrichedSignalAggregator combines legacy signal feeds with new BOM weather
+    and events adapters via signal_bridge, providing enhanced demand signals.
+
+    If demo_mode is not specified, auto-detects from ROSTERIQ_DATA_MODE env var:
+    - "demo" (default): uses DemoWeatherAdapter and DemoEventsAdapter
+    - "live": caller must provide weather_adapter and events_adapter
+
+    Args:
+        pos_adapter: POSAdapter instance. If None, auto-detects from environment.
+        weather_adapter: WeatherAdapter instance (BOMAdapter, DemoWeatherAdapter).
+                        If None and demo_mode=False, attempts auto-detect.
+        events_adapter: EventsAdapter instance (PerthIsOKAdapter, DemoEventsAdapter).
+                       If None and demo_mode=False, attempts auto-detect.
+        demo_mode: Force demo mode. If None, reads ROSTERIQ_DATA_MODE env var.
+
+    Returns:
+        Initialized ForecastEngine with EnrichedSignalAggregator
+
+    Example:
+        >>> engine = await get_enriched_forecast_engine(demo_mode=True)
+        >>> forecast = await engine.forecast_week("venue_001", start_date=date.today())
+    """
+    from rosteriq.signal_feeds_v2 import EnrichedSignalAggregator
+
+    # Determine demo_mode from env if not provided
+    if demo_mode is None:
+        data_mode = os.getenv("ROSTERIQ_DATA_MODE", "demo")
+        demo_mode = data_mode == "demo"
+
+    # Auto-detect POS adapter
+    if pos_adapter is None and not demo_mode:
+        try:
+            from rosteriq.pos_adapter import SwiftPOSClient, DemoSwiftPOSAdapter
+
+            if os.getenv("SWIFTPOS_API_KEY"):
+                pos_adapter = SwiftPOSClient()
+                logger.info("get_enriched_forecast_engine: using real SwiftPOS adapter")
+            else:
+                pos_adapter = DemoSwiftPOSAdapter()
+                logger.info("get_enriched_forecast_engine: using demo POS adapter")
+        except Exception as e:
+            logger.warning(f"Could not init POS adapter: {e}, using demo mode")
+            demo_mode = True
+
+    # Create EnrichedSignalAggregator with provided or auto-detected adapters
+    signal_aggregator = EnrichedSignalAggregator(
+        weather_adapter=weather_adapter,
+        events_adapter=events_adapter,
+    )
+
+    engine = ForecastEngine(
+        pos_adapter=pos_adapter,
+        signal_aggregator=signal_aggregator,
+        demo_mode=demo_mode,
+    )
+
+    logger.info(
+        f"get_enriched_forecast_engine: ForecastEngine created with EnrichedSignalAggregator "
+        f"(demo_mode={demo_mode})"
+    )
+    return engine
+
+
 # ============================================================================
 # Utility Functions
 # ============================================================================
