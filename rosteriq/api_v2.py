@@ -2569,6 +2569,24 @@ async def get_tanda_forecast_revenue(
 
 
 # ============================================================================
+# Feature routers (availability, weather, events, call-in)
+# ============================================================================
+# These live in sibling modules so the feature code is easy to find and test
+# in isolation. They're included here after all direct @app.* endpoints so
+# their paths don't shadow anything registered above.
+
+from rosteriq.availability_router import router as _availability_router
+from rosteriq.weather_router import router as _weather_router
+from rosteriq.events_router import router as _events_router
+from rosteriq.call_in_router import router as _call_in_router
+
+app.include_router(_availability_router)
+app.include_router(_weather_router)
+app.include_router(_events_router)
+app.include_router(_call_in_router)
+
+
+# ============================================================================
 # Error Handlers
 # ============================================================================
 
