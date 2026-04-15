@@ -35,7 +35,7 @@ import logging
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
 
 from rosteriq.data_feeds_factory import (
     get_pos_adapter,
@@ -43,6 +43,21 @@ from rosteriq.data_feeds_factory import (
     get_bookings_store,
 )
 from rosteriq.bookings_csv_parser import parse_bookings_csv
+
+# Auth gating — fall back to no-op in demo/sandbox when auth stack unavailable
+try:
+    from rosteriq.auth import require_access, AccessLevel  # type: ignore
+except Exception:  # pragma: no cover — demo/sandbox path
+    require_access = None  # type: ignore
+    AccessLevel = None  # type: ignore
+
+
+async def _gate(request: Request, level_name: str) -> None:
+    """Apply role gating if auth stack is present; no-op in demo."""
+    if require_access is None or AccessLevel is None:
+        return
+    level = getattr(AccessLevel, level_name)
+    await require_access(level)(request=request)
 
 logger = logging.getLogger("rosteriq.data_feeds_router")
 
@@ -57,6 +72,7 @@ router = APIRouter(tags=["data_feeds"])
 
 @router.get("/api/v1/pos/sales")
 async def get_pos_sales(
+    request: Request,
     venue_id: str = Query(..., description="Venue ID"),
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
@@ -64,8 +80,9 @@ async def get_pos_sales(
     """
     Get POS sales breakdown for a venue and date range.
 
-    Returns hourly sales data with demand signals.
+    Returns hourly sales data with demand signals. L1+ access required.
     """
+    await _gate(request, "L1_SUPERVISOR")
     try:
         # Parse dates
         if not from_date:
@@ -132,6 +149,8 @@ async def get_pos_sales(
             "timestamp": datetime.now(AU_TZ).isoformat(),
         }
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -165,6 +184,7 @@ async def get_pos_health() -> dict:
 
 @router.get("/api/v1/bookings")
 async def get_bookings(
+    request: Request,
     venue_id: str = Query(..., description="Venue ID"),
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
@@ -172,8 +192,9 @@ async def get_bookings(
     """
     Get stored bookings for a venue and date range.
 
-    Includes both API-fetched and CSV-uploaded bookings.
+    Includes both API-fetched and CSV-uploaded bookings. L1+ access required.
     """
+    await _gate(request, "L1_SUPERVISOR")
     try:
         # Parse dates
         if not from_date:
@@ -238,6 +259,8 @@ async def get_bookings(
             "timestamp": datetime.now(AU_TZ).isoformat(),
         }
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -247,10 +270,11 @@ async def get_bookings(
 
 @router.post("/api/v1/bookings/csv-upload")
 async def upload_bookings_csv(
+    request: Request,
     file: UploadFile = File(...),
 ) -> dict:
     """
-    Upload a CSV file with bookings data.
+    Upload a CSV file with bookings data. L2+ access required.
 
     CSV columns (flexible naming):
       - booking_date / date / Date (YYYY-MM-DD)
@@ -261,6 +285,7 @@ async def upload_bookings_csv(
 
     Returns: {bookings_parsed: int, date_range: [min, max]}
     """
+    await _gate(request, "L2_ROSTER_MAKER")
     try:
         # Read and parse CSV
         content = await file.read()
@@ -290,6 +315,8 @@ async def upload_bookings_csv(
             "timestamp": datetime.now(AU_TZ).isoformat(),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"CSV upload failed: {e}")
         raise HTTPException(status_code=400, detail=f"CSV parsing error: {str(e)}")
