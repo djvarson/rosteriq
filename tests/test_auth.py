@@ -60,7 +60,7 @@ def test_create_and_decode_token():
 
 def test_expired_token_rejected():
     _reset()
-    token = auth.create_access_token("u", "v", "m", expires_delta=timedelta(seconds=-1))
+    token = auth.create_access_token("u", "v", "m", expires_hours=-1)
     try:
         auth.decode_token(token)
         raise AssertionError("Expected error for expired token")
@@ -170,10 +170,10 @@ def test_verify_invalid_api_key():
 def test_create_demo_user():
     _reset()
     user = auth.create_demo_user()
-    assert user.email == "demo@rosteriq.com.au"
-    assert user.venue_id == "venue_demo_001"
+    assert user.email == "demo@rosteriq.local"
+    assert user.venue_id == "venue-royal-oak"
     # Should be able to authenticate with the demo password
-    auth_user = auth.authenticate_user("demo@rosteriq.com.au", "DemoPassword1!")
+    auth_user = auth.authenticate_user("demo@rosteriq.local", "DemoPass123!")
     assert auth_user is not None
 
 

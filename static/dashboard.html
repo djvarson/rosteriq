@@ -740,6 +740,240 @@
             cursor: not-allowed;
         }
 
+        /* -------- Award Compliance Card -------- */
+        .award-compliance {
+            background-color: #ffffff;
+            padding: 24px;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .award-compliance:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+        }
+
+        .award-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .award-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .award-check-btn {
+            background: #0ea5e9;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .award-check-btn:hover {
+            background: #0284c7;
+        }
+
+        .award-check-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .award-content {
+            display: none;
+        }
+
+        .award-content.expanded {
+            display: block;
+        }
+
+        .award-cost-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .award-cost-item {
+            background: #f8fafc;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .award-cost-label {
+            font-size: 11px;
+            color: #64748b;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .award-cost-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .award-penalties {
+            margin-bottom: 16px;
+        }
+
+        .award-penalties-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .award-penalty-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .award-penalty-chip {
+            background: #e0f2fe;
+            color: #0369a1;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .award-penalty-chip.high {
+            background: #fecaca;
+            color: #991b1b;
+        }
+
+        .award-warnings {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .award-warnings-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .award-issue {
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .award-issue.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border-left: 4px solid #dc2626;
+        }
+
+        .award-issue.warning {
+            background: #fef3c7;
+            color: #92400e;
+            border-left: 4px solid #f59e0b;
+        }
+
+        .award-issue.info {
+            background: #dbeafe;
+            color: #1e40af;
+            border-left: 4px solid #3b82f6;
+        }
+
+        .award-empty {
+            color: #64748b;
+            font-size: 13px;
+            padding: 12px;
+        }
+
+        .award-loading {
+            color: #64748b;
+            font-size: 13px;
+            padding: 12px;
+        }
+
+        html.dark .award-compliance {
+            background-color: #1e293b;
+            border-color: #334155;
+        }
+
+        html.dark .award-compliance:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        html.dark .award-title {
+            color: #f1f5f9;
+        }
+
+        html.dark .award-check-btn {
+            background: #0ea5e9;
+        }
+
+        html.dark .award-check-btn:hover {
+            background: #0284c7;
+        }
+
+        html.dark .award-cost-item {
+            background: #334155;
+            border-color: #475569;
+        }
+
+        html.dark .award-cost-label {
+            color: #cbd5e1;
+        }
+
+        html.dark .award-cost-value {
+            color: #f1f5f9;
+        }
+
+        html.dark .award-penalties-title,
+        html.dark .award-warnings-title {
+            color: #cbd5e1;
+        }
+
+        html.dark .award-penalty-chip {
+            background: rgba(3, 105, 161, 0.3);
+            color: #7dd3fc;
+        }
+
+        html.dark .award-penalty-chip.high {
+            background: rgba(153, 27, 27, 0.3);
+            color: #fca5a5;
+        }
+
+        html.dark .award-issue.error {
+            background: rgba(153, 27, 27, 0.2);
+            color: #fca5a5;
+        }
+
+        html.dark .award-issue.warning {
+            background: rgba(146, 64, 14, 0.2);
+            color: #fde047;
+        }
+
+        html.dark .award-issue.info {
+            background: rgba(30, 64, 175, 0.2);
+            color: #93c5fd;
+        }
+
         /* -------- Weather Card -------- */
         .weather-card {
             background-color: var(--card-bg);
@@ -3476,6 +3710,46 @@
                 <button class="generate-button" id="generateBtn" onclick="generateRoster()">
                     <span id="btnText">Generate Roster</span>
                 </button>
+            </div>
+
+            <!-- Wage & Compliance Check Card -->
+            <div class="award-compliance" id="awardComplianceCard">
+                <div class="award-header">
+                    <div class="award-title">
+                        <span>✓</span> Wage & Compliance Check
+                    </div>
+                    <button class="award-check-btn" id="awardCheckBtn" onclick="checkAwardCompliance()">Check Award</button>
+                </div>
+                <div class="award-content" id="awardContent">
+                    <div class="award-cost-summary">
+                        <div class="award-cost-item">
+                            <div class="award-cost-label">Base Cost</div>
+                            <div class="award-cost-value" id="awardBaseCost">—</div>
+                        </div>
+                        <div class="award-cost-item">
+                            <div class="award-cost-label">Loading Cost</div>
+                            <div class="award-cost-value" id="awardLoadingCost">—</div>
+                        </div>
+                        <div class="award-cost-item">
+                            <div class="award-cost-label">Total Cost</div>
+                            <div class="award-cost-value" id="awardTotalCost">—</div>
+                        </div>
+                    </div>
+
+                    <div class="award-penalties">
+                        <div class="award-penalties-title">Penalty Rates Applied</div>
+                        <div class="award-penalty-chips" id="awardPenaltyChips">
+                            <div class="award-empty">No shifts to evaluate</div>
+                        </div>
+                    </div>
+
+                    <div class="award-warnings">
+                        <div class="award-warnings-title">Compliance Issues</div>
+                        <div id="awardComplianceIssues">
+                            <div class="award-empty">No issues found</div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -6359,6 +6633,142 @@
                 btn.classList.remove('loading');
                 btnText.innerHTML = 'Generate Roster';
                 alert('Error generating roster. Please try again.');
+            }
+        }
+
+        async function checkAwardCompliance() {
+            const btn = document.getElementById('awardCheckBtn');
+            const content = document.getElementById('awardContent');
+
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+
+            try {
+                // Build roster from demo/current data
+                const roster = [];
+
+                // Generate demo shifts for the week
+                const startDate = currentWeekStart;
+                const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                const roles = [1, 2, 3, 4];  // Award levels
+                const timeSlots = [
+                    { name: 'Breakfast', start: 8, end: 12 },
+                    { name: 'Lunch', start: 12, end: 16 },
+                    { name: 'Afternoon', start: 16, end: 18 },
+                    { name: 'Dinner', start: 18, end: 22 },
+                    { name: 'Late', start: 22, end: 2 }
+                ];
+
+                // Create shifts for demonstration
+                for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+                    const shiftDate = new Date(startDate);
+                    shiftDate.setDate(shiftDate.getDate() + dayIdx);
+
+                    // Add 2-3 shifts per day
+                    const numShifts = Math.floor(Math.random() * 2) + 2;
+                    for (let i = 0; i < numShifts; i++) {
+                        const slot = timeSlots[Math.floor(Math.random() * timeSlots.length)];
+                        const role = roles[Math.floor(Math.random() * roles.length)];
+                        const empNum = Math.floor(Math.random() * 3) + 1;
+
+                        let shiftStart = new Date(shiftDate);
+                        shiftStart.setHours(slot.start, 0, 0, 0);
+
+                        let shiftEnd = new Date(shiftDate);
+                        shiftEnd.setHours(slot.end, 0, 0, 0);
+                        if (slot.end < slot.start) {
+                            shiftEnd.setDate(shiftEnd.getDate() + 1);
+                        }
+
+                        roster.push({
+                            employee_id: `emp_${dayIdx}_${i}`,
+                            role: role,
+                            shift_start: shiftStart.toISOString(),
+                            shift_end: shiftEnd.toISOString(),
+                            hourly_rate: null,
+                            employment_type: Math.random() > 0.7 ? 'casual' : 'full_time',
+                            age: null
+                        });
+                    }
+                }
+
+                // Call the award endpoint
+                const response = await fetch('/api/v1/award/evaluate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        venue_id: _activeVenueId,
+                        roster: roster
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Award check failed: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+
+                // Render results
+                renderAwardResults(data);
+                content.classList.add('expanded');
+
+            } catch (error) {
+                console.error('Award compliance check error:', error);
+                document.getElementById('awardComplianceIssues').innerHTML =
+                    `<div class="award-issue error">Error checking compliance: ${error.message}</div>`;
+                content.classList.add('expanded');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Check Award';
+            }
+        }
+
+        function renderAwardResults(data) {
+            // Format currency
+            const fmtMoney = (n) => '$' + Math.round(n || 0).toLocaleString();
+
+            // Update cost summary
+            document.getElementById('awardBaseCost').textContent = fmtMoney(data.total_base_cost);
+            document.getElementById('awardLoadingCost').textContent = fmtMoney(data.total_loading_cost);
+            document.getElementById('awardTotalCost').textContent = fmtMoney(data.total_cost);
+
+            // Render penalty chips
+            const chipContainer = document.getElementById('awardPenaltyChips');
+            if (data.penalty_breakdown && data.penalty_breakdown.length > 0) {
+                const penaltyMap = {};
+                data.penalty_breakdown.forEach(p => {
+                    const key = `${p.loading_type} ${p.loading_percent.toFixed(0)}%`;
+                    penaltyMap[key] = (penaltyMap[key] || 0) + 1;
+                });
+
+                const chips = Object.entries(penaltyMap)
+                    .map(([key, count]) => {
+                        const isHigh = key.includes('sunday') || key.includes('public_holiday');
+                        return `<div class="award-penalty-chip ${isHigh ? 'high' : ''}">${key} <em>(${count})</em></div>`;
+                    })
+                    .join('');
+                chipContainer.innerHTML = chips;
+            } else {
+                chipContainer.innerHTML = '<div class="award-empty">No penalty rates applied</div>';
+            }
+
+            // Render compliance issues
+            const issuesContainer = document.getElementById('awardComplianceIssues');
+            if (data.compliance_issues && data.compliance_issues.length > 0) {
+                const issues = data.compliance_issues
+                    .map(issue => {
+                        const severity = issue.severity || 'warning';
+                        return `<div class="award-issue ${severity}">${issue.detail} <em>(${issue.employee_id})</em></div>`;
+                    })
+                    .join('');
+                issuesContainer.innerHTML = issues;
+            } else if (data.warnings && data.warnings.length > 0) {
+                const warnings = data.warnings
+                    .map(w => `<div class="award-issue warning">${w}</div>`)
+                    .join('');
+                issuesContainer.innerHTML = warnings;
+            } else {
+                issuesContainer.innerHTML = '<div class="award-empty">✓ All shifts comply with Award rules</div>';
             }
         }
 

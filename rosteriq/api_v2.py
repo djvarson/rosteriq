@@ -2608,6 +2608,8 @@ from rosteriq.ask_router import ask_router as _ask_router
 from rosteriq.roi_router import router as _roi_router
 from rosteriq.shift_events_router import router as _shift_events_router
 from rosteriq.access_router import access_router as _access_router
+from rosteriq.award_router import router as _award_router
+from rosteriq.tanda_webhook_router import router as _tanda_webhook_router
 
 app.include_router(_availability_router)
 app.include_router(_weather_router)
@@ -2617,6 +2619,8 @@ app.include_router(_ask_router)
 app.include_router(_roi_router)
 app.include_router(_shift_events_router)
 app.include_router(_access_router)
+app.include_router(_award_router)
+app.include_router(_tanda_webhook_router)
 
 
 # ============================================================================
