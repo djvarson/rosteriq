@@ -254,5 +254,156 @@ class OnboardingPersistenceTests(unittest.TestCase):
         self.assertEqual(recovered.current_step, "tanda_connect")
 
 
+class ShiftEventPersistenceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmpdir.name, "shift.db")
+        _reset_persistence_with_path(self.db_path)
+        import rosteriq.shift_events as _se
+        _se._store_singleton = None
+
+    def tearDown(self):
+        from rosteriq import persistence as _p
+        import rosteriq.shift_events as _se
+        _se._store_singleton = None
+        _p.reset_for_tests()
+        _p.reset_rehydrate_for_tests()
+        os.environ.pop("ROSTERIQ_DB_PATH", None)
+        self.tmpdir.cleanup()
+
+    def test_shift_event_round_trip(self):
+        from datetime import date as _date
+        from rosteriq.shift_events import (
+            get_shift_event_store, ShiftEvent, EventCategory,
+        )
+        store = get_shift_event_store()
+        ev = ShiftEvent(
+            event_id="ev-1",
+            venue_id="venue-x",
+            category=EventCategory.PUB_GROUP,
+            description="12-person pub crawl",
+            timestamp=datetime(2026, 4, 16, 19, 30, tzinfo=timezone.utc),
+            headcount_at_time=40,
+            logged_by="dale",
+            shift_date=_date(2026, 4, 16),
+            day_of_week=3,
+            hour_of_day=19,
+            weather_condition="clear",
+            active_event_ids=[],
+            tags=["surge"],
+        )
+        store.record(ev)
+
+        import rosteriq.shift_events as _se
+        _se._store_singleton = None
+        from rosteriq import persistence as _p
+        _p.reset_rehydrate_for_tests()
+        _p.init_db()
+
+        store2 = get_shift_event_store()
+        got = store2.for_venue("venue-x")
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0].event_id, "ev-1")
+        self.assertEqual(got[0].category, EventCategory.PUB_GROUP)
+        self.assertEqual(got[0].tags, ["surge"])
+
+
+class TandaHistoryPersistenceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmpdir.name, "th.db")
+        _reset_persistence_with_path(self.db_path)
+        import rosteriq.tanda_history as _th
+        _th._store = None
+
+    def tearDown(self):
+        from rosteriq import persistence as _p
+        import rosteriq.tanda_history as _th
+        _th._store = None
+        _p.reset_for_tests()
+        _p.reset_rehydrate_for_tests()
+        os.environ.pop("ROSTERIQ_DB_PATH", None)
+        self.tmpdir.cleanup()
+
+    def test_daily_hourly_round_trip(self):
+        from datetime import date as _date
+        from rosteriq.tanda_history import (
+            get_history_store, DailyActuals, HourlyActuals,
+        )
+        store = get_history_store()
+        d = _date(2026, 4, 15)
+        store.upsert_daily(DailyActuals(
+            venue_id="v1", day=d,
+            rostered_hours=40, worked_hours=42,
+            rostered_cost=1200, worked_cost=1260,
+            actual_revenue=4800, shift_count=5, employee_count=4,
+        ))
+        store.upsert_hourly(HourlyActuals(
+            venue_id="v1", day=d, hour=18,
+            rostered_heads=5, worked_heads=6, forecast_revenue=900,
+        ))
+        store.mark_ingested("v1")
+
+        import rosteriq.tanda_history as _th
+        _th._store = None
+        from rosteriq import persistence as _p
+        _p.reset_rehydrate_for_tests()
+        _p.init_db()
+
+        store2 = get_history_store()
+        daily = store2.daily_range("v1", d, d)
+        self.assertEqual(len(daily), 1)
+        self.assertAlmostEqual(daily[0].actual_revenue, 4800)
+        hourly = store2.hourly_for_day("v1", d)
+        self.assertEqual(len(hourly), 1)
+        self.assertEqual(hourly[0].worked_heads, 6)
+        self.assertIsNotNone(store2.last_ingested("v1"))
+
+
+class ConciergePersistenceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmpdir.name, "kb.db")
+        _reset_persistence_with_path(self.db_path)
+        import rosteriq.concierge as _c
+        _c._kb = None
+
+    def tearDown(self):
+        from rosteriq import persistence as _p
+        import rosteriq.concierge as _c
+        _c._kb = None
+        _p.reset_for_tests()
+        _p.reset_rehydrate_for_tests()
+        os.environ.pop("ROSTERIQ_DB_PATH", None)
+        self.tmpdir.cleanup()
+
+    def test_kb_round_trip(self):
+        from rosteriq.concierge import get_kb, FAQEntry
+        kb = get_kb()
+        kb.upsert_live_context("v1", {
+            "open_time": "11:00", "close_time": "23:00",
+            "specials": ["$15 parma"],
+        })
+        kb.add_faqs("v1", [FAQEntry(
+            question="Got a pool table?",
+            answer="Yes, two in the sports bar.",
+            keywords=["pool", "billiards"],
+            tags=["amenities"],
+        )])
+
+        import rosteriq.concierge as _c
+        _c._kb = None
+        from rosteriq import persistence as _p
+        _p.reset_rehydrate_for_tests()
+        _p.init_db()
+
+        kb2 = get_kb()
+        recovered = kb2.get("v1")
+        self.assertIsNotNone(recovered)
+        self.assertEqual(recovered.live_context["open_time"], "11:00")
+        # FAQ added above should be present
+        self.assertTrue(any("pool" in f.keywords for f in recovered.faqs))
+
+
 if __name__ == "__main__":
     unittest.main()

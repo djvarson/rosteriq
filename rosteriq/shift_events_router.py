@@ -89,7 +89,8 @@ class PatternResponse(BaseModel):
 # Module-level store singleton (like headcount_store)
 # ---------------------------------------------------------------------------
 
-_shift_event_store = ShiftEventStore()
+from rosteriq.shift_events import get_shift_event_store as _get_ses
+_shift_event_store = _get_ses()
 
 
 # ---------------------------------------------------------------------------

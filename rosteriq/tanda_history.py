@@ -23,9 +23,47 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from rosteriq import persistence as _p
+
 logger = logging.getLogger("rosteriq.tanda_history")
 
 AU_TZ = timezone(timedelta(hours=10))
+
+
+# Round 12 — SQLite schema
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tanda_daily_actuals (
+    venue_id           TEXT NOT NULL,
+    day                TEXT NOT NULL,
+    rostered_hours     REAL NOT NULL DEFAULT 0,
+    worked_hours       REAL NOT NULL DEFAULT 0,
+    rostered_cost      REAL NOT NULL DEFAULT 0,
+    worked_cost        REAL NOT NULL DEFAULT 0,
+    forecast_revenue   REAL NOT NULL DEFAULT 0,
+    actual_revenue     REAL NOT NULL DEFAULT 0,
+    shift_count        INTEGER NOT NULL DEFAULT 0,
+    employee_count     INTEGER NOT NULL DEFAULT 0,
+    notes              TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (venue_id, day)
+);
+CREATE INDEX IF NOT EXISTS ix_tanda_daily_venue ON tanda_daily_actuals(venue_id);
+
+CREATE TABLE IF NOT EXISTS tanda_hourly_actuals (
+    venue_id           TEXT NOT NULL,
+    day                TEXT NOT NULL,
+    hour               INTEGER NOT NULL,
+    rostered_heads     INTEGER NOT NULL DEFAULT 0,
+    worked_heads       INTEGER NOT NULL DEFAULT 0,
+    forecast_revenue   REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (venue_id, day, hour)
+);
+
+CREATE TABLE IF NOT EXISTS tanda_last_ingest (
+    venue_id           TEXT PRIMARY KEY,
+    ingested_at        TEXT NOT NULL
+);
+"""
+_p.register_schema("tanda_history", _SCHEMA)
 
 
 # ---------------------------------------------------------------------------
@@ -120,19 +158,115 @@ class TandaHistoryStore:
         self._lock = threading.Lock()
         self._last_ingest: Dict[str, datetime] = {}
 
+    # -- persistence helpers --
+
+    def _persist_hourly(self, agg: HourlyActuals) -> None:
+        if not _p.is_persistence_enabled():
+            return
+        try:
+            with _p.write_txn() as c:
+                c.execute(
+                    "INSERT OR REPLACE INTO tanda_hourly_actuals "
+                    "(venue_id, day, hour, rostered_heads, worked_heads, forecast_revenue) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    [agg.venue_id, agg.day.isoformat(), agg.hour,
+                     agg.rostered_heads, agg.worked_heads, agg.forecast_revenue],
+                )
+        except Exception as e:
+            logger.warning("hourly persist failed: %s", e)
+
+    def _persist_daily_manual(self, agg: DailyActuals) -> None:
+        """Composite-key UPSERT — sqlite INSERT OR REPLACE works because of
+        the composite primary key on (venue_id, day)."""
+        if not _p.is_persistence_enabled():
+            return
+        try:
+            with _p.write_txn() as c:
+                c.execute(
+                    "INSERT OR REPLACE INTO tanda_daily_actuals "
+                    "(venue_id, day, rostered_hours, worked_hours, rostered_cost, "
+                    " worked_cost, forecast_revenue, actual_revenue, shift_count, "
+                    " employee_count, notes) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [agg.venue_id, agg.day.isoformat(), agg.rostered_hours,
+                     agg.worked_hours, agg.rostered_cost, agg.worked_cost,
+                     agg.forecast_revenue, agg.actual_revenue, agg.shift_count,
+                     agg.employee_count, _p.json_dumps(list(agg.notes))],
+                )
+        except Exception as e:
+            logger.warning("daily persist failed: %s", e)
+
+    def rehydrate(self) -> None:
+        if not _p.is_persistence_enabled():
+            return
+        with self._lock:
+            for r in _p.fetchall("SELECT * FROM tanda_daily_actuals"):
+                try:
+                    agg = DailyActuals(
+                        venue_id=r["venue_id"],
+                        day=date.fromisoformat(r["day"]),
+                        rostered_hours=r["rostered_hours"],
+                        worked_hours=r["worked_hours"],
+                        rostered_cost=r["rostered_cost"],
+                        worked_cost=r["worked_cost"],
+                        forecast_revenue=r["forecast_revenue"],
+                        actual_revenue=r["actual_revenue"],
+                        shift_count=r["shift_count"],
+                        employee_count=r["employee_count"],
+                        notes=_p.json_loads(r["notes"], default=[]) or [],
+                    )
+                    self._daily.setdefault(agg.venue_id, {})[agg.day.isoformat()] = agg
+                except Exception as e:
+                    logger.warning("rehydrate daily row failed: %s", e)
+            for r in _p.fetchall("SELECT * FROM tanda_hourly_actuals"):
+                try:
+                    agg = HourlyActuals(
+                        venue_id=r["venue_id"],
+                        day=date.fromisoformat(r["day"]),
+                        hour=r["hour"],
+                        rostered_heads=r["rostered_heads"],
+                        worked_heads=r["worked_heads"],
+                        forecast_revenue=r["forecast_revenue"],
+                    )
+                    self._hourly.setdefault(agg.venue_id, {})[(agg.day.isoformat(), agg.hour)] = agg
+                except Exception as e:
+                    logger.warning("rehydrate hourly row failed: %s", e)
+            for r in _p.fetchall("SELECT * FROM tanda_last_ingest"):
+                try:
+                    self._last_ingest[r["venue_id"]] = datetime.fromisoformat(r["ingested_at"])
+                except Exception as e:
+                    logger.warning("rehydrate last_ingest row failed: %s", e)
+        logger.info(
+            "Tanda history rehydrated: %d daily, %d hourly across %d venues",
+            sum(len(v) for v in self._daily.values()),
+            sum(len(v) for v in self._hourly.values()),
+            len(self._daily),
+        )
+
     # -- writes --
 
     def upsert_daily(self, agg: DailyActuals) -> None:
         with self._lock:
             self._daily.setdefault(agg.venue_id, {})[agg.day.isoformat()] = agg
+        self._persist_daily_manual(agg)
 
     def upsert_hourly(self, agg: HourlyActuals) -> None:
         with self._lock:
             self._hourly.setdefault(agg.venue_id, {})[(agg.day.isoformat(), agg.hour)] = agg
+        self._persist_hourly(agg)
 
     def mark_ingested(self, venue_id: str) -> None:
         with self._lock:
             self._last_ingest[venue_id] = datetime.now(AU_TZ)
+        if _p.is_persistence_enabled():
+            try:
+                _p.upsert(
+                    "tanda_last_ingest",
+                    {"venue_id": venue_id, "ingested_at": self._last_ingest[venue_id].isoformat()},
+                    pk="venue_id",
+                )
+            except Exception as e:
+                logger.warning("last_ingest persist failed: %s", e)
 
     # -- reads --
 
@@ -187,6 +321,11 @@ def get_history_store() -> TandaHistoryStore:
     if _store is None:
         _store = TandaHistoryStore()
     return _store
+
+
+@_p.on_init
+def _rehydrate_tanda_history_on_init() -> None:
+    get_history_store().rehydrate()
 
 
 # ---------------------------------------------------------------------------

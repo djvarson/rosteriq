@@ -26,12 +26,28 @@ from __future__ import annotations
 import logging
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from rosteriq import persistence as _p
+
 logger = logging.getLogger("rosteriq.concierge")
 AU_TZ = timezone(timedelta(hours=10))
+
+
+# Round 12 — SQLite schema: one row per venue KB (venue-level JSON blob).
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS concierge_kb (
+    venue_id              TEXT PRIMARY KEY,
+    venue_name            TEXT NOT NULL,
+    faqs                  TEXT NOT NULL,  -- JSON array of FAQEntry
+    live_context          TEXT NOT NULL,  -- JSON object
+    escalation_keywords   TEXT NOT NULL,  -- JSON array
+    updated_at            TEXT NOT NULL
+);
+"""
+_p.register_schema("concierge_kb", _SCHEMA)
 
 
 # ---------------------------------------------------------------------------
@@ -120,9 +136,48 @@ class ConciergeKnowledgeBase:
         self._kbs: Dict[str, VenueKB] = {}
         self._lock = threading.Lock()
 
+    # -- persistence (Round 12) --
+
+    def _persist(self, kb: VenueKB) -> None:
+        _p.upsert(
+            "concierge_kb",
+            {
+                "venue_id": kb.venue_id,
+                "venue_name": kb.venue_name,
+                "faqs": _p.json_dumps([asdict(f) for f in kb.faqs]),
+                "live_context": _p.json_dumps(kb.live_context),
+                "escalation_keywords": _p.json_dumps(kb.escalation_keywords),
+                "updated_at": _p.now_iso(),
+            },
+            pk="venue_id",
+        )
+
+    def rehydrate(self) -> None:
+        if not _p.is_persistence_enabled():
+            return
+        rows = _p.fetchall("SELECT * FROM concierge_kb")
+        with self._lock:
+            for r in rows:
+                try:
+                    faqs = [
+                        FAQEntry(**f) for f in (_p.json_loads(r["faqs"], default=[]) or [])
+                    ]
+                    kb = VenueKB(
+                        venue_id=r["venue_id"],
+                        venue_name=r["venue_name"],
+                        faqs=faqs,
+                        live_context=_p.json_loads(r["live_context"], default={}) or {},
+                        escalation_keywords=_p.json_loads(r["escalation_keywords"], default=[]) or [],
+                    )
+                    self._kbs[kb.venue_id] = kb
+                except Exception as e:
+                    logger.warning("concierge rehydrate failed for %s: %s", r["venue_id"], e)
+        logger.info("Concierge KB rehydrated: %d venues", len(rows))
+
     def register(self, kb: VenueKB) -> None:
         with self._lock:
             self._kbs[kb.venue_id] = kb
+        self._persist(kb)
 
     def get(self, venue_id: str) -> Optional[VenueKB]:
         with self._lock:
@@ -137,6 +192,8 @@ class ConciergeKnowledgeBase:
                 kb.faqs = list(_DEFAULT_FAQS)
                 self._kbs[venue_id] = kb
             kb.live_context = {**kb.live_context, **ctx}
+            snapshot = kb
+        self._persist(snapshot)
 
     def add_faqs(self, venue_id: str, faqs: List[FAQEntry]) -> None:
         with self._lock:
@@ -145,6 +202,8 @@ class ConciergeKnowledgeBase:
                 kb = VenueKB(venue_id=venue_id, venue_name=venue_id)
                 self._kbs[venue_id] = kb
             kb.faqs.extend(faqs)
+            snapshot = kb
+        self._persist(snapshot)
 
     def venues(self) -> List[str]:
         with self._lock:
@@ -176,6 +235,11 @@ def get_kb() -> ConciergeKnowledgeBase:
     if _kb is None:
         _kb = ConciergeKnowledgeBase()
     return _kb
+
+
+@_p.on_init
+def _rehydrate_concierge_on_init() -> None:
+    get_kb().rehydrate()
 
 
 # ---------------------------------------------------------------------------

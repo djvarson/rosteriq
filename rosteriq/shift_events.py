@@ -12,12 +12,40 @@ queryable for forecasting and scheduling decisions.
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, date, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+
+from rosteriq import persistence as _p
+
+logger = logging.getLogger("rosteriq.shift_events")
+
+
+# Round 12 — SQLite schema
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS shift_events (
+    event_id           TEXT PRIMARY KEY,
+    venue_id           TEXT NOT NULL,
+    category           TEXT NOT NULL,
+    description        TEXT NOT NULL,
+    timestamp          TEXT NOT NULL,
+    headcount_at_time  INTEGER,
+    logged_by          TEXT,
+    shift_date         TEXT NOT NULL,
+    day_of_week        INTEGER NOT NULL,
+    hour_of_day        INTEGER NOT NULL,
+    weather_condition  TEXT,
+    active_event_ids   TEXT NOT NULL,  -- JSON array
+    tags               TEXT NOT NULL   -- JSON array
+);
+CREATE INDEX IF NOT EXISTS ix_shift_events_venue ON shift_events(venue_id);
+CREATE INDEX IF NOT EXISTS ix_shift_events_ts ON shift_events(timestamp);
+"""
+_p.register_schema("shift_events", _SCHEMA)
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +164,60 @@ class ShiftEventStore:
         self._store: Dict[str, List[ShiftEvent]] = {}
         self._lock = threading.Lock()
 
+    # ------------------------------------------------------------------
+    # Persistence (Round 12)
+    # ------------------------------------------------------------------
+
+    def _event_to_row(self, e: ShiftEvent) -> Dict[str, Any]:
+        return {
+            "event_id": e.event_id,
+            "venue_id": e.venue_id,
+            "category": e.category.value,
+            "description": e.description,
+            "timestamp": e.timestamp.isoformat(),
+            "headcount_at_time": e.headcount_at_time,
+            "logged_by": e.logged_by,
+            "shift_date": e.shift_date.isoformat(),
+            "day_of_week": e.day_of_week,
+            "hour_of_day": e.hour_of_day,
+            "weather_condition": e.weather_condition,
+            "active_event_ids": _p.json_dumps(e.active_event_ids),
+            "tags": _p.json_dumps(e.tags),
+        }
+
+    def _row_to_event(self, r) -> ShiftEvent:
+        return ShiftEvent(
+            event_id=r["event_id"],
+            venue_id=r["venue_id"],
+            category=EventCategory(r["category"]),
+            description=r["description"],
+            timestamp=datetime.fromisoformat(r["timestamp"]),
+            headcount_at_time=r["headcount_at_time"],
+            logged_by=r["logged_by"],
+            shift_date=date.fromisoformat(r["shift_date"]),
+            day_of_week=r["day_of_week"],
+            hour_of_day=r["hour_of_day"],
+            weather_condition=r["weather_condition"],
+            active_event_ids=_p.json_loads(r["active_event_ids"], default=[]) or [],
+            tags=_p.json_loads(r["tags"], default=[]) or [],
+        )
+
+    def _persist(self, e: ShiftEvent) -> None:
+        _p.upsert("shift_events", self._event_to_row(e), pk="event_id")
+
+    def rehydrate(self) -> None:
+        if not _p.is_persistence_enabled():
+            return
+        rows = _p.fetchall("SELECT * FROM shift_events ORDER BY timestamp ASC")
+        with self._lock:
+            for r in rows:
+                try:
+                    ev = self._row_to_event(r)
+                    self._store.setdefault(ev.venue_id, []).append(ev)
+                except Exception as ex:
+                    logger.warning("rehydrate shift event failed: %s", ex)
+        logger.info("Shift events rehydrated: %d rows", len(rows))
+
     def _venue_history(self, venue_id: str) -> List[ShiftEvent]:
         """Ensure venue exists in store and return its event list.
 
@@ -152,6 +234,7 @@ class ShiftEventStore:
             hist.append(event)
             if len(hist) > MAX_EVENTS:
                 del hist[: len(hist) - MAX_EVENTS]
+        self._persist(event)
         return event
 
     def for_venue(self, venue_id: str, since: Optional[datetime] = None) -> List[ShiftEvent]:
@@ -191,15 +274,44 @@ class ShiftEventStore:
         with self._lock:
             if venue_id in self._store:
                 del self._store[venue_id]
+        if _p.is_persistence_enabled():
+            try:
+                with _p.write_txn() as c:
+                    c.execute("DELETE FROM shift_events WHERE venue_id = ?", [venue_id])
+            except Exception as e:
+                logger.warning("shift_events venue delete failed: %s", e)
 
     def clear(self) -> None:
         """Wipe the entire store. Used by tests."""
         with self._lock:
             self._store.clear()
+        if _p.is_persistence_enabled():
+            try:
+                with _p.write_txn() as c:
+                    c.execute("DELETE FROM shift_events")
+            except Exception as e:
+                logger.warning("shift_events clear failed: %s", e)
 
     def store(self) -> Dict[str, List[ShiftEvent]]:
         """Return the raw store dict. For diagnostics and tests."""
         return self._store
+
+
+# Module-level singleton (use this instead of constructing directly so
+# persistence rehydration can be wired up).
+_store_singleton: Optional[ShiftEventStore] = None
+
+
+def get_shift_event_store() -> ShiftEventStore:
+    global _store_singleton
+    if _store_singleton is None:
+        _store_singleton = ShiftEventStore()
+    return _store_singleton
+
+
+@_p.on_init
+def _rehydrate_shift_events_on_init() -> None:
+    get_shift_event_store().rehydrate()
 
 
 # ---------------------------------------------------------------------------
