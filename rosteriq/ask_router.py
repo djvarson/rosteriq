@@ -9,7 +9,7 @@ Wires the AskAgent to FastAPI with two endpoints:
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime
 from typing import Any, List, Dict
 
 from fastapi import APIRouter, HTTPException
@@ -37,6 +37,8 @@ class QueryResultResponse(BaseModel):
     confidence: float
     source_rows: int
     timestamp: str  # ISO format
+    backend_used: str = "rule_based"  # "rule_based", "anthropic", "openai", or "noop"
+    tool_calls: List[Dict[str, Any]] = []  # Tool invocations made by the LLM (empty if rule-based)
 
 
 class ExampleQuestion(BaseModel):
@@ -64,9 +66,10 @@ async def ask_question(req: AskRequest) -> QueryResultResponse:
     """
     Answer a conversational question about venue historical data.
 
-    Uses intent classification and pattern matching to dispatch the
-    question to the appropriate handler.
+    Uses LLM-backed reasoning when configured (via ROSTERIQ_LLM_BACKEND env var),
+    otherwise falls back to rule-based intent classification.
 
+    Supports tool calling for semantic data retrieval.
     Data mode (demo vs live) is controlled via ROSTERIQ_DATA_MODE env var.
     """
     if not req.question or not req.question.strip():
@@ -74,21 +77,34 @@ async def ask_question(req: AskRequest) -> QueryResultResponse:
 
     today = date.today()
 
-    # Call the async agent
-    result: QueryResult = await _ask_agent.answer(
-        question=req.question,
+    # Call the LLM-aware agent (falls back to rule-based if no backend)
+    result = await _ask_agent.answer_with_llm(
+        query=req.question,
         venue_id=req.venue_id,
         today=today,
     )
 
+    # Normalize intent: if LLM returns None, try to infer from rule-based classifier
+    intent_str = result.get("intent")
+    if not intent_str:
+        from rosteriq.ask_agent import classify_intent
+        inferred_intent = classify_intent(req.question)
+        intent_str = inferred_intent.value
+
+    # Normalize timestamp to ISO string
+    ts = result.get("timestamp", datetime.now())
+    timestamp_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+
     return QueryResultResponse(
-        question=result.question,
-        intent=result.intent.value,
-        answer=result.answer,
-        data=result.data,
-        confidence=result.confidence,
-        source_rows=result.source_rows,
-        timestamp=result.timestamp.isoformat(),
+        question=req.question,
+        intent=intent_str,
+        answer=result.get("text", ""),
+        data=result.get("data", {}),
+        confidence=result.get("confidence", 0.5),
+        source_rows=result.get("source_rows", 0),
+        timestamp=timestamp_str,
+        backend_used=result.get("backend_used", "rule_based"),
+        tool_calls=result.get("tool_calls", []),
     )
 
 

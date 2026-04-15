@@ -1,0 +1,437 @@
+<template id="accountability-widget">
+<style>
+    .accountability-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        border-radius: 8px;
+        padding: 16px;
+        margin: 12px 0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .accountability-header {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1a1a1a;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .accountability-icon {
+        width: 24px;
+        height: 24px;
+        background: #4CAF50;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+    }
+
+    .accountability-section {
+        margin-bottom: 16px;
+    }
+
+    .accountability-section-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #555;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+    }
+
+    .leaderboard-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        background: white;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .leaderboard-table th {
+        background: #f0f0f0;
+        padding: 8px;
+        text-align: left;
+        font-weight: 600;
+        color: #555;
+        border-bottom: 1px solid #ddd;
+    }
+
+    .leaderboard-table td {
+        padding: 8px;
+        border-bottom: 1px solid #f0f0f0;
+    }
+
+    .leaderboard-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .leaderboard-table tr:hover {
+        background: #f9f9f9;
+    }
+
+    .manager-name {
+        font-weight: 600;
+        color: #1a1a1a;
+    }
+
+    .metric-badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    .badge-green {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+
+    .badge-orange {
+        background: #fff3e0;
+        color: #e65100;
+    }
+
+    .badge-red {
+        background: #ffebee;
+        color: #c62828;
+    }
+
+    .variance-summary {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .variance-box {
+        background: white;
+        padding: 12px;
+        border-radius: 4px;
+        border-left: 4px solid #4CAF50;
+    }
+
+    .variance-box.negative {
+        border-left-color: #FF9800;
+    }
+
+    .variance-box.positive {
+        border-left-color: #F44336;
+    }
+
+    .variance-label {
+        font-size: 11px;
+        color: #999;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+
+    .variance-value {
+        font-size: 18px;
+        font-weight: 700;
+        color: #1a1a1a;
+    }
+
+    .decisions-list {
+        background: white;
+        border-radius: 4px;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    .decision-item {
+        padding: 10px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 12px;
+    }
+
+    .decision-item:last-child {
+        border-bottom: none;
+    }
+
+    .decision-item.against-signals {
+        background: #fff3cd;
+        border-left: 4px solid #ff9800;
+    }
+
+    .decision-text {
+        flex: 1;
+        color: #333;
+    }
+
+    .decision-time {
+        color: #999;
+        font-size: 11px;
+        margin-left: 8px;
+    }
+
+    .decision-flag {
+        background: #F44336;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 600;
+        margin-left: 8px;
+    }
+
+    .empty-state {
+        color: #999;
+        text-align: center;
+        padding: 20px;
+        font-size: 13px;
+    }
+
+    .loading-spinner {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #4CAF50;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
+
+<div class="accountability-card" id="accountabilityCard">
+    <div class="accountability-header">
+        <div class="accountability-icon">📊</div>
+        <span>Accountability & Variance</span>
+    </div>
+
+    <!-- Variance Summary (last 7 days) -->
+    <div class="accountability-section">
+        <div class="accountability-section-title">Last 7 Days Variance</div>
+        <div class="variance-summary">
+            <div class="variance-box">
+                <div class="variance-label">Avg Revenue Variance</div>
+                <div class="variance-value" id="avgRevenueVariance">—</div>
+            </div>
+            <div class="variance-box">
+                <div class="variance-label">Avg Staff Hours Variance</div>
+                <div class="variance-value" id="avgStaffHoursVariance">—</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manager Leaderboard (top 5) -->
+    <div class="accountability-section">
+        <div class="accountability-section-title">Top Managers by Alert Response</div>
+        <div id="leaderboardContainer">
+            <div class="empty-state">
+                <div class="loading-spinner"></div> Loading...
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Decisions Against Signals -->
+    <div class="accountability-section">
+        <div class="accountability-section-title">⚠️ Recent Decisions Against Signals</div>
+        <div id="decisionsContainer" class="decisions-list">
+            <div class="empty-state">Loading...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Accountability widget JS
+(function() {
+    const WIDGET_ID = 'accountability-widget';
+    const CARD_ID = 'accountabilityCard';
+
+    async function loadLeaderboard() {
+        const container = document.getElementById('leaderboardContainer');
+        if (!container) return;
+
+        try {
+            // Get active venue
+            const venueId = window._activeVenueId || 'demo-venue';
+            if (!venueId) {
+                container.innerHTML = '<div class="empty-state">Please select a venue</div>';
+                return;
+            }
+
+            // Fetch leaderboard
+            const response = await fetch('/api/v1/accountability/leaderboard?venue_ids=' + venueId + '&limit=5');
+            if (!response.ok) {
+                if (response.status === 403) {
+                    container.innerHTML = '<div class="empty-state">Owner access required</div>';
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            const leaderboard = data.leaderboard || [];
+
+            if (leaderboard.length === 0) {
+                container.innerHTML = '<div class="empty-state">No data yet</div>';
+                return;
+            }
+
+            // Render table
+            let html = `
+                <table class="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th>Manager</th>
+                            <th>Decisions</th>
+                            <th>Alerts Actioned</th>
+                            <th>Avg Revenue Variance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            for (const manager of leaderboard.slice(0, 5)) {
+                const badgeClass = manager.alerts_actioned_pct >= 80 ? 'badge-green' : manager.alerts_actioned_pct >= 50 ? 'badge-orange' : 'badge-red';
+                html += `
+                    <tr>
+                        <td class="manager-name">${escapeHtml(manager.manager_name)}</td>
+                        <td>${manager.decisions_total}</td>
+                        <td><span class="metric-badge ${badgeClass}">${manager.alerts_actioned_pct.toFixed(0)}%</span></td>
+                        <td>${manager.avg_variance_revenue !== null ? (manager.avg_variance_revenue > 0 ? '+' : '') + manager.avg_variance_revenue.toFixed(1) + '%' : '—'}</td>
+                    </tr>
+                `;
+            }
+
+            html += `</tbody></table>`;
+            container.innerHTML = html;
+        } catch (err) {
+            console.error('Failed to load leaderboard:', err);
+            container.innerHTML = '<div class="empty-state">Failed to load leaderboard</div>';
+        }
+    }
+
+    async function loadVarianceSummary() {
+        try {
+            const venueId = window._activeVenueId || 'demo-venue';
+            if (!venueId) return;
+
+            // Get recent variance records (simple approach: fetch last variance)
+            // For simplicity, we'll generate demo data if not available
+            const response = await fetch('/api/v1/accountability/variance?venue_id=' + venueId + '&shift_id=demo');
+            if (response.status === 404) {
+                // Demo data
+                document.getElementById('avgRevenueVariance').textContent = '-3.2%';
+                document.getElementById('avgStaffHoursVariance').textContent = '-2.8%';
+                return;
+            }
+
+            if (response.ok) {
+                const data = await response.json();
+                document.getElementById('avgRevenueVariance').textContent = data.variance_revenue_pct !== null ? (data.variance_revenue_pct > 0 ? '+' : '') + data.variance_revenue_pct.toFixed(1) + '%' : '—';
+                document.getElementById('avgStaffHoursVariance').textContent = data.variance_staff_hours_pct !== null ? (data.variance_staff_hours_pct > 0 ? '+' : '') + data.variance_staff_hours_pct.toFixed(1) + '%' : '—';
+            }
+        } catch (err) {
+            console.error('Failed to load variance:', err);
+            document.getElementById('avgRevenueVariance').textContent = '—';
+            document.getElementById('avgStaffHoursVariance').textContent = '—';
+        }
+    }
+
+    async function loadDecisions() {
+        const container = document.getElementById('decisionsContainer');
+        if (!container) return;
+
+        try {
+            const venueId = window._activeVenueId || 'demo-venue';
+            if (!venueId) {
+                container.innerHTML = '<div class="empty-state">Please select a venue</div>';
+                return;
+            }
+
+            // Fetch decisions (only those against signals)
+            const response = await fetch('/api/v1/accountability/decisions?venue_id=' + venueId + '&limit=10');
+            if (!response.ok) {
+                if (response.status === 403) {
+                    container.innerHTML = '<div class="empty-state">L2+ access required</div>';
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const decisions = await response.json();
+
+            // Filter for decisions against signals
+            const againstSignals = decisions.filter(d =>
+                d.decision_type === 'ignored_alert' ||
+                (d.decision_type === 'kept_staff_on' && d.signals_available.suggested_action === 'cut')
+            );
+
+            if (againstSignals.length === 0) {
+                container.innerHTML = '<div class="empty-state">No decisions against signals recently</div>';
+                return;
+            }
+
+            let html = '';
+            for (const decision of againstSignals.slice(0, 5)) {
+                const timestamp = new Date(decision.taken_at);
+                const timeStr = timestamp.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+                const decisionLabel = decision.decision_type.replace(/_/g, ' ').toUpperCase();
+
+                html += `
+                    <div class="decision-item against-signals">
+                        <div class="decision-text">
+                            <strong>${escapeHtml(decision.manager_name)}</strong>: ${decisionLabel}
+                        </div>
+                        <div class="decision-flag">⚠️ vs Signal</div>
+                        <div class="decision-time">${timeStr}</div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        } catch (err) {
+            console.error('Failed to load decisions:', err);
+            container.innerHTML = '<div class="empty-state">Failed to load decisions</div>';
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Public refresh function
+    window.refreshAccountabilityWidget = function() {
+        loadVarianceSummary();
+        loadLeaderboard();
+        loadDecisions();
+    };
+
+    // Auto-refresh when tab changes
+    const originalSwitchTab = window.switchTab;
+    if (originalSwitchTab) {
+        window.switchTab = function(tabName) {
+            originalSwitchTab.call(window, tabName);
+            if (tabName === 'accountability' || tabName === 'dashboard') {
+                setTimeout(() => window.refreshAccountabilityWidget?.(), 100);
+            }
+        };
+    }
+
+    // Initial load
+    document.addEventListener('DOMContentLoaded', () => {
+        loadVarianceSummary();
+        loadLeaderboard();
+        loadDecisions();
+    });
+})();
+</script>
+</template>

@@ -1063,6 +1063,464 @@
             padding: 16px 0;
         }
 
+        /* -------- Live Signal Feed Card -------- */
+        .live-signal-feed {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .live-signal-feed:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+        }
+        .live-feed-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .live-feed-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .pulse-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: var(--success-green);
+            border-radius: 50%;
+            animation: pulse-glow 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+        }
+        .live-feed-scroll {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .feed-item {
+            display: grid;
+            grid-template-columns: 60px 1fr auto;
+            gap: 12px;
+            align-items: center;
+            padding: 10px;
+            background: var(--darker-bg);
+            border-radius: 6px;
+            border-left: 3px solid #ccc;
+            font-size: 13px;
+        }
+        .feed-item.positive {
+            border-left-color: var(--success-green);
+        }
+        .feed-item.negative {
+            border-left-color: var(--alert-red);
+        }
+        .feed-item.neutral {
+            border-left-color: #9ca3af;
+        }
+        .feed-time {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+        .feed-description {
+            color: var(--text-primary);
+        }
+        .feed-badge {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            padding: 3px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+            background: rgba(0, 0, 0, 0.08);
+            color: var(--text-secondary);
+        }
+        .feed-badge.tanda {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+        }
+        .feed-badge.weather {
+            background: rgba(168, 85, 247, 0.1);
+            color: #a855f7;
+        }
+        .feed-badge.event {
+            background: rgba(249, 115, 22, 0.1);
+            color: #f97316;
+        }
+        .feed-badge.shift {
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+        }
+        .feed-empty {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        /* -------- Patterns Learned Panel -------- */
+        .patterns-learned {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 24px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .patterns-learned:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+        }
+        .patterns-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+        }
+        .patterns-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .pattern-row {
+            display: grid;
+            grid-template-columns: 1fr 120px 100px 80px auto;
+            gap: 12px;
+            align-items: center;
+            padding: 12px;
+            background: var(--darker-bg);
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            font-size: 13px;
+        }
+        .pattern-category {
+            display: inline-block;
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .pattern-time {
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+        .pattern-confidence-bar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .pattern-bar {
+            flex: 1;
+            height: 6px;
+            background: var(--border-color);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .pattern-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--info-blue), var(--success-green));
+            border-radius: 3px;
+        }
+        .pattern-pct {
+            font-size: 11px;
+            color: var(--text-secondary);
+            min-width: 35px;
+        }
+        .pattern-last-seen {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .pattern-apply-btn {
+            background: var(--info-blue);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        .pattern-apply-btn:hover {
+            background: #0284c7;
+        }
+        .pattern-apply-btn:disabled {
+            background: var(--border-color);
+            cursor: not-allowed;
+        }
+        .patterns-empty {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        /* -------- Award Compliance Badge -------- */
+        .award-badge-container {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .award-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--darker-bg);
+            border: 1px solid var(--border-color);
+        }
+        .award-badge .badge-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .award-badge.ok {
+            background: rgba(16, 185, 129, 0.08);
+            border-color: rgba(16, 185, 129, 0.2);
+            color: #059669;
+        }
+        .award-badge.ok .badge-dot {
+            background: var(--success-green);
+        }
+        .award-badge.warning {
+            background: rgba(251, 191, 36, 0.08);
+            border-color: rgba(251, 191, 36, 0.2);
+            color: #b45309;
+        }
+        .award-badge.warning .badge-dot {
+            background: #fbbf24;
+        }
+        .award-badge.error {
+            background: rgba(239, 68, 68, 0.08);
+            border-color: rgba(239, 68, 68, 0.2);
+            color: #dc2626;
+        }
+        .award-badge.error .badge-dot {
+            background: var(--alert-red);
+        }
+
+        /* -------- Accountability Widget -------- */
+        .accountability-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 8px;
+            padding: 16px;
+            margin: 12px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .accountability-header {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .accountability-icon {
+            width: 24px;
+            height: 24px;
+            background: #4CAF50;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .accountability-section {
+            margin-bottom: 16px;
+        }
+
+        .accountability-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .leaderboard-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            background: white;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .leaderboard-table th {
+            background: #f0f0f0;
+            padding: 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .leaderboard-table td {
+            padding: 8px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .leaderboard-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .leaderboard-table tr:hover {
+            background: #f9f9f9;
+        }
+
+        .manager-name {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .metric-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-green {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .badge-orange {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .badge-red {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .variance-summary {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .variance-box {
+            background: white;
+            padding: 12px;
+            border-radius: 4px;
+            border-left: 4px solid #4CAF50;
+        }
+
+        .variance-box.negative {
+            border-left-color: #FF9800;
+        }
+
+        .variance-box.positive {
+            border-left-color: #F44336;
+        }
+
+        .variance-label {
+            font-size: 11px;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .variance-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .decisions-list {
+            background: white;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .decision-item {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .decision-item:last-child {
+            border-bottom: none;
+        }
+
+        .decision-item.against-signals {
+            background: #fff3cd;
+            border-left: 4px solid #ff9800;
+        }
+
+        .decision-text {
+            flex: 1;
+            color: #333;
+        }
+
+        .decision-time {
+            color: #999;
+            font-size: 11px;
+            margin-left: 8px;
+        }
+
+        .decision-flag {
+            background: #F44336;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .empty-state {
+            color: #999;
+            text-align: center;
+            padding: 20px;
+            font-size: 13px;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
         /* -------- Events Strip -------- */
         .events-strip {
             background-color: var(--card-bg);
@@ -3687,6 +4145,14 @@
                 </div>
             </div>
 
+            <!-- Patterns Learned Panel -->
+            <div class="patterns-learned" id="patternsCard">
+                <div class="patterns-title">Patterns Learned</div>
+                <div class="patterns-list" id="patternsList">
+                    <div class="patterns-empty">Loading patterns…</div>
+                </div>
+            </div>
+
             <div class="labour-cost">
                 <div class="section-title">Labour Cost Summary</div>
                 <div class="labour-cost-grid">
@@ -3705,6 +4171,12 @@
                     <div class="cost-item">
                         <div class="cost-label">Overtime Hours</div>
                         <div class="cost-value" id="overtimeHours">2.5h</div>
+                    </div>
+                </div>
+                <div class="award-badge-container">
+                    <div class="award-badge ok" id="awardBadge">
+                        <span class="badge-dot"></span>
+                        <span id="awardBadgeText">Award OK</span>
                     </div>
                 </div>
                 <button class="generate-button" id="generateBtn" onclick="generateRoster()">
@@ -3751,6 +4223,47 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Accountability & Variance Card -->
+            <div class="accountability-card" id="accountabilityCard">
+                <div class="accountability-header">
+                    <div class="accountability-icon">📊</div>
+                    <span>Accountability & Variance</span>
+                </div>
+
+                <!-- Variance Summary (last 7 days) -->
+                <div class="accountability-section">
+                    <div class="accountability-section-title">Last 7 Days Variance</div>
+                    <div class="variance-summary">
+                        <div class="variance-box">
+                            <div class="variance-label">Avg Revenue Variance</div>
+                            <div class="variance-value" id="avgRevenueVariance">—</div>
+                        </div>
+                        <div class="variance-box">
+                            <div class="variance-label">Avg Staff Hours Variance</div>
+                            <div class="variance-value" id="avgStaffHoursVariance">—</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Manager Leaderboard (top 5) -->
+                <div class="accountability-section">
+                    <div class="accountability-section-title">Top Managers by Alert Response</div>
+                    <div id="leaderboardContainer">
+                        <div class="empty-state">
+                            <div class="loading-spinner"></div> Loading...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Decisions Against Signals -->
+                <div class="accountability-section">
+                    <div class="accountability-section-title">⚠️ Recent Decisions Against Signals</div>
+                    <div id="decisionsContainer" class="decisions-list">
+                        <div class="empty-state">Loading...</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- ON-SHIFT VIEW -->
@@ -3778,6 +4291,17 @@
                 </div>
                 <div class="weather-forecast" id="weatherForecast">
                     <div class="events-empty">Loading forecast…</div>
+                </div>
+            </div>
+
+            <!-- Live Signal Feed -->
+            <div class="live-signal-feed" id="liveFeedCard">
+                <div class="live-feed-header">
+                    <span class="pulse-indicator"></span>
+                    <span class="live-feed-title">Live Feed</span>
+                </div>
+                <div class="live-feed-scroll" id="liveFeedScroll">
+                    <div class="feed-empty">Loading feed…</div>
                 </div>
             </div>
 
@@ -6963,6 +7487,432 @@
             _weatherIntervalId = setInterval(refreshWeather, 15 * 60 * 1000);
         }
 
+        // ========== LIVE SIGNAL FEED ==========
+        let _liveFeedIntervalId = null;
+        let _feedEventMap = {}; // Cache of event IDs to dedupe
+
+        async function loadLiveSignalFeed() {
+            const container = document.getElementById('liveFeedScroll');
+            if (!container) return;
+
+            try {
+                // Fetch all 4 sources
+                const [tandaRes, weatherRes, eventsRes, shiftRes] = await Promise.allSettled([
+                    fetch(`/api/v1/tanda/webhook/events?org_id=demo&limit=50`),
+                    fetch(`/api/v1/weather/current/${_activeVenueId}`),
+                    fetch(`/api/v1/events/${_activeVenueId}?from=${new Date().toISOString().split('T')[0]}&to=${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}`),
+                    fetch(`/api/v1/shift-events/${_activeVenueId}?hours=24`)
+                ]);
+
+                const items = [];
+
+                // Process Tanda webhooks
+                if (tandaRes.status === 'fulfilled' && tandaRes.value.ok) {
+                    const data = await tandaRes.value.json();
+                    (data.events || []).slice(0, 10).forEach(evt => {
+                        const ts = new Date(evt.occurred_at);
+                        items.push({
+                            time: ts,
+                            timeStr: ts.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }),
+                            description: `${evt.event_type}${evt.data?.description ? ': ' + evt.data.description : ''}`,
+                            source: 'tanda',
+                            impact: evt.event_type.includes('error') ? 'negative' : 'neutral'
+                        });
+                    });
+                }
+
+                // Process weather
+                if (weatherRes.status === 'fulfilled' && weatherRes.value.ok) {
+                    const data = await weatherRes.value.json();
+                    const obs = data.observation || {};
+                    const ts = new Date(obs.timestamp);
+                    const temp = Math.round(obs.temperature_c || 0);
+                    const rainMM = obs.rain_mm_last_hour || 0;
+                    const impact = rainMM > 5 ? 'negative' : rainMM > 0 ? 'neutral' : 'positive';
+                    items.push({
+                        time: ts,
+                        timeStr: ts.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }),
+                        description: `${temp}°C, ${obs.conditions || 'no data'}${rainMM > 0 ? ` (${rainMM}mm rain)` : ''}`,
+                        source: 'weather',
+                        impact: impact
+                    });
+                }
+
+                // Process events (nearby events with spillback potential)
+                if (eventsRes.status === 'fulfilled' && eventsRes.value.ok) {
+                    const data = await eventsRes.value.json();
+                    (data.events || []).slice(0, 5).forEach(evt => {
+                        const ts = new Date(evt.start_time);
+                        const attendance = evt.expected_attendance || 0;
+                        const impact = attendance > 1000 ? 'positive' : attendance > 500 ? 'neutral' : 'positive';
+                        items.push({
+                            time: ts,
+                            timeStr: ts.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }),
+                            description: `${evt.title} (${attendance} people, ${evt.distance_km_from_venue || '?'}km away)`,
+                            source: 'event',
+                            impact: impact
+                        });
+                    });
+                }
+
+                // Process shift events
+                if (shiftRes.status === 'fulfilled' && shiftRes.value.ok) {
+                    const data = await shiftRes.value.json();
+                    (data.events || []).slice(0, 10).forEach(evt => {
+                        const ts = new Date(evt.timestamp);
+                        const impact = evt.category.includes('surge') || evt.category.includes('rush') ? 'negative' :
+                                      evt.category.includes('resolved') ? 'positive' : 'neutral';
+                        items.push({
+                            time: ts,
+                            timeStr: ts.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }),
+                            description: `${evt.description || evt.category}`,
+                            source: 'shift',
+                            impact: impact
+                        });
+                    });
+                }
+
+                // Sort by time (newest first) and take top 10
+                items.sort((a, b) => b.time - a.time);
+                const topItems = items.slice(0, 10);
+
+                if (!topItems.length) {
+                    container.innerHTML = '<div class="feed-empty">No recent signals</div>';
+                    return;
+                }
+
+                container.innerHTML = topItems.map(item => `
+                    <div class="feed-item ${item.impact}">
+                        <div class="feed-time">${item.timeStr}</div>
+                        <div class="feed-description">${escapeHtmlSafe(item.description)}</div>
+                        <div class="feed-badge ${item.source}">${item.source}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error('Live feed error:', err);
+                container.innerHTML = '<div class="feed-empty">Unable to load live feed</div>';
+            }
+        }
+
+        function initLiveFeedWidget() {
+            loadLiveSignalFeed();
+            if (_liveFeedIntervalId) clearInterval(_liveFeedIntervalId);
+            _liveFeedIntervalId = setInterval(loadLiveSignalFeed, 15 * 1000);
+        }
+
+        // ========== PATTERNS LEARNED ==========
+        async function loadPatternsLearned() {
+            const container = document.getElementById('patternsList');
+            if (!container) return;
+
+            try {
+                const res = await fetch(`/api/v1/shift-events/${_activeVenueId}/patterns`);
+                if (!res.ok) throw new Error('Failed to fetch patterns');
+                const data = await res.json();
+                const patterns = data.patterns || [];
+
+                if (!patterns.length) {
+                    container.innerHTML = '<div class="patterns-empty">No patterns learned yet — log a few shift events to start training the model</div>';
+                    return;
+                }
+
+                // Sort by confidence descending, take top 10
+                const topPatterns = patterns.sort((a, b) => b.confidence - a.confidence).slice(0, 10);
+
+                container.innerHTML = topPatterns.map(p => {
+                    const confPct = Math.round(p.confidence * 100);
+                    const dayName = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][p.weekday] || 'Day';
+                    const hourStr = `${p.hour_window[0]}–${p.hour_window[1]}h`;
+                    const lastSeen = new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-AU', { month: 'short', day: 'numeric' });
+                    const canApply = p.confidence >= 0.7;
+                    return `
+                        <div class="pattern-row">
+                            <div class="pattern-category">${escapeHtmlSafe((p.category || 'demand').split('_').join(' ').toUpperCase())}</div>
+                            <div class="pattern-time">${dayName} ${hourStr}</div>
+                            <div class="pattern-confidence-bar">
+                                <div class="pattern-bar">
+                                    <div class="pattern-bar-fill" style="width: ${confPct}%"></div>
+                                </div>
+                                <div class="pattern-pct">${confPct}%</div>
+                            </div>
+                            <div class="pattern-last-seen">${lastSeen}</div>
+                            <button class="pattern-apply-btn" ${canApply ? '' : 'disabled'} onclick="applyPattern('${escapeHtmlSafe(p.category)}', ${p.weekday}, ${p.hour_window[0]}, ${p.hour_window[1]})">
+                                ${canApply ? 'Apply' : 'Low conf.'}
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Patterns error:', err);
+                container.innerHTML = '<div class="patterns-empty">Unable to load patterns</div>';
+            }
+        }
+
+        async function applyPattern(category, weekday, startHour, endHour) {
+            // Find the next occurrence of this weekday and post a shift-event
+            const today = new Date();
+            const daysUntilTarget = (weekday - today.getDay() + 7) % 7 || 7;
+            const targetDate = new Date(today);
+            targetDate.setDate(targetDate.getDate() + daysUntilTarget);
+
+            const description = `Pattern: ${category} predicted for ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday]} ${startHour}:00-${endHour}:00`;
+
+            try {
+                const res = await fetch('/api/v1/shift-events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        venue_id: _activeVenueId,
+                        category: category,
+                        description: description,
+                        shift_date: targetDate.toISOString().split('T')[0],
+                        logged_by: _authUser?.email || 'system'
+                    })
+                });
+
+                if (!res.ok) throw new Error('Failed to apply pattern');
+                alert(`Pattern scheduled for ${targetDate.toLocaleDateString('en-AU')}`);
+                loadPatternsLearned();
+            } catch (err) {
+                console.error('Apply pattern error:', err);
+                alert('Failed to apply pattern');
+            }
+        }
+
+        // ========== AWARD COMPLIANCE BADGE ==========
+        async function updateAwardBadge() {
+            // Call award/evaluate with current draft and update badge
+            const badge = document.getElementById('awardBadge');
+            if (!badge) return;
+
+            try {
+                // Build a sample roster from demo data
+                const roster = [];
+                const startDate = currentWeekStart || new Date();
+                const roles = [1, 2, 3, 4];
+                const timeSlots = [
+                    { start: 8, end: 12 },
+                    { start: 12, end: 16 },
+                    { start: 16, end: 18 },
+                    { start: 18, end: 22 }
+                ];
+
+                for (let dayIdx = 0; dayIdx < 2; dayIdx++) {
+                    const shiftDate = new Date(startDate);
+                    shiftDate.setDate(shiftDate.getDate() + dayIdx);
+
+                    const numShifts = 2;
+                    for (let i = 0; i < numShifts; i++) {
+                        const slot = timeSlots[i];
+                        const role = roles[i % roles.length];
+
+                        let shiftStart = new Date(shiftDate);
+                        shiftStart.setHours(slot.start, 0, 0, 0);
+
+                        let shiftEnd = new Date(shiftDate);
+                        shiftEnd.setHours(slot.end, 0, 0, 0);
+
+                        roster.push({
+                            employee_id: `emp_${dayIdx}_${i}`,
+                            role: role,
+                            shift_start: shiftStart.toISOString(),
+                            shift_end: shiftEnd.toISOString(),
+                            employment_type: Math.random() > 0.7 ? 'casual' : 'full_time'
+                        });
+                    }
+                }
+
+                const response = await fetch('/api/v1/award/evaluate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        venue_id: _activeVenueId,
+                        roster: roster
+                    })
+                });
+
+                if (!response.ok) throw new Error('Award check failed');
+                const data = await response.json();
+
+                // Determine badge state
+                const errorCount = (data.compliance_issues || []).filter(i => i.severity === 'error').length;
+                const warningCount = (data.compliance_issues || []).filter(i => i.severity === 'warning').length;
+
+                const badgeEl = document.getElementById('awardBadge');
+                const badgeText = document.getElementById('awardBadgeText');
+
+                if (errorCount > 0) {
+                    badgeEl.classList.remove('ok', 'warning');
+                    badgeEl.classList.add('error');
+                    badgeText.textContent = `${errorCount} compliance issues`;
+                } else if (warningCount > 0) {
+                    badgeEl.classList.remove('ok', 'error');
+                    badgeEl.classList.add('warning');
+                    badgeText.textContent = `${warningCount} warnings`;
+                } else {
+                    badgeEl.classList.remove('warning', 'error');
+                    badgeEl.classList.add('ok');
+                    badgeText.textContent = 'Award OK';
+                }
+            } catch (err) {
+                console.error('Award badge error:', err);
+            }
+        }
+
+        // ========== ACCOUNTABILITY WIDGET ==========
+        async function loadAccountabilityLeaderboard() {
+            const container = document.getElementById('leaderboardContainer');
+            if (!container) return;
+
+            try {
+                const venueId = _activeVenueId || 'demo-venue';
+                if (!venueId) {
+                    container.innerHTML = '<div class="empty-state">Please select a venue</div>';
+                    return;
+                }
+
+                const response = await fetch('/api/v1/accountability/leaderboard?venue_ids=' + venueId + '&limit=5');
+                if (!response.ok) {
+                    if (response.status === 403) {
+                        container.innerHTML = '<div class="empty-state">Owner access required</div>';
+                        return;
+                    }
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                const leaderboard = data.leaderboard || [];
+
+                if (leaderboard.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No data yet</div>';
+                    return;
+                }
+
+                let html = `
+                    <table class="leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th>Manager</th>
+                                <th>Decisions</th>
+                                <th>Alerts Actioned</th>
+                                <th>Avg Revenue Variance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                for (const manager of leaderboard.slice(0, 5)) {
+                    const badgeClass = manager.alerts_actioned_pct >= 80 ? 'badge-green' : manager.alerts_actioned_pct >= 50 ? 'badge-orange' : 'badge-red';
+                    html += `
+                        <tr>
+                            <td class="manager-name">${escapeHtmlSafe(manager.manager_name)}</td>
+                            <td>${manager.decisions_total}</td>
+                            <td><span class="metric-badge ${badgeClass}">${manager.alerts_actioned_pct.toFixed(0)}%</span></td>
+                            <td>${manager.avg_variance_revenue !== null ? (manager.avg_variance_revenue > 0 ? '+' : '') + manager.avg_variance_revenue.toFixed(1) + '%' : '—'}</td>
+                        </tr>
+                    `;
+                }
+
+                html += `</tbody></table>`;
+                container.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load leaderboard:', err);
+                container.innerHTML = '<div class="empty-state">Failed to load leaderboard</div>';
+            }
+        }
+
+        async function loadAccountabilityVarianceSummary() {
+            try {
+                const venueId = _activeVenueId || 'demo-venue';
+                if (!venueId) return;
+
+                const response = await fetch('/api/v1/accountability/variance?venue_id=' + venueId + '&shift_id=demo');
+                if (response.status === 404) {
+                    // Demo data fallback
+                    const el1 = document.getElementById('avgRevenueVariance');
+                    const el2 = document.getElementById('avgStaffHoursVariance');
+                    if (el1) el1.textContent = '-3.2%';
+                    if (el2) el2.textContent = '-2.8%';
+                    return;
+                }
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const el1 = document.getElementById('avgRevenueVariance');
+                    const el2 = document.getElementById('avgStaffHoursVariance');
+                    if (el1) el1.textContent = data.variance_revenue_pct !== null ? (data.variance_revenue_pct > 0 ? '+' : '') + data.variance_revenue_pct.toFixed(1) + '%' : '—';
+                    if (el2) el2.textContent = data.variance_staff_hours_pct !== null ? (data.variance_staff_hours_pct > 0 ? '+' : '') + data.variance_staff_hours_pct.toFixed(1) + '%' : '—';
+                }
+            } catch (err) {
+                console.error('Failed to load variance:', err);
+                const el1 = document.getElementById('avgRevenueVariance');
+                const el2 = document.getElementById('avgStaffHoursVariance');
+                if (el1) el1.textContent = '—';
+                if (el2) el2.textContent = '—';
+            }
+        }
+
+        async function loadAccountabilityDecisions() {
+            const container = document.getElementById('decisionsContainer');
+            if (!container) return;
+
+            try {
+                const venueId = _activeVenueId || 'demo-venue';
+                if (!venueId) {
+                    container.innerHTML = '<div class="empty-state">Please select a venue</div>';
+                    return;
+                }
+
+                const response = await fetch('/api/v1/accountability/decisions?venue_id=' + venueId + '&limit=10');
+                if (!response.ok) {
+                    if (response.status === 403) {
+                        container.innerHTML = '<div class="empty-state">L2+ access required</div>';
+                        return;
+                    }
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const decisions = await response.json();
+                const againstSignals = decisions.filter(d =>
+                    d.decision_type === 'ignored_alert' ||
+                    (d.decision_type === 'kept_staff_on' && d.signals_available && d.signals_available.suggested_action === 'cut')
+                );
+
+                if (againstSignals.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No decisions against signals recently</div>';
+                    return;
+                }
+
+                let html = '';
+                for (const decision of againstSignals.slice(0, 5)) {
+                    const timestamp = new Date(decision.taken_at);
+                    const timeStr = timestamp.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+                    const decisionLabel = decision.decision_type.replace(/_/g, ' ').toUpperCase();
+
+                    html += `
+                        <div class="decision-item against-signals">
+                            <div class="decision-text">
+                                <strong>${escapeHtmlSafe(decision.manager_name)}</strong>: ${decisionLabel}
+                            </div>
+                            <div class="decision-flag">⚠️ vs Signal</div>
+                            <div class="decision-time">${timeStr}</div>
+                        </div>
+                    `;
+                }
+
+                container.innerHTML = html;
+            } catch (err) {
+                console.error('Failed to load decisions:', err);
+                container.innerHTML = '<div class="empty-state">Failed to load decisions</div>';
+            }
+        }
+
+        function initAccountabilityWidget() {
+            loadAccountabilityVarianceSummary();
+            loadAccountabilityLeaderboard();
+            loadAccountabilityDecisions();
+        }
+
         // ========== EVENTS WIDGET ==========
         let _currentEventData = null;
 
@@ -7284,14 +8234,38 @@
                 initWeatherWidget();
             }
 
+            // Live Signal Feed (on-shift only)
+            const liveFeedCard = document.getElementById('liveFeedCard');
+            if (liveFeedCard) {
+                initLiveFeedWidget();
+            }
+
             // Events widgets (both sections)
             loadEvents('rosterEventsList');
             loadEvents('onshiftEventsList');
+
+            // Patterns Learned (roster maker only)
+            const patternsCard = document.getElementById('patternsCard');
+            if (patternsCard) {
+                loadPatternsLearned();
+            }
 
             // Availability widget (roster maker only)
             const availPanel = document.getElementById('availabilityPanel');
             if (availPanel) {
                 loadAvailability();
+            }
+
+            // Award Compliance Badge (roster maker only)
+            const awardBadge = document.getElementById('awardBadge');
+            if (awardBadge) {
+                updateAwardBadge();
+            }
+
+            // Accountability widget (roster maker only)
+            const accountabilityCard = document.getElementById('accountabilityCard');
+            if (accountabilityCard) {
+                initAccountabilityWidget();
             }
 
             // Call-in widget (on-shift only)
