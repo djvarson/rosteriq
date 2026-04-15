@@ -271,6 +271,14 @@ class ForecastEngine:
             baseline, len(signal_descriptions), multiplier
         )
 
+        # Step 6: Collect raw signal objects for richer metadata
+        signal_objects = await self._get_signal_objects(
+            venue_id,
+            target_date,
+            location_lat=location_lat,
+            location_lng=location_lng,
+        )
+
         forecast = DemandForecast(
             date=date_str,
             hourly_demand=hourly_demand,
@@ -279,10 +287,14 @@ class ForecastEngine:
             confidence=confidence,
         )
 
+        # Attach signal objects to forecast for downstream use
+        # (not part of DemandForecast dataclass, added as attribute)
+        forecast.signal_objects = signal_objects
+
         logger.debug(
             f"Forecast for {venue_id} on {date_str}: "
             f"{int(total_covers)} covers, confidence={confidence:.2f}, "
-            f"multiplier={multiplier:.2f}"
+            f"multiplier={multiplier:.2f}, {len(signal_objects)} signal objects"
         )
 
         return forecast
@@ -441,6 +453,70 @@ class ForecastEngine:
         except Exception as e:
             logger.error(f"Error fetching real baseline: {e}, using demo")
             return self._demo_baseline(day_of_week)
+
+    async def _get_signal_objects(
+        self,
+        venue_id: str,
+        target_date: date,
+        location_lat: Optional[float] = None,
+        location_lng: Optional[float] = None,
+    ) -> List[Dict]:
+        """
+        Collect raw signal objects from signal aggregator for enriched demand data.
+
+        This pulls the full signal objects (not just multipliers) to provide
+        detailed signal metadata to roster generation and for audit trails.
+
+        Aggregates signals from:
+        - Weather (rain/extreme temps reduce demand)
+        - Events (sports, festivals increase demand)
+        - Bookings (confirmed bookings boost demand)
+        - Foot traffic trends
+        - Delivery analytics
+        - Pattern learned signals
+
+        Falls back gracefully if signal_aggregator unavailable.
+
+        Returns:
+            List of signal dicts with keys:
+            - source: "weather", "events", "bookings", "foot_traffic", "delivery", "pattern"
+            - impact_type: "positive", "negative", "neutral"
+            - impact_score: 0-1
+            - confidence: 0-1
+            - description: human-readable summary
+        """
+        if self.demo_mode or self.signal_aggregator is None:
+            return []
+
+        try:
+            signals = await self.signal_aggregator.collect_all_signals(
+                venue_id,
+                target_date,
+                location_lat=location_lat,
+                location_lng=location_lng,
+            )
+
+            # Convert Signal objects to dicts
+            signal_dicts = []
+            for sig in signals:
+                sig_dict = {
+                    "source": sig.source.value if hasattr(sig.source, "value") else str(sig.source),
+                    "impact_type": sig.signal_type.value if hasattr(sig.signal_type, "value") else str(sig.signal_type),
+                    "impact_score": sig.impact_score,
+                    "confidence": sig.confidence,
+                    "description": sig.description,
+                    "timestamp": sig.timestamp.isoformat() if hasattr(sig.timestamp, "isoformat") else str(sig.timestamp),
+                }
+                signal_dicts.append(sig_dict)
+
+            logger.debug(
+                f"Collected {len(signal_dicts)} signal objects for {venue_id} on {target_date}"
+            )
+            return signal_dicts
+
+        except Exception as e:
+            logger.warning(f"Error collecting signal objects: {e}, continuing with empty signals")
+            return []
 
     async def _get_demand_multipliers(
         self,

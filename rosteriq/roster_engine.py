@@ -239,21 +239,24 @@ class RosterEngine:
         Generate an optimal roster for a week.
 
         Main orchestration method that:
-        1. Converts demand forecasts to shift slots
+        1. Converts demand forecasts to shift slots (with signal enrichment)
         2. Performs greedy employee assignment
         3. Runs optimization passes (swaps, gap-filling, budget trimming)
         4. Validates constraints
         5. Calculates quality scores
 
+        Integrates demand signals (weather, events, bookings, patterns) to
+        influence staffing recommendations.
+
         Args:
             employees: List of Employee objects
-            demand_forecasts: List of DemandForecast for the week
+            demand_forecasts: List of DemandForecast for the week (with optional signal_objects)
             week_start_date: Start date (YYYY-MM-DD)
 
         Returns:
             Roster object with all shifts and quality metrics
         """
-        # Step 1: Convert forecasts to demand slots
+        # Step 1: Convert forecasts to demand slots (incorporates signals)
         demand_slots = self._calculate_demand_slots(demand_forecasts, week_start_date)
 
         # Step 2: Initial greedy assignment
@@ -297,14 +300,17 @@ class RosterEngine:
         Convert hourly demand forecasts into required shift slots per role.
 
         Groups consecutive hours requiring the same role into shift slots.
-        Prioritizes peak hours and roles with fewer qualified staff.
+        Prioritizes peak hours, confidence level, and signal-indicated high-demand periods.
+
+        Incorporates signal enrichment: if forecast has signal_objects with positive
+        impact, increases priority/demand_units for those time periods.
 
         Args:
-            forecasts: List of DemandForecast objects
+            forecasts: List of DemandForecast objects (may include signal_objects attribute)
             week_start_date: Week start date for reference
 
         Returns:
-            List of slot dicts: {date, role, start_hour, end_hour, demand_units, priority}
+            List of slot dicts: {date, role, start_hour, end_hour, demand_units, priority, signals}
         """
         slots = []
 
@@ -312,23 +318,51 @@ class RosterEngine:
             date = forecast.date
             demand_by_hour = forecast.hourly_demand
 
+            # Collect positive/negative signal impacts for this day
+            # Default: no signal boost unless signal_objects explicitly provided
+            signal_boost = 1.0
+            signal_descriptions = []
+
+            if hasattr(forecast, 'signal_objects') and forecast.signal_objects:
+                for sig in forecast.signal_objects:
+                    sig_impact_type = sig.get('impact_type', 'neutral')
+                    sig_impact_score = sig.get('impact_score', 0.0)
+                    sig_confidence = sig.get('confidence', 0.0)
+                    sig_description = sig.get('description', '')
+
+                    if sig_impact_type == 'positive' and sig_confidence > 0.5:
+                        # Positive signals with reasonable confidence boost demand
+                        signal_boost += sig_impact_score * 0.2  # Cap boost at +0.2 per signal
+                        signal_descriptions.append(f"Signal: {sig_description}")
+
+                    elif sig_impact_type == 'negative' and sig_confidence > 0.5:
+                        # Negative signals with reasonable confidence reduce demand
+                        signal_boost *= (1.0 - sig_impact_score * 0.1)
+
+            signal_boost = max(0.7, min(signal_boost, 1.5))  # Clamp to reasonable range
+
             for hour in sorted(demand_by_hour.keys()):
                 role_demand = demand_by_hour[hour]
 
                 for role, count in role_demand.items():
                     if count > 0:
-                        # Priority: peak hours (11-21) > confidence level
+                        # Apply signal boost to demand units
+                        boosted_count = count * signal_boost
+
+                        # Priority: peak hours (11-21) > confidence level > signal boost
                         is_peak = 11 <= hour <= 21
-                        priority = (is_peak, forecast.confidence)
+                        priority = (is_peak, forecast.confidence, signal_boost)
 
                         slots.append({
                             'date': date,
                             'role': role,
                             'start_hour': hour,
                             'end_hour': hour + 1,
-                            'demand_units': count,
+                            'demand_units': boosted_count,
                             'priority': priority,
-                            'confidence': forecast.confidence
+                            'confidence': forecast.confidence,
+                            'signal_boost': signal_boost,
+                            'signals': signal_descriptions,
                         })
 
         return sorted(slots, key=lambda s: s['priority'], reverse=True)

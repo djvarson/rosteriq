@@ -2629,6 +2629,7 @@ from rosteriq.brief_subscriptions_router import router as _brief_subscriptions_r
 from rosteriq.data_feeds_router import router as _data_feeds_router
 from rosteriq.tanda_marketplace_router import router as _tanda_marketplace_router
 from rosteriq.tenants_router import tenants_router as _tenants_router
+from rosteriq.billing_router import router as _billing_router
 
 app.include_router(_availability_router)
 app.include_router(_weather_router)
@@ -2645,6 +2646,7 @@ app.include_router(_accountability_router)
 app.include_router(_brief_subscriptions_router)
 app.include_router(_data_feeds_router)
 app.include_router(_tenants_router)
+app.include_router(_billing_router)
 
 
 # ============================================================================
