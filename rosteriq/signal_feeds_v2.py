@@ -29,6 +29,7 @@ from typing import Optional
 
 from rosteriq.signal_feeds import SignalAggregator, Signal, SignalSourceType
 from rosteriq.signal_bridge import weather_to_signals, events_to_signals
+from rosteriq.pattern_signals import patterns_to_signals
 
 logger = logging.getLogger("rosteriq.signal_feeds_v2")
 
@@ -36,17 +37,19 @@ logger = logging.getLogger("rosteriq.signal_feeds_v2")
 class EnrichedSignalAggregator(SignalAggregator):
     """
     Enhanced SignalAggregator that combines legacy feeds with new BOM and events
-    adapters via signal_bridge.
+    adapters via signal_bridge, plus patterns from ShiftEventStore.
 
     Attributes:
         weather_adapter: WeatherAdapter for BOM forecasts (DemoWeatherAdapter or BOMAdapter)
         events_adapter: EventsAdapter for events (DemoEventsAdapter, CompositeEventsAdapter, etc.)
+        pattern_store: ShiftEventStore for learning patterns from logged events
     """
 
     def __init__(
         self,
         weather_adapter=None,
         events_adapter=None,
+        pattern_store=None,
     ):
         """
         Initialize EnrichedSignalAggregator.
@@ -54,9 +57,11 @@ class EnrichedSignalAggregator(SignalAggregator):
         Args:
             weather_adapter: WeatherAdapter instance. If None, auto-detects from ROSTERIQ_DATA_MODE
             events_adapter: EventsAdapter instance. If None, auto-detects from ROSTERIQ_DATA_MODE
+            pattern_store: ShiftEventStore instance for pattern learning. If None, patterns disabled.
         """
         super().__init__()
 
+        self.pattern_store = pattern_store
         data_mode = os.getenv("ROSTERIQ_DATA_MODE", "demo")
 
         # Auto-detect weather adapter if not provided
@@ -191,13 +196,35 @@ class EnrichedSignalAggregator(SignalAggregator):
             except Exception as e:
                 logger.warning(f"Failed to fetch event signals: {e}")
 
-        # Reconstruct final signal list: non-weather + deduped weather
-        final_signals = non_weather_signals + list(weather_signals_by_date.values())
+        # Inject pattern signals if store is available
+        pattern_signals = []
+        if self.pattern_store:
+            try:
+                pattern_signals = await patterns_to_signals(
+                    self.pattern_store,
+                    venue_id,
+                    target_date,
+                    hour=None,  # Collect all patterns for the target_date's weekday
+                )
+                if pattern_signals:
+                    logger.debug(
+                        f"Injected {len(pattern_signals)} pattern signals for {venue_id}"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to fetch pattern signals: {e}")
+
+        # Reconstruct final signal list: non-weather + deduped weather + patterns
+        final_signals = (
+            non_weather_signals
+            + list(weather_signals_by_date.values())
+            + pattern_signals
+        )
 
         logger.debug(
             f"collect_all_signals: {venue_id} on {target_date} collected "
             f"{len(final_signals)} total signals "
-            f"({len(weather_signals_by_date)} weather, {len(event_signals)} events)"
+            f"({len(weather_signals_by_date)} weather, {len(event_signals)} events, "
+            f"{len(pattern_signals)} patterns)"
         )
 
         return final_signals

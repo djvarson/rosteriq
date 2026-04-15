@@ -3,21 +3,27 @@
 Endpoints:
 - POST /api/v1/call-in → create and send call-in SMS
 - GET /api/v1/call-in/{venue_id} → list all call-ins for venue
-- POST /api/v1/call-in/webhook/inbound → handle inbound SMS replies
+- POST /api/v1/call-in/webhook/inbound → handle inbound SMS replies (deprecated, demo mode)
+- POST /api/v1/call-in/webhook/twilio → Twilio production webhook (signature verified)
 """
+import logging
 import os
 import re
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlparse, urlencode
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from rosteriq.call_in import (
     CallInRequest,
     CallInStatus,
     get_service,
     get_store,
+    verify_twilio_signature,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["call-in"])
 
@@ -148,7 +154,10 @@ async def list_call_ins(venue_id: str) -> dict:
 
 @router.post("/call-in/webhook/inbound")
 async def handle_inbound_sms(body: dict) -> dict:
-    """Handle inbound SMS reply.
+    """Handle inbound SMS reply (DEPRECATED - demo mode only).
+
+    This endpoint accepts plain JSON for testing/demo. Production uses
+    /api/v1/call-in/webhook/twilio which verifies Twilio signatures.
 
     Body:
     {
@@ -165,6 +174,78 @@ async def handle_inbound_sms(body: dict) -> dict:
     if not phone or not text:
         raise HTTPException(status_code=400, detail="Missing 'from' or 'body'")
 
+    service = get_service()
+    req = service.handle_inbound(phone, text)
+
+    if not req:
+        return {"matched": False}
+
+    return {
+        "matched": True,
+        "request": _call_in_to_dict(req),
+    }
+
+
+@router.post("/call-in/webhook/twilio")
+async def handle_twilio_webhook(request: Request) -> dict:
+    """Handle inbound SMS from Twilio webhook (production).
+
+    Twilio sends x-www-form-urlencoded POST with fields:
+    - From: sender's phone number
+    - Body: message text
+    - MessageSid: unique message ID
+    - To: our Twilio number
+    etc.
+
+    Signature is in X-Twilio-Signature header.
+
+    Rejects requests > 1KB (Twilio bodies are small).
+    Rejects invalid signatures (403).
+    If TWILIO_AUTH_TOKEN not set, accepts in demo mode with WARNING log.
+
+    Returns 200 {matched: true, request: ...} or {matched: false}.
+    """
+    # Rate-limit-ish: reject body > 1KB
+    body_bytes = await request.body()
+    if len(body_bytes) > 1024:
+        raise HTTPException(status_code=400, detail="Request body too large")
+
+    # Read form data
+    try:
+        form = await request.form()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid form data: {str(e)}")
+
+    # Extract Twilio signature
+    signature_header = request.headers.get("X-Twilio-Signature", "")
+
+    # Build form params dict (form returns a MultiDict-like, convert to dict)
+    params = dict(form)
+
+    # Get auth token from env
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+
+    # Verify signature
+    if auth_token:
+        # Production: build canonical URL from request
+        url = str(request.url)
+        if not verify_twilio_signature(signature_header, url, params, auth_token):
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+    else:
+        # Demo mode: no auth token set, accept request but warn
+        logger.warning(
+            "TWILIO_AUTH_TOKEN not set; accepting webhook without signature "
+            "verification (demo mode)"
+        )
+
+    # Extract From and Body from form params
+    phone = params.get("From", "").strip()
+    text = params.get("Body", "").strip()
+
+    if not phone or not text:
+        raise HTTPException(status_code=400, detail="Missing From or Body")
+
+    # Delegate to service
     service = get_service()
     req = service.handle_inbound(phone, text)
 

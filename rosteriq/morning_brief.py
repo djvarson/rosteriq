@@ -24,7 +24,7 @@ independently testable.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time
 from typing import Any, Dict, Iterable, List, Optional
 
 # ---------------------------------------------------------------------------
@@ -337,6 +337,9 @@ def compose_brief(
         "rollup": rollup,
         "top_dismissed": top,
         "recap_context": recap_context,
+        "weather_outlook": {},
+        "events_today": [],
+        "applicable_patterns": [],
     }
 
 
@@ -417,3 +420,180 @@ def compose_brief_from_store(
         yesterday_recap=yesterday_recap,
         venue_label=venue_label,
     )
+
+
+# ---------------------------------------------------------------------------
+# Enrichment helpers for data feeds
+# ---------------------------------------------------------------------------
+
+
+def _build_enriched_context(
+    venue_id: str,
+    target_date: str,
+    *,
+    weather_adapter: Optional[Any] = None,
+    events_adapter: Optional[Any] = None,
+    shift_event_store: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Build enriched context dict (weather, events, patterns) for a target date.
+
+    Args:
+        venue_id: The venue being enriched.
+        target_date: YYYY-MM-DD string.
+        weather_adapter: WeatherAdapter instance (lazy-loaded if None).
+        events_adapter: EventsAdapter instance (lazy-loaded if None).
+        shift_event_store: ShiftEventStore instance (lazy-loaded if None).
+
+    Returns:
+        Dict with keys: weather_outlook, events_today, applicable_patterns.
+        Fields are populated from adapters; if adapters fail, fields are empty/default.
+    """
+    import asyncio
+    from datetime import datetime, timedelta, timezone, date as date_type
+
+    context: Dict[str, Any] = {
+        "weather_outlook": {},
+        "events_today": [],
+        "applicable_patterns": [],
+    }
+
+    # Determine data mode
+    import os
+    data_mode = os.environ.get("ROSTERIQ_DATA_MODE", "demo").lower()
+
+    # Parse target_date
+    try:
+        target_day = datetime.strptime(target_date, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return context
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Weather
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        if weather_adapter is None:
+            if data_mode == "demo":
+                from rosteriq.data_feeds.bom import DemoWeatherAdapter
+                weather_adapter = DemoWeatherAdapter()
+            else:
+                from rosteriq.data_feeds.bom import DemoWeatherAdapter
+                weather_adapter = DemoWeatherAdapter()  # fallback to demo
+
+        # Fetch forecast for today and tomorrow
+        async def _fetch_weather():
+            forecast_days = await weather_adapter.get_forecast(venue_id, days=2)
+            return forecast_days
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("Event loop closed")
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        forecast = loop.run_until_complete(_fetch_weather())
+
+        for day_obj in forecast:
+            if day_obj.date == target_day:
+                context["weather_outlook"]["today"] = {
+                    "max_c": day_obj.max_c,
+                    "min_c": day_obj.min_c,
+                    "rain_probability_pct": day_obj.rain_probability_pct,
+                    "conditions": day_obj.conditions,
+                }
+            elif day_obj.date == target_day + timedelta(days=1):
+                context["weather_outlook"]["tomorrow"] = {
+                    "max_c": day_obj.max_c,
+                    "min_c": day_obj.min_c,
+                    "rain_probability_pct": day_obj.rain_probability_pct,
+                    "conditions": day_obj.conditions,
+                }
+    except Exception:
+        # Weather fetch failed; degrade gracefully
+        pass
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Events today
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        if events_adapter is None:
+            if data_mode == "demo":
+                from rosteriq.data_feeds.events import DemoEventsAdapter
+                events_adapter = DemoEventsAdapter()
+            else:
+                from rosteriq.data_feeds.events import DemoEventsAdapter
+                events_adapter = DemoEventsAdapter()  # fallback to demo
+
+        # Fetch events for today
+        async def _fetch_events():
+            day_start = datetime.combine(target_day, time=datetime.min.time()).replace(tzinfo=timezone.utc)
+            day_end = datetime.combine(target_day, time=datetime.max.time()).replace(tzinfo=timezone.utc)
+            events_list = await events_adapter.get_events(venue_id, day_start, day_end)
+            return events_list
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("Event loop closed")
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        events_today = loop.run_until_complete(_fetch_events())
+
+        # Top 3 by proximity
+        sorted_events = sorted(
+            events_today,
+            key=lambda e: e.distance_km_from_venue or float('inf')
+        )[:3]
+
+        context["events_today"] = [
+            {
+                "title": e.title,
+                "start_time": e.start_time.isoformat(),
+                "distance_km": e.distance_km_from_venue or 0,
+                "category": e.category,
+                "expected_attendance": e.expected_attendance or 0,
+            }
+            for e in sorted_events
+        ]
+    except Exception:
+        # Events fetch failed; degrade gracefully
+        pass
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Applicable patterns (18:00 peak hour)
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        if shift_event_store is None:
+            from rosteriq import shift_events as se_module
+            shift_event_store = se_module.shift_event_store  # lazy module-global
+
+        from rosteriq.shift_events import PatternLearner
+
+        # Get all events for venue
+        all_events = shift_event_store.for_venue(venue_id)
+
+        # Predict patterns for today at 18:00 (peak)
+        patterns = PatternLearner.predict_for(
+            venue_id=venue_id,
+            target_date=target_day,
+            hour=18,
+            events=all_events,
+        )
+
+        context["applicable_patterns"] = [
+            {
+                "description": p.description,
+                "category": p.category.value,
+                "confidence": p.confidence,
+                "occurrences": p.occurrences,
+            }
+            for p in patterns
+        ]
+    except Exception:
+        # Pattern learning failed; degrade gracefully
+        pass
+
+    return context

@@ -27,6 +27,14 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pydantic import BaseModel, Field
 
+# Access control
+try:
+    from rosteriq.auth import AccessLevel, require_access, User
+except ImportError:
+    AccessLevel = None
+    require_access = None
+    User = None
+
 logger = logging.getLogger("rosteriq.api_v2")
 
 # Get project root directory
@@ -678,15 +686,21 @@ async def get_data_mode() -> DataModeResponse:
 # ============================================================================
 
 @app.post("/api/v1/rosters/generate", response_model=RosterGenerateResponse)
-async def generate_roster(request: RosterGenerateRequest) -> RosterGenerateResponse:
+async def generate_roster(
+    request: RosterGenerateRequest,
+    user: User = Depends(require_access(AccessLevel.L2_ROSTER_MAKER)) if require_access else None,
+) -> RosterGenerateResponse:
     """
     Generate an optimal roster for a venue and week.
+
+    Requires: L2 Roster Maker or higher
 
     Uses RosterIQPipeline.generate_roster() to create shift assignments
     with cost optimization and fairness constraints.
 
     Args:
         request: Venue ID and week start date (YYYY-MM-DD)
+        user: Current authenticated user (must be L2 or OWNER)
 
     Returns:
         Complete roster with shifts, costs, and quality scores
@@ -974,9 +988,14 @@ async def get_live_wage_pulse(venue_id: str) -> LiveWagePulseResponse:
 # ============================================================================
 
 @app.post("/api/v1/scenarios/wage-cost", response_model=ScenarioSolveResponse)
-async def solve_wage_scenario(request: ScenarioSolveRequest) -> ScenarioSolveResponse:
+async def solve_wage_scenario(
+    request: ScenarioSolveRequest,
+    user: User = Depends(require_access(AccessLevel.L2_ROSTER_MAKER)) if require_access else None,
+) -> ScenarioSolveResponse:
     """
     Bidirectional wage-cost scenario solver. Three modes in one endpoint:
+
+    Requires: L2 Roster Maker or higher
 
     1. solve_sales — "Given this wage cost and target %, what sales do I need?"
        Requires: wage_cost, target_wage_cost_pct
@@ -1054,12 +1073,17 @@ async def solve_wage_scenario(request: ScenarioSolveRequest) -> ScenarioSolveRes
 # ============================================================================
 
 @app.post("/api/v1/ask", response_model=AskResponse)
-async def ask_question(request: AskRequest) -> AskResponse:
+async def ask_question(
+    request: AskRequest,
+    user: User = Depends(require_access(AccessLevel.L2_ROSTER_MAKER)) if require_access else None,
+) -> AskResponse:
     """
     Natural-language question answering. The router lives in
     rosteriq.query_library and is purely deterministic: same question +
     same context = byte-identical answer, every time. No LLM, no
     temperature, no prompt drift.
+
+    Requires: L2 Roster Maker or higher
 
     Supported phrasings include:
       "sales last week"
@@ -1388,6 +1412,7 @@ async def get_portfolio_recap(
     portfolio_id: str = "",
     include_trends: bool = False,
     trend_window_days: int = 7,
+    user: User = Depends(require_access(AccessLevel.OWNER)) if require_access else None,
 ) -> PortfolioRecapResponse:
     """
     Portfolio recap for 2+ venues — the Tier-3 group-operator view.
@@ -2582,6 +2607,7 @@ from rosteriq.call_in_router import router as _call_in_router
 from rosteriq.ask_router import ask_router as _ask_router
 from rosteriq.roi_router import router as _roi_router
 from rosteriq.shift_events_router import router as _shift_events_router
+from rosteriq.access_router import access_router as _access_router
 
 app.include_router(_availability_router)
 app.include_router(_weather_router)
@@ -2590,6 +2616,7 @@ app.include_router(_call_in_router)
 app.include_router(_ask_router)
 app.include_router(_roi_router)
 app.include_router(_shift_events_router)
+app.include_router(_access_router)
 
 
 # ============================================================================

@@ -3709,6 +3709,7 @@
                            autocomplete="off">
                     <button type="button" class="headcount-group-btn" onclick="logHeadCountGroup(1)">Log +group</button>
                     <button type="button" class="headcount-group-btn negative" onclick="logHeadCountGroup(-1)">Log −group</button>
+                    <button type="button" class="headcount-group-btn" onclick="openShiftEventModal()">+ Log event</button>
                 </div>
                 <div class="headcount-timeline" id="headcountTimeline">
                     <div class="headcount-timeline-empty">No taps yet. The first tap logs &quot;Start of shift&quot; automatically.</div>
@@ -3891,6 +3892,51 @@
                 <div class="modal-actions">
                     <button type="submit" class="modal-submit">Send request</button>
                     <button type="button" class="modal-cancel" onclick="closeCallInModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Shift Event Modal -->
+    <div class="modal-overlay hidden" id="shiftEventModalOverlay" onclick="closeShiftEventModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">Log shift event</div>
+                <div class="modal-subtitle">Record on-shift events: surges, groups, issues, weather changes</div>
+            </div>
+            <form class="modal-form" id="shiftEventForm" onsubmit="event.preventDefault(); submitShiftEvent();">
+                <div class="form-group">
+                    <label class="form-label">Event category</label>
+                    <select id="shiftEventCategory" class="form-select" required>
+                        <option value="">Select event type…</option>
+                        <option value="walk_in_surge">Walk-in surge</option>
+                        <option value="pub_group">Pub group</option>
+                        <option value="bus_group">Bus group</option>
+                        <option value="stadium_spillback">Stadium spillback</option>
+                        <option value="weather_shift">Weather shift</option>
+                        <option value="booking_no_show">Booking no-show</option>
+                        <option value="staff_shortage">Staff shortage</option>
+                        <option value="equipment_issue">Equipment issue</option>
+                        <option value="customer_incident">Customer incident</option>
+                        <option value="kitchen_backup">Kitchen backup</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <input id="shiftEventDescription" class="form-input" type="text" placeholder="e.g. 'Large birthday party arrived'" required />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Headcount at time (optional)</label>
+                    <input id="shiftEventHeadcount" class="form-input" type="number" placeholder="e.g. 45" min="0" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Weather condition (optional)</label>
+                    <input id="shiftEventWeather" class="form-input" type="text" placeholder="e.g. 'rainy', 'very hot'" />
+                </div>
+                <div class="modal-actions">
+                    <button type="submit" class="modal-submit">Log event</button>
+                    <button type="button" class="modal-cancel" onclick="closeShiftEventModal()">Cancel</button>
                 </div>
             </form>
         </div>
@@ -6755,6 +6801,57 @@
                 }).join('');
             } catch (err) {
                 console.error('Call-in poll error:', err);
+            }
+        }
+
+        // -------- Shift Event Modal --------
+        function openShiftEventModal() {
+            document.getElementById('shiftEventModalOverlay').classList.remove('hidden');
+            document.getElementById('shiftEventForm').reset();
+        }
+
+        function closeShiftEventModal(event) {
+            if (event && event.target !== document.getElementById('shiftEventModalOverlay')) return;
+            document.getElementById('shiftEventModalOverlay').classList.add('hidden');
+        }
+
+        async function submitShiftEvent() {
+            const form = document.getElementById('shiftEventForm');
+            const category = document.getElementById('shiftEventCategory').value;
+            const description = document.getElementById('shiftEventDescription').value;
+            const headcount = document.getElementById('shiftEventHeadcount').value;
+            const weather = document.getElementById('shiftEventWeather').value;
+
+            if (!category || !description) {
+                showToast('Please fill in category and description', 'error');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/v1/shift-events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        venue_id: _activeVenueId,
+                        category: category,
+                        description: description,
+                        headcount_at_time: headcount ? parseInt(headcount) : null,
+                        weather_condition: weather || null,
+                        logged_by: 'dashboard_user'
+                    })
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.detail || 'Failed to log event');
+                }
+
+                showToast('Event logged successfully');
+                closeShiftEventModal();
+                form.reset();
+            } catch (err) {
+                console.error('Shift event error:', err);
+                showToast(err.message || 'Error logging event', 'error');
             }
         }
 

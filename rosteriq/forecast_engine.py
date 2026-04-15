@@ -735,9 +735,18 @@ async def get_enriched_forecast_engine(
             demo_mode = True
 
     # Create EnrichedSignalAggregator with provided or auto-detected adapters
+    # Also inject pattern_store if available (for pattern learning loop)
+    pattern_store = None
+    try:
+        from rosteriq.shift_events_router import _shift_event_store
+        pattern_store = _shift_event_store
+    except ImportError:
+        pass
+
     signal_aggregator = EnrichedSignalAggregator(
         weather_adapter=weather_adapter,
         events_adapter=events_adapter,
+        pattern_store=pattern_store,
     )
 
     engine = ForecastEngine(

@@ -11,6 +11,9 @@ message bodies). Each request has a lifecycle: PENDING → SENT → ACCEPTED|DEC
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import os
 import re
 import uuid
@@ -18,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +118,58 @@ def parse_reply(text: str) -> Optional[CallInStatus]:
 
 
 # ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class SMSProviderError(Exception):
+    """Raised when SMS provider fails to send."""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Signature verification
+# ---------------------------------------------------------------------------
+
+
+def verify_twilio_signature(
+    signature_header: str, url: str, params: dict[str, str], auth_token: str
+) -> bool:
+    """Verify Twilio webhook signature using HMAC-SHA1.
+
+    Implements Twilio's canonical algorithm:
+    1. Concatenate URL + sorted form params (key+value for each)
+    2. HMAC-SHA1 with auth_token as key
+    3. Base64-encode result
+    4. Compare to signature_header using hmac.compare_digest
+
+    Args:
+        signature_header: X-Twilio-Signature header value (base64)
+        url: Full request URL (scheme+host+path+query)
+        params: Form parameters as dict
+        auth_token: Twilio auth token
+
+    Returns:
+        True if signature is valid, False otherwise.
+    """
+    # Build canonical string: url + sorted params (key+value concatenated)
+    canonical = url + "".join(k + v for k, v in sorted(params.items()))
+
+    # HMAC-SHA1 with auth_token as key
+    expected_sig = hmac.new(
+        auth_token.encode("utf-8"),
+        canonical.encode("utf-8"),
+        hashlib.sha1,
+    ).digest()
+
+    # Base64-encode the result
+    expected_b64 = base64.b64encode(expected_sig).decode("utf-8")
+
+    # Compare using hmac.compare_digest to prevent timing attacks
+    return hmac.compare_digest(expected_b64, signature_header)
+
+
+# ---------------------------------------------------------------------------
 # SMS Provider abstraction
 # ---------------------------------------------------------------------------
 
@@ -140,31 +196,82 @@ class DemoSMSProvider(SMSProvider):
 
 
 class TwilioSMSProvider(SMSProvider):
-    """Twilio SMS provider. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM env vars."""
+    """Twilio SMS provider.
 
-    def __init__(self):
-        self.account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-        self.auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-        self.twilio_from = os.getenv("TWILIO_FROM")
+    Reads credentials from env vars or accepts explicit kwargs.
+    Kwargs win over env vars.
 
-        if not all([self.account_sid, self.auth_token, self.twilio_from]):
+    Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM.
+    If require_credentials=True (default), raises ValueError if none configured.
+    """
+
+    def __init__(
+        self,
+        account_sid: Optional[str] = None,
+        auth_token: Optional[str] = None,
+        twilio_from: Optional[str] = None,
+        require_credentials: bool = True,
+    ):
+        self.account_sid = account_sid or os.getenv("TWILIO_ACCOUNT_SID")
+        self.auth_token = auth_token or os.getenv("TWILIO_AUTH_TOKEN")
+        self.twilio_from = twilio_from or os.getenv("TWILIO_FROM")
+
+        if require_credentials and not all(
+            [self.account_sid, self.auth_token, self.twilio_from]
+        ):
             raise ValueError(
                 "TwilioSMSProvider requires TWILIO_ACCOUNT_SID, "
-                "TWILIO_AUTH_TOKEN, TWILIO_FROM env vars"
+                "TWILIO_AUTH_TOKEN, TWILIO_FROM env vars or explicit kwargs"
             )
 
     async def send(self, to: str, body: str) -> dict:
-        """Send via Twilio API. (Placeholder; raises NotImplementedError if not configured.)"""
-        # In real implementation, would do:
-        # import httpx
-        # async with httpx.AsyncClient(auth=(self.account_sid, self.auth_token)) as client:
-        #     resp = await client.post(
-        #         f"https://api.twilio.com/2010-04-01/Accounts/{self.account_sid}/Messages.json",
-        #         data={"To": to, "From": self.twilio_from, "Body": body}
-        #     )
-        #     return resp.json()
+        """Send SMS via Twilio API.
 
-        raise NotImplementedError("Twilio integration not yet implemented")
+        Makes a POST to https://api.twilio.com/2010-04-01/Accounts/{SID}/Messages.json
+        with basic auth (account_sid:auth_token) and form-encoded body.
+
+        Returns a receipt dict:
+        {
+            "id": message SID,
+            "status": message status,
+            "to": recipient phone,
+            "body": message body,
+            "raw": full Twilio JSON response
+        }
+
+        Raises SMSProviderError on non-2xx response.
+        """
+        import httpx
+
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{self.account_sid}/Messages.json"
+
+        async with httpx.AsyncClient(
+            auth=(self.account_sid, self.auth_token)
+        ) as client:
+            resp = await client.post(
+                url,
+                data={"To": to, "From": self.twilio_from, "Body": body},
+            )
+
+            if resp.status_code < 200 or resp.status_code >= 300:
+                try:
+                    error_data = resp.json()
+                    error_msg = error_data.get("message", str(error_data))
+                except Exception:
+                    error_msg = resp.text
+
+                raise SMSProviderError(
+                    f"Twilio API error ({resp.status_code}): {error_msg}"
+                )
+
+            json_resp = resp.json()
+            return {
+                "id": json_resp.get("sid"),
+                "status": json_resp.get("status"),
+                "to": json_resp.get("to"),
+                "body": json_resp.get("body"),
+                "raw": json_resp,
+            }
 
 
 # ---------------------------------------------------------------------------

@@ -342,6 +342,10 @@ def compose_weekly_digest(
         "rollup": rollup,
         "patterns": patterns,
         "should_send": bool(should_send),
+        "weather_week_summary": {},
+        "events_week": [],
+        "top_patterns": [],
+        "shift_event_count": 0,
     }
 
 
@@ -372,6 +376,194 @@ def compose_weekly_digest_from_store(
 # ---------------------------------------------------------------------------
 # Plain-text renderer — shape-compatible with morning_brief.render_text
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Enrichment helpers for data feeds
+# ---------------------------------------------------------------------------
+
+
+def _build_enriched_weekly_context(
+    venue_id: str,
+    start: date,
+    end: date,
+    *,
+    weather_adapter: Any = None,
+    events_adapter: Any = None,
+    shift_event_store: Any = None,
+) -> Dict[str, Any]:
+    """Build enriched context for a week window (weather, events, patterns, counts).
+
+    Args:
+        venue_id: The venue.
+        start, end: Week boundaries (both inclusive).
+        weather_adapter: WeatherAdapter instance (lazy-loaded if None).
+        events_adapter: EventsAdapter instance (lazy-loaded if None).
+        shift_event_store: ShiftEventStore instance (lazy-loaded if None).
+
+    Returns:
+        Dict with keys: weather_week_summary, events_week, top_patterns, shift_event_count.
+        Fields degrade gracefully if adapters fail.
+    """
+    import asyncio
+    import os
+    from datetime import datetime as dt, timezone
+
+    context: Dict[str, Any] = {
+        "weather_week_summary": {
+            "rainy_days": 0,
+            "rainy_dates": [],
+            "avg_max_c": 0.0,
+            "avg_min_c": 0.0,
+        },
+        "events_week": [],
+        "top_patterns": [],
+        "shift_event_count": 0,
+    }
+
+    data_mode = os.environ.get("ROSTERIQ_DATA_MODE", "demo").lower()
+    window_days = (end.toordinal() - start.toordinal() + 1)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Weather week summary
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        if weather_adapter is None:
+            if data_mode == "demo":
+                from rosteriq.data_feeds.bom import DemoWeatherAdapter
+                weather_adapter = DemoWeatherAdapter()
+            else:
+                from rosteriq.data_feeds.bom import DemoWeatherAdapter
+                weather_adapter = DemoWeatherAdapter()  # fallback
+
+        # Fetch forecasts for each day in window
+        async def _fetch_week_weather():
+            forecast = await weather_adapter.get_forecast(venue_id, days=window_days)
+            return forecast
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("Event loop closed")
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        forecast_days = loop.run_until_complete(_fetch_week_weather())
+
+        rainy_count = 0
+        rainy_dates = []
+        max_temps = []
+        min_temps = []
+
+        for day_obj in forecast_days:
+            if start <= day_obj.date <= end:
+                max_temps.append(day_obj.max_c)
+                min_temps.append(day_obj.min_c)
+                if day_obj.rain_probability_pct >= 50 or day_obj.rain_mm_expected >= 2:
+                    rainy_count += 1
+                    rainy_dates.append(day_obj.date.isoformat())
+
+        if max_temps:
+            avg_max = sum(max_temps) / len(max_temps)
+        else:
+            avg_max = 0.0
+
+        if min_temps:
+            avg_min = sum(min_temps) / len(min_temps)
+        else:
+            avg_min = 0.0
+
+        context["weather_week_summary"] = {
+            "rainy_days": rainy_count,
+            "rainy_dates": rainy_dates,
+            "avg_max_c": round(avg_max, 1),
+            "avg_min_c": round(avg_min, 1),
+        }
+    except Exception:
+        # Weather fetch failed; degrade gracefully
+        pass
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Events this week
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        if events_adapter is None:
+            if data_mode == "demo":
+                from rosteriq.data_feeds.events import DemoEventsAdapter
+                events_adapter = DemoEventsAdapter()
+            else:
+                from rosteriq.data_feeds.events import DemoEventsAdapter
+                events_adapter = DemoEventsAdapter()  # fallback
+
+        # Fetch events for the week window
+        async def _fetch_week_events():
+            week_start = dt.combine(start, dt.min.time()).replace(tzinfo=timezone.utc)
+            week_end = dt.combine(end, dt.max.time()).replace(tzinfo=timezone.utc)
+            events_list = await events_adapter.get_events(venue_id, week_start, week_end)
+            return events_list
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("Event loop closed")
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        events_week = loop.run_until_complete(_fetch_week_events())
+
+        context["events_week"] = [
+            {
+                "title": e.title,
+                "start_time": e.start_time.isoformat(),
+                "category": e.category,
+                "expected_attendance": e.expected_attendance or 0,
+            }
+            for e in events_week
+        ]
+    except Exception:
+        # Events fetch failed; degrade gracefully
+        pass
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Top patterns and shift event count
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        if shift_event_store is None:
+            from rosteriq import shift_events as se_module
+            shift_event_store = se_module.shift_event_store  # lazy module-global
+
+        from rosteriq.shift_events import PatternLearner
+
+        # Get all events for venue
+        all_events = shift_event_store.for_venue(venue_id)
+
+        # Analyze for top patterns (confidence desc)
+        patterns = PatternLearner.analyse(all_events)
+        context["top_patterns"] = [
+            {
+                "description": p.description,
+                "category": p.category.value,
+                "confidence": round(p.confidence, 4),
+                "occurrences": p.occurrences,
+            }
+            for p in patterns[:5]
+        ]
+
+        # Count events this week
+        week_start_dt = dt.combine(start, dt.min.time()).replace(tzinfo=timezone.utc)
+        week_end_dt = dt.combine(end, dt.max.time()).replace(tzinfo=timezone.utc)
+        week_events = [
+            e for e in all_events
+            if week_start_dt <= e.timestamp <= week_end_dt
+        ]
+        context["shift_event_count"] = len(week_events)
+    except Exception:
+        # Pattern learning failed; degrade gracefully
+        pass
+
+    return context
+
 
 def render_text(digest: Dict[str, Any]) -> str:
     """Render a digest dict to plain text for email / Slack / cron curl.

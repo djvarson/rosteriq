@@ -17,6 +17,7 @@ import os
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, EmailStr, Field
@@ -33,7 +34,7 @@ except ImportError:
     CryptContext = None
 
 try:
-    from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
+    from fastapi import APIRouter, Depends, FastAPI, HTTPException, status, Request
     from fastapi.security import HTTPAuthenticationCredentials, HTTPBearer
 except ImportError:
     APIRouter = None
@@ -42,8 +43,32 @@ except ImportError:
     HTTPException = None
     status = None
     HTTPBearer = None
+    Request = None
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Access Level Enum
+# ============================================================================
+
+
+class AccessLevel(str, Enum):
+    """Role-based access levels for RosterIQ."""
+
+    L1_SUPERVISOR = "l1"
+    L2_ROSTER_MAKER = "l2"
+    OWNER = "owner"
+
+    @classmethod
+    def rank(cls, level: "AccessLevel") -> int:
+        """Return numeric rank for access level (higher = more permission)."""
+        ranking = {
+            cls.L1_SUPERVISOR: 1,
+            cls.L2_ROSTER_MAKER: 2,
+            cls.OWNER: 3,
+        }
+        return ranking.get(level, 0)
+
 
 # Configuration
 JWT_SECRET = os.getenv("RIQ_JWT_SECRET", "dev-secret-key-change-in-production")
@@ -52,6 +77,7 @@ TOKEN_EXPIRE_HOURS = 24
 PASSWORD_MIN_LENGTH = 8
 API_KEY_PREFIX = "riq_"
 API_KEY_LENGTH = 32
+AUTH_ENABLED = os.getenv("ROSTERIQ_AUTH_ENABLED", "").lower() in ("1", "true", "yes")
 
 # Initialize password context
 pwd_context = CryptContext(
@@ -78,6 +104,7 @@ class User(BaseModel):
     name: str
     venue_id: str
     role: str = Field(default="manager", description="manager, owner, or admin")
+    access_level: AccessLevel = Field(default=AccessLevel.L1_SUPERVISOR, description="Access level: l1, l2, owner")
     created_at: datetime
 
     class Config:
@@ -92,6 +119,7 @@ class UserCreate(BaseModel):
     name: str
     venue_id: str
     role: str = Field(default="manager")
+    access_level: Optional[AccessLevel] = Field(default=AccessLevel.L1_SUPERVISOR)
 
 
 class UserLogin(BaseModel):
@@ -191,6 +219,7 @@ def create_access_token(
     user_id: str,
     venue_id: str,
     role: str,
+    access_level: Optional[AccessLevel] = None,
     expires_hours: int = TOKEN_EXPIRE_HOURS,
 ) -> str:
     """
@@ -200,6 +229,7 @@ def create_access_token(
         user_id: User ID to encode
         venue_id: Venue ID (for venue-scoped access)
         role: User role (manager, owner, admin)
+        access_level: Access level (l1, l2, owner). Defaults to L1_SUPERVISOR.
         expires_hours: Token expiration time in hours
 
     Returns:
@@ -214,16 +244,20 @@ def create_access_token(
     now = datetime.now(timezone.utc)
     expires = now + timedelta(hours=expires_hours)
 
+    if access_level is None:
+        access_level = AccessLevel.L1_SUPERVISOR
+
     payload = {
         "sub": user_id,  # subject (user ID)
         "venue_id": venue_id,
         "role": role,
+        "al": access_level.value,  # access level
         "iat": now,  # issued at
         "exp": expires,  # expiration time
     }
 
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    logger.info(f"Created access token for user {user_id} in venue {venue_id}")
+    logger.info(f"Created access token for user {user_id} in venue {venue_id} with access level {access_level.value}")
     return token
 
 
@@ -235,7 +269,7 @@ def decode_token(token: str) -> dict[str, Any]:
         token: JWT token to decode
 
     Returns:
-        Decoded token payload
+        Decoded token payload (includes 'al' field for access_level if present)
 
     Raises:
         HTTPException: If token is invalid, expired, or jwt library is missing
@@ -248,6 +282,9 @@ def decode_token(token: str) -> dict[str, Any]:
 
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        # Backward compatibility: old tokens without "al" default to L1
+        if "al" not in payload:
+            payload["al"] = AccessLevel.L1_SUPERVISOR.value
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Attempted to use expired token")
@@ -263,6 +300,42 @@ def decode_token(token: str) -> dict[str, Any]:
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+# ============================================================================
+# Access Control Helpers
+# ============================================================================
+
+
+def has_access(user: User | dict, required: AccessLevel) -> bool:
+    """
+    Check if a user has the required access level.
+
+    Access hierarchy: OWNER > L2_ROSTER_MAKER > L1_SUPERVISOR
+    OWNER satisfies any requirement; L2 satisfies L2 and L1; L1 satisfies only L1.
+
+    Args:
+        user: User object or decoded token dict
+        required: Required access level
+
+    Returns:
+        True if user has sufficient access, False otherwise
+    """
+    # Extract access level from user or dict
+    if isinstance(user, dict):
+        user_level_str = user.get("al", AccessLevel.L1_SUPERVISOR.value)
+    else:
+        user_level_str = (user.access_level.value if user.access_level else AccessLevel.L1_SUPERVISOR.value)
+
+    try:
+        user_level = AccessLevel(user_level_str)
+    except (ValueError, KeyError):
+        user_level = AccessLevel.L1_SUPERVISOR
+
+    user_rank = AccessLevel.rank(user_level)
+    required_rank = AccessLevel.rank(required)
+
+    return user_rank >= required_rank
 
 
 # ============================================================================
@@ -366,19 +439,22 @@ def create_user(user_create: UserCreate) -> User:
     user_id = secrets.token_urlsafe(16)
     password_hash = hash_password(user_create.password)
 
+    access_level = user_create.access_level or AccessLevel.L1_SUPERVISOR
+
     user_data = {
         "id": user_id,
         "email": user_create.email,
         "name": user_create.name,
         "venue_id": user_create.venue_id,
         "role": user_create.role,
+        "access_level": access_level,
         "password_hash": password_hash,
         "created_at": datetime.now(timezone.utc),
     }
 
     _users[user_create.email] = user_data
 
-    logger.info(f"Created user {user_id} ({user_create.email}) in venue {user_create.venue_id}")
+    logger.info(f"Created user {user_id} ({user_create.email}) in venue {user_create.venue_id} with access level {access_level.value}")
 
     return User(**user_data)
 
@@ -470,7 +546,8 @@ def create_demo_user() -> User:
     Create a demo user for development and testing.
 
     Creates a user for "The Royal Oak" venue that can be used immediately
-    in dev mode without authentication setup.
+    in dev mode without authentication setup. Demo user defaults to OWNER
+    access level so all features are accessible in demo mode.
 
     Returns:
         Created demo user
@@ -488,6 +565,7 @@ def create_demo_user() -> User:
         name="Demo Manager",
         venue_id="venue-royal-oak",
         role="owner",
+        access_level=AccessLevel.OWNER,
     )
 
     user = create_user(demo_user)
@@ -603,6 +681,78 @@ if HTTPBearer is not None:
 
         return check_role
 
+    def require_access(required_level: AccessLevel) -> Callable:
+        """
+        FastAPI dependency factory to check user has required access level.
+
+        Access hierarchy: OWNER (3) > L2_ROSTER_MAKER (2) > L1_SUPERVISOR (1)
+
+        In demo mode (AUTH_ENABLED=False), returns a synthetic OWNER-level user
+        so existing flows keep working without authentication.
+
+        Args:
+            required_level: Access level required to access endpoint
+
+        Returns:
+            Async dependency function that checks access level and returns user
+        """
+
+        async def check_access(request: Request) -> User:
+            """Check user has required access level."""
+            # Demo mode short-circuit: return synthetic OWNER user
+            if not AUTH_ENABLED:
+                return User(
+                    id="demo-user",
+                    email="demo@rosteriq.local",
+                    name="Demo User",
+                    venue_id="demo-venue",
+                    role="owner",
+                    access_level=AccessLevel.OWNER,
+                    created_at=datetime.now(timezone.utc),
+                )
+
+            # Auth mode: extract and verify Bearer token
+            auth_header = request.headers.get("authorization", "")
+            if not auth_header.startswith("Bearer "):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Missing Bearer token",
+                )
+
+            token = auth_header.split(" ", 1)[1]
+            try:
+                payload = decode_token(token)
+            except HTTPException:
+                raise
+
+            user_id = payload.get("sub")
+            if not user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Invalid token payload",
+                )
+
+            user = get_user_by_id(user_id)
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="User not found",
+                )
+
+            # Check access level
+            if not has_access(user, required_level):
+                logger.warning(
+                    f"User {user.id} ({user.access_level.value}) attempted to access {required_level.value} resource"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"This action requires {required_level.value} access level or higher",
+                )
+
+            return user
+
+        return check_access
+
     # ========================================================================
     # FastAPI Router
     # ========================================================================
@@ -666,7 +816,7 @@ if HTTPBearer is not None:
                 detail="Invalid email or password",
             )
 
-        token = create_access_token(user.id, user.venue_id, user.role)
+        token = create_access_token(user.id, user.venue_id, user.role, user.access_level)
         expires_at = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
 
         logger.info(f"User {user.email} logged in successfully")
@@ -697,6 +847,7 @@ if HTTPBearer is not None:
         user_id = payload.get("sub")
         venue_id = payload.get("venue_id")
         role = payload.get("role")
+        access_level_str = payload.get("al", AccessLevel.L1_SUPERVISOR.value)
 
         if not all([user_id, venue_id, role]):
             raise HTTPException(
@@ -704,7 +855,12 @@ if HTTPBearer is not None:
                 detail="Invalid token",
             )
 
-        new_token = create_access_token(user_id, venue_id, role)
+        try:
+            access_level = AccessLevel(access_level_str)
+        except (ValueError, KeyError):
+            access_level = AccessLevel.L1_SUPERVISOR
+
+        new_token = create_access_token(user_id, venue_id, role, access_level)
         expires_at = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
 
         user = get_user_by_id(user_id)

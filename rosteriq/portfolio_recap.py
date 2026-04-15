@@ -191,6 +191,7 @@ def _venue_mini(
     label: Optional[str],
     *,
     trend: Optional[Dict[str, Any]] = None,
+    signals_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     mini: Dict[str, Any] = {
         "venue_id": r.get("venue_id") or "",
@@ -209,6 +210,8 @@ def _venue_mini(
     }
     if trend is not None:
         mini["trend"] = _compact_trend(trend)
+    if signals_snapshot is not None:
+        mini["signals_snapshot"] = signals_snapshot
     return mini
 
 
@@ -259,6 +262,130 @@ def _compact_trend(trend: Dict[str, Any]) -> Dict[str, Any]:
             "acceptance_rate": float(totals.get("acceptance_rate") or 0.0),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Venue signals snapshot
+# ---------------------------------------------------------------------------
+
+
+def _build_venue_signals_snapshot(
+    venue_id: str,
+    target_date: str,
+    *,
+    weather_adapter: Optional[Any] = None,
+    events_adapter: Optional[Any] = None,
+    shift_event_store: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Build a lightweight signals snapshot for a single venue.
+
+    Returns: {weather_today, events_this_week_count, patterns_count, shift_events_this_week}
+    """
+    import asyncio
+    import os
+    from datetime import datetime as dt, timedelta, timezone, date as date_type
+
+    snapshot: Dict[str, Any] = {
+        "weather_today": {},
+        "events_this_week_count": 0,
+        "patterns_count": 0,
+        "shift_events_this_week": 0,
+    }
+
+    data_mode = os.environ.get("ROSTERIQ_DATA_MODE", "demo").lower()
+
+    try:
+        target_day = dt.strptime(target_date, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return snapshot
+
+    # Weather today
+    try:
+        if weather_adapter is None:
+            if data_mode == "demo":
+                from rosteriq.data_feeds.bom import DemoWeatherAdapter
+                weather_adapter = DemoWeatherAdapter()
+            else:
+                from rosteriq.data_feeds.bom import DemoWeatherAdapter
+                weather_adapter = DemoWeatherAdapter()
+
+        async def _fetch_today_weather():
+            forecast = await weather_adapter.get_forecast(venue_id, days=1)
+            return forecast
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("Event loop closed")
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        forecast = loop.run_until_complete(_fetch_today_weather())
+        if forecast and forecast[0].date == target_day:
+            snapshot["weather_today"] = {
+                "max_c": forecast[0].max_c,
+                "min_c": forecast[0].min_c,
+                "rain_probability_pct": forecast[0].rain_probability_pct,
+                "conditions": forecast[0].conditions,
+            }
+    except Exception:
+        pass
+
+    # Events this week
+    try:
+        if events_adapter is None:
+            if data_mode == "demo":
+                from rosteriq.data_feeds.events import DemoEventsAdapter
+                events_adapter = DemoEventsAdapter()
+            else:
+                from rosteriq.data_feeds.events import DemoEventsAdapter
+                events_adapter = DemoEventsAdapter()
+
+        # Count events for this week (7 days from target_day)
+        async def _fetch_week_events():
+            week_start = dt.combine(target_day, dt.min.time()).replace(tzinfo=timezone.utc)
+            week_end = dt.combine(target_day + timedelta(days=7), dt.max.time()).replace(tzinfo=timezone.utc)
+            events_list = await events_adapter.get_events(venue_id, week_start, week_end)
+            return events_list
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("Event loop closed")
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        events_week = loop.run_until_complete(_fetch_week_events())
+        snapshot["events_this_week_count"] = len(events_week)
+    except Exception:
+        pass
+
+    # Patterns and shift events
+    try:
+        if shift_event_store is None:
+            from rosteriq import shift_events as se_module
+            shift_event_store = se_module.shift_event_store
+
+        from rosteriq.shift_events import PatternLearner
+
+        all_events = shift_event_store.for_venue(venue_id)
+        patterns = PatternLearner.analyse(all_events)
+        snapshot["patterns_count"] = len(patterns)
+
+        # Count shift events this week
+        week_start_dt = dt.combine(target_day, dt.min.time()).replace(tzinfo=timezone.utc)
+        week_end_dt = dt.combine(target_day + timedelta(days=7), dt.max.time()).replace(tzinfo=timezone.utc)
+        week_events = [
+            e for e in all_events
+            if week_start_dt <= e.timestamp <= week_end_dt
+        ]
+        snapshot["shift_events_this_week"] = len(week_events)
+    except Exception:
+        pass
+
+    return snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +459,10 @@ def compose_portfolio(
     trend_window_days: int = 7,
     trends_module: Any = None,
     trend_store: Any = None,
+    include_signals: bool = False,
+    weather_adapter: Optional[Any] = None,
+    events_adapter: Optional[Any] = None,
+    shift_event_store: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Roll a list of per-venue recap dicts up into a portfolio view.
@@ -353,11 +484,15 @@ def compose_portfolio(
             when ``include_trends`` is True. 7, 14, or 28.
         trends_module: Injectable ``rosteriq.trends`` for tests.
         trend_store: Injectable store for the trends composer.
+        include_signals: When True, compute signals snapshot per venue
+            (weather, events, patterns). Defaults False.
+        weather_adapter, events_adapter, shift_event_store: Injectables.
 
     Returns:
         Dict with keys: ``portfolio_id``, ``shift_date``, ``generated_at``,
         ``traffic_light`` (worst-of), ``summary``, ``totals``,
-        ``accountability``, ``venues`` (list of mini summaries).
+        ``accountability``, ``venues`` (list of mini summaries),
+        ``portfolio_weather_outlook`` (when signals included).
     """
     recaps = list(venue_recaps or [])
     labels = dict(venue_labels or {})
@@ -394,11 +529,35 @@ def compose_portfolio(
                 # a sparkline in that case.
                 continue
 
+    # Build signals snapshots per venue if requested
+    signals_by_venue: Dict[str, Dict[str, Any]] = {}
+    if include_signals and recaps:
+        resolved_shift_date = shift_date or (
+            recaps[0].get("shift_date") if recaps and isinstance(recaps[0], dict) else None
+        ) or _now_iso().split("T")[0]  # fallback to today
+        for r in recaps:
+            vid = str(r.get("venue_id") or "")
+            if not vid:
+                continue
+            try:
+                sig = _build_venue_signals_snapshot(
+                    vid,
+                    resolved_shift_date,
+                    weather_adapter=weather_adapter,
+                    events_adapter=events_adapter,
+                    shift_event_store=shift_event_store,
+                )
+                signals_by_venue[vid] = sig
+            except Exception:
+                # A signal fetch failing for one venue must not blow up portfolio
+                continue
+
     mini_venues = [
         _venue_mini(
             r,
             labels.get(r.get("venue_id") or ""),
             trend=trends_by_venue.get(str(r.get("venue_id") or "")) if include_trends else None,
+            signals_snapshot=signals_by_venue.get(str(r.get("venue_id") or "")) if include_signals else None,
         )
         for r in recaps
     ]
@@ -412,7 +571,31 @@ def compose_portfolio(
         recaps[0].get("shift_date") if recaps and isinstance(recaps[0], dict) else None
     ) or ""
 
-    return {
+    # Build portfolio-level weather outlook (venues with rain risk)
+    portfolio_weather_outlook: Dict[str, Any] = {
+        "rain_risk_venues": [],
+        "clear_venues": [],
+    }
+    if include_signals:
+        for sig_data in signals_by_venue.values():
+            weather = sig_data.get("weather_today") or {}
+            rain_prob = weather.get("rain_probability_pct", 0)
+            if rain_prob >= 50:
+                portfolio_weather_outlook["rain_risk_venues"].append(
+                    {
+                        "rain_probability_pct": rain_prob,
+                        "conditions": weather.get("conditions", "unknown"),
+                    }
+                )
+            else:
+                portfolio_weather_outlook["clear_venues"].append(
+                    {
+                        "rain_probability_pct": rain_prob,
+                        "conditions": weather.get("conditions", "clear"),
+                    }
+                )
+
+    result = {
         "portfolio_id": portfolio_id or "",
         "shift_date": resolved_date,
         "generated_at": _now_iso(),
@@ -422,3 +605,7 @@ def compose_portfolio(
         "accountability": accountability,
         "venues": mini_venues,
     }
+    if include_signals:
+        result["portfolio_weather_outlook"] = portfolio_weather_outlook
+
+    return result

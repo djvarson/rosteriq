@@ -46,6 +46,7 @@ class SignalSourceType(str, Enum):
     BOOKINGS = "bookings"
     FOOT_TRAFFIC = "foot_traffic"
     DELIVERY = "delivery"
+    PATTERN = "pattern"
 
 
 class SignalImpactType(str, Enum):
