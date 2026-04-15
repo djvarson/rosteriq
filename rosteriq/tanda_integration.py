@@ -1129,3 +1129,60 @@ async def create_tanda_integration(
 
     logger.info("Tanda integration created successfully")
     return sync, webhook
+
+
+# ============================================================================
+# OAuth Token Exchange Helper
+# ============================================================================
+
+
+async def exchange_authorization_code(
+    code: str,
+    redirect_uri: str,
+    client_id: str,
+    client_secret: str,
+) -> Dict[str, Any]:
+    """
+    Exchange Tanda OAuth authorization code for access token.
+
+    Used by marketplace install flow to exchange the code returned from
+    Tanda's authorize endpoint for an access token.
+
+    Args:
+        code: Authorization code from Tanda
+        redirect_uri: Redirect URI used in authorize request
+        client_id: OAuth client ID
+        client_secret: OAuth client secret
+
+    Returns:
+        Dictionary with access_token, refresh_token, expires_in, scope
+
+    Raises:
+        httpx.HTTPError: If token exchange fails
+        ValueError: If response is invalid
+    """
+    token_url = f"{TANDA_BASE_URL.replace('/v2', '')}/oauth/token"
+
+    async with httpx.AsyncClient(timeout=TANDA_REQUEST_TIMEOUT) as client:
+        response = await client.post(
+            token_url,
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+            },
+        )
+
+    if response.status_code != 200:
+        logger.error(f"Token exchange failed: {response.status_code} - {response.text}")
+        raise ValueError(f"Token exchange failed with status {response.status_code}")
+
+    token_data = response.json()
+
+    if not token_data.get("access_token"):
+        raise ValueError("Token response missing access_token")
+
+    logger.info("OAuth token exchange successful")
+    return token_data

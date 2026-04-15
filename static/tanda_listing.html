@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosterIQ — AI Demand Forecasting for Tanda</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-blue: #0ea5e9;
+            --dark-blue: #001d70;
+            --success-green: #10b981;
+            --neutral-50: #f9fafb;
+            --neutral-100: #f3f4f6;
+            --neutral-200: #e5e7eb;
+            --neutral-700: #374151;
+            --neutral-800: #1f2937;
+            --neutral-900: #111827;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--neutral-50);
+            color: var(--neutral-800);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* ── Header & Hero ──────────────────────────────────────────────── */
+
+        header {
+            background: linear-gradient(135deg, var(--dark-blue) 0%, var(--primary-blue) 100%);
+            color: white;
+            padding: 60px 24px;
+            text-align: center;
+            margin-bottom: 0;
+        }
+
+        header h1 {
+            font-size: 48px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: -0.5px;
+        }
+
+        header p {
+            font-size: 18px;
+            color: rgba(255, 255, 255, 0.9);
+            max-width: 600px;
+            margin: 0 auto;
+            line-height: 1.5;
+        }
+
+        /* ── Navigation ────────────────────────────────────────────────── */
+
+        .nav-bar {
+            background-color: white;
+            border-bottom: 1px solid var(--neutral-200);
+            padding: 16px 24px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .nav-bar .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-logo {
+            font-weight: 700;
+            color: var(--dark-blue);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 24px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: var(--neutral-700);
+            font-size: 14px;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--primary-blue);
+        }
+
+        /* ── Main Content ──────────────────────────────────────────────── */
+
+        main {
+            padding: 60px 0;
+        }
+
+        section {
+            margin-bottom: 80px;
+        }
+
+        section h2 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            color: var(--neutral-900);
+        }
+
+        /* ── Features ──────────────────────────────────────────────────── */
+
+        .features {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 32px;
+            margin-bottom: 40px;
+        }
+
+        .feature-card {
+            background: white;
+            border: 1px solid var(--neutral-200);
+            border-radius: 8px;
+            padding: 32px;
+            transition: box-shadow 0.3s, transform 0.3s;
+        }
+
+        .feature-card:hover {
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            transform: translateY(-4px);
+        }
+
+        .feature-card h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--neutral-900);
+        }
+
+        .feature-card p {
+            font-size: 14px;
+            color: var(--neutral-700);
+            line-height: 1.7;
+        }
+
+        .feature-icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+
+        /* ── Pricing Table ────────────────────────────────────────────── */
+
+        .pricing-section {
+            background: white;
+            border: 1px solid var(--neutral-200);
+            border-radius: 8px;
+            padding: 40px;
+            margin-bottom: 40px;
+        }
+
+        .pricing-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .pricing-header p {
+            font-size: 16px;
+            color: var(--neutral-700);
+        }
+
+        .pricing-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        .pricing-table thead {
+            background-color: var(--neutral-100);
+            border-bottom: 2px solid var(--neutral-200);
+        }
+
+        .pricing-table th {
+            padding: 16px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--neutral-900);
+            font-size: 14px;
+        }
+
+        .pricing-table td {
+            padding: 16px;
+            border-bottom: 1px solid var(--neutral-200);
+            font-size: 14px;
+        }
+
+        .tier-name {
+            font-weight: 600;
+            color: var(--neutral-900);
+        }
+
+        .price {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--primary-blue);
+        }
+
+        .price-label {
+            font-size: 12px;
+            color: var(--neutral-600);
+            font-weight: 400;
+        }
+
+        .feature-list {
+            list-style: none;
+        }
+
+        .feature-list li {
+            padding: 8px 0;
+            color: var(--neutral-700);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .feature-list li:before {
+            content: "✓";
+            color: var(--success-green);
+            font-weight: bold;
+        }
+
+        /* ── CTA Button ────────────────────────────────────────────────– */
+
+        .cta-section {
+            text-align: center;
+            padding: 40px;
+            background: linear-gradient(135deg, var(--dark-blue) 0%, var(--primary-blue) 100%);
+            border-radius: 8px;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .cta-section h3 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .cta-section p {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 14px 32px;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background-color: var(--success-green);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #059669;
+            transform: scale(1.02);
+        }
+
+        .btn-secondary {
+            background-color: white;
+            color: var(--dark-blue);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--neutral-100);
+        }
+
+        /* ── FAQ ───────────────────────────────────────────────────────– */
+
+        .faq-item {
+            background: white;
+            border: 1px solid var(--neutral-200);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+
+        .faq-item h4 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--neutral-900);
+            margin-bottom: 8px;
+        }
+
+        .faq-item p {
+            font-size: 14px;
+            color: var(--neutral-700);
+            line-height: 1.7;
+        }
+
+        /* ── Footer ────────────────────────────────────────────────────– */
+
+        footer {
+            background-color: var(--neutral-900);
+            color: white;
+            padding: 40px 24px;
+            text-align: center;
+            font-size: 13px;
+            margin-top: 80px;
+        }
+
+        footer p {
+            margin-bottom: 8px;
+        }
+
+        footer a {
+            color: var(--primary-blue);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* ── Responsive ────────────────────────────────────────────────– */
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 36px;
+            }
+
+            header p {
+                font-size: 16px;
+            }
+
+            .features {
+                grid-template-columns: 1fr;
+            }
+
+            .nav-links {
+                display: none;
+            }
+
+            .pricing-table {
+                font-size: 13px;
+            }
+
+            .pricing-table th,
+            .pricing-table td {
+                padding: 12px;
+            }
+
+            section h2 {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav-bar">
+        <div class="container">
+            <div class="nav-logo">RosterIQ</div>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#pricing">Pricing</a></li>
+                <li><a href="#faq">FAQ</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <header>
+        <div class="container">
+            <h1>RosterIQ</h1>
+            <p>AI-powered demand forecasting meets accountability. Transform your Tanda roster in minutes, save 10–15% on labour costs.</p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container">
+        <!-- Features Section -->
+        <section id="features">
+            <h2>What RosterIQ Does</h2>
+            <div class="features">
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Smart Roster Generation</h3>
+                    <p>Analyzes POS data, weather, events, and bookings to generate optimized draft rosters. Start from data-driven recommendations instead of a blank page.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>On-Shift Recommendations</h3>
+                    <p>Real-time guidance during shifts (Pro & Enterprise). "Cut 2 bartenders?" Get a confidence score based on live foot traffic and incoming weather.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📈</div>
+                    <h3>Multi-Venue Accountability</h3>
+                    <p>Compare roster fairness, labour cost, and actual vs. forecast performance across all your venues. Understand where your money is going.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- CTA Section -->
+        <div class="cta-section">
+            <h3>Ready to Optimize Your Roster?</h3>
+            <p>Install RosterIQ on your Tanda account and start generating AI-drafted rosters in under 5 minutes.</p>
+            <a href="/api/v1/tanda/marketplace/install" class="btn btn-primary">Install RosterIQ</a>
+        </div>
+
+        <!-- Pricing Section -->
+        <section id="pricing">
+            <h2>Pricing</h2>
+            <div class="pricing-section">
+                <div class="pricing-header">
+                    <p>Simple per-employee-per-month pricing. No setup fees. Cancel anytime.</p>
+                </div>
+                <table class="pricing-table">
+                    <thead>
+                        <tr>
+                            <th>Tier</th>
+                            <th>Price</th>
+                            <th>Features</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="tier-name">Startup</td>
+                            <td>
+                                <div class="price">$1.50</div>
+                                <div class="price-label">per employee/month</div>
+                            </td>
+                            <td>
+                                <ul class="feature-list">
+                                    <li>AI draft roster generation</li>
+                                    <li>Basic demand forecasting</li>
+                                    <li>Shift recommendations</li>
+                                </ul>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="tier-name">Pro</td>
+                            <td>
+                                <div class="price">$3.00</div>
+                                <div class="price-label">per employee/month</div>
+                            </td>
+                            <td>
+                                <ul class="feature-list">
+                                    <li>All Startup features</li>
+                                    <li>Multi-source forecasting (POS, weather, events, bookings)</li>
+                                    <li>Extended forecast horizon (14 days)</li>
+                                    <li>On-shift recommendations</li>
+                                </ul>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="tier-name">Enterprise</td>
+                            <td>
+                                <div class="price">$5.50</div>
+                                <div class="price-label">per employee/month</div>
+                            </td>
+                            <td>
+                                <ul class="feature-list">
+                                    <li>All Pro features</li>
+                                    <li>Real-time push notifications</li>
+                                    <li>Multi-venue management</li>
+                                    <li>Conversational AI recommendations</li>
+                                    <li>Custom integrations</li>
+                                    <li>Priority support</li>
+                                </ul>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p style="text-align: center; font-size: 13px; color: var(--neutral-700); margin-top: 20px;">
+                    For a 30-person venue on Pro: $90/month. Expected labour cost savings: $500+/week.
+                </p>
+            </div>
+        </section>
+
+        <!-- FAQ Section -->
+        <section id="faq">
+            <h2>Frequently Asked Questions</h2>
+
+            <div class="faq-item">
+                <h4>What data does RosterIQ access?</h4>
+                <p>RosterIQ reads employee info, schedules, timesheets, and leave from Tanda, plus signals from your POS (if available), weather APIs, event calendars, and booking platforms. We never store personal data—only aggregate forecasting signals.</p>
+            </div>
+
+            <div class="faq-item">
+                <h4>How long does setup take?</h4>
+                <p>Click "Install RosterIQ," log in to your Tanda account, and grant permissions. You'll generate your first roster draft within 5 minutes. Configuration and fine-tuning may take 30–60 minutes for optimal results.</p>
+            </div>
+
+            <div class="faq-item">
+                <h4>Which venues and industries are supported?</h4>
+                <p>RosterIQ is built for Australian hospitality (bars, restaurants, hotels, cafes). Multi-venue operators get the most value. We are expanding to other regions and industries—contact support for early access.</p>
+            </div>
+
+            <div class="faq-item">
+                <h4>Can I change or cancel my subscription?</h4>
+                <p>Yes. Switch between tiers anytime within your account settings. Cancel your subscription and RosterIQ will be disabled immediately. Your data in Tanda is never affected.</p>
+            </div>
+
+            <div class="faq-item">
+                <h4>How is my data protected?</h4>
+                <p>RosterIQ uses OAuth 2.0 (same standard Tanda uses). We never see your Tanda password. All data is encrypted in transit and encrypted at rest. We comply with Australian Privacy Principles.</p>
+            </div>
+        </section>
+
+        <!-- Support Section -->
+        <section>
+            <h2>Questions or Issues?</h2>
+            <p style="font-size: 16px; color: var(--neutral-700); margin-bottom: 20px;">
+                Email us at <a href="mailto:support@rosteriq.io" style="color: var(--primary-blue); text-decoration: none;">support@rosteriq.io</a> or visit our <a href="/dashboard.html" style="color: var(--primary-blue); text-decoration: none;">dashboard</a> for help articles.
+            </p>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2026 RosterIQ Pty Ltd. All rights reserved.</p>
+        <p>
+            <a href="https://rosteriq.io/privacy">Privacy Policy</a> •
+            <a href="https://rosteriq.io/terms">Terms of Service</a>
+        </p>
+    </footer>
+</body>
+</html>

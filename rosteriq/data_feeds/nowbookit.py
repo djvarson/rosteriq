@@ -128,13 +128,13 @@ class NowBookItClient:
     """Low-level async client for NowBookIt REST API."""
 
     def __init__(self, credentials: NowBookItCredentials):
-        if not httpx:
-            raise ImportError("httpx is required for NowBookItClient. Install with: pip install httpx")
         self.creds = credentials
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: Optional[Any] = None
         self._auth_token: Optional[str] = None
 
-    async def _get_client(self) -> httpx.AsyncClient:
+    async def _get_client(self):
+        if not httpx:
+            raise ImportError("httpx is required for NowBookItClient. Install with: pip install httpx")
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 base_url=self.creds.base_url,

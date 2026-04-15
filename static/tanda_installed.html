@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosterIQ Installation Successful</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-blue: #0ea5e9;
+            --dark-blue: #001d70;
+            --success-green: #10b981;
+            --neutral-50: #f9fafb;
+            --neutral-200: #e5e7eb;
+            --neutral-700: #374151;
+            --neutral-900: #111827;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, var(--dark-blue) 0%, var(--primary-blue) 100%);
+            color: var(--neutral-800);
+            line-height: 1.6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .container {
+            max-width: 500px;
+            background: white;
+            border-radius: 12px;
+            padding: 48px 32px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+            text-align: center;
+        }
+
+        .success-icon {
+            font-size: 64px;
+            margin-bottom: 24px;
+            animation: bounce 1s ease-in-out;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--neutral-900);
+            margin-bottom: 12px;
+        }
+
+        .subtitle {
+            font-size: 18px;
+            color: var(--success-green);
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+
+        .info-section {
+            background-color: var(--neutral-50);
+            border: 1px solid var(--neutral-200);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 24px 0;
+            text-align: left;
+        }
+
+        .info-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--neutral-700);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .info-value {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--neutral-900);
+            word-break: break-all;
+        }
+
+        .scopes {
+            margin: 12px 0;
+        }
+
+        .scope-badge {
+            display: inline-block;
+            background-color: var(--primary-blue);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-right: 6px;
+            margin-bottom: 6px;
+        }
+
+        .next-steps {
+            text-align: left;
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid var(--neutral-200);
+        }
+
+        .next-steps h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--neutral-900);
+            margin-bottom: 12px;
+        }
+
+        .next-steps ol {
+            margin-left: 20px;
+        }
+
+        .next-steps li {
+            font-size: 14px;
+            color: var(--neutral-700);
+            margin-bottom: 8px;
+            line-height: 1.6;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 32px;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 12px 28px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background-color: var(--success-green);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #059669;
+            transform: scale(1.02);
+        }
+
+        .btn-secondary {
+            background-color: var(--neutral-50);
+            color: var(--primary-blue);
+            border: 1px solid var(--neutral-200);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--neutral-200);
+        }
+
+        .support-text {
+            font-size: 12px;
+            color: var(--neutral-700);
+            margin-top: 24px;
+        }
+
+        .support-text a {
+            color: var(--primary-blue);
+            text-decoration: none;
+        }
+
+        .support-text a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Success Icon -->
+        <div class="success-icon">✓</div>
+
+        <!-- Heading -->
+        <h1>RosterIQ Connected!</h1>
+        <div class="subtitle">Your installation is active</div>
+
+        <!-- Installation Info -->
+        <div class="info-section">
+            <div>
+                <div class="info-label">Organization</div>
+                <div class="info-value" id="org-name">Loading...</div>
+            </div>
+
+            <div style="margin-top: 16px;">
+                <div class="info-label">Permissions Granted</div>
+                <div class="scopes" id="scopes-list">
+                    <span class="scope-badge">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Next Steps -->
+        <div class="next-steps">
+            <h3>What's Next?</h3>
+            <ol>
+                <li><strong>Access the Dashboard:</strong> Click the button below to open your RosterIQ dashboard and configure data sources.</li>
+                <li><strong>Connect Signals:</strong> Link your POS (SwiftPOS, Square, LightSpeed), weather data, events, and booking platforms.</li>
+                <li><strong>Generate Your First Roster:</strong> Let AI analyze signals and create an optimized draft roster for next week.</li>
+                <li><strong>Review & Approve:</strong> Check recommendations, tweak as needed, and push to Tanda.</li>
+            </ol>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="button-group">
+            <a href="/dashboard.html" class="btn btn-primary">Open Dashboard</a>
+            <a href="/api/v1/tanda/marketplace/listing" class="btn btn-secondary">Back to Listing</a>
+        </div>
+
+        <!-- Support -->
+        <div class="support-text">
+            <p>
+                Have questions? Email
+                <a href="mailto:support@rosteriq.io">support@rosteriq.io</a>
+                or visit our
+                <a href="/dashboard.html#help">help center</a>.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Extract URL params
+        function getUrlParam(name) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name) || '';
+        }
+
+        // Populate organization name
+        const orgName = getUrlParam('org');
+        if (orgName) {
+            document.getElementById('org-name').textContent = decodeURIComponent(orgName);
+        }
+
+        // Populate scopes
+        const scopes = getUrlParam('scopes');
+        if (scopes) {
+            const scopesList = scopes.split(',').filter(s => s.trim());
+            const scopesHtml = scopesList
+                .map(scope => `<span class="scope-badge">${scope.trim()}</span>`)
+                .join('');
+            document.getElementById('scopes-list').innerHTML = scopesHtml || '<span class="scope-badge">default scopes</span>';
+        }
+    </script>
+</body>
+</html>

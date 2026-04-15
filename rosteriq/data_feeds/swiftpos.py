@@ -32,9 +32,13 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 
-import httpx
-
 logger = logging.getLogger("rosteriq.data_feeds.swiftpos")
+
+# Lazy import httpx — not needed unless using live API
+try:
+    import httpx
+except ImportError:
+    httpx = None
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -160,7 +164,9 @@ class SwiftPOSClient:
         self._token_cache = _TokenCache()
         self._client: Optional[httpx.AsyncClient] = None
 
-    async def _get_client(self) -> httpx.AsyncClient:
+    async def _get_client(self):
+        if not httpx:
+            raise ImportError("httpx required for SwiftPOSClient. Install with: pip install httpx")
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 base_url=self.creds.api_url,

@@ -31,6 +31,7 @@ TESTS_DIR = ROOT / "tests"
 # beyond the stdlib + rosteriq. Skipped with --fast.
 EXTERNAL_DEP_FILES = {
     "test_auth.py",            # pydantic, pyjwt, passlib (auth module)
+    "test_tenants.py",         # pydantic, pyjwt, passlib (auth module integration)
     "test_lightspeed.py",      # httpx (lightspeed adapter)
     "test_pos_aggregator.py",  # httpx (pos adapters)
     "test_shift_swap.py",      # fastapi (shift_swap router)

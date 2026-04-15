@@ -97,7 +97,7 @@ _failed_login_attempts: dict[str, int] = {}  # email -> failed attempts count
 
 
 class User(BaseModel):
-    """Authenticated user model."""
+    """Authenticated user model with multi-tenant support."""
 
     id: str
     email: str
@@ -106,6 +106,8 @@ class User(BaseModel):
     role: str = Field(default="manager", description="manager, owner, or admin")
     access_level: AccessLevel = Field(default=AccessLevel.L1_SUPERVISOR, description="Access level: l1, l2, owner")
     created_at: datetime
+    tenant_id: Optional[str] = None  # New: tenant this user belongs to (None -> defaults to "demo-tenant-001")
+    venue_ids: list[str] = Field(default_factory=list)  # New: venues user can access (for multi-venue OWNER)
 
     class Config:
         from_attributes = True
@@ -120,6 +122,7 @@ class UserCreate(BaseModel):
     venue_id: str
     role: str = Field(default="manager")
     access_level: Optional[AccessLevel] = Field(default=AccessLevel.L1_SUPERVISOR)
+    tenant_id: Optional[str] = None  # New: tenant for this user (defaults to demo-tenant-001)
 
 
 class UserLogin(BaseModel):
@@ -221,6 +224,7 @@ def create_access_token(
     role: str,
     access_level: Optional[AccessLevel] = None,
     expires_hours: int = TOKEN_EXPIRE_HOURS,
+    tenant_id: Optional[str] = None,
 ) -> str:
     """
     Create a JWT access token.
@@ -231,6 +235,7 @@ def create_access_token(
         role: User role (manager, owner, admin)
         access_level: Access level (l1, l2, owner). Defaults to L1_SUPERVISOR.
         expires_hours: Token expiration time in hours
+        tenant_id: Optional tenant ID (defaults to "demo-tenant-001" if None)
 
     Returns:
         Encoded JWT token
@@ -247,17 +252,22 @@ def create_access_token(
     if access_level is None:
         access_level = AccessLevel.L1_SUPERVISOR
 
+    # Default to demo tenant for backward compatibility
+    if tenant_id is None:
+        tenant_id = "demo-tenant-001"
+
     payload = {
         "sub": user_id,  # subject (user ID)
         "venue_id": venue_id,
         "role": role,
         "al": access_level.value,  # access level
+        "tid": tenant_id,  # tenant ID (new field)
         "iat": now,  # issued at
         "exp": expires,  # expiration time
     }
 
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    logger.info(f"Created access token for user {user_id} in venue {venue_id} with access level {access_level.value}")
+    logger.info(f"Created access token for user {user_id} in tenant {tenant_id}, venue {venue_id} with access level {access_level.value}")
     return token
 
 
@@ -269,7 +279,7 @@ def decode_token(token: str) -> dict[str, Any]:
         token: JWT token to decode
 
     Returns:
-        Decoded token payload (includes 'al' field for access_level if present)
+        Decoded token payload (includes 'al' field for access_level, 'tid' for tenant_id)
 
     Raises:
         HTTPException: If token is invalid, expired, or jwt library is missing
@@ -285,6 +295,9 @@ def decode_token(token: str) -> dict[str, Any]:
         # Backward compatibility: old tokens without "al" default to L1
         if "al" not in payload:
             payload["al"] = AccessLevel.L1_SUPERVISOR.value
+        # Backward compatibility: old tokens without "tid" default to demo tenant
+        if "tid" not in payload:
+            payload["tid"] = "demo-tenant-001"
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Attempted to use expired token")
@@ -440,6 +453,7 @@ def create_user(user_create: UserCreate) -> User:
     password_hash = hash_password(user_create.password)
 
     access_level = user_create.access_level or AccessLevel.L1_SUPERVISOR
+    tenant_id = user_create.tenant_id or "demo-tenant-001"
 
     user_data = {
         "id": user_id,
@@ -450,11 +464,13 @@ def create_user(user_create: UserCreate) -> User:
         "access_level": access_level,
         "password_hash": password_hash,
         "created_at": datetime.now(timezone.utc),
+        "tenant_id": tenant_id,
+        "venue_ids": [user_create.venue_id],  # Initialize with the primary venue
     }
 
     _users[user_create.email] = user_data
 
-    logger.info(f"Created user {user_id} ({user_create.email}) in venue {user_create.venue_id} with access level {access_level.value}")
+    logger.info(f"Created user {user_id} ({user_create.email}) in tenant {tenant_id}, venue {user_create.venue_id} with access level {access_level.value}")
 
     return User(**user_data)
 
@@ -566,6 +582,7 @@ def create_demo_user() -> User:
         venue_id="venue-royal-oak",
         role="owner",
         access_level=AccessLevel.OWNER,
+        tenant_id="demo-tenant-001",  # Demo user belongs to demo tenant
     )
 
     user = create_user(demo_user)
@@ -626,6 +643,72 @@ if HTTPBearer is not None:
             Venue ID for the user
         """
         return user.venue_id
+
+    def require_tenant_access(
+        extract_venue_id_from: str = "query",
+        venue_id_param: str = "venue_id",
+    ) -> Callable:
+        """
+        FastAPI dependency factory to enforce tenant scoping on venue access.
+
+        Verifies that the authenticated user's tenant owns the requested venue.
+        Short-circuits in demo mode (AUTH_ENABLED=False) to allow everything.
+
+        Args:
+            extract_venue_id_from: Where to extract venue_id from ("query", "path", "body").
+                Defaults to "query".
+            venue_id_param: Name of the venue parameter. Defaults to "venue_id".
+
+        Returns:
+            Async dependency that returns the authenticated user if tenant access is valid.
+
+        Raises:
+            HTTPException(403): If venue does not belong to user's tenant
+        """
+
+        async def check_tenant_access(request: Request, user: User = Depends(get_current_user)) -> User:
+            """Check tenant ownership of venue."""
+            # Demo mode short-circuit: allow everything
+            if not AUTH_ENABLED:
+                return user
+
+            # Extract venue_id from request
+            venue_id = None
+            if extract_venue_id_from == "query":
+                venue_id = request.query_params.get(venue_id_param)
+            elif extract_venue_id_from == "path":
+                venue_id = request.path_params.get(venue_id_param)
+            elif extract_venue_id_from == "body":
+                try:
+                    body = await request.json()
+                    venue_id = body.get(venue_id_param)
+                except Exception:
+                    pass
+
+            if not venue_id:
+                # No venue_id to check; allow the request
+                return user
+
+            # Verify tenant owns this venue
+            try:
+                # Import here to avoid circular dependency
+                from rosteriq.tenants import get_tenant_store
+                store = get_tenant_store()
+                user_tenant_id = user.tenant_id or "demo-tenant-001"
+                store.assert_venue_in_tenant(venue_id, user_tenant_id)
+            except ValueError as e:
+                logger.warning(
+                    f"Tenant access denied: {user.id} in tenant {user.tenant_id} "
+                    f"tried to access venue {venue_id}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Venue not in your tenant",
+                )
+
+            return user
+
+        return check_tenant_access
 
     async def verify_api_key_dependency(x_api_key: str = None) -> dict[str, Any]:
         """

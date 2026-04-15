@@ -2626,6 +2626,9 @@ from rosteriq.award_router import router as _award_router
 from rosteriq.tanda_webhook_router import router as _tanda_webhook_router
 from rosteriq.accountability_router import router as _accountability_router
 from rosteriq.brief_subscriptions_router import router as _brief_subscriptions_router
+from rosteriq.data_feeds_router import router as _data_feeds_router
+from rosteriq.tanda_marketplace_router import router as _tanda_marketplace_router
+from rosteriq.tenants_router import tenants_router as _tenants_router
 
 app.include_router(_availability_router)
 app.include_router(_weather_router)
@@ -2637,8 +2640,11 @@ app.include_router(_shift_events_router)
 app.include_router(_access_router)
 app.include_router(_award_router)
 app.include_router(_tanda_webhook_router)
+app.include_router(_tanda_marketplace_router)
 app.include_router(_accountability_router)
 app.include_router(_brief_subscriptions_router)
+app.include_router(_data_feeds_router)
+app.include_router(_tenants_router)
 
 
 # ============================================================================
