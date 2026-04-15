@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Welcome to RosterIQ — Setup Wizard</title>
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --text: #e6edf3; --muted: #8b949e;
+      --accent: #2ea043; --accent-hover: #3fb950; --border: #30363d;
+      --danger: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+        Roboto, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+      padding: 24px;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 24px; margin: 0 0 8px; }
+    .sub { color: var(--muted); margin: 0 0 24px; }
+    .progress {
+      display: flex; gap: 6px; margin-bottom: 24px;
+    }
+    .pill {
+      flex: 1; height: 6px; background: var(--border); border-radius: 3px;
+    }
+    .pill.done { background: var(--accent); }
+    .pill.active { background: var(--accent-hover); }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 24px; margin-bottom: 16px;
+    }
+    .step-title { font-size: 18px; margin: 0 0 4px; }
+    .step-desc { color: var(--muted); margin: 0 0 16px; }
+    label { display: block; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
+    input, select {
+      width: 100%; padding: 8px 12px; background: var(--bg);
+      color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+      font-size: 14px;
+    }
+    input:focus, select:focus { outline: 0; border-color: var(--accent); }
+    .row { display: flex; gap: 12px; align-items: center; }
+    .row > * { flex: 1; }
+    .actions {
+      display: flex; justify-content: space-between; gap: 12px; margin-top: 20px;
+    }
+    button {
+      padding: 10px 20px; border: 0; border-radius: 6px; cursor: pointer;
+      font-weight: 600; font-size: 14px; transition: background 0.15s;
+    }
+    .primary { background: var(--accent); color: white; }
+    .primary:hover { background: var(--accent-hover); }
+    .secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    .err { color: var(--danger); margin-top: 8px; min-height: 18px; font-size: 13px; }
+    .check {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 14px; cursor: pointer;
+    }
+    .check input { width: auto; }
+    .summary { background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px; font-family: ui-monospace, Menlo, monospace;
+      font-size: 12px; max-height: 240px; overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Welcome to RosterIQ</h1>
+    <p class="sub">Quick 6-step setup. Takes about two minutes.</p>
+
+    <div class="progress" id="progress"></div>
+
+    <div class="panel" id="step-panel">
+      <h2 class="step-title" id="step-title">Loading…</h2>
+      <p class="step-desc" id="step-desc"></p>
+      <form id="step-form"></form>
+      <div class="err" id="err"></div>
+      <div class="actions">
+        <button class="secondary" id="back-btn" type="button">Back</button>
+        <button class="primary" id="next-btn" type="button">Next →</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const API = "/api/v1/onboarding";
+  let state = null;
+  let spec = null;
+
+  async function api(path, opts) {
+    const r = await fetch(API + path, Object.assign({
+      headers: {"Content-Type": "application/json"},
+    }, opts || {}));
+    if (!r.ok) {
+      const txt = await r.text();
+      throw new Error(txt || r.statusText);
+    }
+    return r.json();
+  }
+
+  async function bootstrap() {
+    spec = await api("/spec");
+    // Demo: tenant_id pulled from URL query, defaulting to demo-tenant-001
+    const params = new URLSearchParams(location.search);
+    const tenantId = params.get("tenant_id") || "demo-tenant-001";
+    const wid = params.get("wizard_id");
+    if (wid) {
+      state = await api("/" + wid);
+    } else {
+      state = await api("/start", {
+        method: "POST",
+        body: JSON.stringify({tenant_id: tenantId}),
+      });
+      const u = new URL(location.href);
+      u.searchParams.set("wizard_id", state.wizard_id);
+      history.replaceState(null, "", u);
+    }
+    render();
+  }
+
+  function renderProgress() {
+    const total = state.total_steps;
+    const idx = state.current_step_index;
+    const html = [];
+    for (let i = 0; i < total; i++) {
+      const cls = i < idx ? "done" : (i === idx ? "active" : "");
+      html.push(`<div class="pill ${cls}"></div>`);
+    }
+    document.getElementById("progress").innerHTML = html.join("");
+  }
+
+  function renderForm(stepSpec) {
+    if (state.completed) {
+      return `<div class="summary">${escapeHtml(JSON.stringify(state.data, null, 2))}</div>`;
+    }
+    if (stepSpec.key === "confirm") {
+      return `<div class="summary">${escapeHtml(JSON.stringify(state.data, null, 2))}</div>`;
+    }
+    const stored = state.data[stepSpec.key] || {};
+    const fields = [].concat(stepSpec.required_fields, stepSpec.optional_fields);
+    const html = [];
+    if (stepSpec.key === "tanda_connect") {
+      html.push(`<label class="check"><input type="checkbox" name="skip" ${stored.skip ? "checked" : ""}> Skip Tanda — I'll roster manually</label>`);
+    }
+    for (const f of fields) {
+      if (f === "skip") continue;
+      const val = stored[f] != null ? stored[f] : "";
+      if (f === "tier") {
+        html.push(`<label>${labelFor(f)}</label>
+          <select name="${f}">
+            ${["trial","startup","pro","enterprise"].map(t =>
+              `<option value="${t}" ${val===t?"selected":""}>${t}</option>`).join("")}
+          </select>`);
+      } else if (f === "pos_provider") {
+        html.push(`<label>${labelFor(f)}</label>
+          <select name="${f}">
+            <option value="">— none —</option>
+            ${["swiftpos","lightspeed","square"].map(t =>
+              `<option value="${t}" ${val===t?"selected":""}>${t}</option>`).join("")}
+          </select>`);
+      } else if (f === "bookings_provider") {
+        html.push(`<label>${labelFor(f)}</label>
+          <select name="${f}">
+            <option value="">— none —</option>
+            ${["nowbookit","opentable","sevenrooms"].map(t =>
+              `<option value="${t}" ${val===t?"selected":""}>${t}</option>`).join("")}
+          </select>`);
+      } else {
+        const isReq = stepSpec.required_fields.indexOf(f) >= 0;
+        html.push(`<label>${labelFor(f)}${isReq ? " *" : ""}</label>
+          <input name="${f}" value="${escapeHtml(String(val))}">`);
+      }
+    }
+    return html.join("");
+  }
+
+  function labelFor(key) {
+    return key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;",
+    }[c]));
+  }
+
+  function currentSpec() {
+    return spec.steps.find(s => s.key === state.current_step) || spec.steps[0];
+  }
+
+  function render() {
+    renderProgress();
+    const sp = currentSpec();
+    document.getElementById("step-title").textContent = sp.title;
+    document.getElementById("step-desc").textContent = sp.description;
+    document.getElementById("step-form").innerHTML = renderForm(sp);
+    document.getElementById("err").textContent = "";
+    document.getElementById("back-btn").style.visibility =
+      state.current_step_index > 0 ? "visible" : "hidden";
+    const nextBtn = document.getElementById("next-btn");
+    if (state.completed) {
+      nextBtn.textContent = "Done ✓"; nextBtn.disabled = true;
+    } else if (sp.key === "confirm") {
+      nextBtn.textContent = "Finish setup";
+      nextBtn.disabled = false;
+    } else {
+      nextBtn.textContent = "Next →";
+      nextBtn.disabled = false;
+    }
+  }
+
+  function collectForm(sp) {
+    const form = document.getElementById("step-form");
+    const data = {};
+    const inputs = form.querySelectorAll("input,select");
+    inputs.forEach(el => {
+      if (el.type === "checkbox") {
+        if (el.checked) data[el.name] = true;
+      } else if (el.value !== "") {
+        if (el.name === "headcount") data[el.name] = parseInt(el.value, 10);
+        else data[el.name] = el.value;
+      }
+    });
+    return data;
+  }
+
+  document.getElementById("next-btn").addEventListener("click", async () => {
+    const sp = currentSpec();
+    const errEl = document.getElementById("err");
+    errEl.textContent = "";
+    try {
+      if (sp.key === "confirm") {
+        state = await api("/" + state.wizard_id + "/complete", {method: "POST"});
+      } else {
+        const data = collectForm(sp);
+        state = await api("/" + state.wizard_id + "/step", {
+          method: "POST",
+          body: JSON.stringify({step: sp.key, data}),
+        });
+      }
+      render();
+    } catch (e) {
+      errEl.textContent = e.message || String(e);
+    }
+  });
+
+  document.getElementById("back-btn").addEventListener("click", () => {
+    const idx = state.current_step_index;
+    if (idx > 0) {
+      state.current_step = spec.steps[idx - 1].key;
+      state.current_step_index = idx - 1;
+      render();
+    }
+  });
+
+  bootstrap().catch(e => {
+    document.getElementById("step-title").textContent = "Setup unavailable";
+    document.getElementById("step-desc").textContent = e.message || String(e);
+  });
+})();
+</script>
+</body>
+</html>

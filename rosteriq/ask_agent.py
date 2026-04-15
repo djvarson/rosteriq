@@ -864,6 +864,34 @@ class AskAgent:
                     "required": ["venue_id"],
                 },
             },
+            {
+                "name": "get_tanda_history",
+                "description": (
+                    "Query the Tanda historical warehouse for daily actuals "
+                    "(rostered vs worked hours, labour cost, forecast vs actual revenue, "
+                    "labour percentage). Use this for any 'last week / last month / variance / "
+                    "labour %' questions. Returns daily rows + a summary digest."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "venue_id": {"type": "string", "description": "Venue ID"},
+                        "from_date": {
+                            "type": "string",
+                            "description": "Start date YYYY-MM-DD (default: today - days)",
+                        },
+                        "to_date": {
+                            "type": "string",
+                            "description": "End date YYYY-MM-DD (default: today)",
+                        },
+                        "days": {
+                            "type": "integer",
+                            "description": "Lookback window when from_date is omitted (default 14)",
+                        },
+                    },
+                    "required": ["venue_id"],
+                },
+            },
         ]
 
     def _get_system_prompt(self) -> str:
@@ -929,6 +957,8 @@ class AskAgent:
                 return self._tool_get_pattern_predictions(inputs, context)
             elif tool_name == "get_recent_shift_events":
                 return self._tool_get_recent_shift_events(inputs, context)
+            elif tool_name == "get_tanda_history":
+                return self._tool_get_tanda_history(inputs, context, today)
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
         except Exception as e:
@@ -1079,3 +1109,71 @@ class AskAgent:
             }
         except Exception as e:
             return {"error": str(e)}
+
+    def _tool_get_tanda_history(
+        self,
+        inputs: Dict[str, Any],
+        context: Any,
+        today: date,
+    ) -> Dict[str, Any]:
+        """Query the Tanda history warehouse for daily actuals + a digest.
+
+        Falls back to an empty payload (with `message`) when no data has
+        been ingested yet so the LLM can answer honestly.
+        """
+        try:
+            from rosteriq.tanda_history import (
+                get_history_store,
+                variance_summary,
+            )
+        except Exception as e:
+            return {"error": f"tanda_history unavailable: {e}"}
+
+        venue_id = inputs.get("venue_id")
+        if not venue_id:
+            return {"error": "venue_id is required"}
+
+        days = int(inputs.get("days") or 14)
+        from_str = inputs.get("from_date")
+        to_str = inputs.get("to_date")
+
+        try:
+            end = (
+                date.fromisoformat(to_str) if to_str else today
+            )
+            start = (
+                date.fromisoformat(from_str)
+                if from_str
+                else end - timedelta(days=days - 1)
+            )
+        except ValueError as e:
+            return {"error": f"invalid date: {e}"}
+
+        if start > end:
+            return {"error": "from_date must be <= to_date"}
+
+        store = get_history_store()
+        rows = store.daily_range(venue_id, start, end)
+
+        digest = variance_summary(
+            venue_id, days=(end - start).days + 1, store=store,
+        )
+
+        if not rows:
+            return {
+                "venue_id": venue_id,
+                "from": start.isoformat(),
+                "to": end.isoformat(),
+                "rows": [],
+                "summary": digest,
+                "message": "no historical Tanda data ingested for this range",
+            }
+
+        return {
+            "venue_id": venue_id,
+            "from": start.isoformat(),
+            "to": end.isoformat(),
+            "row_count": len(rows),
+            "rows": [r.to_dict() for r in rows],
+            "summary": digest,
+        }

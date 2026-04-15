@@ -89,6 +89,10 @@ class RosterGenerateResponse(BaseModel):
     fairness_score: float
     cost_efficiency_score: float
     warnings: List[str]
+    # Round 8 Track A: surface enriched signals so the dashboard can show
+    # *why* the roster looks the way it does (weather/events/POS/bookings/patterns).
+    # Always present; empty list when the pipeline didn't enrich.
+    signals: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class DashboardRosterMakerResponse(BaseModel):
@@ -2641,6 +2645,8 @@ from rosteriq.data_feeds_router import router as _data_feeds_router
 from rosteriq.tanda_marketplace_router import router as _tanda_marketplace_router
 from rosteriq.tenants_router import tenants_router as _tenants_router
 from rosteriq.billing_router import router as _billing_router
+from rosteriq.tanda_history_router import router as _tanda_history_router
+from rosteriq.onboarding_router import router as _onboarding_router
 
 app.include_router(_availability_router)
 app.include_router(_weather_router)
@@ -2658,6 +2664,8 @@ app.include_router(_brief_subscriptions_router)
 app.include_router(_data_feeds_router)
 app.include_router(_tenants_router)
 app.include_router(_billing_router)
+app.include_router(_tanda_history_router)
+app.include_router(_onboarding_router)
 
 
 # ============================================================================

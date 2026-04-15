@@ -250,6 +250,19 @@ class RosterIQPipeline:
                     "overtime_cost": str(cost_summary.overtime_cost),
                 },
                 "warnings": roster.warnings,
+                # Round 8 Track A: include the demand signals collected at
+                # step 2 so callers can see *why* the roster looks like it
+                # does (weather/events/POS/bookings/patterns).
+                "signals": [
+                    {
+                        "source": getattr(s, "source", "unknown"),
+                        "kind": getattr(s, "kind", None) or getattr(s, "type", None) or "demand",
+                        "magnitude": float(getattr(s, "magnitude", 0.0) or 0.0),
+                        "description": getattr(s, "description", "") or "",
+                    }
+                    for s in (signals or [])
+                    if s is not None
+                ],
                 "quality_metrics": {
                     "unfilled_shifts": sum(1 for s in roster.shifts if not s.is_filled),
                     "total_shifts": len(roster.shifts),
