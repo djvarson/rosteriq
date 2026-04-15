@@ -12,6 +12,7 @@ queryable for forecasting and scheduling decisions.
 
 from __future__ import annotations
 
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, date, timezone
@@ -133,32 +134,41 @@ class ShiftEventStore:
 
     def __init__(self):
         self._store: Dict[str, List[ShiftEvent]] = {}
+        self._lock = threading.Lock()
 
     def _venue_history(self, venue_id: str) -> List[ShiftEvent]:
-        """Ensure venue exists in store and return its event list."""
+        """Ensure venue exists in store and return its event list.
+
+        Caller must hold self._lock when mutating the returned list.
+        """
         if venue_id not in self._store:
             self._store[venue_id] = []
         return self._store[venue_id]
 
     def record(self, event: ShiftEvent) -> ShiftEvent:
-        """Store an event and return it."""
-        hist = self._venue_history(event.venue_id)
-        hist.append(event)
-        if len(hist) > MAX_EVENTS:
-            del hist[: len(hist) - MAX_EVENTS]
+        """Store an event and return it. Thread-safe."""
+        with self._lock:
+            hist = self._venue_history(event.venue_id)
+            hist.append(event)
+            if len(hist) > MAX_EVENTS:
+                del hist[: len(hist) - MAX_EVENTS]
         return event
 
     def for_venue(self, venue_id: str, since: Optional[datetime] = None) -> List[ShiftEvent]:
         """List all events for a venue, optionally filtered by timestamp."""
-        hist = self._venue_history(venue_id)
+        with self._lock:
+            hist = self._venue_history(venue_id)
+            snapshot = list(hist)
         if since is None:
-            return list(hist)
-        return [e for e in hist if e.timestamp >= since]
+            return snapshot
+        return [e for e in snapshot if e.timestamp >= since]
 
     def for_shift(self, venue_id: str, shift_date: date) -> List[ShiftEvent]:
         """List all events logged during a specific shift date."""
-        hist = self._venue_history(venue_id)
-        return [e for e in hist if e.shift_date == shift_date]
+        with self._lock:
+            hist = self._venue_history(venue_id)
+            snapshot = list(hist)
+        return [e for e in snapshot if e.shift_date == shift_date]
 
     def recent(self, venue_id: str, hours: int = 24) -> List[ShiftEvent]:
         """List events from the last N hours."""
@@ -170,19 +180,22 @@ class ShiftEventStore:
 
     def all(self) -> List[ShiftEvent]:
         """Return all events across all venues (for pattern learning)."""
-        result = []
-        for venue_events in self._store.values():
-            result.extend(venue_events)
+        with self._lock:
+            result = []
+            for venue_events in self._store.values():
+                result.extend(venue_events)
         return result
 
     def clear_venue(self, venue_id: str) -> None:
         """Clear all events for a venue. Test helper."""
-        if venue_id in self._store:
-            del self._store[venue_id]
+        with self._lock:
+            if venue_id in self._store:
+                del self._store[venue_id]
 
     def clear(self) -> None:
         """Wipe the entire store. Used by tests."""
-        self._store.clear()
+        with self._lock:
+            self._store.clear()
 
     def store(self) -> Dict[str, List[ShiftEvent]]:
         """Return the raw store dict. For diagnostics and tests."""

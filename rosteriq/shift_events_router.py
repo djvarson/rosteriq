@@ -10,7 +10,7 @@ Exports endpoints:
 from datetime import datetime, date, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from rosteriq.shift_events import (
@@ -20,6 +20,21 @@ from rosteriq.shift_events import (
     ShiftEventStore,
     PatternLearner,
 )
+
+# Auth gating — fall back to no-op in demo/sandbox when auth stack unavailable
+try:
+    from rosteriq.auth import require_access, AccessLevel  # type: ignore
+except Exception:  # pragma: no cover — demo/sandbox path
+    require_access = None  # type: ignore
+    AccessLevel = None  # type: ignore
+
+
+async def _gate(request: Request, level_name: str) -> None:
+    """Apply role gating if auth stack is present; no-op in demo."""
+    if require_access is None or AccessLevel is None:
+        return
+    level = getattr(AccessLevel, level_name)
+    await require_access(level)(request=request)
 
 
 # ---------------------------------------------------------------------------
@@ -85,13 +100,14 @@ router = APIRouter(tags=["shift-events"])
 
 
 @router.post("/api/v1/shift-events")
-def record_event(req: RecordEventRequest) -> EventResponse:
+async def record_event(req: RecordEventRequest, request: Request) -> EventResponse:
     """
     Record a new shift event.
 
     Validates category, auto-populates timestamp, day_of_week, hour_of_day.
     Returns the recorded event.
     """
+    await _gate(request, "L1_SUPERVISOR")
     # Validate category
     try:
         category = EventCategory(req.category)
@@ -143,8 +159,9 @@ def record_event(req: RecordEventRequest) -> EventResponse:
 
 
 @router.get("/api/v1/shift-events/{venue_id}")
-def list_events(
+async def list_events(
     venue_id: str,
+    request: Request,
     since: Optional[str] = Query(None),
     hours: Optional[int] = Query(None),
 ) -> dict:
@@ -155,6 +172,7 @@ def list_events(
       ?since=ISO-8601 — events after this timestamp
       ?hours=N — events from last N hours (default 24 if not specified)
     """
+    await _gate(request, "L1_SUPERVISOR")
     if hours and not since:
         # Recent hours filter
         events = _shift_event_store.recent(venue_id, hours=hours)
@@ -180,13 +198,14 @@ def list_events(
 
 
 @router.get("/api/v1/shift-events/{venue_id}/patterns")
-def get_patterns(venue_id: str) -> dict:
+async def get_patterns(venue_id: str, request: Request) -> dict:
     """
     Learn patterns from a venue's event history.
 
     Runs PatternLearner on all events for the venue and returns patterns
     sorted by confidence (descending).
     """
+    await _gate(request, "L1_SUPERVISOR")
     venue_events = _shift_event_store.for_venue(venue_id)
     patterns = PatternLearner.analyse(venue_events)
 
@@ -198,8 +217,9 @@ def get_patterns(venue_id: str) -> dict:
 
 
 @router.get("/api/v1/shift-events/{venue_id}/predict")
-def predict_patterns(
+async def predict_patterns(
     venue_id: str,
+    request: Request,
     date_str: str = Query(..., alias="date"),
     hour: int = Query(...),
 ) -> dict:
@@ -212,6 +232,7 @@ def predict_patterns(
 
     Returns patterns that apply to that weekday + hour for the venue.
     """
+    await _gate(request, "L1_SUPERVISOR")
     try:
         target_date = date.fromisoformat(date_str)
     except (ValueError, TypeError, AttributeError):

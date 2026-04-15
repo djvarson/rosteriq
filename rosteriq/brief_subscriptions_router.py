@@ -17,8 +17,24 @@ import logging
 from datetime import date
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+
+# Auth gating — fall back to no-op in demo/sandbox when auth stack unavailable
+try:
+    from rosteriq.auth import require_access, AccessLevel  # type: ignore
+except Exception:  # pragma: no cover — demo/sandbox path
+    require_access = None  # type: ignore
+    AccessLevel = None  # type: ignore
+
+
+async def _gate(request: Request, level_name: str) -> None:
+    """Apply role gating if auth stack is present; no-op in demo."""
+    if require_access is None or AccessLevel is None:
+        return
+    level = getattr(AccessLevel, level_name)
+    await require_access(level)(request=request)
+
 
 logger = logging.getLogger("rosteriq.brief_subscriptions_router")
 
@@ -93,11 +109,12 @@ router = APIRouter(prefix="/api/v1/briefs", tags=["briefs"])
 
 
 @router.post("/subscriptions", response_model=BriefSubscriptionResponse)
-async def create_subscription(req: BriefSubscriptionCreate) -> Dict[str, Any]:
+async def create_subscription(req: BriefSubscriptionCreate, request: Request) -> Dict[str, Any]:
     """Create a new brief subscription.
 
     Requires L2 or OWNER access.
     """
+    await _gate(request, "L2_ROSTER_MAKER")
     from rosteriq import brief_subscriptions
 
     # Validate at least one channel
@@ -129,11 +146,12 @@ async def create_subscription(req: BriefSubscriptionCreate) -> Dict[str, Any]:
 
 
 @router.get("/subscriptions", response_model=List[BriefSubscriptionResponse])
-async def list_subscriptions(venue_id: str = Query(...)) -> List[Dict[str, Any]]:
+async def list_subscriptions(request: Request, venue_id: str = Query(...)) -> List[Dict[str, Any]]:
     """List all subscriptions for a venue.
 
     Requires L2+ access.
     """
+    await _gate(request, "L2_ROSTER_MAKER")
     from rosteriq import brief_subscriptions
 
     store = brief_subscriptions.get_subscription_store()
@@ -145,11 +163,13 @@ async def list_subscriptions(venue_id: str = Query(...)) -> List[Dict[str, Any]]
 async def update_subscription(
     subscription_id: str,
     req: BriefSubscriptionUpdate,
+    request: Request,
 ) -> Dict[str, Any]:
     """Update a subscription (enabled, channels, brief_types, tz).
 
     Requires L2+ access.
     """
+    await _gate(request, "L2_ROSTER_MAKER")
     from rosteriq import brief_subscriptions
 
     store = brief_subscriptions.get_subscription_store()
@@ -160,11 +180,12 @@ async def update_subscription(
 
 
 @router.delete("/subscriptions/{subscription_id}")
-async def delete_subscription(subscription_id: str) -> Dict[str, Any]:
+async def delete_subscription(subscription_id: str, request: Request) -> Dict[str, Any]:
     """Delete a subscription.
 
     Requires L2+ access.
     """
+    await _gate(request, "L2_ROSTER_MAKER")
     from rosteriq import brief_subscriptions
 
     store = brief_subscriptions.get_subscription_store()
@@ -175,11 +196,12 @@ async def delete_subscription(subscription_id: str) -> Dict[str, Any]:
 
 
 @router.post("/trigger/morning", response_model=BriefTriggerResponse)
-async def trigger_morning_brief(req: BriefTriggerRequest) -> Dict[str, Any]:
+async def trigger_morning_brief(req: BriefTriggerRequest, request: Request) -> Dict[str, Any]:
     """Manually fire a morning brief for a venue.
 
     Requires OWNER access.
     """
+    await _gate(request, "OWNER")
     from rosteriq import brief_dispatcher
 
     try:
@@ -203,11 +225,12 @@ async def trigger_morning_brief(req: BriefTriggerRequest) -> Dict[str, Any]:
 
 
 @router.post("/trigger/weekly", response_model=BriefTriggerResponse)
-async def trigger_weekly_digest(req: BriefTriggerRequest) -> Dict[str, Any]:
+async def trigger_weekly_digest(req: BriefTriggerRequest, request: Request) -> Dict[str, Any]:
     """Manually fire a weekly digest for a venue.
 
     Requires OWNER access.
     """
+    await _gate(request, "OWNER")
     from rosteriq import brief_dispatcher
 
     try:
@@ -231,11 +254,12 @@ async def trigger_weekly_digest(req: BriefTriggerRequest) -> Dict[str, Any]:
 
 
 @router.post("/trigger/portfolio", response_model=BriefTriggerResponse)
-async def trigger_portfolio_recap(req: BriefTriggerRequest) -> Dict[str, Any]:
+async def trigger_portfolio_recap(req: BriefTriggerRequest, request: Request) -> Dict[str, Any]:
     """Manually fire a portfolio recap.
 
     Requires OWNER access. Dispatches to all owner subscriptions.
     """
+    await _gate(request, "OWNER")
     from rosteriq import brief_dispatcher
 
     try:

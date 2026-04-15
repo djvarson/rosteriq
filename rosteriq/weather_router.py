@@ -127,6 +127,8 @@ async def get_current_weather(venue_id: str) -> Dict[str, Any]:
     """
     Get current weather observation for a venue.
 
+    Public endpoint — weather data is non-sensitive.
+
     Returns:
         {
             "observation": {
@@ -171,6 +173,8 @@ async def get_forecast(
 ) -> Dict[str, Any]:
     """
     Get weather forecast for a venue.
+
+    Public endpoint — weather data is non-sensitive.
 
     Query Parameters:
         days: Number of days to forecast (1-14, default 7)

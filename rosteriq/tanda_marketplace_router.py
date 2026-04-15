@@ -36,6 +36,15 @@ except ImportError:
     AccessLevel = None
     User = None
 
+
+async def _gate(request: Request, level_name: str) -> None:
+    """Apply role gating if auth stack is present; no-op in demo."""
+    if require_access is None or AccessLevel is None:
+        return
+    level = getattr(AccessLevel, level_name)
+    await require_access(level)(request=request)
+
+
 logger = logging.getLogger(__name__)
 
 # ============================================================================
@@ -90,7 +99,7 @@ async def get_manifest() -> Dict[str, Any]:
 
 
 @router.get("/install")
-async def start_install(state: Optional[str] = Query(None)) -> RedirectResponse:
+async def start_install(request: Request, state: Optional[str] = Query(None)) -> RedirectResponse:
     """
     Redirect to Tanda OAuth authorize endpoint.
 
@@ -103,6 +112,7 @@ async def start_install(state: Optional[str] = Query(None)) -> RedirectResponse:
     Returns:
         RedirectResponse to Tanda OAuth authorize URL
     """
+    await _gate(request, "L1_SUPERVISOR")
     if not TANDA_MARKETPLACE_CLIENT_ID:
         return RedirectResponse(
             url="/static/error-no-config.html",
@@ -130,6 +140,7 @@ async def start_install(state: Optional[str] = Query(None)) -> RedirectResponse:
 
 @router.get("/install/callback")
 async def handle_install_callback(
+    request: Request,
     code: str = Query(...),
     state: str = Query(...),
     error: Optional[str] = Query(None),
@@ -148,6 +159,7 @@ async def handle_install_callback(
     Returns:
         RedirectResponse to success page or JSON error
     """
+    await _gate(request, "L1_SUPERVISOR")
     # Handle auth errors
     if error:
         logger.warning(f"OAuth error: {error}")

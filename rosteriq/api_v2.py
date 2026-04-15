@@ -519,8 +519,16 @@ async def auth_middleware(request: Request, call_next):
     ):
         return await call_next(request)
 
-    # Validate Bearer token
-    from rosteriq.auth import decode_token, get_user_by_id
+    # Validate Bearer token. Lazy import so the module still loads when
+    # pyjwt/passlib aren't installed (demo/sandbox); if the import fails
+    # while AUTH_ENABLED is true we fail closed with a 503.
+    try:
+        from rosteriq.auth import decode_token, get_user_by_id
+    except Exception as _auth_import_err:  # pragma: no cover - infra
+        logger.error("Auth stack unavailable: %s", _auth_import_err)
+        return PlainTextResponse(
+            "Auth subsystem unavailable", status_code=503,
+        )
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         return PlainTextResponse("Missing Bearer token", status_code=401)
@@ -720,13 +728,16 @@ async def generate_roster(
         Complete roster with shifts, costs, and quality scores
     """
     try:
-        # P0 FIX: factory requires venue_id.
+        # P0 FIX: factory requires venue_id; method only takes week_start_date.
+        # demand_override is currently not consumed by the pipeline — logged as
+        # a TODO so callers can see when their override is ignored.
         pipeline = get_pipeline(venue_id=request.venue_id)
-        result = await pipeline.generate_roster(
-            venue_id=request.venue_id,
-            week_start=request.week_start,
-            demand_override=request.demand_override,
-        )
+        if request.demand_override:
+            logger.info(
+                "demand_override provided for venue %s but pipeline does not "
+                "currently consume it; ignoring", request.venue_id,
+            )
+        result = await pipeline.generate_roster(week_start_date=request.week_start)
         return RosterGenerateResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

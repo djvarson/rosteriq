@@ -114,6 +114,8 @@ async def ask_examples() -> List[ExampleQuestion]:
     List example questions grouped by intent.
 
     Helps users understand what questions the agent can answer.
+
+    Public endpoint — example questions are reference data.
     """
     examples = [
         # HISTORICAL_COMPARE

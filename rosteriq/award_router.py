@@ -14,12 +14,27 @@ from datetime import datetime, date, time
 from decimal import Decimal
 from typing import List, Dict, Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from rosteriq.award_engine import (
     AwardEngine, EmploymentType, ShiftClassification, ComplianceWarning
 )
+
+# Auth gating — fall back to no-op in demo/sandbox when auth stack unavailable
+try:
+    from rosteriq.auth import require_access, AccessLevel  # type: ignore
+except Exception:  # pragma: no cover — demo/sandbox path
+    require_access = None  # type: ignore
+    AccessLevel = None  # type: ignore
+
+
+async def _gate(request: Request, level_name: str) -> None:
+    """Apply role gating if auth stack is present; no-op in demo."""
+    if require_access is None or AccessLevel is None:
+        return
+    level = getattr(AccessLevel, level_name)
+    await require_access(level)(request=request)
 
 # ── Router Setup ───────────────────────────────────────────────────────────
 router = APIRouter(prefix="/api/v1/award", tags=["award"])
@@ -93,7 +108,7 @@ class AwardRulesResponse(BaseModel):
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 @router.post("/evaluate", response_model=AwardEvaluateResponse)
-async def evaluate_roster(req: AwardEvaluateRequest) -> AwardEvaluateResponse:
+async def evaluate_roster(req: AwardEvaluateRequest, request: Request) -> AwardEvaluateResponse:
     """
     Evaluate a roster against Australian Hospitality Award rules.
 
@@ -108,6 +123,7 @@ async def evaluate_roster(req: AwardEvaluateRequest) -> AwardEvaluateResponse:
     - warnings: Text warnings (e.g., "Shift exceeds 12 hours")
     - compliance_issues: Compliance rule violations
     """
+    await _gate(request, "L2_ROSTER_MAKER")
 
     total_base_cost = Decimal("0")
     total_loading_cost = Decimal("0")
@@ -263,6 +279,8 @@ async def get_award_rules() -> AwardRulesResponse:
     Get a summary of award rules currently enforced by the engine.
 
     Useful for the dashboard to show a "verified against" badge.
+
+    Public endpoint — award rules are reference data, no auth required.
     """
 
     rules = [

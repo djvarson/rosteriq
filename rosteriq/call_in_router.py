@@ -23,6 +23,22 @@ from rosteriq.call_in import (
     verify_twilio_signature,
 )
 
+# Auth gating — fall back to no-op in demo/sandbox when auth stack unavailable
+try:
+    from rosteriq.auth import require_access, AccessLevel  # type: ignore
+except Exception:  # pragma: no cover — demo/sandbox path
+    require_access = None  # type: ignore
+    AccessLevel = None  # type: ignore
+
+
+async def _gate(request: Request, level_name: str) -> None:
+    """Apply role gating if auth stack is present; no-op in demo."""
+    if require_access is None or AccessLevel is None:
+        return
+    level = getattr(AccessLevel, level_name)
+    await require_access(level)(request=request)
+
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["call-in"])
@@ -81,7 +97,7 @@ def _call_in_to_dict(req: CallInRequest) -> dict:
 
 
 @router.post("/call-in")
-async def create_call_in(body: dict) -> dict:
+async def create_call_in(body: dict, request: Request) -> dict:
     """Create and send a call-in SMS.
 
     Body:
@@ -98,6 +114,7 @@ async def create_call_in(body: dict) -> dict:
 
     Returns the created CallInRequest.
     """
+    await _gate(request, "L1_SUPERVISOR")
     # Extract and validate
     venue_id = body.get("venue_id", "").strip()
     employee_id = body.get("employee_id", "").strip()
@@ -141,8 +158,9 @@ async def create_call_in(body: dict) -> dict:
 
 
 @router.get("/call-in/{venue_id}")
-async def list_call_ins(venue_id: str) -> dict:
+async def list_call_ins(venue_id: str, request: Request) -> dict:
     """List all call-in requests for a venue, sorted newest first."""
+    await _gate(request, "L1_SUPERVISOR")
     store = get_store()
     reqs = store.list_for_venue(venue_id)
     return {

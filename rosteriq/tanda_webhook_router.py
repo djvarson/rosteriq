@@ -18,6 +18,22 @@ from rosteriq.tanda_webhooks import (
     verify_tanda_signature,
 )
 
+# Auth gating — fall back to no-op in demo/sandbox when auth stack unavailable
+try:
+    from rosteriq.auth import require_access, AccessLevel  # type: ignore
+except Exception:  # pragma: no cover — demo/sandbox path
+    require_access = None  # type: ignore
+    AccessLevel = None  # type: ignore
+
+
+async def _gate(request: Request, level_name: str) -> None:
+    """Apply role gating if auth stack is present; no-op in demo."""
+    if require_access is None or AccessLevel is None:
+        return
+    level = getattr(AccessLevel, level_name)
+    await require_access(level)(request=request)
+
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/tanda/webhook", tags=["tanda-webhook"])
@@ -141,7 +157,7 @@ async def list_events(org_id: str, limit: int = 50) -> dict:
 
 
 @router.post("/replay")
-async def replay_event(body: dict) -> dict:
+async def replay_event(body: dict, request: Request) -> dict:
     """Re-dispatch a stored webhook event for testing/debugging.
 
     Body:
@@ -151,6 +167,7 @@ async def replay_event(body: dict) -> dict:
 
     Returns error if event not found.
     """
+    await _gate(request, "OWNER")
     event_id = body.get("event_id", "").strip()
     if not event_id:
         raise HTTPException(status_code=400, detail="event_id is required")

@@ -46,6 +46,8 @@ def calculate_roi_endpoint(inputs: ROIInputs) -> ROIResult:
     """
     Calculate ROI for a venue.
 
+    Public endpoint — ROI calculator is a lead-gen tool (no auth).
+
     Request body:
     - venue_name: str (optional)
     - staff_count: int (>= 1)
@@ -88,6 +90,8 @@ def calculate_roi_endpoint(inputs: ROIInputs) -> ROIResult:
 def sample_roi() -> ROIResult:
     """
     Return a sample calculation for a typical 30-staff venue at $35k/week, pro tier.
+
+    Public endpoint — ROI calculator is a lead-gen tool (no auth).
     """
     calc_inputs = CalcROIInputs(
         venue_name="Sample Venue",

@@ -13,7 +13,7 @@ import logging
 import os
 from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from rosteriq.tanda_availability import (
@@ -22,6 +22,21 @@ from rosteriq.tanda_availability import (
     DemoAvailabilityReader,
 )
 from rosteriq.tanda_adapter import get_tanda_adapter, DemoTandaAdapter, TandaAdapter
+
+# Auth gating — fall back to no-op in demo/sandbox when auth stack unavailable
+try:
+    from rosteriq.auth import require_access, AccessLevel  # type: ignore
+except Exception:  # pragma: no cover — demo/sandbox path
+    require_access = None  # type: ignore
+    AccessLevel = None  # type: ignore
+
+
+async def _gate(request: Request, level_name: str) -> None:
+    """Apply role gating if auth stack is present; no-op in demo."""
+    if require_access is None or AccessLevel is None:
+        return
+    level = getattr(AccessLevel, level_name)
+    await require_access(level)(request=request)
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +99,7 @@ async def _get_availability_reader():
 @router.get("/api/v1/tanda/availability/{venue_id}", response_model=GetAvailabilityResponse)
 async def get_availability(
     venue_id: str,
+    request: Request,
     employee_id: Optional[str] = Query(None, description="Optional employee ID to filter by"),
 ) -> GetAvailabilityResponse:
     """
@@ -100,6 +116,7 @@ async def get_availability(
         HTTPException 400: If employee_id format is invalid
         HTTPException 502: If adapter raises an exception
     """
+    await _gate(request, "L1_SUPERVISOR")
     try:
         # Validate employee_id format if provided
         if employee_id and not isinstance(employee_id, str):
