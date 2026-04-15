@@ -118,24 +118,22 @@ async def submit_step(request: Request, wizard_id: str) -> dict:
 async def complete_wizard(request: Request, wizard_id: str) -> dict:
     await _gate(request, "L2_ROSTER_MAKER")
 
+    finalize_summary: dict = {}
+
     def _finalize(state) -> None:
-        # Best-effort: if the operator chose a billing tier we record it
-        # in the tenant store. Tanda/Stripe wiring is beyond this scope —
-        # the wizard just captures intent here.
+        # Delegate to onboarding_finalize.run_finalize for the full
+        # set of hooks (tenant ensure, concierge KB seed, Tanda creds,
+        # history backfill flag). Best-effort — never raise.
+        nonlocal finalize_summary
         try:
-            from rosteriq.tenants import get_tenant_store, BillingTier  # type: ignore
-        except Exception:
+            from rosteriq.onboarding_finalize import run_finalize  # type: ignore
+        except Exception as e:  # pragma: no cover — demo path
+            logger.warning("onboarding_finalize unavailable: %s", e)
             return
         try:
-            store = get_tenant_store()
-            tenant = store.get(state.tenant_id)
-            if tenant is None:
-                return
-            tier_str = (state.data.get("billing_tier", {}).get("tier") or "").lower()
-            if tier_str and hasattr(BillingTier, tier_str.upper()):
-                tenant.billing_tier = getattr(BillingTier, tier_str.upper())
+            finalize_summary = run_finalize(state)
         except Exception as e:  # pragma: no cover
-            logger.warning("tenant finalize failed: %s", e)
+            logger.warning("run_finalize failed: %s", e)
 
     try:
         state = get_onboarding_store().complete(wizard_id, finalize=_finalize)
@@ -143,4 +141,7 @@ async def complete_wizard(request: Request, wizard_id: str) -> dict:
         raise HTTPException(status_code=404, detail="wizard not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return state.to_dict()
+    out = state.to_dict()
+    if finalize_summary:
+        out["finalize"] = finalize_summary
+    return out
