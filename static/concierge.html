@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Concierge — RosterIQ</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0; background: #f6f8fa; color: #24292f; }
+    .wrap { max-width: 560px; margin: 24px auto; padding: 16px; }
+    .header { font-size: 22px; font-weight: 600; margin-bottom: 12px; }
+    .chat { background: white; border: 1px solid #d0d7de; border-radius: 8px;
+      min-height: 320px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .msg { padding: 10px 14px; border-radius: 16px; max-width: 80%; }
+    .me { background: #0969da; color: white; align-self: flex-end; }
+    .ai { background: #eaeef2; align-self: flex-start; }
+    .escalate { background: #fff8c5; border: 1px solid #d4a72c; }
+    .meta { font-size: 11px; color: #6e7781; margin-top: 4px; }
+    .input-row { display: flex; gap: 8px; margin-top: 12px; }
+    input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #d0d7de; }
+    button { padding: 10px 18px; background: #0969da; color: white; border: 0;
+      border-radius: 6px; cursor: pointer; font-weight: 600; }
+    button:hover { background: #0860c6; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">Ask anything 🛎️</div>
+    <div class="chat" id="chat"></div>
+    <div class="input-row">
+      <input id="q" placeholder="e.g. what time do you open?" autocomplete="off">
+      <button id="send">Ask</button>
+    </div>
+  </div>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const venueId = params.get("venue_id") || "demo-tenant-001";
+  const chat = document.getElementById("chat");
+
+  function add(text, cls, meta) {
+    const div = document.createElement("div");
+    div.className = "msg " + cls;
+    div.textContent = text;
+    chat.appendChild(div);
+    if (meta) {
+      const m = document.createElement("div");
+      m.className = "meta";
+      m.textContent = meta;
+      chat.appendChild(m);
+    }
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  async function ask(q) {
+    add(q, "me");
+    try {
+      const r = await fetch("/api/v1/concierge/ask", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({venue_id: venueId, query: q}),
+      });
+      const data = await r.json();
+      const cls = data.escalate ? "ai escalate" : "ai";
+      add(data.answer, cls,
+        `confidence ${(data.confidence*100).toFixed(0)}%${data.escalate ? " · staff will follow up" : ""}`);
+    } catch (e) {
+      add("Sorry — I couldn't reach the system. Please ask a staff member.", "ai escalate");
+    }
+  }
+
+  document.getElementById("send").addEventListener("click", () => {
+    const v = document.getElementById("q").value.trim();
+    if (!v) return;
+    document.getElementById("q").value = "";
+    ask(v);
+  });
+  document.getElementById("q").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("send").click();
+  });
+})();
+</script>
+</body>
+</html>
