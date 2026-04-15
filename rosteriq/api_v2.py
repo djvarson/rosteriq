@@ -1929,6 +1929,29 @@ _TANDA_SWEEP_JOB_ENABLED = (
     os.environ.get("ROSTERIQ_TANDA_SWEEP_JOB_ENABLED", "true").strip().lower()
     in ("1", "true", "yes", "on")
 )
+# Round 14: daily Tanda history ingest — opt-in.
+_TANDA_HISTORY_INGEST_ENABLED = (
+    os.environ.get("ROSTERIQ_TANDA_HISTORY_INGEST_ENABLED", "false").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+# Comma-separated "venue:org" pairs, e.g. "venue_1:org_1,venue_2:org_1"
+_TANDA_HISTORY_VENUES = [
+    p.strip() for p in os.environ.get("ROSTERIQ_TANDA_HISTORY_VENUES", "").split(",")
+    if p.strip()
+]
+
+
+def _tanda_history_venue_pairs():
+    """Parse ROSTERIQ_TANDA_HISTORY_VENUES into (venue_id, org_id) tuples."""
+    out = []
+    for pair in _TANDA_HISTORY_VENUES:
+        if ":" in pair:
+            v, o = pair.split(":", 1)
+            out.append((v.strip(), o.strip()))
+        else:
+            # If no org specified, assume venue_id doubles as org_id.
+            out.append((pair.strip(), pair.strip()))
+    return out
 
 
 def _ensure_scheduled_jobs() -> None:
@@ -1980,6 +2003,29 @@ def _ensure_scheduled_jobs() -> None:
             )
         except Exception:
             logger.exception("Failed to register tanda_retry_sweep job")
+
+    if (
+        _TANDA_HISTORY_INGEST_ENABLED
+        and _tanda_history_venue_pairs()
+        and scheduler.get("tanda_history_ingest") is None
+    ):
+        try:
+            job = _sj.make_tanda_history_ingest_job(
+                interval_s=float(
+                    os.environ.get("ROSTERIQ_TANDA_HISTORY_INTERVAL_S", str(24 * 3600))
+                ),
+                lookback_days=int(
+                    os.environ.get("ROSTERIQ_TANDA_HISTORY_LOOKBACK_DAYS", "2")
+                ),
+                venue_map_fn=_tanda_history_venue_pairs,
+            )
+            scheduler.add(job)
+            logger.info(
+                "Scheduled tanda_history_ingest job registered (%d venues)",
+                len(_tanda_history_venue_pairs()),
+            )
+        except Exception:
+            logger.exception("Failed to register tanda_history_ingest job")
 
     _SCHEDULED_JOBS_READY = True
 

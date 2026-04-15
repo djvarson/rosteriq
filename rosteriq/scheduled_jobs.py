@@ -41,7 +41,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("rosteriq.scheduled_jobs")
 
@@ -568,6 +568,111 @@ def make_tanda_retry_sweep_job(
             "swept_at": now.isoformat(),
             "summary": summary,
         }
+    return ScheduledJob(name=name, interval_s=interval_s, fn=_fn)
+
+
+# ---------------------------------------------------------------------------
+# Daily Tanda history ingest (Round 14)
+# ---------------------------------------------------------------------------
+
+
+def make_tanda_history_ingest_job(
+    *,
+    name: str = "tanda_history_ingest",
+    interval_s: float = 24 * 60 * 60.0,  # daily
+    venue_map_fn: Callable[[], List[Tuple[str, str]]],  # () -> [(venue_id, org_id), ...]
+    lookback_days: int = 2,
+    adapter_factory: Optional[Callable[[], Any]] = None,
+) -> ScheduledJob:
+    """Build a scheduled job that re-ingests recent Tanda history.
+
+    Args:
+        name: Scheduler-side job name.
+        interval_s: Seconds between firings (default: daily).
+        venue_map_fn: Callback returning the (venue_id, org_id) pairs to
+            ingest. Called on every firing so new venues auto-register.
+        lookback_days: How many days back from "now" to re-ingest. A
+            small window catches late timesheet corrections without
+            re-pulling months of data.
+        adapter_factory: Optional factory for the Tanda adapter. If
+            None, we lazy-import ``rosteriq.tanda_integration.get_tanda_adapter``
+            and call it.
+
+    Returns:
+        A ``ScheduledJob`` that the shared ``Scheduler`` can run.
+    """
+    import asyncio
+    from datetime import date, timedelta
+
+    def _fn(now: datetime) -> Dict[str, Any]:
+        try:
+            pairs = list(venue_map_fn() or [])
+        except Exception as e:
+            return {"ok": False, "error": f"venue_map_fn failed: {e}", "runs": []}
+
+        if not pairs:
+            return {"ok": True, "runs": [], "message": "no venues registered"}
+
+        # Lazy import adapter only when needed so this job is safe to
+        # register even in demo mode.
+        if adapter_factory is not None:
+            try:
+                adapter = adapter_factory()
+            except Exception as e:
+                return {"ok": False, "error": f"adapter init failed: {e}", "runs": []}
+        else:
+            try:
+                from rosteriq.tanda_integration import get_tanda_adapter  # type: ignore
+                adapter = get_tanda_adapter()
+            except Exception as e:
+                return {
+                    "ok": False,
+                    "error": f"tanda adapter unavailable: {e}",
+                    "runs": [],
+                    "message": "demo mode — no adapter, skipping ingest",
+                }
+
+        from rosteriq.tanda_history import TandaHistoryIngestor
+        ingestor = TandaHistoryIngestor(adapter=adapter)
+
+        end = now.date()
+        start = end - timedelta(days=max(lookback_days - 1, 0))
+
+        async def _run_all() -> List[Dict[str, Any]]:
+            results: List[Dict[str, Any]] = []
+            for venue_id, org_id in pairs:
+                try:
+                    summary = await ingestor.ingest_range(
+                        venue_id=venue_id, org_id=org_id, start=start, end=end,
+                    )
+                    results.append({
+                        "venue_id": venue_id, "ok": True, "summary": summary,
+                    })
+                except Exception as e:
+                    results.append({
+                        "venue_id": venue_id, "ok": False, "error": str(e),
+                    })
+            return results
+
+        try:
+            # Run in a fresh event loop so we don't collide with any
+            # existing loop; the scheduler runs on its own thread.
+            loop = asyncio.new_event_loop()
+            try:
+                runs = loop.run_until_complete(_run_all())
+            finally:
+                loop.close()
+        except Exception as e:
+            return {"ok": False, "error": f"loop failed: {e}", "runs": []}
+
+        ok = all(r.get("ok") for r in runs)
+        return {
+            "ok": ok,
+            "from": start.isoformat(),
+            "to": end.isoformat(),
+            "runs": runs,
+        }
+
     return ScheduledJob(name=name, interval_s=interval_s, fn=_fn)
 
 
