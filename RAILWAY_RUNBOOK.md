@@ -52,6 +52,9 @@ Recommended:
 | `STRIPE_SUCCESS_URL` / `STRIPE_CANCEL_URL` | Post-checkout redirects. |
 | `ANTHROPIC_API_KEY` *or* `OPENAI_API_KEY` | LLM backend for the Ask + concierge agents. |
 | `BOM_API_KEY` | Australian Bureau of Meteorology key (if using paid tier). |
+| `ROSTERIQ_DB_PATH` | SQLite path for persistence (default: in-memory only if unset). Set to e.g. `/data/rosteriq.db` on Railway with a persistent volume. |
+| `ROSTERIQ_TANDA_HISTORY_INGEST_ENABLED` | `true` to enable the daily Tanda history ingest scheduled job (Round 14). Default `false`. |
+| `ROSTERIQ_TANDA_HISTORY_VENUES` | Comma-separated `venue_id:org_id` pairs for the ingest job (e.g. `v-1:org-1,v-2:org-2`). |
 
 Notes:
 * Anything missing falls through to the demo path — features that
