@@ -2661,6 +2661,7 @@ from rosteriq.billing_router import router as _billing_router
 from rosteriq.tanda_history_router import router as _tanda_history_router
 from rosteriq.onboarding_router import router as _onboarding_router
 from rosteriq.concierge_router import router as _concierge_router
+from rosteriq.forecast_accuracy_router import router as _forecast_accuracy_router
 
 app.include_router(_availability_router)
 app.include_router(_weather_router)
@@ -2681,6 +2682,7 @@ app.include_router(_billing_router)
 app.include_router(_tanda_history_router)
 app.include_router(_onboarding_router)
 app.include_router(_concierge_router)
+app.include_router(_forecast_accuracy_router)
 
 
 # ============================================================================
