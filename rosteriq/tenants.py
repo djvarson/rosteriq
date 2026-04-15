@@ -35,7 +35,46 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from enum import Enum
 
+from rosteriq import persistence as _p
+
 logger = logging.getLogger(__name__)
+
+
+# Round 11 — SQLite schema for tenants + usage snapshots
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tenants (
+    tenant_id        TEXT PRIMARY KEY,
+    name             TEXT NOT NULL,
+    slug             TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    billing_tier     TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    trial_ends_at    TEXT,
+    owner_user_id    TEXT,
+    venue_ids        TEXT NOT NULL,  -- JSON array
+    max_venues       INTEGER NOT NULL DEFAULT 1,
+    max_employees    INTEGER NOT NULL DEFAULT 50,
+    contact_email    TEXT NOT NULL DEFAULT '',
+    notes            TEXT NOT NULL DEFAULT '{}'  -- JSON
+);
+CREATE INDEX IF NOT EXISTS ix_tenants_slug ON tenants(slug);
+
+CREATE TABLE IF NOT EXISTS tenant_usage (
+    rowid_pk         INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id        TEXT NOT NULL,
+    snapshot_date    TEXT NOT NULL,
+    active_venues    INTEGER NOT NULL DEFAULT 0,
+    total_employees  INTEGER NOT NULL DEFAULT 0,
+    rosters_generated_month INTEGER NOT NULL DEFAULT 0,
+    ask_queries_month       INTEGER NOT NULL DEFAULT 0,
+    call_ins_sent_month     INTEGER NOT NULL DEFAULT 0,
+    sms_credits_used        INTEGER NOT NULL DEFAULT 0,
+    billable_amount         REAL NOT NULL DEFAULT 0.0,
+    UNIQUE(tenant_id, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS ix_tenant_usage_tenant ON tenant_usage(tenant_id);
+"""
+_p.register_schema("tenants", _SCHEMA)
 
 # ============================================================================
 # Tenant Data Models (stdlib dataclasses, no Pydantic)
@@ -184,6 +223,104 @@ class TenantStore:
         self._usage_snapshots: dict[str, list[TenantUsageSnapshot]] = {}  # tenant_id -> [snapshots]
         self._initialized = False
 
+    # ------------------------------------------------------------------
+    # Persistence (Round 11) — opt-in via ROSTERIQ_DB_PATH; no-op in demo
+    # ------------------------------------------------------------------
+
+    def _tenant_to_row(self, t: Tenant) -> dict[str, Any]:
+        return {
+            "tenant_id": t.tenant_id,
+            "name": t.name,
+            "slug": t.slug,
+            "created_at": t.created_at.isoformat(),
+            "billing_tier": t.billing_tier.value,
+            "status": t.status.value,
+            "trial_ends_at": t.trial_ends_at.isoformat() if t.trial_ends_at else None,
+            "owner_user_id": t.owner_user_id,
+            "venue_ids": _p.json_dumps(t.venue_ids),
+            "max_venues": t.max_venues,
+            "max_employees": t.max_employees,
+            "contact_email": t.contact_email,
+            "notes": _p.json_dumps(t.notes),
+        }
+
+    def _row_to_tenant(self, r) -> Tenant:
+        return Tenant(
+            tenant_id=r["tenant_id"],
+            name=r["name"],
+            slug=r["slug"],
+            created_at=datetime.fromisoformat(r["created_at"]),
+            billing_tier=BillingTier(r["billing_tier"]),
+            status=TenantStatus(r["status"]),
+            trial_ends_at=datetime.fromisoformat(r["trial_ends_at"]) if r["trial_ends_at"] else None,
+            owner_user_id=r["owner_user_id"],
+            venue_ids=_p.json_loads(r["venue_ids"], default=[]) or [],
+            max_venues=r["max_venues"],
+            max_employees=r["max_employees"],
+            contact_email=r["contact_email"] or "",
+            notes=_p.json_loads(r["notes"], default={}) or {},
+        )
+
+    def _persist_tenant(self, t: Tenant) -> None:
+        _p.upsert("tenants", self._tenant_to_row(t), pk="tenant_id")
+
+    def _persist_usage(self, snap: TenantUsageSnapshot) -> None:
+        # tenant_usage UNIQUE on (tenant_id, snapshot_date) — but our pk
+        # for upsert is rowid_pk. Use explicit upsert via INSERT OR REPLACE.
+        if not _p.is_persistence_enabled():
+            return
+        try:
+            with _p.write_txn() as c:
+                c.execute(
+                    "INSERT OR REPLACE INTO tenant_usage "
+                    "(tenant_id, snapshot_date, active_venues, total_employees, "
+                    " rosters_generated_month, ask_queries_month, call_ins_sent_month, "
+                    " sms_credits_used, billable_amount) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [snap.tenant_id, snap.snapshot_date, snap.active_venues,
+                     snap.total_employees, snap.rosters_generated_month,
+                     snap.ask_queries_month, snap.call_ins_sent_month,
+                     snap.sms_credits_used, snap.billable_amount],
+                )
+        except Exception as e:
+            logger.warning("usage persist failed: %s", e)
+
+    def rehydrate(self) -> None:
+        """Load tenants + usage from SQLite into in-memory state."""
+        if not _p.is_persistence_enabled():
+            return
+        for row in _p.fetchall("SELECT * FROM tenants"):
+            try:
+                t = self._row_to_tenant(row)
+                self._tenants[t.tenant_id] = t
+                for v in t.venue_ids:
+                    self._venue_to_tenant[v] = t.tenant_id
+            except Exception as e:
+                logger.warning("rehydrate tenant row failed: %s", e)
+        for row in _p.fetchall(
+            "SELECT * FROM tenant_usage ORDER BY snapshot_date ASC"
+        ):
+            try:
+                snap = TenantUsageSnapshot(
+                    tenant_id=row["tenant_id"],
+                    snapshot_date=row["snapshot_date"],
+                    active_venues=row["active_venues"],
+                    total_employees=row["total_employees"],
+                    rosters_generated_month=row["rosters_generated_month"],
+                    ask_queries_month=row["ask_queries_month"],
+                    call_ins_sent_month=row["call_ins_sent_month"],
+                    sms_credits_used=row["sms_credits_used"],
+                    billable_amount=row["billable_amount"],
+                )
+                self._usage_snapshots.setdefault(snap.tenant_id, []).append(snap)
+            except Exception as e:
+                logger.warning("rehydrate usage row failed: %s", e)
+        logger.info(
+            "Tenants rehydrated: %d tenants, %d usage snapshots",
+            len(self._tenants),
+            sum(len(v) for v in self._usage_snapshots.values()),
+        )
+
     def _seed_demo_tenant(self) -> None:
         """
         Seed the demo tenant on first access.
@@ -278,6 +415,7 @@ class TenantStore:
         )
 
         self._tenants[tenant_id] = tenant
+        self._persist_tenant(tenant)
         logger.info(f"Created tenant {tenant_id} ({name}) with tier {billing_tier.value}")
         return tenant
 
@@ -321,6 +459,7 @@ class TenantStore:
         # Use dataclass replace to create updated copy
         tenant = replace(tenant, **fields)
         self._tenants[tenant_id] = tenant
+        self._persist_tenant(tenant)
         logger.info(f"Updated tenant {tenant_id}: {list(fields.keys())}")
         return tenant
 
@@ -348,6 +487,15 @@ class TenantStore:
             self._venue_to_tenant.pop(venue_id, None)
         # Remove usage snapshots
         self._usage_snapshots.pop(tenant_id, None)
+
+        # Persist deletion
+        try:
+            _p.delete("tenants", "tenant_id", tenant_id)
+            if _p.is_persistence_enabled():
+                with _p.write_txn() as c:
+                    c.execute("DELETE FROM tenant_usage WHERE tenant_id = ?", [tenant_id])
+        except Exception as e:
+            logger.warning("tenant delete persist failed: %s", e)
 
         logger.warning(f"Deleted tenant {tenant_id} ({tenant.name})")
         return True
@@ -457,6 +605,7 @@ class TenantStore:
             self._usage_snapshots[snapshot.tenant_id] = []
 
         self._usage_snapshots[snapshot.tenant_id].append(snapshot)
+        self._persist_usage(snapshot)
         logger.debug(f"Recorded usage snapshot for tenant {snapshot.tenant_id} on {snapshot.snapshot_date}")
 
     def get_usage(self, tenant_id: str, month: Optional[str] = None) -> Optional[TenantUsageSnapshot]:
@@ -509,6 +658,12 @@ def get_tenant_store() -> TenantStore:
         # Seed demo tenant on first access
         _tenant_store_instance._seed_demo_tenant()
     return _tenant_store_instance
+
+
+# Round 11 — rehydrate from SQLite on init_db()
+@_p.on_init
+def _rehydrate_tenants_on_init() -> None:
+    get_tenant_store().rehydrate()
 
 
 # ============================================================================

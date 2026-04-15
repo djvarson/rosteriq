@@ -24,7 +24,29 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
+from rosteriq import persistence as _p
+
 logger = logging.getLogger(__name__)
+
+
+# Round 11 — SQLite schema for subscriptions
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS subscriptions (
+    tenant_id                TEXT PRIMARY KEY,
+    stripe_subscription_id   TEXT NOT NULL,
+    stripe_customer_id       TEXT NOT NULL,
+    status                   TEXT NOT NULL,
+    tier                     TEXT NOT NULL,
+    current_period_end       TEXT NOT NULL,
+    trial_ends_at            TEXT,
+    quantity                 INTEGER NOT NULL DEFAULT 0,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_subscriptions_stripe
+    ON subscriptions(stripe_subscription_id);
+"""
+_p.register_schema("subscriptions", _SCHEMA)
 
 # ============================================================================
 # Stripe Configuration
@@ -154,6 +176,53 @@ class SubscriptionStore:
         self._subscriptions: dict[str, Subscription] = {}  # tenant_id -> Subscription
         self._stripe_id_index: dict[str, str] = {}  # stripe_subscription_id -> tenant_id
 
+    # ------------------------------------------------------------------
+    # Persistence (Round 11) — opt-in via ROSTERIQ_DB_PATH
+    # ------------------------------------------------------------------
+
+    def _sub_to_row(self, s: Subscription) -> dict[str, Any]:
+        return {
+            "tenant_id": s.tenant_id,
+            "stripe_subscription_id": s.stripe_subscription_id,
+            "stripe_customer_id": s.stripe_customer_id,
+            "status": s.status.value,
+            "tier": s.tier,
+            "current_period_end": s.current_period_end.isoformat(),
+            "trial_ends_at": s.trial_ends_at.isoformat() if s.trial_ends_at else None,
+            "quantity": s.quantity,
+            "created_at": s.created_at.isoformat(),
+            "updated_at": s.updated_at.isoformat(),
+        }
+
+    def _row_to_sub(self, r) -> Subscription:
+        return Subscription(
+            tenant_id=r["tenant_id"],
+            stripe_subscription_id=r["stripe_subscription_id"],
+            stripe_customer_id=r["stripe_customer_id"],
+            status=SubscriptionStatus(r["status"]),
+            tier=r["tier"],
+            current_period_end=datetime.fromisoformat(r["current_period_end"]),
+            trial_ends_at=datetime.fromisoformat(r["trial_ends_at"]) if r["trial_ends_at"] else None,
+            quantity=r["quantity"],
+            created_at=datetime.fromisoformat(r["created_at"]),
+            updated_at=datetime.fromisoformat(r["updated_at"]),
+        )
+
+    def _persist(self, s: Subscription) -> None:
+        _p.upsert("subscriptions", self._sub_to_row(s), pk="tenant_id")
+
+    def rehydrate(self) -> None:
+        if not _p.is_persistence_enabled():
+            return
+        for r in _p.fetchall("SELECT * FROM subscriptions"):
+            try:
+                s = self._row_to_sub(r)
+                self._subscriptions[s.tenant_id] = s
+                self._stripe_id_index[s.stripe_subscription_id] = s.tenant_id
+            except Exception as e:
+                logger.warning("rehydrate subscription failed: %s", e)
+        logger.info("Subscriptions rehydrated: %d", len(self._subscriptions))
+
     def create(self, subscription: Subscription) -> Subscription:
         """
         Create a new subscription.
@@ -172,6 +241,7 @@ class SubscriptionStore:
 
         self._subscriptions[subscription.tenant_id] = subscription
         self._stripe_id_index[subscription.stripe_subscription_id] = subscription.tenant_id
+        self._persist(subscription)
 
         logger.info(f"Created subscription {subscription.stripe_subscription_id} for tenant {subscription.tenant_id}")
         return subscription
@@ -222,6 +292,7 @@ class SubscriptionStore:
 
         sub = Subscription(**data)
         self._subscriptions[tenant_id] = sub
+        self._persist(sub)
         logger.info(f"Updated subscription for tenant {tenant_id}: {list(fields.keys())}")
         return sub
 
@@ -238,6 +309,10 @@ class SubscriptionStore:
         sub = self._subscriptions.pop(tenant_id, None)
         if sub:
             self._stripe_id_index.pop(sub.stripe_subscription_id, None)
+            try:
+                _p.delete("subscriptions", "tenant_id", tenant_id)
+            except Exception as e:
+                logger.warning("subscription delete persist failed: %s", e)
             logger.info(f"Deleted subscription for tenant {tenant_id}")
             return True
         return False
@@ -267,6 +342,12 @@ def get_subscription_store() -> SubscriptionStore:
     if _subscription_store_instance is None:
         _subscription_store_instance = SubscriptionStore()
     return _subscription_store_instance
+
+
+# Round 11 — rehydrate from SQLite on init_db()
+@_p.on_init
+def _rehydrate_subs_on_init() -> None:
+    get_subscription_store().rehydrate()
 
 
 # ============================================================================

@@ -26,8 +26,29 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
+from rosteriq import persistence as _p
+
 logger = logging.getLogger("rosteriq.onboarding")
 AU_TZ = timezone(timedelta(hours=10))
+
+
+# Round 11 — SQLite persistence schema.
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS onboarding_wizards (
+    wizard_id        TEXT PRIMARY KEY,
+    tenant_id        TEXT NOT NULL,
+    started_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    current_step     TEXT NOT NULL,
+    completed_steps  TEXT NOT NULL,  -- JSON array
+    data             TEXT NOT NULL,  -- JSON object
+    completed        INTEGER NOT NULL DEFAULT 0,
+    completed_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_onboarding_tenant
+    ON onboarding_wizards(tenant_id);
+"""
+_p.register_schema("onboarding", _SCHEMA)
 
 
 # ---------------------------------------------------------------------------
@@ -190,12 +211,64 @@ def validate_step(step_key: str, payload: Dict[str, Any]) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
+def _state_to_row(state: "WizardState") -> Dict[str, Any]:
+    return {
+        "wizard_id": state.wizard_id,
+        "tenant_id": state.tenant_id,
+        "started_at": state.started_at.isoformat(),
+        "updated_at": state.updated_at.isoformat(),
+        "current_step": state.current_step,
+        "completed_steps": _p.json_dumps(list(state.completed_steps)),
+        "data": _p.json_dumps(dict(state.data)),
+        "completed": 1 if state.completed else 0,
+        "completed_at": state.completed_at.isoformat() if state.completed_at else None,
+    }
+
+
+def _row_to_state(row) -> "WizardState":
+    return WizardState(
+        wizard_id=row["wizard_id"],
+        tenant_id=row["tenant_id"],
+        started_at=datetime.fromisoformat(row["started_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+        current_step=row["current_step"],
+        completed_steps=_p.json_loads(row["completed_steps"], default=[]) or [],
+        data=_p.json_loads(row["data"], default={}) or {},
+        completed=bool(row["completed"]),
+        completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
+    )
+
+
 class OnboardingStore:
-    """Thread-safe in-memory store of WizardState keyed by wizard_id."""
+    """Thread-safe in-memory store of WizardState keyed by wizard_id.
+
+    When `ROSTERIQ_DB_PATH` is set, mutations are mirrored to SQLite
+    (table `onboarding_wizards`) and `rehydrate()` rebuilds the in-mem
+    map from disk on startup. Persistence is best-effort — write
+    failures are logged but never raise; the in-memory copy is the
+    source of truth for live reads.
+    """
 
     def __init__(self) -> None:
         self._states: Dict[str, WizardState] = {}
         self._lock = threading.Lock()
+
+    def rehydrate(self) -> None:
+        """Load all wizards from SQLite into the in-memory map."""
+        if not _p.is_persistence_enabled():
+            return
+        rows = _p.fetchall("SELECT * FROM onboarding_wizards")
+        with self._lock:
+            for r in rows:
+                try:
+                    state = _row_to_state(r)
+                    self._states[state.wizard_id] = state
+                except Exception as e:
+                    logger.warning("rehydrate row failed: %s", e)
+        logger.info("Onboarding rehydrated %d wizards", len(rows))
+
+    def _persist(self, state: "WizardState") -> None:
+        _p.upsert("onboarding_wizards", _state_to_row(state), pk="wizard_id")
 
     def start(self, tenant_id: str) -> WizardState:
         wid = f"wiz_{uuid.uuid4().hex[:12]}"
@@ -209,6 +282,7 @@ class OnboardingStore:
         )
         with self._lock:
             self._states[wid] = state
+        self._persist(state)
         logger.info("Onboarding wizard started: %s for tenant %s", wid, tenant_id)
         return state
 
@@ -249,6 +323,7 @@ class OnboardingStore:
             else:
                 state.current_step = STEPS[-1].key
             state.updated_at = datetime.now(AU_TZ)
+        self._persist(state)
         return state
 
     def complete(
@@ -287,6 +362,7 @@ class OnboardingStore:
             state.completed_at = datetime.now(AU_TZ)
             state.updated_at = state.completed_at
             state.current_step = "confirm"
+        self._persist(state)
         return state
 
     def clear(self) -> None:
@@ -303,3 +379,9 @@ def get_onboarding_store() -> OnboardingStore:
     if _store is None:
         _store = OnboardingStore()
     return _store
+
+
+# Rehydrate at init_db() time
+@_p.on_init
+def _rehydrate_on_init() -> None:
+    get_onboarding_store().rehydrate()

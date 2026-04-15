@@ -423,6 +423,19 @@ async def lifespan(app: FastAPI):
     """
     logger.info(f"RosterIQ API v2 starting up (version {APP_VERSION})")
 
+    # Round 11: open SQLite (if ROSTERIQ_DB_PATH set), apply schemas,
+    # rehydrate in-memory stores. No-op if the env var is unset, so
+    # demo/sandbox mode is unaffected.
+    try:
+        from rosteriq import persistence as _persistence
+        _persistence.init_db()
+        if _persistence.is_persistence_enabled():
+            logger.info("SQLite persistence ENABLED at %s", _persistence.db_path())
+        else:
+            logger.info("SQLite persistence disabled (in-memory only)")
+    except Exception:
+        logger.exception("Persistence init failed (non-fatal)")
+
     # P0 FIX: Pipelines are now lazily initialized per-venue via the local
     # get_pipeline(venue_id) wrapper below. Don't eagerly construct one here
     # since the factory requires a real venue_id and we don't have one at
