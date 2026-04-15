@@ -31,7 +31,7 @@ logger = logging.getLogger("rosteriq.weather_router")
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
-DATA_MODE = os.getenv("ROSTERIQ_DATA_MODE", "demo")
+WEATHER_BACKEND = os.getenv("ROSTERIQ_WEATHER_BACKEND", "demo").lower()
 BOM_VENUE_CONFIG = {
     # Example config (users would populate this per deployment)
     # "venue_123": {
@@ -45,12 +45,18 @@ _adapter = None
 
 
 def get_adapter():
-    """Lazy-load adapter based on mode."""
+    """Lazy-load adapter based on ROSTERIQ_WEATHER_BACKEND env var."""
     global _adapter
     if _adapter is None:
-        if DATA_MODE == "live":
-            _adapter = BOMAdapter(BOM_VENUE_CONFIG)
-            logger.info("Using live BOM adapter")
+        if WEATHER_BACKEND == "bom":
+            try:
+                _adapter = BOMAdapter(BOM_VENUE_CONFIG)
+                logger.info("Using live BOM adapter")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to initialize BOM adapter: {e}; falling back to demo"
+                )
+                _adapter = DemoWeatherAdapter()
         else:
             _adapter = DemoWeatherAdapter()
             logger.info("Using demo weather adapter")

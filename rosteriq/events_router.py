@@ -34,6 +34,10 @@ AU_TZ = timezone(timedelta(hours=10))
 
 router = APIRouter(tags=["events"])
 
+# Configuration from environment
+EVENTS_BACKEND = os.getenv("ROSTERIQ_EVENTS_BACKEND", "demo").lower()
+PERTHISOK_BASE_URL = os.getenv("ROSTERIQ_PERTHISOK_BASE_URL")
+
 # Global adapter instance (lazy-loaded)
 _adapter: Optional[CompositeEventsAdapter] = None
 
@@ -42,34 +46,35 @@ def _get_adapter() -> CompositeEventsAdapter:
     """Get or create the composite events adapter."""
     global _adapter
     if _adapter is None:
-        data_mode = os.getenv("ROSTERIQ_DATA_MODE", "demo").lower()
-
         adapters = []
 
-        if data_mode == "live":
+        if EVENTS_BACKEND == "perthisok":
             try:
-                adapters.append(PerthIsOKAdapter())
-            except ImportError:
-                logger.warning("httpx not available; skipping PerthIsOKAdapter")
+                adapter = PerthIsOKAdapter(base_url=PERTHISOK_BASE_URL)
+                adapters.append(adapter)
+                logger.info("Using live PerthIsOK adapter")
+            except Exception as e:
+                logger.warning(f"Failed to initialize PerthIsOK adapter: {e}; falling back to demo")
 
-            # Stadium config (example; would be loaded from config/env)
-            stadium_config = {
-                # "optus_stadium": {
-                #     "name": "Optus Stadium",
-                #     "lat": -31.945,
-                #     "lon": 115.836,
-                #     "schedule_url": "https://...",
-                #     "attendance_capacity": 60000,
-                # },
-            }
-            if stadium_config:
-                try:
-                    adapters.append(StadiumScheduleAdapter(stadium_config))
-                except ImportError:
-                    logger.warning("httpx not available; skipping StadiumScheduleAdapter")
+        # Stadium config (example; would be loaded from config/env)
+        stadium_config = {
+            # "optus_stadium": {
+            #     "name": "Optus Stadium",
+            #     "lat": -31.945,
+            #     "lon": 115.836,
+            #     "schedule_url": "https://...",
+            #     "attendance_capacity": 60000,
+            # },
+        }
+        if stadium_config:
+            try:
+                adapters.append(StadiumScheduleAdapter(stadium_config))
+            except ImportError:
+                logger.warning("httpx not available; skipping StadiumScheduleAdapter")
 
         # Always include demo as fallback
         adapters.append(DemoEventsAdapter())
+        logger.info(f"Events adapter: {EVENTS_BACKEND} with {len(adapters)} total adapters")
 
         _adapter = CompositeEventsAdapter(adapters)
 

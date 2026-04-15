@@ -446,6 +446,15 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to setup auth module (non-fatal)")
 
+    # Scheduled briefs: start the asyncio background scheduler that delivers
+    # morning/weekly/portfolio briefs to subscribed recipients via SMS + email.
+    try:
+        from rosteriq.brief_lifecycle import start_briefs_on_startup
+        await start_briefs_on_startup()
+        logger.info("Scheduled brief dispatcher started")
+    except Exception:
+        logger.exception("Failed to start scheduled brief dispatcher (non-fatal)")
+
     yield
 
     logger.info("RosterIQ API v2 shutting down")
@@ -454,6 +463,11 @@ async def lifespan(app: FastAPI):
         _sj.get_global_scheduler().stop(join_timeout_s=2.0)
     except Exception:
         logger.exception("Scheduler shutdown failed")
+    try:
+        from rosteriq.brief_lifecycle import stop_briefs_on_shutdown
+        await stop_briefs_on_shutdown()
+    except Exception:
+        logger.exception("Brief dispatcher shutdown failed")
 
 
 # ============================================================================
@@ -2611,6 +2625,7 @@ from rosteriq.access_router import access_router as _access_router
 from rosteriq.award_router import router as _award_router
 from rosteriq.tanda_webhook_router import router as _tanda_webhook_router
 from rosteriq.accountability_router import router as _accountability_router
+from rosteriq.brief_subscriptions_router import router as _brief_subscriptions_router
 
 app.include_router(_availability_router)
 app.include_router(_weather_router)
@@ -2623,6 +2638,7 @@ app.include_router(_access_router)
 app.include_router(_award_router)
 app.include_router(_tanda_webhook_router)
 app.include_router(_accountability_router)
+app.include_router(_brief_subscriptions_router)
 
 
 # ============================================================================

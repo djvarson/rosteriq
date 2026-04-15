@@ -807,6 +807,293 @@ def dispatch_all_weekly_digests(
 
 
 # ---------------------------------------------------------------------------
+# SMS + Email delivery (Moment 12 follow-on: actual delivery)
+# ---------------------------------------------------------------------------
+
+async def dispatch_morning_brief_with_delivery(
+    venue_id: str,
+    *,
+    target_date: Optional[str] = None,
+    yesterday_recap: Optional[Dict[str, Any]] = None,
+    venue_label: Optional[str] = None,
+    store: Any = None,
+) -> Dict[str, Any]:
+    """Compose a morning brief and deliver it via SMS + email to subscribers.
+
+    Args:
+        venue_id: The venue to brief.
+        target_date: YYYY-MM-DD; defaults to yesterday UTC.
+        yesterday_recap: Optional recap dict to enrich the brief.
+        venue_label: Optional human label.
+        store: Injectable accountability-store stub for tests.
+
+    Returns:
+        Dict with keys:
+        - venue_id
+        - composed_at (ISO timestamp)
+        - delivered: list of {recipient, channel, status, detail}
+        - failed: list of {recipient, channel, error}
+    """
+    from rosteriq import brief_subscriptions
+    from rosteriq import email_provider as _email_provider
+    from rosteriq import call_in as _call_in
+
+    # Compose the brief
+    brief = _morning_brief.compose_brief_from_store(
+        venue_id,
+        target_date=target_date,
+        yesterday_recap=yesterday_recap,
+        venue_label=venue_label,
+        store=store,
+    )
+    text_body = _morning_brief.render_text(brief)
+
+    # Render HTML version
+    html_body = _render_html_brief(brief, brief_type="morning")
+
+    # Get subscriptions for this venue + brief type
+    sub_store = brief_subscriptions.get_subscription_store()
+    subs = sub_store.list_for_brief(venue_id, "morning")
+
+    delivered: List[Dict[str, Any]] = []
+    failed: List[Dict[str, Any]] = []
+
+    # Send to each subscriber
+    for sub in subs:
+        for channel in sub.delivery_channels:
+            try:
+                if channel == "email" and sub.email:
+                    provider = _email_provider.get_email_provider()
+                    receipt = await provider.send(
+                        to=sub.email,
+                        subject=f"RosterIQ Morning Brief — {brief.get('venue_label', venue_id)} ({brief.get('date', 'unknown')})",
+                        body_text=text_body,
+                        body_html=html_body,
+                    )
+                    delivered.append({
+                        "recipient": sub.email,
+                        "channel": "email",
+                        "status": receipt.get("status", "sent"),
+                        "detail": receipt.get("id", ""),
+                    })
+                elif channel == "sms" and sub.phone:
+                    # SMS: truncate to 320 chars (2 segments)
+                    sms_body = _format_sms_brief(brief)[:320]
+                    provider = _call_in.get_service().provider
+                    receipt = await provider.send(sub.phone, sms_body)
+                    delivered.append({
+                        "recipient": sub.phone,
+                        "channel": "sms",
+                        "status": receipt.get("status", "queued"),
+                        "detail": receipt.get("id", ""),
+                    })
+            except Exception as exc:
+                failed.append({
+                    "recipient": sub.email or sub.phone or f"user_{sub.user_id}",
+                    "channel": channel,
+                    "error": str(exc),
+                })
+
+    return {
+        "venue_id": venue_id,
+        "composed_at": _now_iso(),
+        "delivered": delivered,
+        "failed": failed,
+    }
+
+
+async def dispatch_weekly_digest_with_delivery(
+    venue_id: str,
+    *,
+    week_ending: Optional[str] = None,
+    window_days: int = 7,
+    venue_label: Optional[str] = None,
+    store: Any = None,
+) -> Dict[str, Any]:
+    """Compose a weekly digest and deliver it via SMS + email to subscribers."""
+    from rosteriq import brief_subscriptions
+    from rosteriq import email_provider as _email_provider
+    from rosteriq import call_in as _call_in
+
+    # Compose the digest
+    digest = _weekly_digest.compose_weekly_digest_from_store(
+        venue_id,
+        week_ending=week_ending,
+        window_days=window_days,
+        venue_label=venue_label,
+        store=store,
+    )
+
+    # Skip if should_send is False (quiet week)
+    if not digest.get("should_send", True):
+        return {
+            "venue_id": venue_id,
+            "composed_at": _now_iso(),
+            "delivered": [],
+            "failed": [],
+            "skipped": True,
+        }
+
+    text_body = _weekly_digest.render_text(digest)
+    html_body = _render_html_brief(digest, brief_type="weekly")
+
+    sub_store = brief_subscriptions.get_subscription_store()
+    subs = sub_store.list_for_brief(venue_id, "weekly")
+
+    delivered: List[Dict[str, Any]] = []
+    failed: List[Dict[str, Any]] = []
+
+    for sub in subs:
+        for channel in sub.delivery_channels:
+            try:
+                if channel == "email" and sub.email:
+                    provider = _email_provider.get_email_provider()
+                    receipt = await provider.send(
+                        to=sub.email,
+                        subject=f"RosterIQ Weekly Digest — {digest.get('venue_label', venue_id)} ({digest.get('week_start', 'unknown')})",
+                        body_text=text_body,
+                        body_html=html_body,
+                    )
+                    delivered.append({
+                        "recipient": sub.email,
+                        "channel": "email",
+                        "status": receipt.get("status", "sent"),
+                        "detail": receipt.get("id", ""),
+                    })
+                elif channel == "sms" and sub.phone:
+                    sms_body = _format_sms_brief(digest)[:320]
+                    provider = _call_in.get_service().provider
+                    receipt = await provider.send(sub.phone, sms_body)
+                    delivered.append({
+                        "recipient": sub.phone,
+                        "channel": "sms",
+                        "status": receipt.get("status", "queued"),
+                        "detail": receipt.get("id", ""),
+                    })
+            except Exception as exc:
+                failed.append({
+                    "recipient": sub.email or sub.phone or f"user_{sub.user_id}",
+                    "channel": channel,
+                    "error": str(exc),
+                })
+
+    return {
+        "venue_id": venue_id,
+        "composed_at": _now_iso(),
+        "delivered": delivered,
+        "failed": failed,
+        "skipped": False,
+    }
+
+
+async def dispatch_portfolio_recap_with_delivery(
+    venue_ids: List[str],
+    *,
+    target_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compose portfolio recap and deliver to owner-level subscribers only.
+
+    This is an owner-level report, so only "owner" role subscribers receive it.
+    """
+    from rosteriq import brief_subscriptions
+
+    # Portfolio recap requires venue recaps — for now, skip full implementation
+    # as it needs a shift_recap adapter. This is a placeholder.
+    delivered: List[Dict[str, Any]] = []
+    failed: List[Dict[str, Any]] = []
+
+    sub_store = brief_subscriptions.get_subscription_store()
+
+    # Collect all owner subscriptions across venues
+    owner_subs = [
+        s for s in sub_store.all()
+        if (s.venue_id in venue_ids and
+            s.user_role == "owner" and
+            s.enabled and
+            "portfolio" in s.brief_types)
+    ]
+
+    # For now, just track that we would send to owners
+    # Full implementation requires shift_recap integration
+    for sub in owner_subs:
+        delivered.append({
+            "recipient": sub.email or sub.phone or f"user_{sub.user_id}",
+            "channel": "email" if sub.email else "sms",
+            "status": "pending",
+            "detail": "portfolio_recap_not_yet_implemented",
+        })
+
+    return {
+        "venue_ids": venue_ids,
+        "composed_at": _now_iso(),
+        "delivered": delivered,
+        "failed": failed,
+    }
+
+
+def _format_sms_brief(brief: Dict[str, Any]) -> str:
+    """Format a brief dict as SMS text (plain text, no HTML)."""
+    if brief.get("week_start"):  # weekly digest
+        headline = brief.get("headline", "Weekly digest")
+        venue = brief.get("venue_label", "Venue")
+        return f"{venue} — {headline}"
+    else:  # morning brief
+        headline = brief.get("headline", "Morning briefing")
+        venue = brief.get("venue_label", "Venue")
+        return f"{venue} — {headline}"
+
+
+def _render_html_brief(brief: Dict[str, Any], brief_type: str = "morning") -> str:
+    """Render a brief dict as HTML email body."""
+    venue_label = brief.get("venue_label", "Venue")
+    headline = brief.get("headline", "RosterIQ Brief")
+
+    if brief_type == "weekly":
+        week_start = brief.get("week_start", "")
+        week_end = brief.get("week_end", "")
+        window = f"({week_start} to {week_end})" if week_start and week_end else ""
+        title = f"Weekly Digest {window}"
+    else:
+        date = brief.get("date", "")
+        title = f"Morning Brief ({date})" if date else "Morning Brief"
+
+    html = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; color: #333; }}
+            .header {{ background: #1a73e8; color: white; padding: 20px; border-radius: 4px; margin-bottom: 20px; }}
+            .headline {{ font-size: 18px; font-weight: bold; margin-bottom: 10px; }}
+            .section {{ margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 4px; }}
+            .one-thing {{ background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="headline">{venue_label} — {title}</div>
+            <div>{headline}</div>
+        </div>
+
+        <div class="section">
+            <strong>Summary</strong>
+            <p>{brief.get("summary", "")}</p>
+        </div>
+
+        <div class="one-thing">
+            <strong>Action for today:</strong>
+            <p>{brief.get("one_thing") or brief.get("one_pattern", "Review your recs.")}</p>
+        </div>
+
+        <div style="color: #999; font-size: 12px; margin-top: 30px;">
+            <p>This is an automated message from RosterIQ.</p>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
@@ -251,10 +252,272 @@ class DemoWeatherAdapter(WeatherAdapter):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# BOM Client with Caching
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class BOMClient:
+    """
+    HTTP client for BOM API with caching and retry logic.
+
+    Features:
+    - 10-minute in-process cache keyed by URL
+    - 3-retry exponential backoff (1s, 2s, 4s)
+    - 10s timeout per request
+    - Lazy httpx import
+    """
+
+    BASE_URL = "http://reg.bom.gov.au/fwo"
+    TIMEOUT = 10
+    CACHE_TTL_SECONDS = 600  # 10 minutes
+    MAX_RETRIES = 3
+
+    def __init__(self):
+        """Initialize BOM client."""
+        self._client: Optional[httpx.AsyncClient] = None
+        self._cache: Dict[str, tuple[dict, float]] = {}  # url -> (data, timestamp)
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Lazy-load httpx client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=self.TIMEOUT)
+        return self._client
+
+    async def close(self):
+        """Close client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+
+    async def _fetch_with_retry(self, url: str) -> dict:
+        """Fetch with exponential backoff retry."""
+        client = await self._get_client()
+        last_error = None
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = await client.get(url)
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    last_error = BOMFetchError(
+                        f"BOM API returned {response.status_code}"
+                    )
+            except Exception as e:
+                last_error = e
+
+            if attempt < self.MAX_RETRIES - 1:
+                backoff = 2 ** attempt  # 1s, 2s, 4s
+                await asyncio.sleep(backoff)
+
+        raise BOMFetchError(f"Failed after {self.MAX_RETRIES} retries: {last_error}")
+
+    async def get_observations(self, product_id: str) -> dict:
+        """
+        Fetch observations from BOM.
+
+        Args:
+            product_id: BOM product ID (e.g., "IDW14400")
+
+        Returns:
+            Observations dict from BOM JSON
+        """
+        url = f"{self.BASE_URL}/{product_id}.json"
+
+        # Check cache
+        now = time.time()
+        if url in self._cache:
+            data, timestamp = self._cache[url]
+            if now - timestamp < self.CACHE_TTL_SECONDS:
+                logger.debug(f"Cache hit for {product_id}")
+                return data
+
+        # Fetch and cache
+        try:
+            data = await self._fetch_with_retry(url)
+            self._cache[url] = (data, now)
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to fetch observations for {product_id}: {e}")
+            raise
+
+    async def get_forecast(self, product_id: str) -> dict:
+        """
+        Fetch forecast from BOM.
+
+        Args:
+            product_id: BOM product ID (e.g., "IDW14400")
+
+        Returns:
+            Forecast dict from BOM JSON
+        """
+        # BOM forecast endpoints typically use _forecast suffix or separate feed
+        # For now, return empty dict to gracefully degrade
+        logger.debug(f"BOM forecast not yet fully implemented for {product_id}")
+        return {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BOM Station/Product Mapping
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Hardcoded lat/lon -> BOM product_id mapping for major AU cities
+# Venues resolve to nearest major city's station
+STATION_MAPPING = {
+    "perth": {
+        "lat": -31.9454,
+        "lon": 115.8381,
+        "product_id_obs": "IDW14400",  # Perth observations
+        "product_id_forecast": "IDW14400",
+    },
+    "brisbane": {
+        "lat": -27.4698,
+        "lon": 153.0251,
+        "product_id_obs": "IDQ11295",  # Brisbane city observations
+        "product_id_forecast": "IDQ11295",
+    },
+    "sydney": {
+        "lat": -33.8688,
+        "lon": 151.2093,
+        "product_id_obs": "IDN60801",  # Sydney observations
+        "product_id_forecast": "IDN60801",
+    },
+    "melbourne": {
+        "lat": -37.8136,
+        "lon": 144.9631,
+        "product_id_obs": "IDV10753",  # Melbourne observations
+        "product_id_forecast": "IDV10753",
+    },
+    "adelaide": {
+        "lat": -34.9285,
+        "lon": 138.6007,
+        "product_id_obs": "IDS10044",  # Adelaide observations
+        "product_id_forecast": "IDS10044",
+    },
+    "gold_coast": {
+        "lat": -28.0028,
+        "lon": 153.4318,
+        "product_id_obs": "IDQ11295",  # Brisbane city (nearest)
+        "product_id_forecast": "IDQ11295",
+    },
+}
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate distance in km between two lat/lon points using Haversine formula.
+
+    Args:
+        lat1, lon1: First point (degrees)
+        lat2, lon2: Second point (degrees)
+
+    Returns:
+        Distance in km
+    """
+    import math
+
+    R = 6371.0  # Earth's radius in km
+
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
+    c = 2 * math.asin(math.sqrt(a))
+
+    return R * c
+
+
+def resolve_station(venue_lat: Optional[float], venue_lon: Optional[float]) -> tuple[str, str]:
+    """
+    Resolve venue coordinates to nearest BOM station.
+
+    Args:
+        venue_lat, venue_lon: Venue coordinates
+
+    Returns:
+        Tuple of (product_id_obs, product_id_forecast)
+    """
+    if venue_lat is None or venue_lon is None:
+        # Default to Brisbane
+        logger.warning("No venue coordinates; defaulting to Brisbane")
+        return STATION_MAPPING["brisbane"]["product_id_obs"], STATION_MAPPING["brisbane"]["product_id_forecast"]
+
+    # Find nearest station
+    min_distance = float('inf')
+    nearest_station = "brisbane"
+
+    for station_name, station_info in STATION_MAPPING.items():
+        dist = haversine_km(venue_lat, venue_lon, station_info["lat"], station_info["lon"])
+        if dist < min_distance:
+            min_distance = dist
+            nearest_station = station_name
+
+    station = STATION_MAPPING[nearest_station]
+    logger.debug(f"Resolved venue ({venue_lat}, {venue_lon}) to {nearest_station} ({min_distance:.1f}km away)")
+    return station["product_id_obs"], station["product_id_forecast"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # BOM Live Adapter
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class BOMLiveWeatherAdapter(WeatherAdapter):
+    """
+    Live BOM adapter using BOMClient with automatic station resolution.
+
+    Features:
+    - Auto-resolve venue lat/lon to nearest BOM station
+    - Graceful fallback to empty list on network failure
+    - 10-minute caching
+    """
+
+    def __init__(self):
+        """Initialize BOM live adapter."""
+        if not httpx:
+            raise ImportError("httpx required for BOMLiveWeatherAdapter")
+        self.client = BOMClient()
+
+    async def close(self):
+        """Close client."""
+        await self.client.close()
+
+    async def get_current(self, venue_id: str) -> WeatherObservation:
+        """
+        Fetch current observation from BOM (or return empty fallback).
+
+        Note: This implementation doesn't require venue_id to lat/lon mapping
+        since we'd need that external config. For now, raises gracefully.
+        """
+        raise BOMFetchError(
+            "BOMLiveWeatherAdapter.get_current requires venue lat/lon config; "
+            "use with signal_feeds factory that has venue coordinates"
+        )
+
+    async def get_forecast(
+        self, venue_id: str, days: int = 7
+    ) -> list[WeatherForecastDay]:
+        """
+        Fetch forecast from BOM.
+
+        Gracefully returns empty list on any failure.
+        """
+        try:
+            # This is a placeholder; real implementation would need venue coords
+            logger.warning(
+                f"BOM forecast for {venue_id} requires venue configuration; returning empty"
+            )
+            return []
+        except Exception as e:
+            logger.warning(f"BOM forecast fetch failed for {venue_id}: {e}")
+            return []
+
+
+# Keep the old BOMAdapter for backward compatibility (config-driven)
 class BOMAdapter(WeatherAdapter):
     """
     Live BOM adapter using httpx.

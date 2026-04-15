@@ -20,6 +20,11 @@ from rosteriq.deputy_adapter import (
     DemoDeputyAdapter,
 )
 from rosteriq.deputy_integration import DeputyClient
+from rosteriq.humanforce_adapter import (
+    HumanForceAdapter,
+    DemoHumanForceAdapter,
+)
+from rosteriq.humanforce_integration import HumanForceClient
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +51,8 @@ def get_scheduling_adapter(platform: Optional[str] = None) -> SchedulingPlatform
 
     Returns:
         SchedulingPlatformAdapter instance (TandaAdapter, DeputyAdapter,
-        DemoTandaAdapter, or DemoDeputyAdapter)
+        HumanForceAdapter, DemoTandaAdapter, DemoDeputyAdapter,
+        or DemoHumanForceAdapter)
 
     Raises:
         ValueError: If platform is unknown or required credentials are missing
@@ -68,6 +74,10 @@ def get_scheduling_adapter(platform: Optional[str] = None) -> SchedulingPlatform
     if platform in ("demo_deputy", "deputy_demo"):
         logger.info("Using demo Deputy adapter (explicit platform selection)")
         return DemoDeputyAdapter()
+
+    if platform in ("demo_humanforce", "humanforce_demo"):
+        logger.info("Using demo HumanForce adapter (explicit platform selection)")
+        return DemoHumanForceAdapter()
 
     # For "tanda" and "deputy" platforms, check data_mode or credentials
     if platform == "tanda":
@@ -109,8 +119,32 @@ def get_scheduling_adapter(platform: Optional[str] = None) -> SchedulingPlatform
             logger.info("Using demo Deputy adapter (credentials not configured)")
             return DemoDeputyAdapter()
 
+    elif platform == "humanforce":
+        if data_mode == "demo":
+            logger.info("Using demo HumanForce adapter (ROSTERIQ_DATA_MODE=demo)")
+            return DemoHumanForceAdapter()
+
+        # Try live mode if credentials present
+        region = os.environ.get("HUMANFORCE_REGION", "apac")
+        api_key = os.environ.get("HUMANFORCE_API_KEY")
+        client_id = os.environ.get("HUMANFORCE_CLIENT_ID")
+        client_secret = os.environ.get("HUMANFORCE_CLIENT_SECRET")
+
+        if api_key or (client_id and client_secret):
+            logger.info("Using real HumanForce adapter")
+            client = HumanForceClient(
+                region=region,
+                api_key=api_key,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+            return HumanForceAdapter(client)
+        else:
+            logger.info("Using demo HumanForce adapter (credentials not configured)")
+            return DemoHumanForceAdapter()
+
     else:
         raise ValueError(
             f"Unknown scheduling platform: {platform}. "
-            f"Supported: tanda, deputy, demo_tanda, demo_deputy"
+            f"Supported: tanda, deputy, humanforce, demo_tanda, demo_deputy, demo_humanforce"
         )

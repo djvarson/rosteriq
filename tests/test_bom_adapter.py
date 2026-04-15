@@ -25,6 +25,10 @@ from rosteriq.data_feeds.bom import (
     BOMFetchError,
     WeatherObservation,
     WeatherForecastDay,
+    BOMClient,
+    resolve_station,
+    haversine_km,
+    STATION_MAPPING,
 )
 
 
@@ -243,3 +247,152 @@ def test_bom_get_current_parses_observation():
 def test_bom_raises_on_non_200():
     """Sync wrapper for async test."""
     _run(test_bom_raises_on_non_200(MagicMock()))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BOMClient Tests (new caching + retry logic)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@patch("rosteriq.data_feeds.bom.httpx")
+async def test_bom_client_constructs_correct_url(mock_httpx_module):
+    """BOMClient constructs correct URL for product_id."""
+    mock_client = AsyncMock()
+    mock_httpx_module.AsyncClient.return_value = mock_client
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"observations": {"data": []}}
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    client = BOMClient()
+    await client.get_observations("IDW14400")
+
+    # Verify URL construction
+    mock_client.get.assert_called_once()
+    call_args = mock_client.get.call_args
+    assert "http://reg.bom.gov.au/fwo/IDW14400.json" in str(call_args)
+
+
+def test_bom_client_constructs_correct_url():
+    """Sync wrapper."""
+    _run(test_bom_client_constructs_correct_url(MagicMock()))
+
+
+@patch("rosteriq.data_feeds.bom.httpx")
+async def test_bom_client_caches_results(mock_httpx_module):
+    """BOMClient caches results for 10 minutes."""
+    mock_client = AsyncMock()
+    mock_httpx_module.AsyncClient.return_value = mock_client
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"observations": {"data": [{"air_temp": "20"}]}}
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    client = BOMClient()
+
+    # First call
+    result1 = await client.get_observations("IDW14400")
+    call_count_1 = mock_client.get.call_count
+
+    # Second call (should be cached)
+    result2 = await client.get_observations("IDW14400")
+    call_count_2 = mock_client.get.call_count
+
+    # Should only have called once due to caching
+    assert call_count_1 == 1
+    assert call_count_2 == 1
+    assert result1 == result2
+
+
+def test_bom_client_caches_results():
+    """Sync wrapper."""
+    _run(test_bom_client_caches_results(MagicMock()))
+
+
+@patch("rosteriq.data_feeds.bom.httpx")
+async def test_bom_client_parses_sample_json(mock_httpx_module):
+    """BOMClient parses sample BOM observation JSON."""
+    mock_client = AsyncMock()
+    mock_httpx_module.AsyncClient.return_value = mock_client
+
+    # Sample BOM observations response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "observations": {
+            "data": [
+                {
+                    "air_temp": "23.5",
+                    "apparent_t": "21.0",
+                    "rain_trace": "0.5",
+                    "rel_hum": "65",
+                    "wind_spd_kmh": "12.3",
+                    "local_date_time_full": "2026-04-15T14:30:00+10:00",
+                }
+            ]
+        }
+    }
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    client = BOMClient()
+    obs = await client.get_observations("IDW14400")
+
+    assert "observations" in obs
+    assert "data" in obs["observations"]
+    assert len(obs["observations"]["data"]) > 0
+
+
+def test_bom_client_parses_sample_json():
+    """Sync wrapper."""
+    _run(test_bom_client_parses_sample_json(MagicMock()))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Station Resolution Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_resolve_station_perth():
+    """Perth lat/lon resolves to IDW14400."""
+    # Perth CBD coordinates
+    perth_lat, perth_lon = -31.9454, 115.8381
+    obs_id, fcst_id = resolve_station(perth_lat, perth_lon)
+    assert obs_id == "IDW14400"
+    assert fcst_id == "IDW14400"
+
+
+def test_resolve_station_brisbane():
+    """Brisbane lat/lon resolves to IDQ11295."""
+    # Brisbane CBD coordinates
+    brisbane_lat, brisbane_lon = -27.4698, 153.0251
+    obs_id, fcst_id = resolve_station(brisbane_lat, brisbane_lon)
+    assert obs_id == "IDQ11295"
+    assert fcst_id == "IDQ11295"
+
+
+def test_resolve_station_gold_coast():
+    """Gold Coast lat/lon resolves to Brisbane station (nearest)."""
+    # Gold Coast coordinates
+    gc_lat, gc_lon = -28.0028, 153.4318
+    obs_id, fcst_id = resolve_station(gc_lat, gc_lon)
+    # Should resolve to Brisbane (IDQ11295) as nearest station
+    assert obs_id == "IDQ11295"
+
+
+def test_resolve_station_none_coordinates():
+    """None coordinates default to Brisbane."""
+    obs_id, fcst_id = resolve_station(None, None)
+    assert obs_id == "IDQ11295"  # Brisbane default
+
+
+def test_haversine_perth_to_brisbane():
+    """Haversine distance Perth to Brisbane ~3600km."""
+    perth_lat, perth_lon = -31.9454, 115.8381
+    brisbane_lat, brisbane_lon = -27.4698, 153.0251
+
+    distance = haversine_km(perth_lat, perth_lon, brisbane_lat, brisbane_lon)
+
+    # Perth to Brisbane is roughly 3600km (across Australia)
+    assert 3500 <= distance <= 3700, f"Expected ~3600km, got {distance}km"

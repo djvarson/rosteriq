@@ -4047,6 +4047,165 @@
             border-left-color: #0ea5e9;
             border-color: #334155;
         }
+
+        /* -------- Role-based view switcher -------- */
+        .role-chip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            color: #c2d2ff;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 16px;
+        }
+
+        .role-chip-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .role-chip-icon {
+            font-size: 14px;
+        }
+
+        .role-chip-text {
+            font-size: 12px;
+        }
+
+        .view-switcher {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 12px;
+        }
+
+        .view-switcher-dropdown {
+            background: rgba(255, 255, 255, 0.1);
+            color: #c2d2ff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23c2d2ff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            padding-right: 28px;
+            min-height: 32px;
+            transition: border-color 0.15s ease, background-color 0.15s ease;
+        }
+
+        .view-switcher-dropdown:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .view-switcher-dropdown:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.4);
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+        }
+
+        /* L1 Onboarding Banner */
+        .l1-onboarding-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 16px;
+            background: rgba(14, 165, 233, 0.08);
+            border: 1px solid rgba(14, 165, 233, 0.2);
+            border-radius: 8px;
+            color: #0ea5e9;
+            font-size: 13px;
+            margin-bottom: 16px;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .l1-onboarding-banner.hidden {
+            display: none;
+        }
+
+        .l1-onboarding-text {
+            flex: 1;
+        }
+
+        .l1-onboarding-dismiss {
+            background: none;
+            border: none;
+            color: #0ea5e9;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0;
+            min-width: auto;
+            opacity: 0.7;
+            transition: opacity 0.15s ease;
+            flex-shrink: 0;
+        }
+
+        .l1-onboarding-dismiss:hover {
+            opacity: 1;
+        }
+
+        /* Role-based section visibility */
+        body[data-view="l1"] .role-l2,
+        body[data-view="l1"] .role-owner {
+            display: none !important;
+        }
+
+        body[data-view="l2"] .role-owner {
+            display: none !important;
+        }
+
+        body[data-view="owner"] {
+            /* Shows everything */
+        }
+
+        html.dark .role-chip {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.15);
+            color: #94a3b8;
+        }
+
+        html.dark .view-switcher-dropdown {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.15);
+            color: #cbd5e1;
+        }
+
+        html.dark .view-switcher-dropdown:hover {
+            border-color: rgba(255, 255, 255, 0.25);
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        html.dark .l1-onboarding-banner {
+            background: rgba(14, 165, 233, 0.1);
+            border-color: rgba(14, 165, 233, 0.3);
+            color: #38bdf8;
+        }
+
+        html.dark .l1-onboarding-dismiss {
+            color: #38bdf8;
+        }
     </style>
 
     <!-- Offline detection banner -->
@@ -4063,6 +4222,19 @@
                 <span>Dashboard</span>
                 <span id="userBadge" class="user-badge hidden"></span>
                 <button id="logoutBtn" class="logout-btn hidden" onclick="handleLogout()">Sign Out</button>
+                <div class="role-chip" id="roleChip" style="margin-left: auto; margin-right: 0;">
+                    <span class="role-chip-label">
+                        <span class="role-chip-icon" id="roleChipIcon">👤</span>
+                        <span class="role-chip-text" id="roleChipText">Loading…</span>
+                    </span>
+                </div>
+                <div class="view-switcher" id="viewSwitcher" style="display: none;">
+                    <select id="viewSwitcherDropdown" class="view-switcher-dropdown" onchange="applyViewFilter(this.value)" title="Switch between role-based views">
+                        <option value="l1">L1 Supervisor</option>
+                        <option value="l2">L2 Roster Maker</option>
+                        <option value="owner">Owner</option>
+                    </select>
+                </div>
             </div>
             <div class="venue-switcher" id="venueSwitcher">
                 <select id="venueSelect" onchange="switchVenue(this.value)">
@@ -4080,8 +4252,8 @@
             </div>
         </header>
 
-        <!-- ROSTER MAKER VIEW -->
-        <div id="roster" class="view active">
+        <!-- ROSTER MAKER VIEW (L2 + OWNER) -->
+        <div id="roster" class="view active role-l2">
             <div class="week-selector">
                 <button onclick="previousWeek()">← Previous</button>
                 <div class="week-display">
@@ -4145,8 +4317,8 @@
                 </div>
             </div>
 
-            <!-- Patterns Learned Panel -->
-            <div class="patterns-learned" id="patternsCard">
+            <!-- Patterns Learned Panel (L2 + OWNER) -->
+            <div class="patterns-learned role-l2" id="patternsCard">
                 <div class="patterns-title">Patterns Learned</div>
                 <div class="patterns-list" id="patternsList">
                     <div class="patterns-empty">Loading patterns…</div>
@@ -4184,8 +4356,8 @@
                 </button>
             </div>
 
-            <!-- Wage & Compliance Check Card -->
-            <div class="award-compliance" id="awardComplianceCard">
+            <!-- Wage & Compliance Check Card (L2 + OWNER) -->
+            <div class="award-compliance role-l2" id="awardComplianceCard">
                 <div class="award-header">
                     <div class="award-title">
                         <span>✓</span> Wage & Compliance Check
@@ -4224,8 +4396,8 @@
                 </div>
             </div>
 
-            <!-- Accountability & Variance Card -->
-            <div class="accountability-card" id="accountabilityCard">
+            <!-- Accountability & Variance Card (OWNER only) -->
+            <div class="accountability-card role-owner" id="accountabilityCard">
                 <div class="accountability-header">
                     <div class="accountability-icon">📊</div>
                     <span>Accountability & Variance</span>
@@ -4268,6 +4440,12 @@
 
         <!-- ON-SHIFT VIEW -->
         <div id="onshift" class="view">
+            <!-- L1 Onboarding Banner -->
+            <div class="l1-onboarding-banner hidden" id="l1OnboardingBanner">
+                <div class="l1-onboarding-text">You're viewing the On-Shift dashboard. Ask your roster maker for roster-editing access.</div>
+                <button class="l1-onboarding-dismiss" id="l1OnboardingDismiss" onclick="dismissL1Onboarding()">×</button>
+            </div>
+
             <div class="status-header">
                 <div>
                     <span class="live-badge">● LIVE</span>
@@ -4407,8 +4585,8 @@
                 </div>
             </div>
 
-            <!-- Scenario Solver: POST /api/v1/scenarios/wage-cost -->
-            <div class="scenario-card" id="scenarioCard">
+            <!-- Scenario Solver: POST /api/v1/scenarios/wage-cost (L2 + OWNER) -->
+            <div class="scenario-card role-l2" id="scenarioCard">
                 <div class="scenario-header">
                     <span class="scenario-title">Scenario Solver</span>
                     <div class="scenario-mode-tabs" id="scenarioModeTabs">
@@ -4452,8 +4630,8 @@
                 </div>
             </div>
 
-            <!-- Ask RosterIQ — Moment 3: deterministic natural-language queries -->
-            <div class="ask-card" id="askCard">
+            <!-- Ask RosterIQ — Moment 3: deterministic natural-language queries (L2 + OWNER) -->
+            <div class="ask-card role-l2" id="askCard">
                 <div class="ask-header">
                     <div class="ask-title">Ask RosterIQ</div>
                     <div class="ask-subtitle">Plain-English questions. Deterministic answers. No LLM guesswork.</div>
@@ -4564,8 +4742,8 @@
                 </div>
             </div>
 
-            <!-- Portfolio View — Moment 9: multi-venue roll-up (Tier 3) -->
-            <div class="portfolio-card hidden" id="portfolioCard">
+            <!-- Portfolio View — Moment 9: multi-venue roll-up (OWNER only) -->
+            <div class="portfolio-card role-owner hidden" id="portfolioCard">
                 <div class="portfolio-header">
                     <div>
                         <div class="portfolio-title">Portfolio View</div>
@@ -4793,6 +4971,169 @@
         let currentWeekStart = new Date('2026-04-07');
         let demandChart = null;
         let demandComparisonChart = null;
+
+        // -------- Role-based view management --------
+        let _userAccessLevel = 'owner';  // Default to owner in demo mode
+        let _userPermissions = [];       // Permissions array from the server
+        let _currentView = 'owner';      // Current view selection
+
+        // Fetch user access level and permissions from /api/v1/access/me
+        async function fetchAccessLevel() {
+            try {
+                const resp = await fetch('/api/v1/access/me');
+                if (!resp.ok) {
+                    console.warn(`Access endpoint returned ${resp.status}, defaulting to OWNER view for demos`);
+                    applyViewFilter('owner');
+                    updateRoleChip('owner', []);
+                    return;
+                }
+                const data = await resp.json();
+                _userAccessLevel = data.access_level || 'owner';
+                _userPermissions = data.permissions || [];
+
+                // Initialize the view based on URL or access level
+                const urlView = new URLSearchParams(window.location.search).get('view');
+                let initialView = _userAccessLevel;
+
+                // Allow viewing lower tiers (L2 can see L1, OWNER can see both)
+                if (urlView) {
+                    if (_userAccessLevel === 'owner') {
+                        initialView = urlView; // OWNER can see any view
+                    } else if (_userAccessLevel === 'l2' && (urlView === 'l1' || urlView === 'l2')) {
+                        initialView = urlView; // L2 can only see L1 or L2
+                    } else if (_userAccessLevel === 'l1' && urlView === 'l1') {
+                        initialView = urlView; // L1 can only see L1
+                    }
+                }
+
+                applyViewFilter(initialView);
+                updateRoleChip(_userAccessLevel, _userPermissions);
+                updateViewSwitcherVisibility(_userAccessLevel);
+            } catch (err) {
+                console.warn('Failed to fetch access level, defaulting to OWNER view', err);
+                applyViewFilter('owner');
+                updateRoleChip('owner', []);
+            }
+        }
+
+        // Apply a view filter and update the DOM
+        function applyViewFilter(viewName) {
+            // Validate the view name
+            if (!['l1', 'l2', 'owner'].includes(viewName)) viewName = 'owner';
+
+            _currentView = viewName;
+            document.body.dataset.view = viewName;
+
+            // Update URL with ?view= parameter
+            const url = new URL(window.location);
+            url.searchParams.set('view', viewName);
+            history.replaceState(null, '', url);
+
+            // Update the view switcher dropdown
+            const dropdown = document.getElementById('viewSwitcherDropdown');
+            if (dropdown) dropdown.value = viewName;
+
+            // Show/hide L1 onboarding banner
+            const l1Banner = document.getElementById('l1OnboardingBanner');
+            if (l1Banner) {
+                if (viewName === 'l1') {
+                    const dismissed = new URLSearchParams(window.location.search).get('l1_banner_dismissed');
+                    if (!dismissed) {
+                        l1Banner.classList.remove('hidden');
+                    } else {
+                        l1Banner.classList.add('hidden');
+                    }
+                } else {
+                    l1Banner.classList.add('hidden');
+                }
+            }
+
+            // Pause live feed if editing rosters (L2/OWNER on roster view)
+            if (viewName === 'l1') {
+                // L1 needs live feed
+                resumeLiveFeed();
+            } else {
+                // L2/OWNER might be editing, pause for better UX
+                pauseLiveFeed();
+            }
+        }
+
+        // Update the role chip in the header
+        function updateRoleChip(accessLevel, permissions) {
+            const chipText = document.getElementById('roleChipText');
+            const chipIcon = document.getElementById('roleChipIcon');
+
+            if (!chipText || !chipIcon) return;
+
+            const labels = {
+                'l1': 'L1 Supervisor',
+                'l2': 'L2 Roster Maker',
+                'owner': 'Owner'
+            };
+
+            const icons = {
+                'l1': '👤',
+                'l2': '📋',
+                'owner': '👑'
+            };
+
+            chipText.textContent = labels[accessLevel] || 'User';
+            chipIcon.textContent = icons[accessLevel] || '👤';
+        }
+
+        // Show the view switcher if user can switch between views
+        function updateViewSwitcherVisibility(accessLevel) {
+            const switcher = document.getElementById('viewSwitcher');
+            if (!switcher) return;
+
+            // Show switcher for L2+ (they can switch views)
+            // L1 can only see L1, so no switcher needed
+            if (accessLevel === 'l1') {
+                switcher.style.display = 'none';
+            } else {
+                switcher.style.display = 'flex';
+                // Populate the dropdown with available views
+                const dropdown = document.getElementById('viewSwitcherDropdown');
+                if (dropdown) {
+                    if (accessLevel === 'l2') {
+                        // L2 can see L1 and L2 views
+                        dropdown.innerHTML = `
+                            <option value="l1">L1 Supervisor</option>
+                            <option value="l2" selected>L2 Roster Maker</option>
+                        `;
+                    } else if (accessLevel === 'owner') {
+                        // OWNER can see all views
+                        dropdown.innerHTML = `
+                            <option value="l1">L1 Supervisor</option>
+                            <option value="l2">L2 Roster Maker</option>
+                            <option value="owner" selected>Owner</option>
+                        `;
+                    }
+                }
+            }
+        }
+
+        // Helper to dismiss L1 onboarding banner
+        function dismissL1Onboarding() {
+            const banner = document.getElementById('l1OnboardingBanner');
+            if (banner) banner.classList.add('hidden');
+
+            // Persist dismissal via URL param
+            const url = new URL(window.location);
+            url.searchParams.set('l1_banner_dismissed', '1');
+            history.replaceState(null, '', url);
+        }
+
+        // Placeholder functions for live feed control
+        // (These may already exist or be no-ops depending on implementation)
+        function pauseLiveFeed() {
+            // Called when L2/OWNER is editing — can pause polling
+            // This is optional; no-op is fine
+        }
+        function resumeLiveFeed() {
+            // Called when L1 is viewing — resume polling
+            // This is optional; no-op is fine
+        }
 
         // -------- Venue switcher --------
         async function loadVenueList() {
@@ -5051,6 +5392,7 @@
                 } catch {}
             }
             await loadVenueList();
+            await fetchAccessLevel();
             updateWeekDisplay();
             refreshAllVenueData();
             initScenarioSolver();

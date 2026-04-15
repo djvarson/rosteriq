@@ -28,8 +28,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from enum import Enum
 from typing import Any, Optional
 from abc import ABC, abstractmethod
@@ -146,14 +147,119 @@ class EventsAdapter(ABC):
 
 
 # ---------------------------------------------------------------------------
+# PerthIsOK Client with Caching
+# ---------------------------------------------------------------------------
+
+class PerthIsOKClient:
+    """
+    HTTP client for PerthIsOK API with caching and retry logic.
+
+    Features:
+    - 30-minute in-process cache
+    - 3-retry exponential backoff
+    - Lazy httpx import
+    """
+
+    TIMEOUT = 10
+    CACHE_TTL_SECONDS = 1800  # 30 minutes
+    MAX_RETRIES = 3
+
+    def __init__(self, base_url: Optional[str] = None):
+        """
+        Initialize PerthIsOK client.
+
+        Args:
+            base_url: Optional override for base URL (default: https://www.perthisok.com)
+        """
+        self.base_url = base_url or "https://www.perthisok.com"
+        self._client: Optional[httpx.AsyncClient] = None
+        self._cache: dict[str, tuple[Any, float]] = {}
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Lazy-load httpx client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=self.TIMEOUT)
+        return self._client
+
+    async def close(self):
+        """Close client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+
+    async def _fetch_with_retry(self, url: str) -> Any:
+        """Fetch with exponential backoff retry."""
+        client = await self._get_client()
+        last_error = None
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = await client.get(url)
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 404:
+                    logger.warning(f"PerthIsOK endpoint not found: {url}")
+                    raise EventsAdapterError(f"PerthIsOK endpoint 404: {url}")
+                else:
+                    last_error = EventsAdapterError(
+                        f"PerthIsOK returned {response.status_code}"
+                    )
+            except Exception as e:
+                if isinstance(e, EventsAdapterError):
+                    raise
+                last_error = e
+
+            if attempt < self.MAX_RETRIES - 1:
+                backoff = 2 ** attempt  # 1s, 2s, 4s
+                await asyncio.sleep(backoff)
+
+        raise EventsAdapterError(f"Failed after {self.MAX_RETRIES} retries: {last_error}")
+
+    async def get_events(
+        self, start_date: date, end_date: date
+    ) -> list[dict]:
+        """
+        Fetch events from PerthIsOK API.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+
+        Returns:
+            List of event dicts
+        """
+        url = f"{self.base_url}/api/events?start={start_date}&end={end_date}"
+
+        # Check cache
+        now = time.time()
+        if url in self._cache:
+            data, timestamp = self._cache[url]
+            if now - timestamp < self.CACHE_TTL_SECONDS:
+                logger.debug(f"Cache hit for PerthIsOK events {start_date} to {end_date}")
+                return data
+
+        # Fetch and cache
+        try:
+            data = await self._fetch_with_retry(url)
+            if not isinstance(data, list):
+                logger.warning(f"PerthIsOK returned non-list: {type(data)}")
+                data = []
+            self._cache[url] = (data, now)
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to fetch PerthIsOK events: {e}")
+            return []
+
+
+# ---------------------------------------------------------------------------
 # PerthIsOK Adapter
 # ---------------------------------------------------------------------------
 
 class PerthIsOKAdapter(EventsAdapter):
     """
-    Fetches events from perthisok.com.
+    Fetches events from perthisok.com with caching and distance filtering.
 
-    Endpoint assumption: https://www.perthisok.com/events.json returns JSON array:
+    Endpoint assumption: https://www.perthisok.com/api/events?start=YYYY-MM-DD&end=YYYY-MM-DD
+    returns JSON array:
       [
         {
           "id": "event_123",
@@ -171,12 +277,12 @@ class PerthIsOKAdapter(EventsAdapter):
         ...
       ]
 
-    If the real endpoint differs in shape, this parser can be adapted.
+    Filters events:
+    - Within 10km of venue (if venue coords provided)
+    - Within time window
     """
 
-    BASE_URL = "https://www.perthisok.com"
-    EVENTS_ENDPOINT = "/events.json"
-    TIMEOUT = 30
+    DISTANCE_FILTER_KM = 10.0  # Only include events within 10km
 
     # Perth venues reference coordinates (optional fallback)
     PERTH_VENUES = {
@@ -185,55 +291,72 @@ class PerthIsOKAdapter(EventsAdapter):
         "subiaco": (-31.9809, 115.8159),
     }
 
-    def __init__(self):
+    def __init__(self, base_url: Optional[str] = None):
+        """
+        Initialize PerthIsOK adapter.
+
+        Args:
+            base_url: Optional override for API base URL
+        """
         if not httpx:
             raise ImportError("httpx is required. Install with: pip install httpx")
-        self._client: Optional[httpx.AsyncClient] = None
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.TIMEOUT)
-        return self._client
+        self.client = PerthIsOKClient(base_url=base_url)
 
     async def close(self):
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
+        if hasattr(self, 'client'):
+            await self.client.close()
 
     async def get_events(
         self,
         venue_id: str,
         window_start: datetime,
         window_end: datetime,
+        venue_lat: Optional[float] = None,
+        venue_lon: Optional[float] = None,
     ) -> list[VenueEvent]:
         """
-        Fetch events from PerthIsOK and filter to time window.
+        Fetch events from PerthIsOK and filter to time window and distance.
 
         Args:
-            venue_id: RosterIQ venue ID (for distance filtering)
+            venue_id: RosterIQ venue ID
             window_start: Start of window (tz-aware)
             window_end: End of window (tz-aware)
+            venue_lat: Venue latitude (optional, for distance filtering)
+            venue_lon: Venue longitude (optional, for distance filtering)
 
         Returns:
-            List of VenueEvent objects
+            List of VenueEvent objects, gracefully empty on failure
         """
         try:
-            client = await self._get_client()
-            url = f"{self.BASE_URL}{self.EVENTS_ENDPOINT}"
-            resp = await client.get(url)
-            resp.raise_for_status()
+            # Extract date range
+            start_date = window_start.date()
+            end_date = window_end.date()
 
-            data = resp.json()
-            if not isinstance(data, list):
-                logger.warning(f"PerthIsOK returned non-list: {type(data)}")
-                return []
+            # Fetch events (with caching and graceful fallback)
+            raw_events = await self.client.get_events(start_date, end_date)
 
             events = []
-            for raw in data:
+            for raw in raw_events:
                 try:
                     event = self._parse_event(raw)
-                    # Filter to window
-                    if window_start <= event.start_time <= window_end:
-                        events.append(event)
+
+                    # Filter to time window
+                    if not (window_start <= event.start_time <= window_end):
+                        continue
+
+                    # Filter by distance if venue coords provided
+                    if venue_lat is not None and venue_lon is not None:
+                        if event.lat is not None and event.lon is not None:
+                            distance = haversine_km(venue_lat, venue_lon, event.lat, event.lon)
+                            event.distance_km_from_venue = distance
+                            if distance > self.DISTANCE_FILTER_KM:
+                                logger.debug(
+                                    f"Filtering {event.title}: {distance:.1f}km away (> {self.DISTANCE_FILTER_KM}km)"
+                                )
+                                continue
+
+                    events.append(event)
+
                 except Exception as e:
                     logger.warning(f"Failed to parse PerthIsOK event: {e}")
                     continue
@@ -241,8 +364,8 @@ class PerthIsOKAdapter(EventsAdapter):
             return events
 
         except Exception as e:
-            logger.error(f"Failed to fetch PerthIsOK events: {e}")
-            raise EventsAdapterError(f"PerthIsOK fetch failed: {e}") from e
+            logger.warning(f"Failed to fetch PerthIsOK events for {venue_id}: {e}")
+            return []
 
     def _parse_event(self, raw: dict) -> VenueEvent:
         """
