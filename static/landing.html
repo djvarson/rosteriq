@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosterIQ — AI Rostering for Hospitality</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        :root{
+            --navy:#0f172a;--navy-mid:#1e293b;--navy-lite:#334155;
+            --teal:#14b8a6;--teal-dark:#0d9488;--teal-pale:#ccfbf1;--teal-bg:#f0fdfa;
+            --slate:#64748b;--slate-lt:#94a3b8;
+            --body:#334155;--white:#fff;--light:#f8fafc;--border:#e2e8f0;
+            --green:#22c55e;--amber:#f59e0b;
+        }
+        html{scroll-behavior:smooth}
+        body{font-family:'Inter',-apple-system,system-ui,sans-serif;color:var(--body);line-height:1.6;background:var(--white)}
+
+        /* ── NAV ── */
+        .nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(15,23,42,.97);backdrop-filter:blur(8px);border-bottom:1px solid rgba(255,255,255,.06)}
+        .nav-inner{max-width:1200px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;justify-content:space-between}
+        .nav-logo{font-weight:800;font-size:20px;color:var(--teal);letter-spacing:-.5px}
+        .nav-links{display:flex;gap:28px;align-items:center}
+        .nav-links a{color:var(--slate-lt);text-decoration:none;font-size:14px;font-weight:500;transition:color .2s}
+        .nav-links a:hover{color:var(--white)}
+        .nav-cta{background:var(--teal);color:var(--white)!important;padding:8px 20px;border-radius:6px;font-weight:600;transition:background .2s}
+        .nav-cta:hover{background:var(--teal-dark)}
+
+        /* ── HERO ── */
+        .hero{background:var(--navy);padding:140px 24px 100px;position:relative;overflow:hidden}
+        .hero::before{content:'';position:absolute;top:-200px;right:-200px;width:600px;height:600px;border-radius:50%;background:rgba(20,184,166,.06)}
+        .hero::after{content:'';position:absolute;bottom:-100px;left:-100px;width:400px;height:400px;border-radius:50%;background:rgba(30,41,59,.8)}
+        .hero-inner{max-width:1200px;margin:0 auto;position:relative;z-index:1;display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center}
+        .hero-text h1{font-size:52px;font-weight:800;line-height:1.1;color:var(--white);letter-spacing:-1.5px;margin-bottom:20px}
+        .hero-text h1 span{color:var(--teal)}
+        .hero-text p{font-size:18px;color:var(--slate-lt);margin-bottom:32px;max-width:520px;line-height:1.7}
+        .hero-buttons{display:flex;gap:16px;flex-wrap:wrap}
+        .btn-primary{background:var(--teal);color:var(--white);padding:14px 32px;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none;display:inline-flex;align-items:center;gap:8px;transition:all .2s;border:none;cursor:pointer}
+        .btn-primary:hover{background:var(--teal-dark);transform:translateY(-1px);box-shadow:0 8px 24px rgba(20,184,166,.3)}
+        .btn-secondary{background:transparent;color:var(--white);padding:14px 32px;border-radius:8px;font-weight:600;font-size:16px;text-decoration:none;border:1px solid rgba(255,255,255,.2);transition:all .2s}
+        .btn-secondary:hover{border-color:var(--teal);color:var(--teal)}
+
+        /* Hero dashboard preview */
+        .hero-preview{background:var(--navy-mid);border-radius:12px;border:1px solid rgba(255,255,255,.08);padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+        .preview-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+        .preview-title{color:var(--white);font-weight:700;font-size:14px}
+        .preview-badge{background:rgba(34,197,94,.15);color:var(--green);padding:4px 10px;border-radius:99px;font-size:11px;font-weight:600}
+        .preview-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+        .preview-stat{background:rgba(255,255,255,.04);border-radius:8px;padding:14px;text-align:center}
+        .preview-stat-num{font-size:24px;font-weight:800;color:var(--teal)}
+        .preview-stat-label{font-size:11px;color:var(--slate-lt);margin-top:2px}
+        .preview-bars{display:flex;gap:4px;align-items:flex-end;height:80px;padding-top:12px}
+        .preview-bar{flex:1;background:rgba(20,184,166,.3);border-radius:3px 3px 0 0;transition:height .5s}
+        .preview-bar.active{background:var(--teal)}
+
+        /* ── SOCIAL PROOF BAR ── */
+        .proof{background:var(--light);border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:28px 24px}
+        .proof-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:center;gap:48px;flex-wrap:wrap}
+        .proof-item{text-align:center}
+        .proof-num{font-size:28px;font-weight:800;color:var(--navy)}
+        .proof-label{font-size:12px;color:var(--slate);font-weight:500}
+
+        /* ── SECTION ── */
+        .section{padding:80px 24px}
+        .section-inner{max-width:1200px;margin:0 auto}
+        .section-tag{display:inline-block;background:var(--teal-pale);color:var(--teal-dark);font-size:12px;font-weight:700;padding:4px 12px;border-radius:99px;margin-bottom:12px;letter-spacing:.5px;text-transform:uppercase}
+        .section-title{font-size:36px;font-weight:800;color:var(--navy);margin-bottom:12px;letter-spacing:-.5px}
+        .section-sub{font-size:17px;color:var(--slate);max-width:640px;margin-bottom:48px}
+
+        /* ── FEATURE GRID ── */
+        .features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+        .feature-card{background:var(--white);border:1px solid var(--border);border-radius:12px;padding:28px;transition:all .25s}
+        .feature-card:hover{border-color:var(--teal);box-shadow:0 8px 30px rgba(20,184,166,.1);transform:translateY(-2px)}
+        .feature-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:16px}
+        .feature-icon.teal{background:var(--teal-pale);color:var(--teal-dark)}
+        .feature-icon.navy{background:rgba(15,23,42,.08);color:var(--navy)}
+        .feature-icon.green{background:rgba(34,197,94,.1);color:var(--green)}
+        .feature-card h3{font-size:17px;font-weight:700;color:var(--navy);margin-bottom:8px}
+        .feature-card p{font-size:14px;color:var(--slate);line-height:1.6}
+
+        /* ── HOW IT WORKS ── */
+        .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:32px;counter-reset:step}
+        .step{text-align:center;position:relative}
+        .step::before{counter-increment:step;content:counter(step);width:48px;height:48px;background:var(--teal);color:var(--white);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;margin:0 auto 16px}
+        .step h3{font-size:16px;font-weight:700;color:var(--navy);margin-bottom:8px}
+        .step p{font-size:13px;color:var(--slate)}
+
+        /* ── ROI CALCULATOR ── */
+        .roi-section{background:var(--navy);padding:80px 24px}
+        .roi-inner{max-width:900px;margin:0 auto}
+        .roi-grid{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start}
+        .roi-form{background:var(--navy-mid);border-radius:12px;padding:32px;border:1px solid rgba(255,255,255,.06)}
+        .roi-label{display:block;color:var(--slate-lt);font-size:13px;font-weight:500;margin-bottom:6px}
+        .roi-input{width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:12px 16px;color:var(--white);font-size:16px;font-family:inherit;margin-bottom:20px;outline:none;transition:border .2s}
+        .roi-input:focus{border-color:var(--teal)}
+        .roi-result{background:var(--navy-mid);border-radius:12px;padding:32px;border:1px solid rgba(20,184,166,.2);text-align:center}
+        .roi-big{font-size:56px;font-weight:800;color:var(--teal);line-height:1;margin:16px 0 8px}
+        .roi-per{font-size:14px;color:var(--slate-lt);margin-bottom:24px}
+        .roi-sub{font-size:14px;color:var(--slate-lt);margin-bottom:4px}
+        .roi-sub strong{color:var(--white)}
+        .roi-divider{height:1px;background:rgba(255,255,255,.06);margin:20px 0}
+
+        /* ── PRICING ── */
+        .pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+        .price-card{background:var(--white);border:1px solid var(--border);border-radius:12px;padding:32px;text-align:center;transition:all .25s;position:relative}
+        .price-card.featured{border-color:var(--teal);box-shadow:0 8px 30px rgba(20,184,166,.15)}
+        .price-card.featured::before{content:'MOST POPULAR';position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--teal);color:var(--white);padding:4px 16px;border-radius:99px;font-size:11px;font-weight:700;letter-spacing:.5px}
+        .price-name{font-size:20px;font-weight:700;color:var(--navy);margin-bottom:4px}
+        .price-amount{font-size:36px;font-weight:800;color:var(--teal)}
+        .price-unit{font-size:14px;color:var(--slate);margin-bottom:20px}
+        .price-features{list-style:none;text-align:left;margin-bottom:24px}
+        .price-features li{padding:8px 0;font-size:14px;color:var(--body);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+        .price-features li::before{content:'\2713';color:var(--teal);font-weight:700;font-size:14px}
+        .price-features li.disabled{color:var(--slate-lt)}
+        .price-features li.disabled::before{content:'\2014';color:var(--border)}
+
+        /* ── CTA BANNER ── */
+        .cta-banner{background:linear-gradient(135deg,var(--teal-dark),var(--teal));padding:80px 24px;text-align:center}
+        .cta-banner h2{font-size:36px;font-weight:800;color:var(--white);margin-bottom:12px}
+        .cta-banner p{font-size:17px;color:rgba(255,255,255,.85);margin-bottom:32px;max-width:560px;margin-left:auto;margin-right:auto}
+        .btn-white{background:var(--white);color:var(--teal-dark);padding:14px 32px;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none;display:inline-flex;align-items:center;gap:8px;transition:all .2s;border:none;cursor:pointer}
+        .btn-white:hover{box-shadow:0 8px 24px rgba(0,0,0,.15);transform:translateY(-1px)}
+
+        /* ── FOOTER ── */
+        .footer{background:var(--navy);padding:40px 24px;text-align:center;color:var(--slate-lt);font-size:13px}
+        .footer a{color:var(--teal);text-decoration:none}
+
+        /* ── RESPONSIVE ── */
+        @media(max-width:900px){
+            .hero-inner{grid-template-columns:1fr;text-align:center}
+            .hero-text h1{font-size:36px}
+            .hero-text p{margin:0 auto 24px}
+            .hero-buttons{justify-content:center}
+            .hero-preview{display:none}
+            .features-grid,.pricing-grid{grid-template-columns:1fr}
+            .steps{grid-template-columns:repeat(2,1fr)}
+            .roi-grid{grid-template-columns:1fr}
+            .proof-inner{gap:24px}
+        }
+
+        /* ── ANIMATIONS ── */
+        @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+        .hero-preview{animation:float 5s ease-in-out infinite}
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+    <div class="nav-inner">
+        <div class="nav-logo">RosterIQ</div>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#how">How It Works</a>
+            <a href="#roi">ROI Calculator</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#roi" class="nav-cta">Get Started</a>
+        </div>
+    </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <div class="hero-inner">
+        <div class="hero-text">
+            <h1>Stop guessing.<br>Start <span>rostering with data.</span></h1>
+            <p>RosterIQ predicts how busy your venue will be tomorrow using weather, events, bookings, POS data and 10+ other signals. Then builds you a draft roster that actually matches demand.</p>
+            <div class="hero-buttons">
+                <a href="#roi" class="btn-primary">Calculate Your Savings &rarr;</a>
+                <a href="#features" class="btn-secondary">See Features</a>
+            </div>
+        </div>
+        <div class="hero-preview">
+            <div class="preview-header">
+                <span class="preview-title">Today's Forecast &mdash; The Brisbane Hotel</span>
+                <span class="preview-badge">&#9679; Live</span>
+            </div>
+            <div class="preview-stats">
+                <div class="preview-stat">
+                    <div class="preview-stat-num">$12,450</div>
+                    <div class="preview-stat-label">Forecast Revenue</div>
+                </div>
+                <div class="preview-stat">
+                    <div class="preview-stat-num">87%</div>
+                    <div class="preview-stat-label">Forecast Accuracy</div>
+                </div>
+                <div class="preview-stat">
+                    <div class="preview-stat-num">14</div>
+                    <div class="preview-stat-label">Staff Rostered</div>
+                </div>
+            </div>
+            <div class="preview-bars" id="demoBars"></div>
+        </div>
+    </div>
+</section>
+
+<!-- SOCIAL PROOF -->
+<div class="proof">
+    <div class="proof-inner">
+        <div class="proof-item"><div class="proof-num">10-15%</div><div class="proof-label">Labour Cost Reduction</div></div>
+        <div class="proof-item"><div class="proof-num">13</div><div class="proof-label">Data Signal Categories</div></div>
+        <div class="proof-item"><div class="proof-num">15 min</div><div class="proof-label">Roster Build Time</div></div>
+        <div class="proof-item"><div class="proof-num">$3</div><div class="proof-label">Per Employee / Month</div></div>
+    </div>
+</div>
+
+<!-- FEATURES -->
+<section class="section" id="features" style="background:var(--light)">
+    <div class="section-inner">
+        <div class="section-tag">Features</div>
+        <h2 class="section-title">Everything your roster needs. Nothing it doesn't.</h2>
+        <p class="section-sub">Built for Australian hospitality managers who run on Tanda, SwiftPOS, and NowBookIt. Plugs into what you already use.</p>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon teal">&#9729;</div>
+                <h3>Weather-Aware Forecasting</h3>
+                <p>Live BOM weather feeds. Rain kills your outdoor seating? RosterIQ knows and adjusts the forecast automatically.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon navy">&#9881;</div>
+                <h3>Draft Roster Generation</h3>
+                <p>Generates a data-driven draft roster in Tanda. You review, tweak, approve. Starting from recommendations instead of a blank page.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon green">&#36;</div>
+                <h3>Award Compliance Built In</h3>
+                <p>Hospitality Award MA000009. Penalty rates, overtime, break rules, public holidays. Always compliant, always costed.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon teal">&#128202;</div>
+                <h3>On-Shift Intelligence</h3>
+                <p>"87% chance it's not picking up. Cut these 2 bartenders." Real-time recommendations with the data to back them up.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon navy">&#128172;</div>
+                <h3>AI Ask Agent</h3>
+                <p>"What did we spend on labour last Friday?" Conversational access to your venue's historical data. No spreadsheets.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon green">&#128241;</div>
+                <h3>SMS Staff Call-In</h3>
+                <p>One tap to call in staff. Auto-populated SMS with name and shift time. Staff replies yes/no. You get "Jack's on the way."</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon teal">&#127941;</div>
+                <h3>Events + Sports + Concerts</h3>
+                <p>Stadium spillback, comedy nights, pub golfers. We track Ticketmaster, PerthIsOK, AFL, NRL, Cricket and adjust your forecast.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon navy">&#128200;</div>
+                <h3>Accountability Tracking</h3>
+                <p>Know what decisions your managers made with what data. "You had all this data and kept people on — why?" Now you can see it from home.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon green">&#127970;</div>
+                <h3>Multi-Venue Portfolio</h3>
+                <p>One view across all your venues. End-of-week consolidated report. Anomaly flags. Automates your executive management meetings.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="section" id="how">
+    <div class="section-inner">
+        <div class="section-tag">How It Works</div>
+        <h2 class="section-title">From install to savings in under a week.</h2>
+        <p class="section-sub">We set it up for you. You play with it for 2 weeks free. If it doesn't save you money, turn it off.</p>
+        <div class="steps">
+            <div class="step">
+                <h3>Connect Tanda</h3>
+                <p>One-click install from the Tanda marketplace. OAuth handles the rest.</p>
+            </div>
+            <div class="step">
+                <h3>We Pull Your Data</h3>
+                <p>Historical rosters, POS sales, weather, events, bookings. All ingested automatically.</p>
+            </div>
+            <div class="step">
+                <h3>AI Learns Your Venue</h3>
+                <p>The model adapts to your unique patterns. Comedy Fridays. Stadium spillback. Rainy Sundays.</p>
+            </div>
+            <div class="step">
+                <h3>Better Rosters, Less Waste</h3>
+                <p>Draft rosters in Tanda matched to forecast demand. Real-time shift recommendations.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ROI CALCULATOR -->
+<section class="roi-section" id="roi">
+    <div class="roi-inner">
+        <div style="text-align:center;margin-bottom:40px">
+            <div class="section-tag" style="background:rgba(20,184,166,.15)">ROI Calculator</div>
+            <h2 class="section-title" style="color:var(--white)">See what RosterIQ saves you.</h2>
+            <p class="section-sub" style="color:var(--slate-lt);margin-left:auto;margin-right:auto">Plug in your numbers. Most venues see 10-15% labour cost savings.</p>
+        </div>
+        <div class="roi-grid">
+            <div class="roi-form">
+                <label class="roi-label">Number of Employees</label>
+                <input class="roi-input" type="number" id="empCount" value="30" min="1">
+                <label class="roi-label">Weekly Wage Spend ($)</label>
+                <input class="roi-input" type="number" id="weeklyWages" value="15000" min="0" step="500">
+                <label class="roi-label">Estimated Waste (%)</label>
+                <input class="roi-input" type="range" id="wastePct" value="12" min="5" max="25" style="padding:6px 0">
+                <div style="display:flex;justify-content:space-between;color:var(--slate-lt);font-size:12px;margin-top:-12px;margin-bottom:16px">
+                    <span>5%</span><span id="wasteDisplay" style="color:var(--teal);font-weight:700">12%</span><span>25%</span>
+                </div>
+            </div>
+            <div class="roi-result">
+                <div style="color:var(--slate-lt);font-size:14px">Estimated Annual Savings</div>
+                <div class="roi-big" id="annualSavings">$54,600</div>
+                <div class="roi-per" id="monthlySavings">$4,550 / month</div>
+                <div class="roi-divider"></div>
+                <div class="roi-sub">RosterIQ cost: <strong id="roiCost">$90/mo</strong></div>
+                <div class="roi-sub">Return on investment: <strong id="roiMultiple" style="color:var(--teal)">50x</strong></div>
+                <div class="roi-divider"></div>
+                <a href="#" class="btn-primary" style="width:100%;justify-content:center;margin-top:12px">Start Free Trial &rarr;</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- PRICING -->
+<section class="section" id="pricing" style="background:var(--light)">
+    <div class="section-inner">
+        <div class="section-tag">Pricing</div>
+        <h2 class="section-title">Simple per-employee pricing.</h2>
+        <p class="section-sub">No lock-in contracts. Turn the tap on or off any time. 2-week free trial on all plans.</p>
+        <div class="pricing-grid">
+            <div class="price-card">
+                <div class="price-name">Startup</div>
+                <div class="price-amount">$1.50</div>
+                <div class="price-unit">per employee / month</div>
+                <ul class="price-features">
+                    <li>Draft roster generation</li>
+                    <li>Forecast engine</li>
+                    <li>Award compliance</li>
+                    <li>Onboarding wizard</li>
+                    <li class="disabled">Extended data sources</li>
+                    <li class="disabled">On-shift dashboard</li>
+                    <li class="disabled">Real-time notifications</li>
+                </ul>
+                <a href="#roi" class="btn-primary" style="width:100%;justify-content:center;font-size:14px">Start Free Trial</a>
+            </div>
+            <div class="price-card featured">
+                <div class="price-name">Professional</div>
+                <div class="price-amount">$3</div>
+                <div class="price-unit">per employee / month</div>
+                <ul class="price-features">
+                    <li>Everything in Startup</li>
+                    <li>Extended data sources</li>
+                    <li>On-shift dashboard</li>
+                    <li>Scenario solver</li>
+                    <li>SMS staff call-in</li>
+                    <li class="disabled">Multi-venue portfolio</li>
+                    <li class="disabled">Accountability tracking</li>
+                </ul>
+                <a href="#roi" class="btn-primary" style="width:100%;justify-content:center;font-size:14px">Start Free Trial</a>
+            </div>
+            <div class="price-card">
+                <div class="price-name">Enterprise</div>
+                <div class="price-amount">$5.50</div>
+                <div class="price-unit">per employee / month</div>
+                <ul class="price-features">
+                    <li>Everything in Professional</li>
+                    <li>Multi-venue portfolio</li>
+                    <li>Accountability + owner view</li>
+                    <li>Real-time notifications</li>
+                    <li>Conversational AI agent</li>
+                    <li>Consolidated reporting</li>
+                    <li>Priority support</li>
+                </ul>
+                <a href="#roi" class="btn-primary" style="width:100%;justify-content:center;font-size:14px">Start Free Trial</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CTA BANNER -->
+<section class="cta-banner">
+    <h2>Your roster person spends 4 hours researching.<br>Give them 15 minutes instead.</h2>
+    <p>Every single duty manager will make assistant venue manager decisions. That's labour saved. Money in your pocket, $3 in ours.</p>
+    <a href="#roi" class="btn-white">Calculate Your Savings &rarr;</a>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+    <p style="margin-bottom:8px"><strong style="color:var(--teal)">RosterIQ</strong> &mdash; AI rostering for Australian hospitality</p>
+    <p>Built for Tanda &bull; Powered by real data &bull; <a href="/static/dashboard.html">Dashboard Demo</a> &bull; <a href="/static/roi.html">ROI Calculator</a></p>
+    <p style="margin-top:12px;color:var(--slate)">&copy; 2026 RosterIQ Pty Ltd. All rights reserved.</p>
+</footer>
+
+<script>
+// Demo bars animation
+const bars = document.getElementById('demoBars');
+const heights = [15,20,35,55,70,85,95,100,90,80,70,55,40,50,65,80,95,100,95,85,70,50,30,15];
+heights.forEach((h, i) => {
+    const bar = document.createElement('div');
+    bar.className = 'preview-bar' + (i >= 11 && i <= 14 || i >= 17 && i <= 20 ? ' active' : '');
+    bar.style.height = h + '%';
+    bars.appendChild(bar);
+});
+
+// ROI Calculator
+function calcROI() {
+    const emp = parseInt(document.getElementById('empCount').value) || 30;
+    const weekly = parseInt(document.getElementById('weeklyWages').value) || 15000;
+    const waste = parseInt(document.getElementById('wastePct').value) || 12;
+    const captureRate = 0.7; // RosterIQ captures 70% of waste
+    const annualWaste = weekly * 52 * (waste / 100);
+    const annualSavings = Math.round(annualWaste * captureRate);
+    const monthlySavings = Math.round(annualSavings / 12);
+    const cost = emp * 3; // Pro tier
+    const multiple = Math.round(monthlySavings / cost);
+
+    document.getElementById('annualSavings').textContent = '$' + annualSavings.toLocaleString();
+    document.getElementById('monthlySavings').textContent = '$' + monthlySavings.toLocaleString() + ' / month';
+    document.getElementById('roiCost').textContent = '$' + cost + '/mo';
+    document.getElementById('roiMultiple').textContent = multiple + 'x';
+    document.getElementById('wasteDisplay').textContent = waste + '%';
+}
+document.getElementById('empCount').addEventListener('input', calcROI);
+document.getElementById('weeklyWages').addEventListener('input', calcROI);
+document.getElementById('wastePct').addEventListener('input', calcROI);
+calcROI();
+</script>
+</body>
+</html>

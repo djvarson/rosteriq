@@ -436,6 +436,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Persistence init failed (non-fatal)")
 
+    # Demo seed: populate realistic pilot data if empty
+    try:
+        from rosteriq.demo_seed import seed_if_empty
+        seed_if_empty("demo-venue-001")
+    except Exception:
+        logger.exception("Demo seed failed (non-fatal)")
+
     # P0 FIX: Pipelines are now lazily initialized per-venue via the local
     # get_pipeline(venue_id) wrapper below. Don't eagerly construct one here
     # since the factory requires a real venue_id and we don't have one at
