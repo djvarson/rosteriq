@@ -2716,6 +2716,13 @@ from rosteriq.onboarding_router import router as _onboarding_router
 from rosteriq.concierge_router import router as _concierge_router
 from rosteriq.forecast_accuracy_router import router as _forecast_accuracy_router
 
+try:
+    from rosteriq.ws_router import router as _ws_router
+    _ws_router_available = True
+except Exception:
+    logger.warning("ws_router unavailable")
+    _ws_router_available = False
+
 app.include_router(_availability_router)
 app.include_router(_weather_router)
 app.include_router(_events_router)
@@ -2736,6 +2743,9 @@ app.include_router(_tanda_history_router)
 app.include_router(_onboarding_router)
 app.include_router(_concierge_router)
 app.include_router(_forecast_accuracy_router)
+
+if _ws_router_available:
+    app.include_router(_ws_router)
 
 
 # ============================================================================
