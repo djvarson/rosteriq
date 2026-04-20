@@ -2774,6 +2774,13 @@ try:
 except Exception:
     logger.warning("daily_digest_router unavailable")
 
+try:
+    from rosteriq.break_compliance_router import router as _break_compliance_router
+    if _break_compliance_router is not None:
+        app.include_router(_break_compliance_router)
+except Exception:
+    logger.warning("break_compliance_router unavailable")
+
 if _ws_router_available:
     app.include_router(_ws_router)
 
