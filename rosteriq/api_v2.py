@@ -2819,6 +2819,13 @@ try:
 except Exception:
     logger.warning("leave_management_router unavailable")
 
+try:
+    from rosteriq.incident_log_router import router as _incident_log_router
+    if _incident_log_router is not None:
+        app.include_router(_incident_log_router, prefix="/api/v1/incidents", tags=["incidents"])
+except Exception:
+    logger.warning("incident_log_router unavailable")
+
 if _ws_router_available:
     app.include_router(_ws_router)
 
