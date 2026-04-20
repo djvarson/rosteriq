@@ -2766,6 +2766,12 @@ try:
 except Exception:
     logger.warning("shift_swap_router unavailable")
 
+try:
+    from rosteriq.daily_digest_router import router as _daily_digest_router
+    app.include_router(_daily_digest_router)
+except Exception:
+    logger.warning("daily_digest_router unavailable")
+
 if _ws_router_available:
     app.include_router(_ws_router)
 
