@@ -2815,3 +2815,19 @@ async def general_exception_handler(request: Request, exc: Exception):
         "status_code": 500,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ============================================================================
+# Staff Performance Scoring Router (Round 27)
+# ============================================================================
+
+# Lazy import with try/except for sandboxed compatibility
+try:
+    from rosteriq.staff_score_router import staff_score_router
+    if staff_score_router is not None:
+        app.include_router(staff_score_router, prefix="/api/v1/staff/scores", tags=["staff"])
+        logger.info("Registered staff_score_router at /api/v1/staff/scores")
+except ImportError:
+    logger.warning("staff_score_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register staff_score_router: %s", e)
