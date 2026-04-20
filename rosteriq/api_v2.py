@@ -2717,6 +2717,7 @@ from rosteriq.concierge_router import router as _concierge_router
 from rosteriq.forecast_accuracy_router import router as _forecast_accuracy_router
 from rosteriq.pattern_learner_router import router as _pattern_learner_router
 from rosteriq.roster_export_router import router as _roster_export_router
+from rosteriq.fatigue_manager_router import router as _fatigue_manager_router
 
 try:
     from rosteriq.comms_hub_router import router as _comms_hub_router
@@ -2743,6 +2744,12 @@ except Exception:
     logger.warning("ws_router unavailable")
     _ws_router_available = False
 
+try:
+    from rosteriq.close_of_day_router import router as _close_of_day_router
+except Exception:
+    logger.warning("close_of_day_router unavailable")
+    _close_of_day_router = None
+
 app.include_router(_availability_router)
 app.include_router(_weather_router)
 app.include_router(_events_router)
@@ -2765,12 +2772,16 @@ app.include_router(_concierge_router)
 app.include_router(_forecast_accuracy_router)
 app.include_router(_pattern_learner_router)
 app.include_router(_roster_export_router)
+app.include_router(_fatigue_manager_router)
 if _comms_hub_router is not None:
     app.include_router(_comms_hub_router)
 if _headcount_router is not None:
     app.include_router(_headcount_router)
 if _portfolio_router is not None:
     app.include_router(_portfolio_router)
+
+if _close_of_day_router is not None:
+    app.include_router(_close_of_day_router)
 
 try:
     from rosteriq.shift_swap_router import router as _shift_swap_router
