@@ -2716,6 +2716,13 @@ from rosteriq.onboarding_router import router as _onboarding_router
 from rosteriq.concierge_router import router as _concierge_router
 from rosteriq.forecast_accuracy_router import router as _forecast_accuracy_router
 from rosteriq.pattern_learner_router import router as _pattern_learner_router
+from rosteriq.roster_export_router import router as _roster_export_router
+
+try:
+    from rosteriq.comms_hub_router import router as _comms_hub_router
+except Exception:
+    logger.warning("comms_hub_router unavailable")
+    _comms_hub_router = None
 
 try:
     from rosteriq.headcount_router import router as _headcount_router
@@ -2757,6 +2764,9 @@ app.include_router(_onboarding_router)
 app.include_router(_concierge_router)
 app.include_router(_forecast_accuracy_router)
 app.include_router(_pattern_learner_router)
+app.include_router(_roster_export_router)
+if _comms_hub_router is not None:
+    app.include_router(_comms_hub_router)
 if _headcount_router is not None:
     app.include_router(_headcount_router)
 if _portfolio_router is not None:
