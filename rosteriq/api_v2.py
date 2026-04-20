@@ -2900,3 +2900,19 @@ except ImportError:
     logger.warning("staff_score_router not available (sandboxed environment)")
 except Exception as e:
     logger.warning("Failed to register staff_score_router: %s", e)
+
+
+# ============================================================================
+# Smart Roster Suggestions Engine (Round 43)
+# ============================================================================
+
+# Lazy import with try/except for sandboxed compatibility
+try:
+    from rosteriq.smart_roster_router import smart_roster_router
+    if smart_roster_router is not None:
+        app.include_router(smart_roster_router, prefix="/api/v1/smart-roster", tags=["smart-roster"])
+        logger.info("Registered smart_roster_router at /api/v1/smart-roster")
+except ImportError:
+    logger.warning("smart_roster_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register smart_roster_router: %s", e)
