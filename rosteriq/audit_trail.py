@@ -347,10 +347,12 @@ def get_audit_store() -> AuditStore:
 
 
 def _reset_for_tests():
-    """Test helper: clear the in-memory store."""
+    """Test helper: clear the in-memory store (skips persistence reload)."""
     global _store
     with _store_lock:
-        _store = AuditStore()
+        _store = AuditStore.__new__(AuditStore)
+        _store._lock = threading.Lock()
+        _store._entries = []
 
 
 def log_event(
