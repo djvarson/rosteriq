@@ -2976,3 +2976,33 @@ except ImportError:
     logger.warning("payroll_export_router not available (sandboxed environment)")
 except Exception as e:
     logger.warning("Failed to register payroll_export_router: %s", e)
+
+
+# ============================================================================
+# Staff Availability Preferences (Round 49)
+# ============================================================================
+
+try:
+    from rosteriq.availability_prefs_router import router as _availability_prefs_router
+    if _availability_prefs_router is not None:
+        app.include_router(_availability_prefs_router, prefix="/api/v1/availability-prefs", tags=["availability"])
+        logger.info("Registered availability_prefs_router at /api/v1/availability-prefs")
+except ImportError:
+    logger.warning("availability_prefs_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register availability_prefs_router: %s", e)
+
+
+# ============================================================================
+# Training & Skills Development Tracker (Round 50)
+# ============================================================================
+
+try:
+    from rosteriq.training_tracker_router import router as _training_tracker_router
+    if _training_tracker_router is not None:
+        app.include_router(_training_tracker_router, prefix="/api/v1/training", tags=["training"])
+        logger.info("Registered training_tracker_router at /api/v1/training")
+except ImportError:
+    logger.warning("training_tracker_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register training_tracker_router: %s", e)
