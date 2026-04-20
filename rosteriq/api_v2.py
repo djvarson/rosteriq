@@ -2717,6 +2717,7 @@ from rosteriq.concierge_router import router as _concierge_router
 from rosteriq.forecast_accuracy_router import router as _forecast_accuracy_router
 from rosteriq.pattern_learner_router import router as _pattern_learner_router
 from rosteriq.roster_export_router import router as _roster_export_router
+from rosteriq.public_holidays_router import router as _public_holidays_router
 from rosteriq.fatigue_manager_router import router as _fatigue_manager_router
 
 try:
@@ -2756,6 +2757,12 @@ except Exception:
     logger.warning("venue_config_router unavailable")
     _venue_config_router = None
 
+try:
+    from rosteriq.audit_trail_router import audit_trail_router as _audit_trail_router
+except Exception:
+    logger.warning("audit_trail_router unavailable")
+    _audit_trail_router = None
+
 app.include_router(_availability_router)
 app.include_router(_weather_router)
 app.include_router(_events_router)
@@ -2778,6 +2785,7 @@ app.include_router(_concierge_router)
 app.include_router(_forecast_accuracy_router)
 app.include_router(_pattern_learner_router)
 app.include_router(_roster_export_router)
+app.include_router(_public_holidays_router)
 app.include_router(_fatigue_manager_router)
 if _comms_hub_router is not None:
     app.include_router(_comms_hub_router)
@@ -2791,6 +2799,9 @@ if _close_of_day_router is not None:
 
 if _venue_config_router is not None:
     app.include_router(_venue_config_router, prefix="/api/v1/config", tags=["configuration"])
+
+if _audit_trail_router is not None:
+    app.include_router(_audit_trail_router)
 
 try:
     from rosteriq.shift_swap_router import router as _shift_swap_router
