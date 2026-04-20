@@ -2802,6 +2802,13 @@ try:
 except Exception:
     logger.warning("timesheet_recon_router unavailable")
 
+try:
+    from rosteriq.leave_management_router import router as _leave_management_router
+    if _leave_management_router is not None:
+        app.include_router(_leave_management_router)
+except Exception:
+    logger.warning("leave_management_router unavailable")
+
 if _ws_router_available:
     app.include_router(_ws_router)
 
