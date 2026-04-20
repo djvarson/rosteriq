@@ -2916,3 +2916,18 @@ except ImportError:
     logger.warning("smart_roster_router not available (sandboxed environment)")
 except Exception as e:
     logger.warning("Failed to register smart_roster_router: %s", e)
+
+
+# ============================================================================
+# Tip Pooling & Distribution (Round 45)
+# ============================================================================
+
+try:
+    from rosteriq.tip_pool_router import router as _tip_pool_router
+    if _tip_pool_router is not None:
+        app.include_router(_tip_pool_router, prefix="/api/v1/tips", tags=["tips"])
+        logger.info("Registered tip_pool_router at /api/v1/tips")
+except ImportError:
+    logger.warning("tip_pool_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register tip_pool_router: %s", e)
