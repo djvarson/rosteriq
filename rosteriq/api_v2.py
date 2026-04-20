@@ -2931,3 +2931,18 @@ except ImportError:
     logger.warning("tip_pool_router not available (sandboxed environment)")
 except Exception as e:
     logger.warning("Failed to register tip_pool_router: %s", e)
+
+
+# ============================================================================
+# Multi-Venue Staff Sharing (Round 46)
+# ============================================================================
+
+try:
+    from rosteriq.staff_sharing_router import router as _staff_sharing_router
+    if _staff_sharing_router is not None:
+        app.include_router(_staff_sharing_router, prefix="/api/v1/sharing", tags=["sharing"])
+        logger.info("Registered staff_sharing_router at /api/v1/sharing")
+except ImportError:
+    logger.warning("staff_sharing_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register staff_sharing_router: %s", e)
