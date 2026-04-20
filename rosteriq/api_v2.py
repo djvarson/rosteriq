@@ -2946,3 +2946,33 @@ except ImportError:
     logger.warning("staff_sharing_router not available (sandboxed environment)")
 except Exception as e:
     logger.warning("Failed to register staff_sharing_router: %s", e)
+
+
+# ============================================================================
+# Employee Document Vault (Round 47)
+# ============================================================================
+
+try:
+    from rosteriq.document_vault_router import router as _document_vault_router
+    if _document_vault_router is not None:
+        app.include_router(_document_vault_router, prefix="/api/v1/documents", tags=["documents"])
+        logger.info("Registered document_vault_router at /api/v1/documents")
+except ImportError:
+    logger.warning("document_vault_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register document_vault_router: %s", e)
+
+
+# ============================================================================
+# Payroll Export Engine (Round 48)
+# ============================================================================
+
+try:
+    from rosteriq.payroll_export_router import router as _payroll_export_router
+    if _payroll_export_router is not None:
+        app.include_router(_payroll_export_router, prefix="/api/v1/payroll", tags=["payroll"])
+        logger.info("Registered payroll_export_router at /api/v1/payroll")
+except ImportError:
+    logger.warning("payroll_export_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register payroll_export_router: %s", e)
