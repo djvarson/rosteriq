@@ -2782,11 +2782,25 @@ except Exception:
     logger.warning("break_compliance_router unavailable")
 
 try:
+    from rosteriq.certifications_router import router as _certifications_router
+    if _certifications_router is not None:
+        app.include_router(_certifications_router)
+except Exception:
+    logger.warning("certifications_router unavailable")
+
+try:
     from rosteriq.labour_budget_router import router as _labour_budget_router
     if _labour_budget_router is not None:
         app.include_router(_labour_budget_router, prefix="/api/v1/budget", tags=["budget"])
 except Exception:
     logger.warning("labour_budget_router unavailable")
+
+try:
+    from rosteriq.timesheet_recon_router import router as _timesheet_recon_router
+    if _timesheet_recon_router is not None:
+        app.include_router(_timesheet_recon_router, prefix="/api/v1/recon", tags=["reconciliation"])
+except Exception:
+    logger.warning("timesheet_recon_router unavailable")
 
 if _ws_router_available:
     app.include_router(_ws_router)
