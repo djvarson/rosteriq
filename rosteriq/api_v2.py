@@ -2781,6 +2781,13 @@ try:
 except Exception:
     logger.warning("break_compliance_router unavailable")
 
+try:
+    from rosteriq.labour_budget_router import router as _labour_budget_router
+    if _labour_budget_router is not None:
+        app.include_router(_labour_budget_router, prefix="/api/v1/budget", tags=["budget"])
+except Exception:
+    logger.warning("labour_budget_router unavailable")
+
 if _ws_router_available:
     app.include_router(_ws_router)
 
