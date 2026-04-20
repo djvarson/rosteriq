@@ -2760,6 +2760,12 @@ if _headcount_router is not None:
 if _portfolio_router is not None:
     app.include_router(_portfolio_router)
 
+try:
+    from rosteriq.shift_swap_router import router as _shift_swap_router
+    app.include_router(_shift_swap_router)
+except Exception:
+    logger.warning("shift_swap_router unavailable")
+
 if _ws_router_available:
     app.include_router(_ws_router)
 

@@ -1,1213 +1,439 @@
-"""
-Shift Swap and Staff Notification System for RosterIQ.
+"""Shift swap / offer-up module for RosterIQ.
 
-Handles staff requesting shift swaps, manager approvals, and notifications across
-multiple channels (email, SMS, push, in-app).
+Pure stdlib module for shift swap management. Staff can offer up shifts they can't
+work, other staff claim them, managers approve. This reduces no-shows and last-minute
+scrambles.
+
+Lifecycle: OFFERED -> CLAIMED -> APPROVED|REJECTED, or OFFERED -> CANCELLED.
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Optional, List, Dict, Tuple, Set
-from abc import ABC, abstractmethod
+from __future__ import annotations
+
+import logging
+import threading
 import uuid
-from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("rosteriq.shift_swap")
 
 
-# ============================================================================
-# Enums
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Enums & Data Classes
+# ---------------------------------------------------------------------------
+
 
 class SwapStatus(str, Enum):
-    """Status of a swap request."""
-    PENDING = "PENDING"
-    APPROVED = "APPROVED"
-    REJECTED = "REJECTED"
-    EXPIRED = "EXPIRED"
-    CANCELLED = "CANCELLED"
+    """Shift swap lifecycle states."""
+    OFFERED = "offered"
+    CLAIMED = "claimed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
-
-class NotificationType(str, Enum):
-    """Types of notifications that can be sent."""
-    ROSTER_PUBLISHED = "ROSTER_PUBLISHED"
-    SHIFT_ASSIGNED = "SHIFT_ASSIGNED"
-    SHIFT_CHANGED = "SHIFT_CHANGED"
-    SWAP_REQUESTED = "SWAP_REQUESTED"
-    SWAP_APPROVED = "SWAP_APPROVED"
-    SWAP_REJECTED = "SWAP_REJECTED"
-    SHIFT_REMINDER = "SHIFT_REMINDER"
-    AVAILABILITY_REQUEST = "AVAILABILITY_REQUEST"
-
-
-class NotificationChannel(str, Enum):
-    """Notification delivery channels."""
-    EMAIL = "EMAIL"
-    SMS = "SMS"
-    PUSH = "PUSH"
-    IN_APP = "IN_APP"
-
-
-# ============================================================================
-# Data Models
-# ============================================================================
 
 @dataclass
-class SwapRequest:
-    """Represents a shift swap request between employees."""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    requester_id: str = ""
-    requester_name: str = ""
-    original_shift_id: str = ""
-    original_date: str = ""  # ISO format: YYYY-MM-DD
-    original_start: str = ""  # HH:MM
-    original_end: str = ""    # HH:MM
-    target_shift_id: Optional[str] = None  # None for open swap requests
-    target_employee_id: Optional[str] = None  # None for open swaps
-    target_employee_name: Optional[str] = None
-    reason: str = ""
-    status: SwapStatus = SwapStatus.PENDING
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    resolved_at: Optional[datetime] = None
-    resolved_by: Optional[str] = None
-    auto_approved: bool = False
+class ShiftSwap:
+    """A single shift swap offer."""
 
-    def to_dict(self) -> Dict:
-        """Convert to dictionary for API responses."""
+    swap_id: str
+    venue_id: str
+    shift_id: str
+    shift_date: str  # ISO date (YYYY-MM-DD)
+    shift_start: str  # HH:MM
+    shift_end: str  # HH:MM
+    role: str  # e.g., "bartender", "floor", "kitchen"
+    offered_by: str  # employee id
+    offered_by_name: str
+    reason: str
+    status: SwapStatus = SwapStatus.OFFERED
+    claimed_by: Optional[str] = None
+    claimed_by_name: Optional[str] = None
+    claimed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None  # manager id
+    reviewed_at: Optional[datetime] = None
+    review_note: Optional[str] = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dict for JSON responses."""
         return {
-            "id": self.id,
-            "requester_id": self.requester_id,
-            "requester_name": self.requester_name,
-            "original_shift_id": self.original_shift_id,
-            "original_date": self.original_date,
-            "original_start": self.original_start,
-            "original_end": self.original_end,
-            "target_shift_id": self.target_shift_id,
-            "target_employee_id": self.target_employee_id,
-            "target_employee_name": self.target_employee_name,
+            "swap_id": self.swap_id,
+            "venue_id": self.venue_id,
+            "shift_id": self.shift_id,
+            "shift_date": self.shift_date,
+            "shift_start": self.shift_start,
+            "shift_end": self.shift_end,
+            "role": self.role,
+            "offered_by": self.offered_by,
+            "offered_by_name": self.offered_by_name,
             "reason": self.reason,
             "status": self.status.value,
+            "claimed_by": self.claimed_by,
+            "claimed_by_name": self.claimed_by_name,
+            "claimed_at": self.claimed_at.isoformat() if self.claimed_at else None,
+            "reviewed_by": self.reviewed_by,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "review_note": self.review_note,
             "created_at": self.created_at.isoformat(),
-            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
-            "resolved_by": self.resolved_by,
-            "auto_approved": self.auto_approved,
+            "updated_at": self.updated_at.isoformat(),
         }
 
 
-@dataclass
-class Notification:
-    """Represents a notification sent to an employee."""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    employee_id: str = ""
-    type: NotificationType = NotificationType.SHIFT_ASSIGNED
-    title: str = ""
-    message: str = ""
-    metadata: Dict = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    read_at: Optional[datetime] = None
-    sent_via: NotificationChannel = NotificationChannel.IN_APP
-    is_read: bool = False
+# ---------------------------------------------------------------------------
+# Persistence wiring
+# ---------------------------------------------------------------------------
 
-    def to_dict(self) -> Dict:
-        """Convert to dictionary for API responses."""
-        return {
-            "id": self.id,
-            "employee_id": self.employee_id,
-            "type": self.type.value,
-            "title": self.title,
-            "message": self.message,
-            "metadata": self.metadata,
-            "created_at": self.created_at.isoformat(),
-            "read_at": self.read_at.isoformat() if self.read_at else None,
-            "sent_via": self.sent_via.value,
-            "is_read": self.is_read,
+# Lazy import of persistence module to avoid circular deps
+def _get_persistence():
+    """Lazy import of persistence module."""
+    try:
+        from rosteriq import persistence as _p
+        return _p
+    except ImportError:
+        return None
+
+
+# Register schema on module load
+_SHIFT_SWAPS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS shift_swaps (
+    swap_id TEXT PRIMARY KEY,
+    venue_id TEXT NOT NULL,
+    shift_id TEXT NOT NULL,
+    shift_date TEXT NOT NULL,
+    shift_start TEXT NOT NULL,
+    shift_end TEXT NOT NULL,
+    role TEXT NOT NULL,
+    offered_by TEXT NOT NULL,
+    offered_by_name TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'offered',
+    claimed_by TEXT,
+    claimed_by_name TEXT,
+    claimed_at TEXT,
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    review_note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_swap_venue ON shift_swaps(venue_id);
+CREATE INDEX IF NOT EXISTS ix_swap_status ON shift_swaps(status);
+CREATE INDEX IF NOT EXISTS ix_swap_created ON shift_swaps(created_at DESC);
+"""
+
+def _register_schema_and_callbacks():
+    """Register schema and rehydration callback. Deferred until persistence is available."""
+    try:
+        _p = _get_persistence()
+        if _p:
+            _p.register_schema("shift_swaps", _SHIFT_SWAPS_SCHEMA)
+            # Register rehydration callback
+            def _rehydrate_on_init():
+                store = get_swap_store()
+                store._rehydrate()
+            _p.on_init(_rehydrate_on_init)
+    except Exception:
+        pass
+
+
+_register_schema_and_callbacks()
+
+
+# ---------------------------------------------------------------------------
+# ShiftSwapStore
+# ---------------------------------------------------------------------------
+
+
+class ShiftSwapStore:
+    """Thread-safe in-memory store for shift swaps with persistence.
+
+    Persists to SQLite on every state change when persistence is enabled.
+    Rehydrates from SQLite on app startup via @_p.on_init callback.
+    """
+
+    def __init__(self):
+        self._swaps: Dict[str, ShiftSwap] = {}
+        self._lock = threading.Lock()
+
+    def _persist(self, swap: ShiftSwap) -> None:
+        """Persist a swap to SQLite if enabled."""
+        _p = _get_persistence()
+        if not _p or not _p.is_persistence_enabled():
+            return
+
+        row = {
+            "swap_id": swap.swap_id,
+            "venue_id": swap.venue_id,
+            "shift_id": swap.shift_id,
+            "shift_date": swap.shift_date,
+            "shift_start": swap.shift_start,
+            "shift_end": swap.shift_end,
+            "role": swap.role,
+            "offered_by": swap.offered_by,
+            "offered_by_name": swap.offered_by_name,
+            "reason": swap.reason,
+            "status": swap.status.value,
+            "claimed_by": swap.claimed_by,
+            "claimed_by_name": swap.claimed_by_name,
+            "claimed_at": swap.claimed_at.isoformat() if swap.claimed_at else None,
+            "reviewed_by": swap.reviewed_by,
+            "reviewed_at": swap.reviewed_at.isoformat() if swap.reviewed_at else None,
+            "review_note": swap.review_note,
+            "created_at": swap.created_at.isoformat(),
+            "updated_at": swap.updated_at.isoformat(),
         }
+        try:
+            _p.upsert("shift_swaps", row, pk="swap_id")
+        except Exception as e:
+            logger.warning("Failed to persist shift swap %s: %s", swap.swap_id, e)
 
+    def _rehydrate(self) -> None:
+        """Load all swaps from SQLite. Called on startup by persistence.on_init."""
+        _p = _get_persistence()
+        if not _p or not _p.is_persistence_enabled():
+            return
 
-@dataclass
-class SwapRule:
-    """Configuration rules for shift swaps."""
-    allow_open_swaps: bool = True
-    require_manager_approval: bool = True
-    auto_approve_same_role: bool = True
-    auto_approve_same_cost: bool = False
-    max_swaps_per_week: int = 3
-    min_notice_hours: int = 24
-    blackout_dates: List[str] = field(default_factory=list)  # ISO format dates
+        try:
+            rows = _p.fetchall("SELECT * FROM shift_swaps")
+            for row in rows:
+                swap = self._row_to_swap(dict(row))
+                self._swaps[swap.swap_id] = swap
+            logger.info("Rehydrated %d shift swaps from persistence", len(self._swaps))
+        except Exception as e:
+            logger.warning("Failed to rehydrate shift swaps: %s", e)
 
+    @staticmethod
+    def _row_to_swap(row: Dict[str, Any]) -> ShiftSwap:
+        """Reconstruct a ShiftSwap from a DB row."""
+        # Parse ISO datetime strings back to datetime objects
+        def parse_iso(s: Optional[str]) -> Optional[datetime]:
+            if not s:
+                return None
+            try:
+                return datetime.fromisoformat(s)
+            except (ValueError, TypeError):
+                return None
 
-@dataclass
-class Shift:
-    """Represents a work shift."""
-    id: str = ""
-    employee_id: Optional[str] = None
-    date: str = ""  # YYYY-MM-DD
-    start_time: str = ""  # HH:MM
-    end_time: str = ""  # HH:MM
-    role: str = ""
-    cost: float = 0.0
-    required: bool = True
-
-
-@dataclass
-class Employee:
-    """Represents an employee."""
-    id: str = ""
-    name: str = ""
-    roles: Set[str] = field(default_factory=set)
-    hourly_rate: float = 0.0
-    unavailable_dates: List[str] = field(default_factory=list)
-    active: bool = True
-
-
-# ============================================================================
-# Pydantic Models for API
-# ============================================================================
-
-class SwapRequestCreate(BaseModel):
-    """Request payload to create a swap request."""
-    original_shift_id: str
-    target_shift_id: Optional[str] = None
-    target_employee_id: Optional[str] = None
-    reason: str = ""
-
-
-class SwapApprovalRequest(BaseModel):
-    """Request payload for swap approval."""
-    approver_id: str
-
-
-class SwapRejectionRequest(BaseModel):
-    """Request payload for swap rejection."""
-    approver_id: str
-    reason: str = ""
-
-
-class ShiftClaimRequest(BaseModel):
-    """Request payload to claim an open shift."""
-    employee_id: str
-
-
-# ============================================================================
-# SwapManager Class
-# ============================================================================
-
-class SwapManager:
-    """
-    Manages shift swap requests, eligibility checks, and auto-approval logic.
-
-    Handles:
-    - Creating swap requests
-    - Evaluating swap eligibility
-    - Approving/rejecting swaps
-    - Auto-processing swaps based on rules
-    - Managing open shift pickups
-    """
-
-    def __init__(self, rules: SwapRule):
-        """
-        Initialize SwapManager with swap rules.
-
-        Args:
-            rules: SwapRule configuration object
-        """
-        self.rules = rules
-        self.swaps: Dict[str, SwapRequest] = {}
-        self.employees: Dict[str, Employee] = {}
-        self.shifts: Dict[str, Shift] = {}
-
-    def register_employee(self, employee: Employee) -> None:
-        """Register an employee in the swap system."""
-        self.employees[employee.id] = employee
-
-    def register_shift(self, shift: Shift) -> None:
-        """Register a shift in the swap system."""
-        self.shifts[shift.id] = shift
-
-    def create_swap_request(
-        self,
-        requester: Employee,
-        original_shift: Shift,
-        target_shift: Optional[Shift] = None,
-        target_employee: Optional[Employee] = None,
-        reason: str = "",
-    ) -> SwapRequest:
-        """
-        Create a new shift swap request.
-
-        Args:
-            requester: Employee requesting the swap
-            original_shift: The shift to be swapped out
-            target_shift: Target shift (None for open swap)
-            target_employee: Employee who would take original shift (None for open)
-            reason: Reason for the swap request
-
-        Returns:
-            SwapRequest: The created swap request
-
-        Raises:
-            ValueError: If swap violates business rules
-        """
-        # Validate requester has the original shift
-        if original_shift.employee_id != requester.id:
-            raise ValueError("Requester must own the original shift")
-
-        # Check minimum notice
-        shift_datetime = datetime.fromisoformat(
-            f"{original_shift.date}T{original_shift.start_time}"
+        return ShiftSwap(
+            swap_id=row["swap_id"],
+            venue_id=row["venue_id"],
+            shift_id=row["shift_id"],
+            shift_date=row["shift_date"],
+            shift_start=row["shift_start"],
+            shift_end=row["shift_end"],
+            role=row["role"],
+            offered_by=row["offered_by"],
+            offered_by_name=row["offered_by_name"],
+            reason=row["reason"],
+            status=SwapStatus(row.get("status", "offered")),
+            claimed_by=row.get("claimed_by"),
+            claimed_by_name=row.get("claimed_by_name"),
+            claimed_at=parse_iso(row.get("claimed_at")),
+            reviewed_by=row.get("reviewed_by"),
+            reviewed_at=parse_iso(row.get("reviewed_at")),
+            review_note=row.get("review_note"),
+            created_at=parse_iso(row.get("created_at")) or datetime.now(timezone.utc),
+            updated_at=parse_iso(row.get("updated_at")) or datetime.now(timezone.utc),
         )
-        if (shift_datetime - datetime.utcnow()).total_seconds() < (
-            self.rules.min_notice_hours * 3600
-        ):
-            raise ValueError(
-                f"Swap request requires at least {self.rules.min_notice_hours} hours notice"
-            )
 
-        # Check blackout dates
-        if original_shift.date in self.rules.blackout_dates:
-            raise ValueError("Shift date is in blackout period")
-
-        request = SwapRequest(
-            requester_id=requester.id,
-            requester_name=requester.name,
-            original_shift_id=original_shift.id,
-            original_date=original_shift.date,
-            original_start=original_shift.start_time,
-            original_end=original_shift.end_time,
-            target_shift_id=target_shift.id if target_shift else None,
-            target_employee_id=target_employee.id if target_employee else None,
-            target_employee_name=target_employee.name if target_employee else None,
+    def offer(
+        self,
+        venue_id: str,
+        shift_id: str,
+        shift_date: str,
+        shift_start: str,
+        shift_end: str,
+        role: str,
+        offered_by: str,
+        offered_by_name: str,
+        reason: str,
+    ) -> ShiftSwap:
+        """Create a new shift swap offer. Returns the ShiftSwap."""
+        swap_id = f"swap_{uuid.uuid4().hex[:12]}"
+        now = datetime.now(timezone.utc)
+        swap = ShiftSwap(
+            swap_id=swap_id,
+            venue_id=venue_id,
+            shift_id=shift_id,
+            shift_date=shift_date,
+            shift_start=shift_start,
+            shift_end=shift_end,
+            role=role,
+            offered_by=offered_by,
+            offered_by_name=offered_by_name,
             reason=reason,
+            status=SwapStatus.OFFERED,
+            created_at=now,
+            updated_at=now,
         )
+        with self._lock:
+            self._swaps[swap_id] = swap
+        self._persist(swap)
+        return swap
 
-        self.swaps[request.id] = request
-        return request
+    def claim(self, swap_id: str, claimed_by: str, claimed_by_name: str) -> ShiftSwap:
+        """Claim a shift swap. Must be in OFFERED status.
 
-    def get_eligible_swaps(
-        self, shift: Shift, available_employees: List[Employee]
-    ) -> List[Employee]:
+        Raises ValueError if swap not found or not in OFFERED status.
         """
-        Find employees eligible to take a specific shift.
+        with self._lock:
+            swap = self._swaps.get(swap_id)
+            if not swap:
+                raise ValueError(f"Shift swap {swap_id} not found")
+            if swap.status != SwapStatus.OFFERED:
+                raise ValueError(
+                    f"Cannot claim swap {swap_id}: status is {swap.status}, "
+                    f"must be {SwapStatus.OFFERED}"
+                )
+            swap.claimed_by = claimed_by
+            swap.claimed_by_name = claimed_by_name
+            swap.claimed_at = datetime.now(timezone.utc)
+            swap.status = SwapStatus.CLAIMED
+            swap.updated_at = datetime.now(timezone.utc)
 
-        Checks:
-        - Required role/skills match
-        - Not already assigned to shift
-        - Available on that date
-        - Not exceeding weekly swap limits
+        self._persist(swap)
+        return swap
 
-        Args:
-            shift: The shift to fill
-            available_employees: Pool of employees to check
+    def approve(
+        self, swap_id: str, reviewed_by: str, note: Optional[str] = None
+    ) -> ShiftSwap:
+        """Approve a claimed swap. Must be in CLAIMED status.
 
-        Returns:
-            List[Employee]: Employees who can take the shift
+        Raises ValueError if swap not found or not in CLAIMED status.
         """
-        eligible = []
+        with self._lock:
+            swap = self._swaps.get(swap_id)
+            if not swap:
+                raise ValueError(f"Shift swap {swap_id} not found")
+            if swap.status != SwapStatus.CLAIMED:
+                raise ValueError(
+                    f"Cannot approve swap {swap_id}: status is {swap.status}, "
+                    f"must be {SwapStatus.CLAIMED}"
+                )
+            swap.status = SwapStatus.APPROVED
+            swap.reviewed_by = reviewed_by
+            swap.reviewed_at = datetime.now(timezone.utc)
+            swap.review_note = note
+            swap.updated_at = datetime.now(timezone.utc)
 
-        for emp in available_employees:
-            # Check role match
-            if shift.role not in emp.roles:
-                continue
+        self._persist(swap)
+        return swap
 
-            # Check not already assigned
-            if shift.employee_id == emp.id:
-                continue
+    def reject(
+        self, swap_id: str, reviewed_by: str, note: Optional[str] = None
+    ) -> ShiftSwap:
+        """Reject a claimed swap. Must be in CLAIMED status.
 
-            # Check availability
-            if shift.date in emp.unavailable_dates:
-                continue
-
-            # Check weekly swap limit
-            swaps_this_week = self._count_swaps_this_week(emp.id)
-            if swaps_this_week >= self.rules.max_swaps_per_week:
-                continue
-
-            # Check active status
-            if not emp.active:
-                continue
-
-            eligible.append(emp)
-
-        return eligible
-
-    def evaluate_swap(self, request: SwapRequest) -> Dict:
+        Raises ValueError if swap not found or not in CLAIMED status.
         """
-        Evaluate a swap request and return recommendation.
+        with self._lock:
+            swap = self._swaps.get(swap_id)
+            if not swap:
+                raise ValueError(f"Shift swap {swap_id} not found")
+            if swap.status != SwapStatus.CLAIMED:
+                raise ValueError(
+                    f"Cannot reject swap {swap_id}: status is {swap.status}, "
+                    f"must be {SwapStatus.CLAIMED}"
+                )
+            swap.status = SwapStatus.REJECTED
+            swap.reviewed_by = reviewed_by
+            swap.reviewed_at = datetime.now(timezone.utc)
+            swap.review_note = note
+            swap.updated_at = datetime.now(timezone.utc)
 
-        Checks:
-        - Role and skill compatibility
-        - Cost impact
-        - Fairness (workload balance)
-        - Constraint violations
+        self._persist(swap)
+        return swap
 
-        Args:
-            request: SwapRequest to evaluate
+    def cancel(self, swap_id: str, cancelled_by: str) -> ShiftSwap:
+        """Cancel a swap. Only works if status is OFFERED or CLAIMED, and only
+        if the canceller is the original offerer.
 
-        Returns:
-            Dict with keys: eligible (bool), recommendation (str), score (float),
-                           reasons (List[str])
+        Raises ValueError if swap not found, not in cancellable status, or if
+        cancelled_by is not the offerer.
         """
-        reasons = []
-        score = 0.0
-        max_score = 100.0
+        with self._lock:
+            swap = self._swaps.get(swap_id)
+            if not swap:
+                raise ValueError(f"Shift swap {swap_id} not found")
+            if swap.status not in (SwapStatus.OFFERED, SwapStatus.CLAIMED):
+                raise ValueError(
+                    f"Cannot cancel swap {swap_id}: status is {swap.status}, "
+                    f"must be {SwapStatus.OFFERED} or {SwapStatus.CLAIMED}"
+                )
+            if swap.offered_by != cancelled_by:
+                raise ValueError(
+                    f"Cannot cancel swap {swap_id}: only the offerer "
+                    f"({swap.offered_by}) can cancel"
+                )
+            swap.status = SwapStatus.CANCELLED
+            swap.updated_at = datetime.now(timezone.utc)
 
-        original_shift = self.shifts.get(request.original_shift_id)
-        target_shift = self.shifts.get(request.target_shift_id) if request.target_shift_id else None
+        self._persist(swap)
+        return swap
 
-        if not original_shift:
-            return {
-                "eligible": False,
-                "recommendation": "REJECT",
-                "score": 0.0,
-                "reasons": ["Original shift not found"],
-            }
+    def get(self, swap_id: str) -> Optional[ShiftSwap]:
+        """Get a shift swap by ID. Returns None if not found."""
+        with self._lock:
+            return self._swaps.get(swap_id)
 
-        requester = self.employees.get(request.requester_id)
-        target_employee = (
-            self.employees.get(request.target_employee_id)
-            if request.target_employee_id
-            else None
-        )
+    def list_for_venue(
+        self, venue_id: str, status: Optional[SwapStatus] = None, limit: int = 50
+    ) -> List[ShiftSwap]:
+        """List shift swaps for a venue, newest first.
 
-        # If not a direct swap, mark as open swap
-        if not target_shift and not target_employee:
-            return {
-                "eligible": True,
-                "recommendation": "OPEN_SWAP",
-                "score": 50.0,
-                "reasons": ["Open swap request - awaiting eligible volunteers"],
-            }
-
-        if target_shift and target_employee:
-            # Check role compatibility
-            if original_shift.role not in target_employee.roles:
-                reasons.append("Target employee lacks required role")
-            else:
-                score += 30.0
-                reasons.append("Role requirements met")
-
-            # Check cost impact
-            cost_diff = abs(original_shift.cost - target_shift.cost)
-            if cost_diff < 5:
-                score += 25.0
-                reasons.append("Similar cost impact")
-            else:
-                reasons.append(f"Cost difference: ${cost_diff:.2f}")
-
-            # Check availability
-            if target_shift.date in target_employee.unavailable_dates:
-                reasons.append("Target employee unavailable on date")
-            else:
-                score += 20.0
-                reasons.append("Target employee available")
-
-            # Auto-approval checks
-            if self.rules.auto_approve_same_role and original_shift.role == target_shift.role:
-                score += 15.0
-                reasons.append("Auto-approval: same role")
-
-            if self.rules.auto_approve_same_cost and original_shift.cost == target_shift.cost:
-                score += 10.0
-                reasons.append("Auto-approval: same cost")
-
-        eligible = score >= 50.0
-        recommendation = "APPROVE" if score >= 75.0 else ("CONDITIONAL" if eligible else "REJECT")
-
-        return {
-            "eligible": eligible,
-            "recommendation": recommendation,
-            "score": min(score, max_score),
-            "reasons": reasons,
-        }
-
-    def approve_swap(self, request_id: str, approver_id: str) -> SwapRequest:
+        Optionally filter by status. Limited to `limit` results.
         """
-        Approve a swap request and update shifts.
+        with self._lock:
+            swaps = [s for s in self._swaps.values() if s.venue_id == venue_id]
+            if status is not None:
+                swaps = [s for s in swaps if s.status == status]
+            # Sort newest first
+            swaps.sort(key=lambda s: s.created_at, reverse=True)
+            return swaps[:limit]
 
-        Args:
-            request_id: ID of swap request to approve
-            approver_id: ID of manager approving
+    def list_available(self, venue_id: str) -> List[ShiftSwap]:
+        """List available swaps for claiming (OFFERED status only).
 
-        Returns:
-            SwapRequest: Updated swap request
-
-        Raises:
-            ValueError: If swap is invalid
+        Returns newest first, up to 50.
         """
-        request = self.swaps.get(request_id)
-        if not request:
-            raise ValueError(f"Swap request {request_id} not found")
+        return self.list_for_venue(venue_id, status=SwapStatus.OFFERED, limit=50)
 
-        if request.status != SwapStatus.PENDING:
-            raise ValueError(f"Cannot approve swap with status {request.status}")
+    def list_pending_review(self, venue_id: str) -> List[ShiftSwap]:
+        """List swaps pending manager review (CLAIMED status only).
 
-        original_shift = self.shifts.get(request.original_shift_id)
-        target_shift = self.shifts.get(request.target_shift_id)
-
-        if not original_shift or not target_shift:
-            raise ValueError("Required shifts not found")
-
-        # Execute the swap
-        original_shift.employee_id = request.target_employee_id
-        target_shift.employee_id = request.requester_id
-
-        request.status = SwapStatus.APPROVED
-        request.resolved_at = datetime.utcnow()
-        request.resolved_by = approver_id
-
-        return request
-
-    def reject_swap(self, request_id: str, approver_id: str, reason: str = "") -> SwapRequest:
+        Returns newest first, up to 50.
         """
-        Reject a swap request.
-
-        Args:
-            request_id: ID of swap request to reject
-            approver_id: ID of manager rejecting
-            reason: Reason for rejection
-
-        Returns:
-            SwapRequest: Updated swap request
-
-        Raises:
-            ValueError: If swap is invalid
-        """
-        request = self.swaps.get(request_id)
-        if not request:
-            raise ValueError(f"Swap request {request_id} not found")
-
-        if request.status != SwapStatus.PENDING:
-            raise ValueError(f"Cannot reject swap with status {request.status}")
-
-        request.status = SwapStatus.REJECTED
-        request.resolved_at = datetime.utcnow()
-        request.resolved_by = approver_id
-        request.reason = reason if reason else request.reason
-
-        return request
-
-    def cancel_swap(self, request_id: str) -> SwapRequest:
-        """
-        Cancel a swap request (only by requester).
-
-        Args:
-            request_id: ID of swap request to cancel
-
-        Returns:
-            SwapRequest: Updated swap request
-
-        Raises:
-            ValueError: If swap is invalid
-        """
-        request = self.swaps.get(request_id)
-        if not request:
-            raise ValueError(f"Swap request {request_id} not found")
-
-        if request.status not in [SwapStatus.PENDING, SwapStatus.APPROVED]:
-            raise ValueError(f"Cannot cancel swap with status {request.status}")
-
-        request.status = SwapStatus.CANCELLED
-        request.resolved_at = datetime.utcnow()
-
-        return request
-
-    def auto_process_swaps(self, pending_requests: List[SwapRequest]) -> List[SwapRequest]:
-        """
-        Auto-approve or auto-reject swaps based on configured rules.
-
-        Args:
-            pending_requests: List of pending swap requests
-
-        Returns:
-            List[SwapRequest]: Processed requests
-        """
-        processed = []
-
-        for request in pending_requests:
-            if request.status != SwapStatus.PENDING:
-                continue
-
-            evaluation = self.evaluate_swap(request)
-
-            if evaluation["recommendation"] == "APPROVE":
-                try:
-                    self.approve_swap(request.id, "AUTO_SYSTEM")
-                    request.auto_approved = True
-                    processed.append(request)
-                except ValueError:
-                    continue
-
-            elif evaluation["recommendation"] == "REJECT":
-                try:
-                    reason = "; ".join(evaluation["reasons"])
-                    self.reject_swap(request.id, "AUTO_SYSTEM", reason)
-                    processed.append(request)
-                except ValueError:
-                    continue
-
-        return processed
-
-    def get_open_shifts(self, roster: List[Shift]) -> List[Shift]:
-        """
-        Get shifts available for pickup (unfilled or open swaps).
-
-        Args:
-            roster: List of shifts in roster
-
-        Returns:
-            List[Shift]: Open shifts available for claiming
-        """
-        return [shift for shift in roster if shift.employee_id is None and shift.required]
-
-    def claim_open_shift(self, employee: Employee, shift: Shift) -> SwapRequest:
-        """
-        Employee claims an unfilled shift.
-
-        Args:
-            employee: Employee claiming shift
-            shift: Shift to claim
-
-        Returns:
-            SwapRequest: Created claim request
-
-        Raises:
-            ValueError: If claim is invalid
-        """
-        if shift.employee_id is not None:
-            raise ValueError("Shift is already assigned")
-
-        if shift.role not in employee.roles:
-            raise ValueError("Employee lacks required role")
-
-        if shift.date in employee.unavailable_dates:
-            raise ValueError("Employee unavailable on that date")
-
-        # Create a pseudo-swap request for tracking
-        request = SwapRequest(
-            requester_id=employee.id,
-            requester_name=employee.name,
-            original_shift_id=shift.id,
-            original_date=shift.date,
-            original_start=shift.start_time,
-            original_end=shift.end_time,
-            target_shift_id=shift.id,
-            target_employee_id=employee.id,
-            target_employee_name=employee.name,
-            reason="Open shift claim",
-            status=SwapStatus.APPROVED,
-            auto_approved=True,
-        )
-
-        self.swaps[request.id] = request
-        shift.employee_id = employee.id
-
-        return request
-
-    def expire_stale_requests(self, max_age_hours: int = 48) -> int:
-        """
-        Expire pending requests older than max_age_hours.
-
-        Args:
-            max_age_hours: Maximum age in hours before expiry
-
-        Returns:
-            int: Number of requests expired
-        """
-        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
-        expired_count = 0
-
-        for request in self.swaps.values():
-            if (
-                request.status == SwapStatus.PENDING
-                and request.created_at < cutoff_time
-            ):
-                request.status = SwapStatus.EXPIRED
-                expired_count += 1
-
-        return expired_count
-
-    def _count_swaps_this_week(self, employee_id: str) -> int:
-        """Count approved swaps for employee in current week."""
-        week_start = datetime.utcnow() - timedelta(days=datetime.utcnow().weekday())
-        count = 0
-
-        for request in self.swaps.values():
-            if (
-                request.requester_id == employee_id
-                and request.status == SwapStatus.APPROVED
-                and request.created_at >= week_start
-            ):
-                count += 1
-
-        return count
+        return self.list_for_venue(venue_id, status=SwapStatus.CLAIMED, limit=50)
 
 
-# ============================================================================
-# NotificationManager Class
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Module singleton
+# ---------------------------------------------------------------------------
 
-class NotificationManager:
+_swap_store_singleton: Optional[ShiftSwapStore] = None
+_singleton_lock = threading.Lock()
+
+
+def get_swap_store() -> ShiftSwapStore:
+    """Get the module-level shift swap store singleton.
+
+    Lazily initializes on first call. Thread-safe.
     """
-    Manages notifications sent to employees across multiple channels.
-
-    Supports: email, SMS, push notifications, and in-app notifications.
-    Tracks delivery status and read status.
-    """
-
-    def __init__(self, channels: Optional[List[NotificationChannel]] = None):
-        """
-        Initialize NotificationManager.
-
-        Args:
-            channels: List of notification channels to use (default: IN_APP only)
-        """
-        self.channels = channels or [NotificationChannel.IN_APP]
-        self.notifications: Dict[str, Notification] = {}
-
-    def notify_roster_published(
-        self, employees: List[Employee], roster_period: str
-    ) -> List[Notification]:
-        """
-        Notify all staff of new roster publication.
-
-        Args:
-            employees: List of employees to notify
-            roster_period: Description of roster period (e.g., "Week of 14 April")
-
-        Returns:
-            List[Notification]: Created notifications
-        """
-        notifications = []
-        title, message = self._generate_message(
-            NotificationType.ROSTER_PUBLISHED, period=roster_period
-        )
-
-        for emp in employees:
-            notif = self._create_notification(
-                emp.id,
-                NotificationType.ROSTER_PUBLISHED,
-                title,
-                message,
-                {"period": roster_period},
-            )
-            notifications.append(notif)
-
-        return notifications
-
-    def notify_shift_assigned(self, employee: Employee, shift: Shift) -> Notification:
-        """
-        Notify employee of shift assignment.
-
-        Args:
-            employee: Employee assigned
-            shift: Assigned shift
-
-        Returns:
-            Notification: Created notification
-        """
-        title, message = self._generate_message(
-            NotificationType.SHIFT_ASSIGNED,
-            date=shift.date,
-            time=f"{shift.start_time}-{shift.end_time}",
-            role=shift.role,
-        )
-
-        return self._create_notification(
-            employee.id,
-            NotificationType.SHIFT_ASSIGNED,
-            title,
-            message,
-            {
-                "shift_id": shift.id,
-                "date": shift.date,
-                "time": f"{shift.start_time}-{shift.end_time}",
-                "role": shift.role,
-            },
-        )
-
-    def notify_shift_changed(
-        self, employee: Employee, old_shift: Shift, new_shift: Shift
-    ) -> Notification:
-        """
-        Notify employee of shift modification.
-
-        Args:
-            employee: Employee affected
-            old_shift: Original shift details
-            new_shift: New shift details
-
-        Returns:
-            Notification: Created notification
-        """
-        title, message = self._generate_message(
-            NotificationType.SHIFT_CHANGED,
-            old_time=f"{old_shift.start_time}-{old_shift.end_time}",
-            new_time=f"{new_shift.start_time}-{new_shift.end_time}",
-            date=new_shift.date,
-        )
-
-        return self._create_notification(
-            employee.id,
-            NotificationType.SHIFT_CHANGED,
-            title,
-            message,
-            {
-                "old_shift_id": old_shift.id,
-                "new_shift_id": new_shift.id,
-                "old_time": f"{old_shift.start_time}-{old_shift.end_time}",
-                "new_time": f"{new_shift.start_time}-{new_shift.end_time}",
-            },
-        )
-
-    def notify_swap_request(self, manager: Employee, request: SwapRequest) -> Notification:
-        """
-        Notify manager of pending swap request.
-
-        Args:
-            manager: Manager to notify
-            request: Swap request to review
-
-        Returns:
-            Notification: Created notification
-        """
-        title, message = self._generate_message(
-            NotificationType.SWAP_REQUESTED,
-            requester=request.requester_name,
-            date=request.original_date,
-            time=f"{request.original_start}-{request.original_end}",
-        )
-
-        return self._create_notification(
-            manager.id,
-            NotificationType.SWAP_REQUESTED,
-            title,
-            message,
-            {
-                "swap_id": request.id,
-                "requester_id": request.requester_id,
-                "requester_name": request.requester_name,
-                "date": request.original_date,
-            },
-        )
-
-    def notify_swap_result(self, employee: Employee, request: SwapRequest) -> Notification:
-        """
-        Notify employee of swap request result (approved/rejected).
-
-        Args:
-            employee: Employee to notify
-            request: Resolved swap request
-
-        Returns:
-            Notification: Created notification
-        """
-        is_approved = request.status == SwapStatus.APPROVED
-        notif_type = (
-            NotificationType.SWAP_APPROVED
-            if is_approved
-            else NotificationType.SWAP_REJECTED
-        )
-
-        title, message = self._generate_message(
-            notif_type,
-            status="approved" if is_approved else "rejected",
-            date=request.original_date,
-        )
-
-        return self._create_notification(
-            employee.id,
-            notif_type,
-            title,
-            message,
-            {
-                "swap_id": request.id,
-                "status": request.status.value,
-                "reason": request.reason,
-            },
-        )
-
-    def notify_shift_reminder(
-        self, employee: Employee, shift: Shift, hours_before: int = 24
-    ) -> Notification:
-        """
-        Send reminder notification before scheduled shift.
-
-        Args:
-            employee: Employee to remind
-            shift: Shift coming up
-            hours_before: Hours before shift to send reminder
-
-        Returns:
-            Notification: Created notification
-        """
-        title, message = self._generate_message(
-            NotificationType.SHIFT_REMINDER,
-            time=f"{shift.start_time}-{shift.end_time}",
-            date=shift.date,
-            hours=hours_before,
-        )
-
-        return self._create_notification(
-            employee.id,
-            NotificationType.SHIFT_REMINDER,
-            title,
-            message,
-            {
-                "shift_id": shift.id,
-                "time": f"{shift.start_time}-{shift.end_time}",
-                "hours_before": hours_before,
-            },
-        )
-
-    def request_availability(
-        self, employees: List[Employee], date_range: Tuple[str, str]
-    ) -> List[Notification]:
-        """
-        Request availability from employees for a date range.
-
-        Args:
-            employees: Employees to request availability from
-            date_range: Tuple of (start_date, end_date) in YYYY-MM-DD format
-
-        Returns:
-            List[Notification]: Created notifications
-        """
-        notifications = []
-        start_date, end_date = date_range
-
-        title, message = self._generate_message(
-            NotificationType.AVAILABILITY_REQUEST,
-            start_date=start_date,
-            end_date=end_date,
-        )
-
-        for emp in employees:
-            notif = self._create_notification(
-                emp.id,
-                NotificationType.AVAILABILITY_REQUEST,
-                title,
-                message,
-                {
-                    "start_date": start_date,
-                    "end_date": end_date,
-                },
-            )
-            notifications.append(notif)
-
-        return notifications
-
-    def get_unread(self, employee_id: str) -> List[Notification]:
-        """
-        Get all unread notifications for an employee.
-
-        Args:
-            employee_id: Employee ID
-
-        Returns:
-            List[Notification]: Unread notifications
-        """
-        return [
-            n
-            for n in self.notifications.values()
-            if n.employee_id == employee_id and not n.is_read
-        ]
-
-    def mark_read(self, notification_id: str) -> Notification:
-        """
-        Mark notification as read.
-
-        Args:
-            notification_id: ID of notification to mark read
-
-        Returns:
-            Notification: Updated notification
-
-        Raises:
-            ValueError: If notification not found
-        """
-        notif = self.notifications.get(notification_id)
-        if not notif:
-            raise ValueError(f"Notification {notification_id} not found")
-
-        notif.is_read = True
-        notif.read_at = datetime.utcnow()
-
-        return notif
-
-    def send_batch(self, notifications: List[Notification]) -> Dict:
-        """
-        Batch send notifications with delivery tracking.
-
-        Args:
-            notifications: List of notifications to send
-
-        Returns:
-            Dict with keys: total, sent, failed, delivery_channels
-        """
-        result = {
-            "total": len(notifications),
-            "sent": 0,
-            "failed": 0,
-            "delivery_channels": {ch.value: 0 for ch in self.channels},
-        }
-
-        for notif in notifications:
-            # Simulate sending through configured channels
-            for channel in self.channels:
-                notif.sent_via = channel
-                result["delivery_channels"][channel.value] += 1
-                result["sent"] += 1
-
-        return result
-
-    def _create_notification(
-        self,
-        employee_id: str,
-        notif_type: NotificationType,
-        title: str,
-        message: str,
-        metadata: Dict,
-    ) -> Notification:
-        """Create and store a notification."""
-        notif = Notification(
-            employee_id=employee_id,
-            type=notif_type,
-            title=title,
-            message=message,
-            metadata=metadata,
-            sent_via=self.channels[0] if self.channels else NotificationChannel.IN_APP,
-        )
-        self.notifications[notif.id] = notif
-        return notif
-
-    def _format_shift_time(self, shift: Shift) -> str:
-        """
-        Format shift time in human-readable format.
-
-        Returns string like: "Mon 14 Apr, 10am-6pm"
-
-        Args:
-            shift: Shift to format
-
-        Returns:
-            str: Formatted shift time
-        """
-        date_obj = datetime.fromisoformat(shift.date)
-        day_name = date_obj.strftime("%a")
-        date_str = date_obj.strftime("%d %b")
-
-        start_hour = int(shift.start_time.split(":")[0])
-        end_hour = int(shift.end_time.split(":")[0])
-
-        start_ampm = "am" if start_hour < 12 else "pm"
-        end_ampm = "am" if end_hour < 12 else "pm"
-
-        start_display = start_hour if start_hour <= 12 else start_hour - 12
-        end_display = end_hour if end_hour <= 12 else end_hour - 12
-
-        return f"{day_name} {date_str}, {start_display}{start_ampm}-{end_display}{end_ampm}"
-
-    def _generate_message(
-        self, notif_type: NotificationType, **context
-    ) -> Tuple[str, str]:
-        """
-        Generate notification title and message based on type.
-
-        Args:
-            notif_type: Type of notification
-            **context: Context variables for message generation
-
-        Returns:
-            Tuple[str, str]: (title, message)
-        """
-        templates = {
-            NotificationType.ROSTER_PUBLISHED: (
-                "New Roster Published",
-                f"Your roster for {context.get('period', 'next period')} is now available.",
-            ),
-            NotificationType.SHIFT_ASSIGNED: (
-                "Shift Assigned",
-                f"You've been assigned to work {context.get('time', '')} on {context.get('date', '')} as {context.get('role', 'Staff')}.",
-            ),
-            NotificationType.SHIFT_CHANGED: (
-                "Shift Changed",
-                f"Your shift on {context.get('date', '')} has been changed from {context.get('old_time', '')} to {context.get('new_time', '')}.",
-            ),
-            NotificationType.SWAP_REQUESTED: (
-                "Swap Request Pending",
-                f"{context.get('requester', 'An employee')} requested to swap their shift on {context.get('date', '')} ({context.get('time', '')}). Review needed.",
-            ),
-            NotificationType.SWAP_APPROVED: (
-                "Swap Approved",
-                f"Your swap request for {context.get('date', '')} has been {context.get('status', 'approved')}.",
-            ),
-            NotificationType.SWAP_REJECTED: (
-                "Swap Rejected",
-                f"Your swap request for {context.get('date', '')} has been {context.get('status', 'rejected')}.",
-            ),
-            NotificationType.SHIFT_REMINDER: (
-                "Shift Reminder",
-                f"You have a shift coming up on {context.get('date', '')} from {context.get('time', '')} ({context.get('hours', '24')} hours away).",
-            ),
-            NotificationType.AVAILABILITY_REQUEST: (
-                "Availability Request",
-                f"Please provide your availability for {context.get('start_date', '')} to {context.get('end_date', '')}.",
-            ),
-        }
-
-        return templates.get(
-            notif_type, ("Notification", "You have a new notification.")
-        )
-
-
-# ============================================================================
-# FastAPI Router
-# ============================================================================
-
-def create_swap_router(
-    swap_manager: SwapManager, notification_manager: NotificationManager
-) -> APIRouter:
-    """
-    Create FastAPI router for shift swap and notification endpoints.
-
-    Args:
-        swap_manager: SwapManager instance
-        notification_manager: NotificationManager instance
-
-    Returns:
-        APIRouter: Configured router
-    """
-    router = APIRouter(prefix="/api", tags=["swaps"])
-
-    @router.post("/swaps")
-    def create_swap(request: SwapRequestCreate, current_user_id: str):
-        """Create a new shift swap request."""
-        try:
-            original_shift = swap_manager.shifts.get(request.original_shift_id)
-            target_shift = (
-                swap_manager.shifts.get(request.target_shift_id)
-                if request.target_shift_id
-                else None
-            )
-            requester = swap_manager.employees.get(current_user_id)
-
-            if not original_shift or not requester:
-                raise HTTPException(status_code=404, detail="Shift or employee not found")
-
-            target_employee = (
-                swap_manager.employees.get(request.target_employee_id)
-                if request.target_employee_id
-                else None
-            )
-
-            swap = swap_manager.create_swap_request(
-                requester=requester,
-                original_shift=original_shift,
-                target_shift=target_shift,
-                target_employee=target_employee,
-                reason=request.reason,
-            )
-
-            return swap.to_dict()
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-    @router.get("/swaps")
-    def list_swaps(
-        status: Optional[str] = Query(None),
-        employee_id: Optional[str] = Query(None),
-    ):
-        """List swap requests with optional filtering."""
-        results = list(swap_manager.swaps.values())
-
-        if status:
-            results = [
-                s for s in results if s.status.value == status
-            ]
-
-        if employee_id:
-            results = [
-                s
-                for s in results
-                if s.requester_id == employee_id or s.target_employee_id == employee_id
-            ]
-
-        return [s.to_dict() for s in results]
-
-    @router.post("/swaps/{swap_id}/approve")
-    def approve_swap(swap_id: str, request: SwapApprovalRequest):
-        """Approve a shift swap request."""
-        try:
-            swap = swap_manager.approve_swap(swap_id, request.approver_id)
-            requester = swap_manager.employees.get(swap.requester_id)
-
-            if requester:
-                notification_manager.notify_swap_result(requester, swap)
-
-            return swap.to_dict()
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-    @router.post("/swaps/{swap_id}/reject")
-    def reject_swap(swap_id: str, request: SwapRejectionRequest):
-        """Reject a shift swap request."""
-        try:
-            swap = swap_manager.reject_swap(
-                swap_id, request.approver_id, request.reason
-            )
-            requester = swap_manager.employees.get(swap.requester_id)
-
-            if requester:
-                notification_manager.notify_swap_result(requester, swap)
-
-            return swap.to_dict()
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-    @router.get("/shifts/open")
-    def list_open_shifts():
-        """Get list of open shifts available for pickup."""
-        shifts = list(swap_manager.shifts.values())
-        open_shifts = swap_manager.get_open_shifts(shifts)
-        return [
-            {
-                "id": s.id,
-                "date": s.date,
-                "time": f"{s.start_time}-{s.end_time}",
-                "role": s.role,
-                "cost": s.cost,
-            }
-            for s in open_shifts
-        ]
-
-    @router.post("/shifts/{shift_id}/claim")
-    def claim_shift(shift_id: str, request: ShiftClaimRequest):
-        """Employee claims an open shift."""
-        try:
-            shift = swap_manager.shifts.get(shift_id)
-            employee = swap_manager.employees.get(request.employee_id)
-
-            if not shift or not employee:
-                raise HTTPException(status_code=404, detail="Shift or employee not found")
-
-            claim = swap_manager.claim_open_shift(employee, shift)
-            return claim.to_dict()
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-    @router.get("/notifications")
-    def get_notifications(current_user_id: str):
-        """Get notifications for current user."""
-        notifications = notification_manager.get_unread(current_user_id)
-        return [n.to_dict() for n in notifications]
-
-    @router.post("/notifications/{notification_id}/read")
-    def mark_notification_read(notification_id: str):
-        """Mark a notification as read."""
-        try:
-            notif = notification_manager.mark_read(notification_id)
-            return notif.to_dict()
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-
-    return router
+    global _swap_store_singleton
+    if _swap_store_singleton is None:
+        with _singleton_lock:
+            if _swap_store_singleton is None:
+                _swap_store_singleton = ShiftSwapStore()
+    return _swap_store_singleton
+
+
+# Test helper: reset singleton
+def _reset_for_tests() -> None:
+    """Reset the singleton. Used by tests."""
+    global _swap_store_singleton
+    _swap_store_singleton = None
