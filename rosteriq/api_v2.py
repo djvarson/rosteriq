@@ -2750,6 +2750,12 @@ except Exception:
     logger.warning("close_of_day_router unavailable")
     _close_of_day_router = None
 
+try:
+    from rosteriq.venue_config_router import router as _venue_config_router
+except Exception:
+    logger.warning("venue_config_router unavailable")
+    _venue_config_router = None
+
 app.include_router(_availability_router)
 app.include_router(_weather_router)
 app.include_router(_events_router)
@@ -2782,6 +2788,9 @@ if _portfolio_router is not None:
 
 if _close_of_day_router is not None:
     app.include_router(_close_of_day_router)
+
+if _venue_config_router is not None:
+    app.include_router(_venue_config_router, prefix="/api/v1/config", tags=["configuration"])
 
 try:
     from rosteriq.shift_swap_router import router as _shift_swap_router
