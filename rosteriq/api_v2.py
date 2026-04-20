@@ -2715,6 +2715,7 @@ from rosteriq.tanda_history_router import router as _tanda_history_router
 from rosteriq.onboarding_router import router as _onboarding_router
 from rosteriq.concierge_router import router as _concierge_router
 from rosteriq.forecast_accuracy_router import router as _forecast_accuracy_router
+from rosteriq.pattern_learner_router import router as _pattern_learner_router
 
 try:
     from rosteriq.headcount_router import router as _headcount_router
@@ -2755,6 +2756,7 @@ app.include_router(_tanda_history_router)
 app.include_router(_onboarding_router)
 app.include_router(_concierge_router)
 app.include_router(_forecast_accuracy_router)
+app.include_router(_pattern_learner_router)
 if _headcount_router is not None:
     app.include_router(_headcount_router)
 if _portfolio_router is not None:
