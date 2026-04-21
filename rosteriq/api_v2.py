@@ -3006,3 +3006,33 @@ except ImportError:
     logger.warning("training_tracker_router not available (sandboxed environment)")
 except Exception as e:
     logger.warning("Failed to register training_tracker_router: %s", e)
+
+
+# ============================================================================
+# Xero Bidirectional Revenue Sync (Round 51)
+# ============================================================================
+
+try:
+    from rosteriq.xero_sync_router import router as _xero_sync_router
+    if _xero_sync_router is not None:
+        app.include_router(_xero_sync_router, prefix="/api/v1/xero", tags=["xero"])
+        logger.info("Registered xero_sync_router at /api/v1/xero")
+except ImportError:
+    logger.warning("xero_sync_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register xero_sync_router: %s", e)
+
+
+# ============================================================================
+# POS Sales Curve Forecaster (Round 52)
+# ============================================================================
+
+try:
+    from rosteriq.sales_curve_router import router as _sales_curve_router
+    if _sales_curve_router is not None:
+        app.include_router(_sales_curve_router, prefix="/api/v1/sales-curves", tags=["sales-curves"])
+        logger.info("Registered sales_curve_router at /api/v1/sales-curves")
+except ImportError:
+    logger.warning("sales_curve_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register sales_curve_router: %s", e)
