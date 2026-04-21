@@ -3036,3 +3036,33 @@ except ImportError:
     logger.warning("sales_curve_router not available (sandboxed environment)")
 except Exception as e:
     logger.warning("Failed to register sales_curve_router: %s", e)
+
+
+# ============================================================================
+# KPI Dashboard Data API (Round 53)
+# ============================================================================
+
+try:
+    from rosteriq.kpi_dashboard_router import router as _kpi_dashboard_router
+    if _kpi_dashboard_router is not None:
+        app.include_router(_kpi_dashboard_router, prefix="/api/v1/kpis", tags=["kpis"])
+        logger.info("Registered kpi_dashboard_router at /api/v1/kpis")
+except ImportError:
+    logger.warning("kpi_dashboard_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register kpi_dashboard_router: %s", e)
+
+
+# ============================================================================
+# Rostered Days Off (RDO) Manager (Round 54)
+# ============================================================================
+
+try:
+    from rosteriq.rdo_manager_router import router as _rdo_manager_router
+    if _rdo_manager_router is not None:
+        app.include_router(_rdo_manager_router, prefix="/api/v1/rdos", tags=["rdos"])
+        logger.info("Registered rdo_manager_router at /api/v1/rdos")
+except ImportError:
+    logger.warning("rdo_manager_router not available (sandboxed environment)")
+except Exception as e:
+    logger.warning("Failed to register rdo_manager_router: %s", e)
