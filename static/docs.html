@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RosterIQ API Documentation</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <style>
+    :root {
+      --dark-navy: #0F1629;
+      --dark-bg: #1A202C;
+      --card-bg: #2D3748;
+      --light-bg: #F0F2F5;
+      --text-primary: #FFFFFF;
+      --text-secondary: #A0AEC0;
+      --text-muted: #718096;
+      --brand-blue: #3366FF;
+      --success: #10B981;
+      --warning: #F59E0B;
+      --danger: #EF4444;
+      --info: #3B82F6;
+      --border: #4A5568;
+      --code-bg: #0F1419;
+      --method-get: #60A5FA;
+      --method-post: #4ADE80;
+      --method-put: #FBBF24;
+      --method-delete: #FCA5A5;
+      --method-patch: #D8B4FE;
+    }
+
+    body.light-mode {
+      --dark-navy: #FFFFFF;
+      --dark-bg: #F9FAFB;
+      --card-bg: #F3F4F6;
+      --light-bg: #FFFFFF;
+      --text-primary: #1F2937;
+      --text-secondary: #6B7280;
+      --text-muted: #9CA3AF;
+      --border: #E5E7EB;
+      --code-bg: #F3F4F6;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--light-bg);
+      color: var(--text-primary);
+      line-height: 1.6;
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    /* Layout */
+    .docs-container {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      width: 300px;
+      background: var(--dark-navy);
+      border-right: 1px solid var(--border);
+      padding: 20px 0;
+      position: fixed;
+      height: 100vh;
+      left: 0;
+      top: 0;
+      overflow-y: auto;
+      z-index: 1000;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    .sidebar-header {
+      padding: 0 20px 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+
+    .sidebar-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .sidebar-logo:hover {
+      opacity: 0.8;
+    }
+
+    .sidebar-logo-text {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .sidebar-logo-text span {
+      color: var(--brand-blue);
+    }
+
+    .sidebar-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .sidebar-controls {
+      display: flex;
+      gap: 8px;
+      padding: 0 20px;
+      margin-bottom: 8px;
+    }
+
+    .control-btn {
+      flex: 1;
+      padding: 6px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+
+    .control-btn:hover {
+      background: var(--border);
+      color: var(--text-primary);
+    }
+
+    .search-box {
+      padding: 0 12px 16px;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-primary);
+      font-size: 13px;
+    }
+
+    .search-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .sidebar-nav {
+      padding: 0 8px;
+    }
+
+    .nav-section {
+      margin-bottom: 20px;
+    }
+
+    .nav-section-title {
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      margin-bottom: 4px;
+      border-radius: 6px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 13px;
+      transition: all 0.2s;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .nav-link:hover {
+      background: rgba(51, 102, 255, 0.1);
+      color: var(--brand-blue);
+    }
+
+    .nav-link.active {
+      background: rgba(51, 102, 255, 0.15);
+      color: var(--brand-blue);
+      font-weight: 600;
+    }
+
+    .method-badge-small {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .method-badge-small.get {
+      background: rgba(96, 165, 250, 0.2);
+      color: var(--method-get);
+    }
+
+    .method-badge-small.post {
+      background: rgba(74, 222, 128, 0.2);
+      color: var(--method-post);
+    }
+
+    .method-badge-small.put {
+      background: rgba(251, 191, 36, 0.2);
+      color: var(--method-put);
+    }
+
+    .method-badge-small.delete {
+      background: rgba(252, 165, 165, 0.2);
+      color: var(--method-delete);
+    }
+
+    .main-content {
+      flex: 1;
+      margin-left: 300px;
+      background: var(--light-bg);
+    }
+
+    .header {
+      background: var(--dark-navy);
+      border-bottom: 1px solid var(--border);
+      padding: 40px 60px;
+      margin-bottom: 40px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+    }
+
+    .header h1 {
+      font-size: 36px;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+
+    .header p {
+      color: var(--text-secondary);
+      font-size: 16px;
+    }
+
+    .header-version {
+      text-align: right;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .version-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      background: rgba(51, 102, 255, 0.1);
+      color: var(--brand-blue);
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-top: 8px;
+    }
+
+    .content {
+      padding: 0 60px 60px;
+      max-width: 1400px;
+    }
+
+    .endpoints-container {
+      display: grid;
+      gap: 24px;
+    }
+
+    .endpoint {
+      background: var(--dark-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 32px;
+      transition: all 0.3s;
+    }
+
+    .endpoint:hover {
+      border-color: var(--brand-blue);
+      box-shadow: 0 0 0 1px var(--brand-blue);
+    }
+
+    .endpoint-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .method {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      min-width: 50px;
+      text-align: center;
+    }
+
+    .method.get {
+      background: rgba(96, 165, 250, 0.2);
+      color: var(--method-get);
+    }
+
+    .method.post {
+      background: rgba(74, 222, 128, 0.2);
+      color: var(--method-post);
+    }
+
+    .method.put {
+      background: rgba(251, 191, 36, 0.2);
+      color: var(--method-put);
+    }
+
+    .method.patch {
+      background: rgba(216, 180, 254, 0.2);
+      color: var(--method-patch);
+    }
+
+    .method.delete {
+      background: rgba(252, 165, 165, 0.2);
+      color: var(--method-delete);
+    }
+
+    .endpoint-path {
+      font-family: 'Courier New', monospace;
+      font-size: 15px;
+      color: var(--brand-blue);
+      font-weight: 600;
+      flex: 1;
+      min-width: 200px;
+      word-break: break-all;
+    }
+
+    .endpoint-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 16px 0 8px;
+      color: var(--text-primary);
+    }
+
+    .endpoint-desc {
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+    .auth-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      background: rgba(51, 102, 255, 0.2);
+      color: var(--brand-blue);
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .property-group {
+      margin: 24px 0;
+    }
+
+    .property-group-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--brand-blue);
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .parameter {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 12px;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .parameter-name {
+      font-weight: 600;
+      color: var(--brand-blue);
+      font-family: 'Courier New', monospace;
+    }
+
+    .parameter-info {
+      color: var(--text-secondary);
+    }
+
+    .code-example {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      margin: 12px 0;
+      overflow-x: auto;
+      font-size: 12px;
+      position: relative;
+    }
+
+    .code-copy-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      padding: 6px 12px;
+      background: var(--brand-blue);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .code-copy-btn:hover {
+      opacity: 0.8;
+      transform: scale(1.05);
+    }
+
+    .code-example code {
+      color: #E0E0E0;
+      font-family: 'Courier New', monospace;
+      line-height: 1.5;
+    }
+
+    .response-codes {
+      margin: 20px 0;
+    }
+
+    .response-code {
+      display: flex;
+      gap: 16px;
+      padding: 12px;
+      background: rgba(16, 185, 129, 0.1);
+      border-left: 3px solid var(--success);
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .response-code.error {
+      background: rgba(239, 68, 68, 0.1);
+      border-left-color: var(--danger);
+    }
+
+    .response-code.warning {
+      background: rgba(245, 158, 11, 0.1);
+      border-left-color: var(--warning);
+    }
+
+    .response-code-status {
+      font-weight: 700;
+      color: var(--success);
+      min-width: 40px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .response-code.error .response-code-status {
+      color: var(--danger);
+    }
+
+    .response-code.warning .response-code-status {
+      color: var(--warning);
+    }
+
+    .response-code-desc {
+      color: var(--text-secondary);
+    }
+
+    .try-button {
+      display: inline-block;
+      padding: 10px 20px;
+      background: var(--brand-blue);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s;
+      margin-top: 12px;
+    }
+
+    .try-button:hover {
+      opacity: 0.9;
+      transform: translateY(-2px);
+    }
+
+    .try-button:active {
+      transform: translateY(0);
+    }
+
+    .note {
+      background: rgba(59, 130, 246, 0.1);
+      border-left: 3px solid var(--info);
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin: 16px 0;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-secondary);
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 1024px) {
+      .sidebar {
+        width: 260px;
+      }
+
+      .main-content {
+        margin-left: 260px;
+      }
+
+      .content {
+        padding: 0 40px 40px;
+      }
+
+      .header {
+        padding: 30px 40px;
+      }
+
+      .parameter {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .sidebar {
+        position: absolute;
+        transform: translateX(-100%);
+        width: 260px;
+        height: auto;
+        max-height: 100vh;
+        transition: transform 0.3s;
+      }
+
+      .sidebar.open {
+        transform: translateX(0);
+      }
+
+      .main-content {
+        margin-left: 0;
+      }
+
+      .content {
+        padding: 0 20px 40px;
+      }
+
+      .header {
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+
+      .header h1 {
+        font-size: 24px;
+      }
+
+      .header-content {
+        flex-direction: column;
+      }
+
+      .endpoint {
+        padding: 20px;
+      }
+
+      .endpoint-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .endpoint-path {
+        font-size: 13px;
+      }
+
+      .method {
+        width: 100%;
+      }
+
+      .sidebar-controls {
+        display: none;
+      }
+    }
+
+    .hljs {
+      background: transparent !important;
+      padding: 0 !important;
+    }
+
+    /* Loading indicator */
+    .loading {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 400px;
+      color: var(--text-secondary);
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid var(--border);
+      border-top-color: var(--brand-blue);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Modal for trying endpoints */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal.open {
+      display: flex;
+    }
+
+    .modal-content {
+      background: var(--dark-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 32px;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      width: 90%;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 24px;
+      transition: color 0.2s;
+    }
+
+    .close-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      padding: 10px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-primary);
+      font-size: 13px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .form-group textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+
+    .modal-footer {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .modal-footer button {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--brand-blue);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+    }
+
+    .btn-secondary {
+      background: var(--card-bg);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: var(--border);
+      color: var(--text-primary);
+    }
+
+    .tag-badge {
+      display: inline-block;
+      padding: 4px 8px;
+      background: rgba(51, 102, 255, 0.2);
+      color: var(--brand-blue);
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 8px;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="docs-container">
+    <!-- Sidebar -->
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo" onclick="scrollToTop()">
+          <div style="font-size: 24px;">📋</div>
+          <div>
+            <div class="sidebar-logo-text">Roster<span>IQ</span></div>
+            <div class="sidebar-subtitle">API Docs</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-controls">
+        <button class="control-btn" id="darkModeBtn" onclick="toggleDarkMode()" title="Toggle dark mode">🌙</button>
+        <button class="control-btn" id="searchFocusBtn" onclick="focusSearch()" title="Search">🔍</button>
+      </div>
+
+      <div class="search-box">
+        <input type="text" class="search-input" id="searchInput" placeholder="Search endpoints..." onkeyup="filterEndpoints()">
+      </div>
+
+      <div class="sidebar-nav" id="sidebarNav"></div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="header">
+        <div class="header-content">
+          <div>
+            <h1>RosterIQ API</h1>
+            <p>AI-powered predictive rostering for Australian hospitality venues</p>
+          </div>
+          <div class="header-version">
+            <div>v1.0.0</div>
+            <div class="version-badge">OpenAPI 3.1</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="endpoints-container" id="endpointsContainer">
+          <div class="loading">
+            <div class="spinner"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Try Endpoint Modal -->
+  <div class="modal" id="tryModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="tryModalTitle">Try API Endpoint</h2>
+        <button class="close-btn" onclick="closeTryModal()">&times;</button>
+      </div>
+
+      <div id="tryModalBody">
+        <div class="form-group">
+          <label>Authentication Token (Optional)</label>
+          <textarea id="authToken" placeholder="Paste your Bearer token here (without 'Bearer ' prefix)"></textarea>
+        </div>
+        <div id="tryFormFields"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-primary" onclick="sendTryRequest()">Send Request</button>
+        <button class="btn-secondary" onclick="closeTryModal()">Cancel</button>
+      </div>
+
+      <div id="tryResponse" style="margin-top: 20px; display: none;">
+        <div class="property-group-title" style="margin-bottom: 12px;">Response</div>
+        <div class="code-example">
+          <code id="tryResponseCode"></code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let openAPISpec = null;
+    let allEndpoints = [];
+    let currentDarkMode = true;
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', async () => {
+      loadDarkMode();
+      await loadOpenAPISpec();
+      renderSidebar();
+      renderEndpoints();
+    });
+
+    async function loadOpenAPISpec() {
+      try {
+        const response = await fetch('/static/openapi.json');
+        openAPISpec = await response.json();
+
+        // Flatten paths into searchable endpoints
+        allEndpoints = [];
+        for (const [path, methods] of Object.entries(openAPISpec.paths)) {
+          for (const [method, details] of Object.entries(methods)) {
+            if (typeof details === 'object' && details.operationId) {
+              allEndpoints.push({
+                path,
+                method: method.toUpperCase(),
+                ...details
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load OpenAPI spec:', error);
+        document.getElementById('endpointsContainer').innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">⚠️</div>
+            <h2>Unable to Load Documentation</h2>
+            <p>The API specification could not be loaded.</p>
+          </div>
+        `;
+      }
+    }
+
+    function renderSidebar() {
+      if (!openAPISpec || !openAPISpec.tags) return;
+
+      const nav = document.getElementById('sidebarNav');
+      nav.innerHTML = '';
+
+      openAPISpec.tags.forEach(tag => {
+        const section = document.createElement('div');
+        section.className = 'nav-section';
+
+        const title = document.createElement('div');
+        title.className = 'nav-section-title';
+        title.textContent = tag.name;
+
+        section.appendChild(title);
+
+        // Get endpoints for this tag
+        const tagEndpoints = allEndpoints.filter(ep =>
+          ep.tags && ep.tags.includes(tag.name)
+        );
+
+        tagEndpoints.forEach(ep => {
+          const link = document.createElement('a');
+          link.className = 'nav-link';
+          link.href = `#${ep.operationId}`;
+
+          const methodBadge = document.createElement('span');
+          methodBadge.className = `method-badge-small ${ep.method.toLowerCase()}`;
+          methodBadge.textContent = ep.method;
+
+          const pathText = document.createElement('span');
+          pathText.textContent = ep.summary || ep.path;
+          pathText.style.flex = '1';
+          pathText.style.overflow = 'hidden';
+          pathText.style.textOverflow = 'ellipsis';
+
+          link.appendChild(methodBadge);
+          link.appendChild(pathText);
+          link.onclick = (e) => {
+            e.preventDefault();
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            link.classList.add('active');
+            document.getElementById(ep.operationId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          };
+
+          section.appendChild(link);
+        });
+
+        nav.appendChild(section);
+      });
+    }
+
+    function renderEndpoints() {
+      const container = document.getElementById('endpointsContainer');
+
+      if (!openAPISpec || allEndpoints.length === 0) {
+        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        return;
+      }
+
+      // Group by tags
+      const grouped = {};
+      openAPISpec.tags.forEach(tag => {
+        grouped[tag.name] = [];
+      });
+
+      allEndpoints.forEach(ep => {
+        if (ep.tags && ep.tags[0]) {
+          grouped[ep.tags[0]].push(ep);
+        }
+      });
+
+      let html = '';
+      for (const [tagName, endpoints] of Object.entries(grouped)) {
+        if (endpoints.length === 0) continue;
+
+        endpoints.forEach(ep => {
+          html += renderEndpointCard(ep);
+        });
+      }
+
+      container.innerHTML = html;
+      document.querySelectorAll('.code-example code').forEach(block => {
+        hljs.highlightElement(block);
+      });
+    }
+
+    function renderEndpointCard(ep) {
+      const securityRequired = ep.security ? '🔒' : '';
+      const hasParams = ep.parameters && ep.parameters.length > 0;
+      const hasRequestBody = ep.requestBody;
+      const hasResponses = ep.responses;
+
+      let parametersHtml = '';
+      if (hasParams) {
+        parametersHtml = `
+          <div class="property-group">
+            <div class="property-group-title">Parameters</div>
+            ${ep.parameters.map(param => `
+              <div class="parameter">
+                <div class="parameter-name">${param.name}</div>
+                <div class="parameter-info">
+                  <strong>${param.in}</strong> • ${param.schema?.type || 'unknown'}
+                  ${param.required ? '• <strong>required</strong>' : '• optional'}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      let exampleHtml = '';
+      if (ep.method === 'POST' || ep.method === 'PUT' || ep.method === 'PATCH') {
+        const host = window.location.hostname === 'localhost' ? 'http://localhost:8000' : 'https://api.rosteriq.io';
+        const curlCmd = `curl -X ${ep.method} ${host}${ep.path} \\
+  -H "Authorization: Bearer YOUR_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "key": "value" }'`;
+        exampleHtml = `
+          <div class="property-group">
+            <div class="property-group-title">Example Request</div>
+            <div class="code-example">
+              <button class="code-copy-btn" onclick="copyCode(this)">Copy</button>
+              <code class="language-bash">${escapeHtml(curlCmd)}</code>
+            </div>
+          </div>
+        `;
+      }
+
+      let responsesHtml = '';
+      if (hasResponses) {
+        const responses = Object.entries(ep.responses);
+        responsesHtml = `
+          <div class="response-codes">
+            <div class="property-group-title">Responses</div>
+            ${responses.map(([code, resp]) => {
+              const isError = code >= '400';
+              const isWarning = code >= '300' && code < '400';
+              return `
+                <div class="response-code ${isError ? 'error' : isWarning ? 'warning' : ''}">
+                  <span class="response-code-status">${code}</span>
+                  <span class="response-code-desc">${resp.description || 'No description'}</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      }
+
+      const secBadge = ep.security ? '<div class="auth-badge">🔐 Authentication Required</div>' : '';
+
+      return `
+        <div class="endpoint" id="${ep.operationId}">
+          <div class="endpoint-header">
+            <span class="method ${ep.method.toLowerCase()}">${ep.method}</span>
+            <span class="endpoint-path">${ep.path}</span>
+          </div>
+          <h3 class="endpoint-title">${ep.summary || ep.operationId}</h3>
+          <p class="endpoint-desc">${ep.description || ''}</p>
+          ${secBadge}
+          ${ep.tags ? ep.tags.map(tag => `<span class="tag-badge">${tag}</span>`).join('') : ''}
+
+          ${parametersHtml}
+          ${exampleHtml}
+          ${responsesHtml}
+
+          <button class="try-button" onclick="openTryModal('${ep.operationId}', '${ep.method}', '${escapeHtml(ep.path)}')">
+            ▶️ Try It Out
+          </button>
+        </div>
+      `;
+    }
+
+    function filterEndpoints() {
+      const query = document.getElementById('searchInput').value.toLowerCase();
+
+      if (!query) {
+        renderEndpoints();
+        return;
+      }
+
+      const filtered = allEndpoints.filter(ep =>
+        ep.summary?.toLowerCase().includes(query) ||
+        ep.path?.toLowerCase().includes(query) ||
+        ep.operationId?.toLowerCase().includes(query)
+      );
+
+      const container = document.getElementById('endpointsContainer');
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">🔍</div>
+            <h2>No endpoints found</h2>
+            <p>Try adjusting your search query</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(ep => renderEndpointCard(ep)).join('');
+      document.querySelectorAll('.code-example code').forEach(block => {
+        hljs.highlightElement(block);
+      });
+    }
+
+    function openTryModal(operationId, method, path) {
+      const endpoint = allEndpoints.find(ep => ep.operationId === operationId);
+      if (!endpoint) return;
+
+      document.getElementById('tryModalTitle').textContent = `${method} ${path}`;
+
+      let fieldsHtml = '';
+      if (endpoint.parameters && endpoint.parameters.length > 0) {
+        fieldsHtml = endpoint.parameters.map((param, idx) => {
+          if (param.in !== 'query') return '';
+          return `
+            <div class="form-group">
+              <label>${param.name} ${param.required ? '<span style="color: var(--danger);">*</span>' : ''}</label>
+              <input type="text" id="param_${idx}" placeholder="${param.schema?.type || 'value'}" />
+            </div>
+          `;
+        }).join('');
+      }
+
+      if (endpoint.requestBody) {
+        fieldsHtml += `
+          <div class="form-group">
+            <label>Request Body (JSON)</label>
+            <textarea id="requestBody" placeholder='{"key": "value"}'></textarea>
+          </div>
+        `;
+      }
+
+      document.getElementById('tryFormFields').innerHTML = fieldsHtml;
+      document.getElementById('tryResponse').style.display = 'none';
+      document.getElementById('tryModal').classList.add('open');
+    }
+
+    function closeTryModal() {
+      document.getElementById('tryModal').classList.remove('open');
+    }
+
+    async function sendTryRequest() {
+      const token = document.getElementById('authToken').value;
+      const method = document.getElementById('tryModalTitle').textContent.split(' ')[0];
+      const path = document.getElementById('tryModalTitle').textContent.substring(method.length + 1);
+
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      let body = null;
+      const requestBodyEl = document.getElementById('requestBody');
+      if (requestBodyEl && requestBodyEl.value) {
+        try {
+          body = JSON.parse(requestBodyEl.value);
+        } catch (e) {
+          alert('Invalid JSON in request body');
+          return;
+        }
+      }
+
+      const host = window.location.hostname === 'localhost' ? 'http://localhost:8000' : 'https://api.rosteriq.io';
+
+      try {
+        const response = await fetch(host + path, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined
+        });
+
+        const responseText = await response.text();
+        let formatted = responseText;
+        try {
+          formatted = JSON.stringify(JSON.parse(responseText), null, 2);
+        } catch (e) {
+          // Not JSON, use as-is
+        }
+
+        document.getElementById('tryResponseCode').textContent = formatted;
+        document.getElementById('tryResponse').style.display = 'block';
+        hljs.highlightElement(document.getElementById('tryResponseCode'));
+      } catch (error) {
+        document.getElementById('tryResponseCode').textContent = `Error: ${error.message}`;
+        document.getElementById('tryResponse').style.display = 'block';
+      }
+    }
+
+    function copyCode(btn) {
+      const code = btn.nextElementSibling.textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        const originalText = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        setTimeout(() => {
+          btn.textContent = originalText;
+        }, 2000);
+      });
+    }
+
+    function toggleDarkMode() {
+      currentDarkMode = !currentDarkMode;
+      document.body.classList.toggle('light-mode');
+      localStorage.setItem('rosteriq-dark-mode', currentDarkMode);
+    }
+
+    function loadDarkMode() {
+      const saved = localStorage.getItem('rosteriq-dark-mode');
+      if (saved === 'false') {
+        currentDarkMode = false;
+        document.body.classList.add('light-mode');
+      }
+    }
+
+    function focusSearch() {
+      document.getElementById('searchInput').focus();
+    }
+
+    function scrollToTop() {
+      document.querySelector('.content').scrollTop = 0;
+    }
+
+    function escapeHtml(text) {
+      const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      };
+      return text.replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // Close modal on escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeTryModal();
+      }
+    });
+  </script>
+</body>
+</html>

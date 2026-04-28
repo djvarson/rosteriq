@@ -1,0 +1,22 @@
+{
+  "description": "RosterIQ Monitoring Configuration",
+  "thresholds": {
+    "error_rate_threshold": 5.0,
+    "error_rate_window": 300,
+    "p99_latency_threshold": 2000,
+    "db_pool_utilization_threshold": 90,
+    "queue_depth_threshold": 100,
+    "memory_usage_threshold": 536870912,
+    "cache_hit_rate_threshold": 50
+  },
+  "prometheus": {
+    "scrape_interval": "15s",
+    "evaluation_interval": "15s",
+    "metrics_endpoint": "/metrics"
+  },
+  "dashboards": {
+    "json_endpoint": "/api/v1/admin/metrics",
+    "alerts_endpoint": "/api/v1/admin/alerts",
+    "health_endpoint": "/api/v1/admin/health-detailed"
+  }
+}

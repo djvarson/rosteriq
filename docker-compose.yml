@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  # PostgreSQL database
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rosteriq
+      POSTGRES_USER: rosteriq
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-rosteriq_dev_2026}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rosteriq"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # RosterIQ API server
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://rosteriq:${DB_PASSWORD:-rosteriq_dev_2026}@db:5432/rosteriq
+      ROSTERIQ_ENV: production
+      CORS_ORIGINS: http://localhost:3000,http://localhost:8080
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./rosteriq:/app/rosteriq:ro  # Live reload in dev
+    command: >
+      uvicorn rosteriq.api:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --log-level info
+
+  # Dashboard (served via nginx)
+  dashboard:
+    image: nginx:alpine
+    volumes:
+      - ./dashboard:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

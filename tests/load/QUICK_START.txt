@@ -1,0 +1,77 @@
+================================================================================
+RosterIQ LOAD TESTING - QUICK START GUIDE
+================================================================================
+
+INSTALLATION (One-time setup):
+  pip install locust
+
+BASIC COMMANDS:
+  # Smoke test (quick sanity check - 5 users, 30 seconds)
+  ./run_load_test.sh smoke
+
+  # Production-like load test (50 users, 5 minutes)
+  ./run_load_test.sh load
+
+  # Stress test (100 users, 10 minutes)
+  ./run_load_test.sh stress
+
+  # Endurance test (50 users, 30 minutes)
+  ./run_load_test.sh endurance
+
+  # Interactive web dashboard
+  locust -f locustfile.py --host=http://localhost:8000
+
+CUSTOM HOST:
+  ./run_load_test.sh load --host http://api.example.com:8000
+
+ENVIRONMENT VARIABLES:
+  export TARGET_HOST=http://api.example.com:8000
+  export TANDA_WEBHOOK_SECRET=your-secret
+  ./run_load_test.sh load
+
+RESULTS:
+  HTML Report:  tests/load/reports/rosteriq_*.html
+  CSV Data:     tests/load/reports/rosteriq_*.csv
+
+PROFILES:
+  smoke     - 5 users, 30s (quick check)
+  load      - 50 users, 5min (production)
+  stress    - 100 users, 10min (breaking point)
+  spike     - 200 users, 5min (spike handling)
+  endurance - 50 users, 30min (stability)
+
+BENCHMARKS:
+  python tests/benchmarks/bench_core.py
+
+EXPECTED PERFORMANCE:
+  GET /health:            < 30ms
+  POST /api/auth/login:   < 300ms
+  POST /rosters/generate: < 10s
+  GET /venues:            < 100ms
+  GET /forecasts:         < 200ms
+  POST /tanda/webhook:    < 50ms
+  GET /api/staff/...:     < 200ms
+
+TROUBLESHOOTING:
+  - API not responding?
+    Make sure it's running: python -m rosteriq.api
+
+  - High error rates?
+    Check API logs for exceptions
+    Verify database is initialized
+    Check authentication secret
+
+  - Slow tests?
+    Run smoke test first (quick baseline)
+    Check server CPU/memory usage
+    Review slow query logs
+
+NEXT STEPS:
+  1. Run smoke test
+  2. Review results in HTML report
+  3. Run production load test
+  4. Run benchmarks
+  5. Customize profiles in config.py
+  6. Run against production endpoint
+
+For full documentation, see README.md

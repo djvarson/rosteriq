@@ -1,0 +1,128 @@
+{
+  "app_name": "RosterIQ",
+  "version": "1.0.0",
+  "author": "RosterIQ Pty Ltd",
+  "description": "AI-powered predictive rostering for Australian hospitality",
+  "website": "https://rosteriq.com.au",
+  "logo_url": "https://rosteriq.com.au/logo.png",
+  "author_email": "support@rosteriq.com.au",
+  "support_email": "support@rosteriq.com.au",
+  "privacy_policy_url": "https://rosteriq.com.au/privacy",
+  "terms_url": "https://rosteriq.com.au/terms",
+  "documentation_url": "https://rosteriq.com.au/docs",
+  "oauth_scopes": [
+    "roster:read",
+    "roster:write",
+    "employee:read",
+    "department:read",
+    "timesheet:read",
+    "leave:read"
+  ],
+  "oauth_client_id": "${TANDA_CLIENT_ID}",
+  "oauth_client_secret": "${TANDA_CLIENT_SECRET}",
+  "install_url": "/api/tanda/plugin/install",
+  "uninstall_url": "/api/tanda/plugin/uninstall",
+  "webhook_url": "/api/webhooks/tanda",
+  "redirect_uri": "/api/tanda/callback",
+  "categories": [
+    "rostering",
+    "workforce-management",
+    "ai"
+  ],
+  "features": [
+    "AI-powered roster predictions using historical data",
+    "Real-time demand forecasting from foot traffic and POS data",
+    "Award rule compliance and penalty avoidance",
+    "Labour cost optimization",
+    "Shift scheduling recommendations",
+    "Staff availability and skill matching",
+    "Multi-venue support",
+    "Mobile app for shift management"
+  ],
+  "required_permissions": [
+    "roster:read - View existing rosters",
+    "roster:write - Create and modify rosters",
+    "employee:read - Access employee records and availability",
+    "department:read - View department structure",
+    "timesheet:read - Track worked hours",
+    "leave:read - Understand leave periods"
+  ],
+  "pricing": {
+    "model": "subscription",
+    "tiers": [
+      {
+        "name": "Starter",
+        "slug": "starter",
+        "price_aud": 99.00,
+        "billing_period": "monthly",
+        "max_venues": 1,
+        "max_employees": 25,
+        "features": [
+          "Basic roster predictions",
+          "Weekly demand forecasts",
+          "Award compliance checking",
+          "Email support"
+        ]
+      },
+      {
+        "name": "Professional",
+        "slug": "professional",
+        "price_aud": 299.00,
+        "billing_period": "monthly",
+        "max_venues": 5,
+        "max_employees": 200,
+        "features": [
+          "Advanced AI predictions",
+          "Real-time demand forecasting",
+          "Cost optimization recommendations",
+          "Mobile app access",
+          "Priority support"
+        ]
+      },
+      {
+        "name": "Enterprise",
+        "slug": "enterprise",
+        "price_aud": 0.00,
+        "billing_period": "custom",
+        "max_venues": null,
+        "max_employees": null,
+        "features": [
+          "All Professional features",
+          "Custom integrations",
+          "Dedicated account manager",
+          "SLA guarantees",
+          "On-site training"
+        ]
+      }
+    ]
+  },
+  "screenshots": [
+    {
+      "title": "Demand Forecasting Dashboard",
+      "description": "Real-time predicted covers and staffing recommendations",
+      "url": "https://rosteriq.com.au/screenshots/forecast.png"
+    },
+    {
+      "title": "Roster Generator",
+      "description": "AI-optimized weekly rosters with compliance checking",
+      "url": "https://rosteriq.com.au/screenshots/roster.png"
+    },
+    {
+      "title": "Cost Analysis",
+      "description": "Labour cost breakdown and savings opportunities",
+      "url": "https://rosteriq.com.au/screenshots/costs.png"
+    }
+  ],
+  "marketplace_metadata": {
+    "status": "active",
+    "published_at": "2026-04-25T00:00:00Z",
+    "review_status": "approved",
+    "maturity_level": "production",
+    "supported_regions": [
+      "AU"
+    ],
+    "languages": [
+      "en"
+    ]
+  }
+}

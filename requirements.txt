@@ -1,0 +1,63 @@
+# RosterIQ — AI-powered predictive rostering for Australian hospitality
+# Production dependencies with pinned versions
+# Last updated: 2026-04-28
+
+# ============================================================================
+# Core Web Framework
+# ============================================================================
+fastapi>=0.109.0,<1.0
+uvicorn[standard]>=0.27.0,<1.0
+httpx>=0.26.0,<1.0
+python-multipart>=0.0.6,<1.0
+pydantic>=2.5.0,<3.0
+
+# GraphQL API layer
+strawberry-graphql>=0.217.0,<1.0
+
+# ============================================================================
+# Database & Persistence
+# ============================================================================
+psycopg2-binary>=2.9.9,<3.0
+redis[hiredis]>=5.0,<6.0
+
+# ============================================================================
+# Authentication & Security
+# ============================================================================
+PyJWT>=2.8.0,<3.0
+passlib[bcrypt]>=1.7.4,<2.0
+bcrypt>=4.1.0,<5.0
+cryptography>=41.0.0,<43.0
+
+# ============================================================================
+# Business Integrations
+# ============================================================================
+# Stripe for billing and subscription management
+stripe>=7.0.0,<8.0
+
+# Twilio for SMS notifications (optional, gracefully degraded if not configured)
+twilio>=8.0.0,<9.0
+
+# Web push notifications
+pywebpush>=1.14.0,<2.0
+
+# PDF report generation
+reportlab>=4.0,<5.0
+
+# ============================================================================
+# Utilities
+# ============================================================================
+python-dotenv>=1.0.0,<2.0
+
+# ============================================================================
+# Monitoring & Error Reporting (Optional)
+# ============================================================================
+# sentry-sdk[fastapi]>=1.40.0,<2.0
+
+# ============================================================================
+# Development & Testing (Optional, not installed in production)
+# ============================================================================
+# pytest>=7.0,<8.0
+# pytest-asyncio>=0.21,<1.0
+# pytest-cov>=4.0,<5.0
+# respx>=0.20,<1.0
+# locust>=2.0,<3.0

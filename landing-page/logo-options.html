@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosterIQ Logo Options</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=DM+Sans:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f5f5f5;
+            padding: 3rem 2rem;
+            color: #111;
+        }
+        h1 {
+            text-align: center; font-size: 1.5rem; font-weight: 700;
+            margin-bottom: 0.5rem; letter-spacing: -0.5px;
+        }
+        .intro {
+            text-align: center; color: #777; font-size: 0.95rem;
+            margin-bottom: 3rem;
+        }
+        .options {
+            max-width: 900px; margin: 0 auto;
+            display: flex; flex-direction: column; gap: 2rem;
+        }
+        .option {
+            background: white; border-radius: 16px;
+            padding: 2.5rem 3rem;
+            border: 2px solid #e5e5e5;
+            display: flex; align-items: center; justify-content: space-between;
+            transition: border-color 0.2s;
+        }
+        .option:hover { border-color: #0ea5e9; }
+        .option-number {
+            font-size: 0.75rem; font-weight: 700; color: #999;
+            text-transform: uppercase; letter-spacing: 2px;
+            margin-bottom: 1.5rem;
+        }
+        .logo-render {
+            display: flex; align-items: center; gap: 1rem;
+        }
+        .logo-icon {
+            width: 48px; height: 48px; flex-shrink: 0;
+        }
+        .meta {
+            text-align: right; min-width: 200px;
+        }
+        .font-name {
+            font-size: 0.85rem; font-weight: 600; color: #0ea5e9;
+            margin-bottom: 0.25rem;
+        }
+        .font-desc {
+            font-size: 0.8rem; color: #999; line-height: 1.5;
+        }
+
+        /* Option 1 - Inter (current) */
+        .logo-1 .wordmark {
+            font-family: 'Inter', sans-serif;
+            font-size: 2.4rem; font-weight: 900;
+            letter-spacing: -1.5px; color: #111;
+        }
+        .logo-1 .wordmark span { color: #0ea5e9; }
+
+        /* Option 2 - DM Sans */
+        .logo-2 .wordmark {
+            font-family: 'DM Sans', sans-serif;
+            font-size: 2.4rem; font-weight: 800;
+            letter-spacing: -1px; color: #111;
+        }
+        .logo-2 .wordmark span { color: #0ea5e9; }
+
+        /* Option 3 - Plus Jakarta Sans */
+        .logo-3 .wordmark {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 2.4rem; font-weight: 800;
+            letter-spacing: -0.5px; color: #111;
+        }
+        .logo-3 .wordmark span { color: #0ea5e9; }
+
+        /* Option 4 - Outfit */
+        .logo-4 .wordmark {
+            font-family: 'Outfit', sans-serif;
+            font-size: 2.5rem; font-weight: 700;
+            letter-spacing: -0.5px; color: #111;
+        }
+        .logo-4 .wordmark span { color: #0ea5e9; }
+
+        /* Option 5 - Space Grotesk */
+        .logo-5 .wordmark {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2.3rem; font-weight: 700;
+            letter-spacing: -1px; color: #111;
+        }
+        .logo-5 .wordmark span { color: #0ea5e9; }
+
+        /* Dark versions */
+        .dark-row {
+            background: #111; border-radius: 16px;
+            padding: 2rem 3rem;
+            max-width: 900px; margin: 3rem auto 0;
+            display: flex; align-items: center; justify-content: space-around;
+            flex-wrap: wrap; gap: 2rem;
+        }
+        .dark-row .wordmark { color: white !important; }
+        .dark-label {
+            text-align: center; color: #999; font-size: 0.8rem;
+            margin-top: 2.5rem; max-width: 900px; margin-left: auto; margin-right: auto;
+            margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 2px; font-weight: 600;
+        }
+
+        .dark-logo { display: flex; align-items: center; gap: 0.75rem; }
+        .dark-logo .icon { width: 36px; height: 36px; }
+
+        .d1 .wordmark { font-family: 'Inter', sans-serif; font-size: 1.6rem; font-weight: 900; letter-spacing: -1.5px; color: white; }
+        .d2 .wordmark { font-family: 'DM Sans', sans-serif; font-size: 1.6rem; font-weight: 800; letter-spacing: -1px; color: white; }
+        .d3 .wordmark { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.5px; color: white; }
+        .d4 .wordmark { font-family: 'Outfit', sans-serif; font-size: 1.7rem; font-weight: 700; letter-spacing: -0.5px; color: white; }
+        .d5 .wordmark { font-family: 'Space Grotesk', sans-serif; font-size: 1.55rem; font-weight: 700; letter-spacing: -1px; color: white; }
+        .dark-logo .wordmark span { color: #0ea5e9 !important; }
+    </style>
+</head>
+<body>
+
+<h1>RosterIQ Logo — Font Options</h1>
+<p class="intro">5 typeface options with the brand icon. Pick your favourite.</p>
+
+<div class="options">
+
+    <!-- Option 1 -->
+    <div class="option logo-1">
+        <div>
+            <div class="option-number">Option 1</div>
+            <div class="logo-render">
+                <svg class="logo-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="32" cy="32" r="30" fill="#0ea5e9"/>
+                    <circle cx="32" cy="32" r="24" fill="white"/>
+                    <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+                    <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+                    <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+                    <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+                    <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/>
+                    <circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+                    <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/>
+                    <circle cx="32" cy="32" r="3" fill="#111"/>
+                </svg>
+                <div class="wordmark">Roster<span>IQ</span></div>
+            </div>
+        </div>
+        <div class="meta">
+            <div class="font-name">Inter Black</div>
+            <div class="font-desc">Current choice. Tight tracking,<br>very geometric, tech-forward.</div>
+        </div>
+    </div>
+
+    <!-- Option 2 -->
+    <div class="option logo-2">
+        <div>
+            <div class="option-number">Option 2</div>
+            <div class="logo-render">
+                <svg class="logo-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="32" cy="32" r="30" fill="#0ea5e9"/>
+                    <circle cx="32" cy="32" r="24" fill="white"/>
+                    <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+                    <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+                    <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+                    <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+                    <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/>
+                    <circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+                    <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/>
+                    <circle cx="32" cy="32" r="3" fill="#111"/>
+                </svg>
+                <div class="wordmark">Roster<span>IQ</span></div>
+            </div>
+        </div>
+        <div class="meta">
+            <div class="font-name">DM Sans ExtraBold</div>
+            <div class="font-desc">Softer geometry, slightly warmer.<br>Popular with SaaS startups.</div>
+        </div>
+    </div>
+
+    <!-- Option 3 -->
+    <div class="option logo-3">
+        <div>
+            <div class="option-number">Option 3</div>
+            <div class="logo-render">
+                <svg class="logo-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="32" cy="32" r="30" fill="#0ea5e9"/>
+                    <circle cx="32" cy="32" r="24" fill="white"/>
+                    <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+                    <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+                    <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+                    <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+                    <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/>
+                    <circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+                    <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/>
+                    <circle cx="32" cy="32" r="3" fill="#111"/>
+                </svg>
+                <div class="wordmark">Roster<span>IQ</span></div>
+            </div>
+        </div>
+        <div class="meta">
+            <div class="font-name">Plus Jakarta Sans ExtraBold</div>
+            <div class="font-desc">Friendly, rounded terminals.<br>Feels approachable and modern.</div>
+        </div>
+    </div>
+
+    <!-- Option 4 -->
+    <div class="option logo-4">
+        <div>
+            <div class="option-number">Option 4</div>
+            <div class="logo-render">
+                <svg class="logo-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="32" cy="32" r="30" fill="#0ea5e9"/>
+                    <circle cx="32" cy="32" r="24" fill="white"/>
+                    <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+                    <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+                    <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+                    <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+                    <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/>
+                    <circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+                    <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/>
+                    <circle cx="32" cy="32" r="3" fill="#111"/>
+                </svg>
+                <div class="wordmark">Roster<span>IQ</span></div>
+            </div>
+        </div>
+        <div class="meta">
+            <div class="font-name">Outfit Bold</div>
+            <div class="font-desc">Clean and airy with open counters.<br>Reads well at small sizes.</div>
+        </div>
+    </div>
+
+    <!-- Option 5 -->
+    <div class="option logo-5">
+        <div>
+            <div class="option-number">Option 5</div>
+            <div class="logo-render">
+                <svg class="logo-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="32" cy="32" r="30" fill="#0ea5e9"/>
+                    <circle cx="32" cy="32" r="24" fill="white"/>
+                    <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+                    <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+                    <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+                    <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+                    <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/>
+                    <circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+                    <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/>
+                    <circle cx="32" cy="32" r="3" fill="#111"/>
+                </svg>
+                <div class="wordmark">Roster<span>IQ</span></div>
+            </div>
+        </div>
+        <div class="meta">
+            <div class="font-name">Space Grotesk Bold</div>
+            <div class="font-desc">Monospaced flavour, techy feel.<br>Distinctive "R" and "Q" shapes.</div>
+        </div>
+    </div>
+
+</div>
+
+<p class="dark-label">On dark background</p>
+<div class="dark-row">
+    <div class="dark-logo d1">
+        <svg class="icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="32" r="30" fill="#0ea5e9"/><circle cx="32" cy="32" r="24" fill="white"/>
+            <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+            <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+            <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+            <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/><circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+            <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/><circle cx="32" cy="32" r="3" fill="#111"/>
+        </svg>
+        <div class="wordmark">Roster<span>IQ</span></div>
+    </div>
+    <div class="dark-logo d2">
+        <svg class="icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="32" r="30" fill="#0ea5e9"/><circle cx="32" cy="32" r="24" fill="white"/>
+            <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+            <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+            <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+            <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/><circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+            <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/><circle cx="32" cy="32" r="3" fill="#111"/>
+        </svg>
+        <div class="wordmark">Roster<span>IQ</span></div>
+    </div>
+    <div class="dark-logo d3">
+        <svg class="icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="32" r="30" fill="#0ea5e9"/><circle cx="32" cy="32" r="24" fill="white"/>
+            <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+            <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+            <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+            <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/><circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+            <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/><circle cx="32" cy="32" r="3" fill="#111"/>
+        </svg>
+        <div class="wordmark">Roster<span>IQ</span></div>
+    </div>
+    <div class="dark-logo d4">
+        <svg class="icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="32" r="30" fill="#0ea5e9"/><circle cx="32" cy="32" r="24" fill="white"/>
+            <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+            <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+            <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+            <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/><circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+            <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/><circle cx="32" cy="32" r="3" fill="#111"/>
+        </svg>
+        <div class="wordmark">Roster<span>IQ</span></div>
+    </div>
+    <div class="dark-logo d5">
+        <svg class="icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="32" r="30" fill="#0ea5e9"/><circle cx="32" cy="32" r="24" fill="white"/>
+            <circle cx="32" cy="12" r="2.5" fill="#111"/><circle cx="32" cy="52" r="2.5" fill="#111"/>
+            <circle cx="12" cy="32" r="2.5" fill="#111"/><circle cx="52" cy="32" r="2.5" fill="#111"/>
+            <line x1="32" y1="32" x2="32" y2="16" stroke="#111" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="32" y1="32" x2="44" y2="42" stroke="#0ea5e9" stroke-width="3.5" stroke-linecap="round"/>
+            <circle cx="20" cy="18" r="3.5" fill="#0ea5e9" opacity="0.8"/><circle cx="44" cy="18" r="3.5" fill="#22c55e" opacity="0.8"/>
+            <circle cx="48" cy="28" r="3.5" fill="#f59e0b" opacity="0.75"/><circle cx="32" cy="32" r="3" fill="#111"/>
+        </svg>
+        <div class="wordmark">Roster<span>IQ</span></div>
+    </div>
+</div>
+
+</body>
+</html>

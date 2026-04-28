@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RosterIQ - Offline</title>
+  <style>
+    :root {
+      --dark-navy: #0F1629;
+      --brand-blue: #3366FF;
+      --text-primary: #FFFFFF;
+      --text-secondary: #A0AEC0;
+      --warning: #F59E0B;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, var(--dark-navy) 0%, #1a2847 100%);
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .offline-container {
+      max-width: 500px;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 60px 40px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .offline-icon {
+      font-size: 64px;
+      margin-bottom: 24px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.7;
+        transform: scale(1.05);
+      }
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: var(--warning);
+    }
+
+    .subtitle {
+      font-size: 16px;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+      line-height: 1.6;
+    }
+
+    .status-badge {
+      display: inline-block;
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid var(--warning);
+      color: var(--warning);
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 24px;
+    }
+
+    .cached-data {
+      background: rgba(51, 102, 255, 0.1);
+      border: 1px solid var(--brand-blue);
+      color: var(--text-secondary);
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .retry-btn {
+      background: var(--brand-blue);
+      color: white;
+      border: none;
+      padding: 12px 32px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: inline-block;
+    }
+
+    .retry-btn:hover:not(:disabled) {
+      background: #2555dd;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(51, 102, 255, 0.3);
+    }
+
+    .retry-btn:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .retry-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .logo {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--brand-blue);
+      margin-bottom: 20px;
+      letter-spacing: -1px;
+    }
+  </style>
+</head>
+<body>
+  <div class="offline-container">
+    <div class="logo">RosterIQ</div>
+    <div class="offline-icon">📡</div>
+
+    <h1>You're Offline</h1>
+
+    <div class="status-badge">
+      <span id="status">No Internet Connection</span>
+    </div>
+
+    <div class="subtitle">
+      <p>Your device lost connection to the internet.</p>
+      <p style="margin-top: 8px;">Viewing cached roster data from your last sync.</p>
+    </div>
+
+    <div class="cached-data">
+      <strong>Cached Data Available:</strong>
+      <p style="margin-top: 8px;">You can still view previously loaded rosters, staff schedules, and venue data while offline. Real-time updates will sync when you're back online.</p>
+    </div>
+
+    <button class="retry-btn" id="retryBtn" onclick="retryConnection()">
+      Try Again
+    </button>
+
+    <div class="footer">
+      <p>Your connection will be restored automatically.</p>
+      <p style="margin-top: 8px;">RosterIQ v1.0 • Progressive Web App</p>
+    </div>
+  </div>
+
+  <script>
+    // Monitor online/offline status
+    window.addEventListener('online', () => {
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = 'Back Online!';
+      document.querySelector('.status-badge').style.borderColor = '#10B981';
+      document.querySelector('.status-badge').style.background = 'rgba(16, 185, 129, 0.1)';
+      document.querySelector('.status-badge').style.color = '#10B981';
+
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    });
+
+    function retryConnection() {
+      const btn = document.getElementById('retryBtn');
+      btn.disabled = true;
+      btn.textContent = 'Checking connection...';
+
+      // Try to fetch a small resource to check connectivity
+      fetch('/static/manifest.json', { method: 'HEAD' })
+        .then(() => {
+          window.location.reload();
+        })
+        .catch(() => {
+          btn.disabled = false;
+          btn.textContent = 'Still Offline - Try Again';
+        });
+    }
+  </script>
+</body>
+</html>

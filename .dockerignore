@@ -1,0 +1,103 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.vimrc
+.vim
+
+# Git
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Environment files (NEVER include in Docker)
+.env
+.env.local
+.env.*.local
+
+# Tests (optional — include or exclude based on your needs)
+tests/
+pytest.ini
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation
+docs/
+*.md
+README*
+LICENSE
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+.postgres/
+
+# Temporary files
+tmp/
+temp/
+*.log
+*.pot
+
+# OS
+.DS_Store
+Thumbs.db
+*.pid
+
+# CI/CD
+.github/workflows/
+.gitlab-ci.yml
+.travis.yml
+
+# Build artifacts
+Dockerfile
+Procfile
+railway.json
+docker-compose.yml
+nginx.conf
+start.sh
+setup.sh
+
+# Misc files
+*.pdf
+sample_data/
+Andy/
+Andy (1)/
+landing-page/
+dashboard/

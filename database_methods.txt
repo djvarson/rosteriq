@@ -1,0 +1,14 @@
+
+    # --- Preference Learning ---
+
+    def save_preference_profile(self, employee_id: str, profile: dict) -> None:
+        """Save or update a preference profile for an employee."""
+        raise NotImplementedError
+
+    def get_preference_profile(self, employee_id: str) -> Optional[dict]:
+        """Get a preference profile for an employee. Returns None if not found."""
+        raise NotImplementedError
+
+    def list_preference_profiles(self, venue_id: str) -> list[dict]:
+        """List all preference profiles for a venue."""
+        raise NotImplementedError

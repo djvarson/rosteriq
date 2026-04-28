@@ -1,0 +1,4112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Shifts - RosterIQ Staff Portal</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --dark-navy: #0F1629;
+      --dark-bg: #1A202C;
+      --card-bg: #2D3748;
+      --light-bg: #F0F2F5;
+      --text-primary: #FFFFFF;
+      --text-secondary: #A0AEC0;
+      --text-muted: #718096;
+      --brand-blue: #3366FF;
+      --success: #10B981;
+      --warning: #F59E0B;
+      --danger: #EF4444;
+      --info: #3B82F6;
+      --border: #4A5568;
+      --morning: #9F7AEA;
+      --afternoon: #4299E1;
+      --evening: #ED8936;
+      --night: #2D3748;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--light-bg);
+      color: var(--text-primary);
+    }
+
+    /* ============================================
+       LAYOUT: Mobile-first single column
+       ============================================ */
+    .container {
+      width: 100%;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--light-bg);
+    }
+
+    /* ============================================
+       HEADER
+       ============================================ */
+    .header {
+      background: var(--dark-navy);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header-logo {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .header-logo span {
+      color: var(--brand-blue);
+    }
+
+    .header-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .user-menu {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .user-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--brand-blue);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .logout-btn {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 20px;
+      padding: 8px;
+      transition: color 0.2s;
+    }
+
+    .logout-btn:hover {
+      color: var(--danger);
+    }
+
+    /* ============================================
+       NAVIGATION TABS
+       ============================================ */
+    .nav-tabs {
+      background: var(--dark-bg);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      overflow-x: auto;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .nav-tab {
+      padding: 16px 20px;
+      border: none;
+      background: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+      border-bottom: 3px solid transparent;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+
+    .nav-tab:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .nav-tab.active {
+      color: var(--brand-blue);
+      border-bottom-color: var(--brand-blue);
+    }
+
+    /* ============================================
+       CONTENT AREA
+       ============================================ */
+    .content {
+      flex: 1;
+      padding: 24px 20px;
+      max-width: 100%;
+      overflow-y: auto;
+    }
+
+    @media (min-width: 768px) {
+      .content {
+        padding: 32px;
+        max-width: 1200px;
+        margin: 0 auto;
+        width: 100%;
+      }
+    }
+
+    .section {
+      display: none;
+    }
+
+    .section.active {
+      display: block;
+      animation: fadeIn 0.2s;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    /* ============================================
+       CARDS & COMPONENTS
+       ============================================ */
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      border: 1px solid #E2E8F0;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .card-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1A202C;
+    }
+
+    .card-subtitle {
+      font-size: 13px;
+      color: #718096;
+      margin-top: 4px;
+    }
+
+    /* ============================================
+       MY SHIFTS SECTION
+       ============================================ */
+    .week-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .week-nav button {
+      background: var(--brand-blue);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .week-nav button:hover {
+      background: #2952CC;
+    }
+
+    .week-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1A202C;
+    }
+
+    .shifts-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    @media (min-width: 768px) {
+      .shifts-grid {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      }
+    }
+
+    .day-card {
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    .day-header {
+      background: #F7FAFC;
+      padding: 16px;
+      border-bottom: 1px solid #E2E8F0;
+    }
+
+    .day-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1A202C;
+    }
+
+    .day-date {
+      font-size: 12px;
+      color: #718096;
+      margin-top: 2px;
+    }
+
+    .day-content {
+      padding: 16px;
+    }
+
+    .shift-item {
+      background: #F7FAFC;
+      border-left: 4px solid var(--info);
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      font-size: 13px;
+    }
+
+    .shift-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .shift-item.morning {
+      border-left-color: var(--morning);
+    }
+
+    .shift-item.afternoon {
+      border-left-color: var(--afternoon);
+    }
+
+    .shift-item.evening {
+      border-left-color: var(--evening);
+    }
+
+    .shift-item.night {
+      border-left-color: var(--night);
+    }
+
+    .shift-time {
+      font-weight: 600;
+      color: #1A202C;
+      margin-bottom: 4px;
+    }
+
+    .shift-details {
+      color: #718096;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .no-shifts {
+      text-align: center;
+      padding: 32px 16px;
+      color: #718096;
+    }
+
+    .no-shifts-icon {
+      font-size: 40px;
+      margin-bottom: 12px;
+    }
+
+    /* ============================================
+       TIMELINE (VISUAL BARS)
+       ============================================ */
+    .timeline {
+      position: relative;
+      height: 60px;
+      background: #EDF2F7;
+      border-radius: 6px;
+      margin: 12px 0;
+      overflow: hidden;
+    }
+
+    .timeline-bar {
+      position: absolute;
+      height: 100%;
+      background: var(--brand-blue);
+      border-radius: 4px;
+      top: 0;
+    }
+
+    /* ============================================
+       AVAILABILITY SECTION
+       ============================================ */
+    .availability-grid {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .availability-day {
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+      gap: 8px;
+      align-items: center;
+    }
+
+    .day-label {
+      font-weight: 600;
+      color: #1A202C;
+      grid-column: 1 / -1;
+      margin-bottom: 8px;
+    }
+
+    .availability-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .toggle-input {
+      appearance: none;
+      width: 40px;
+      height: 24px;
+      background: #CBD5E0;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+      position: relative;
+    }
+
+    .toggle-input:checked {
+      background: var(--success);
+    }
+
+    .toggle-input::after {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      top: 2px;
+      left: 2px;
+      transition: left 0.2s;
+    }
+
+    .toggle-input:checked::after {
+      left: 18px;
+    }
+
+    .toggle-label {
+      font-size: 12px;
+      color: #4A5568;
+      font-weight: 500;
+    }
+
+    /* ============================================
+       SHIFT BIDDING MARKETPLACE
+       ============================================ */
+    .bidding-grid {
+      display: grid;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    @media (min-width: 768px) {
+      .bidding-grid {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      }
+    }
+
+    .bid-card {
+      background: white;
+      border: 2px solid #E2E8F0;
+      border-radius: 12px;
+      padding: 16px;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+
+    .bid-card:hover {
+      border-color: var(--brand-blue);
+      box-shadow: 0 4px 12px rgba(51, 102, 255, 0.1);
+    }
+
+    .bid-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 12px;
+    }
+
+    .bid-date {
+      font-weight: 700;
+      color: #1A202C;
+      font-size: 14px;
+    }
+
+    .bid-badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .bid-badge.open {
+      background: #D1FAE5;
+      color: #065F46;
+    }
+
+    .bid-badge.closed {
+      background: #FEE2E2;
+      color: #7F1D1D;
+    }
+
+    .bid-time {
+      font-size: 13px;
+      color: #4A5568;
+      margin-bottom: 8px;
+    }
+
+    .bid-role {
+      font-size: 12px;
+      color: #718096;
+      margin-bottom: 8px;
+    }
+
+    .bid-stats {
+      display: flex;
+      gap: 12px;
+      padding: 12px 0;
+      border-top: 1px solid #E2E8F0;
+      border-bottom: 1px solid #E2E8F0;
+      margin: 12px 0;
+      font-size: 12px;
+    }
+
+    .bid-stat {
+      flex: 1;
+      text-align: center;
+    }
+
+    .bid-stat-value {
+      font-weight: 700;
+      color: #1A202C;
+      display: block;
+    }
+
+    .bid-stat-label {
+      color: #718096;
+      font-size: 11px;
+    }
+
+    .bid-range {
+      font-size: 12px;
+      color: #4A5568;
+      margin: 8px 0;
+    }
+
+    .bid-action-btn {
+      width: 100%;
+      padding: 10px;
+      margin-top: 12px;
+      border-radius: 6px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+
+    .bid-action-btn.primary {
+      background: var(--brand-blue);
+      color: white;
+    }
+
+    .bid-action-btn.primary:hover {
+      background: #2952CC;
+    }
+
+    .bid-action-btn.secondary {
+      background: #F0F4FF;
+      color: var(--brand-blue);
+      border: 1px solid var(--brand-blue);
+    }
+
+    .bid-action-btn.secondary:hover {
+      background: var(--brand-blue);
+      color: white;
+    }
+
+    .my-bids-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .my-bid-item {
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .my-bid-info {
+      flex: 1;
+    }
+
+    .my-bid-date {
+      font-weight: 600;
+      color: #1A202C;
+      margin-bottom: 4px;
+    }
+
+    .my-bid-time {
+      font-size: 12px;
+      color: #718096;
+      margin-bottom: 4px;
+    }
+
+    .my-bid-rate {
+      font-size: 13px;
+      color: #4A5568;
+    }
+
+    .my-bid-status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .my-bid-status.pending {
+      background: #FEF3C7;
+      color: #92400E;
+    }
+
+    .my-bid-status.accepted {
+      background: #D1FAE5;
+      color: #065F46;
+    }
+
+    .my-bid-status.rejected {
+      background: #FEE2E2;
+      color: #7F1D1D;
+    }
+
+    /* ============================================
+       PUSH NOTIFICATIONS
+       ============================================ */
+    .notification-settings {
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .notification-section {
+      margin-bottom: 24px;
+    }
+
+    .notification-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .notification-section-title {
+      font-weight: 700;
+      color: #1A202C;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+
+    .notification-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid #E2E8F0;
+    }
+
+    .notification-item:last-child {
+      border-bottom: none;
+    }
+
+    .notification-label {
+      font-size: 13px;
+      color: #1A202C;
+      font-weight: 500;
+    }
+
+    .notification-desc {
+      font-size: 12px;
+      color: #718096;
+      margin-top: 2px;
+    }
+
+    .push-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .push-status.enabled {
+      background: #D1FAE5;
+      color: #065F46;
+    }
+
+    .push-status.disabled {
+      background: #FEE2E2;
+      color: #7F1D1D;
+    }
+
+    .push-status.unsupported {
+      background: #DBEAFE;
+      color: #0C2340;
+    }
+
+    .push-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .quiet-hours-picker {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 12px 0;
+    }
+
+    .time-input-group {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .time-input-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #4A5568;
+      margin-bottom: 4px;
+    }
+
+    .time-input-group input[type="time"] {
+      padding: 8px 12px;
+      border: 1px solid #CBD5E0;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    /* ============================================
+       APPROVAL VIEWS
+       ============================================ */
+    .approvals-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .approval-card {
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .approval-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 16px;
+    }
+
+    .approval-title {
+      font-weight: 700;
+      color: #1A202C;
+      font-size: 14px;
+    }
+
+    .approval-subtitle {
+      font-size: 12px;
+      color: #718096;
+      margin-top: 4px;
+    }
+
+    .approval-status-badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .approval-status-badge.pending {
+      background: #FEF3C7;
+      color: #92400E;
+    }
+
+    .approval-status-badge.approved {
+      background: #D1FAE5;
+      color: #065F46;
+    }
+
+    .approval-status-badge.rejected {
+      background: #FEE2E2;
+      color: #7F1D1D;
+    }
+
+    .approval-summary {
+      background: #F7FAFC;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #4A5568;
+    }
+
+    .approval-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    @media (max-width: 480px) {
+      .approval-actions {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .approval-btn {
+      padding: 10px 16px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .approval-btn-approve {
+      background: var(--success);
+      color: white;
+    }
+
+    .approval-btn-approve:hover {
+      background: #059669;
+    }
+
+    .approval-btn-reject {
+      background: var(--danger);
+      color: white;
+    }
+
+    .approval-btn-reject:hover {
+      background: #DC2626;
+    }
+
+    .approval-comment {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #CBD5E0;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+      margin-bottom: 12px;
+    }
+
+    .approval-history {
+      border-top: 1px solid #E2E8F0;
+      padding-top: 16px;
+      margin-top: 16px;
+    }
+
+    .approval-history-title {
+      font-weight: 600;
+      color: #1A202C;
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+
+    .approval-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .approval-entry {
+      display: flex;
+      gap: 12px;
+      font-size: 12px;
+    }
+
+    .approval-entry-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--brand-blue);
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+
+    .approval-entry-text {
+      flex: 1;
+    }
+
+    .approval-entry-action {
+      color: #1A202C;
+      font-weight: 600;
+    }
+
+    .approval-entry-time {
+      color: #718096;
+      font-size: 11px;
+    }
+
+    /* ============================================
+       CONFLICT WARNINGS
+       ============================================ */
+    .conflict-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .conflict-badge.critical {
+      background: #FEE2E2;
+      color: #7F1D1D;
+    }
+
+    .conflict-badge.warning {
+      background: #FEF3C7;
+      color: #92400E;
+    }
+
+    .conflict-badge.info {
+      background: #DBEAFE;
+      color: #0C2340;
+    }
+
+    .conflict-tooltip {
+      position: relative;
+      display: inline-block;
+    }
+
+    .conflict-tooltip:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 125%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1A202C;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 11px;
+      white-space: nowrap;
+      z-index: 100;
+      font-weight: normal;
+    }
+
+    .conflict-tooltip:hover::before {
+      content: '';
+      position: absolute;
+      bottom: 120%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 4px solid transparent;
+      border-top-color: #1A202C;
+      z-index: 100;
+    }
+
+    .hours-slider {
+      margin: 24px 0;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #E2E8F0;
+    }
+
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+
+    .slider-label-text {
+      font-weight: 600;
+      color: #1A202C;
+    }
+
+    .slider-value {
+      color: var(--brand-blue);
+      font-weight: 700;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #CBD5E0;
+      outline: none;
+      -webkit-appearance: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--brand-blue);
+      cursor: pointer;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--brand-blue);
+      cursor: pointer;
+      border: none;
+    }
+
+    /* ============================================
+       SWAP BOARD SECTION
+       ============================================ */
+    .swap-actions {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    @media (min-width: 768px) {
+      .swap-actions {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .btn {
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--brand-blue);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2952CC;
+    }
+
+    .btn-secondary {
+      background: white;
+      color: var(--brand-blue);
+      border: 2px solid var(--brand-blue);
+    }
+
+    .btn-secondary:hover {
+      background: #F0F4FF;
+    }
+
+    .swap-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .swap-item {
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+    }
+
+    .swap-info {
+      flex: 1;
+    }
+
+    .swap-date {
+      font-weight: 600;
+      color: #1A202C;
+    }
+
+    .swap-time {
+      font-size: 13px;
+      color: #718096;
+      margin-top: 4px;
+    }
+
+    .swap-role {
+      font-size: 12px;
+      color: #718096;
+      margin-top: 4px;
+    }
+
+    .swap-status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-top: 8px;
+    }
+
+    .swap-status.pending {
+      background: #FEF3C7;
+      color: #92400E;
+    }
+
+    .swap-status.approved {
+      background: #D1FAE5;
+      color: #065F46;
+    }
+
+    .swap-status.rejected {
+      background: #FEE2E2;
+      color: #7F1D1D;
+    }
+
+    .swap-action {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .swap-btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .swap-btn-accept {
+      background: var(--success);
+      color: white;
+    }
+
+    .swap-btn-accept:hover {
+      background: #059669;
+    }
+
+    .swap-btn-reject {
+      background: var(--danger);
+      color: white;
+    }
+
+    .swap-btn-reject:hover {
+      background: #DC2626;
+    }
+
+    /* ============================================
+       PAY ESTIMATE SECTION
+       ============================================ */
+    .pay-summary {
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+      display: grid;
+      gap: 20px;
+    }
+
+    .pay-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid #EDF2F7;
+    }
+
+    .pay-row:last-child {
+      border-bottom: none;
+    }
+
+    .pay-label {
+      font-size: 14px;
+      color: #4A5568;
+    }
+
+    .pay-value {
+      font-weight: 600;
+      color: #1A202C;
+      font-size: 14px;
+    }
+
+    .pay-total-row {
+      border-top: 2px solid #E2E8F0;
+      border-bottom: none !important;
+      padding-top: 16px !important;
+      font-size: 16px;
+    }
+
+    .pay-total-row .pay-value {
+      font-size: 18px;
+      color: var(--success);
+    }
+
+    .pay-breakdown {
+      background: #F7FAFC;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .breakdown-item {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: #4A5568;
+    }
+
+    .breakdown-item:last-child {
+      margin-bottom: 0;
+    }
+
+    /* ============================================
+       PROFILE SECTION
+       ============================================ */
+    .profile-grid {
+      display: grid;
+      gap: 20px;
+    }
+
+    .profile-field {
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .profile-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #718096;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .profile-value {
+      font-size: 15px;
+      color: #1A202C;
+      font-weight: 500;
+    }
+
+    .profile-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #CBD5E0;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+
+    .profile-input:focus {
+      outline: none;
+      border-color: var(--brand-blue);
+      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+    }
+
+    .cert-item {
+      background: #F7FAFC;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .cert-name {
+      font-weight: 600;
+      color: #1A202C;
+      font-size: 14px;
+    }
+
+    .cert-expiry {
+      font-size: 12px;
+      color: #718096;
+    }
+
+    .cert-status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .cert-status.valid {
+      background: #D1FAE5;
+      color: #065F46;
+    }
+
+    .cert-status.expiring {
+      background: #FEF3C7;
+      color: #92400E;
+    }
+
+    .cert-status.expired {
+      background: #FEE2E2;
+      color: #7F1D1D;
+    }
+
+    /* ============================================
+       MODAL
+       ============================================ */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 500px;
+      width: 100%;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    }
+
+    .modal-header {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1A202C;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #718096;
+    }
+
+    .modal-close:hover {
+      color: #1A202C;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #4A5568;
+      margin-bottom: 8px;
+    }
+
+    .form-input,
+    .form-select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #CBD5E0;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    .form-input:focus,
+    .form-select:focus {
+      outline: none;
+      border-color: var(--brand-blue);
+      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+    }
+
+    .form-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    /* ============================================
+       ALERTS
+       ============================================ */
+    .alert {
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: start;
+      gap: 12px;
+      font-size: 13px;
+    }
+
+    .alert-icon {
+      flex-shrink: 0;
+      font-size: 18px;
+    }
+
+    .alert-success {
+      background: #D1FAE5;
+      color: #065F46;
+      border: 1px solid #A7F3D0;
+    }
+
+    .alert-error {
+      background: #FEE2E2;
+      color: #7F1D1D;
+      border: 1px solid #FECACA;
+    }
+
+    .alert-info {
+      background: #DBEAFE;
+      color: #0C2340;
+      border: 1px solid #BFDBFE;
+    }
+
+    /* ============================================
+       RESPONSIVE DESIGN: Tablet (768px and below)
+       ============================================ */
+    @media (max-width: 768px) {
+      .content {
+        padding: 16px;
+      }
+
+      .card {
+        padding: 16px;
+      }
+
+      .card-title {
+        font-size: 16px;
+      }
+
+      .shifts-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .bidding-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .availability-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .availability-day {
+        grid-template-columns: 1fr;
+      }
+
+      .week-nav {
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .week-nav button {
+        width: 100%;
+        min-height: 44px;
+        padding: 12px;
+      }
+
+      .week-label {
+        text-align: center;
+        width: 100%;
+      }
+
+      .nav-tabs {
+        flex-wrap: wrap;
+      }
+
+      .nav-tab {
+        padding: 12px 16px;
+        min-height: 44px;
+        font-size: 13px;
+      }
+
+      .btn {
+        min-height: 44px;
+        padding: 12px 16px;
+      }
+
+      .swap-item {
+        flex-direction: column;
+      }
+
+      .swap-action {
+        width: 100%;
+        flex-direction: column;
+      }
+
+      .swap-btn {
+        width: 100%;
+        min-height: 44px;
+      }
+
+      .approval-actions {
+        grid-template-columns: 1fr;
+      }
+
+      .approval-btn {
+        min-height: 44px;
+      }
+
+      .pay-summary {
+        grid-template-columns: 1fr;
+      }
+
+      .form-input,
+      .form-select {
+        min-height: 44px;
+        padding: 12px;
+        font-size: 16px;
+      }
+
+      .toggle-input {
+        width: 48px;
+        height: 28px;
+      }
+
+      .toggle-input::after {
+        width: 24px;
+        height: 24px;
+      }
+
+      .toggle-input:checked::after {
+        left: 22px;
+      }
+
+      .time-input-group input[type="time"] {
+        min-height: 44px;
+        font-size: 16px;
+      }
+
+      .header {
+        padding: 12px 16px;
+      }
+
+      .day-card {
+        margin-bottom: 16px;
+      }
+
+      .shift-item {
+        padding: 12px;
+        font-size: 12px;
+      }
+
+      .my-bid-item {
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .profile-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .cert-item {
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-start;
+      }
+    }
+
+    /* ============================================
+       RESPONSIVE DESIGN: Mobile (480px and below)
+       ============================================ */
+    @media (max-width: 480px) {
+      .card {
+        padding: 12px;
+        margin-bottom: 16px;
+      }
+
+      .card-title {
+        font-size: 14px;
+      }
+
+      .card-subtitle {
+        font-size: 12px;
+      }
+
+      .content {
+        padding: 12px;
+        max-width: 100%;
+      }
+
+      .shifts-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      .day-card {
+        margin-bottom: 0;
+      }
+
+      .day-header {
+        padding: 12px;
+      }
+
+      .day-name {
+        font-size: 13px;
+      }
+
+      .day-date {
+        font-size: 11px;
+      }
+
+      .day-content {
+        padding: 12px;
+      }
+
+      .shift-item {
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 8px;
+        font-size: 11px;
+      }
+
+      .shift-time {
+        font-size: 12px;
+        margin-bottom: 2px;
+      }
+
+      .shift-details {
+        font-size: 11px;
+      }
+
+      .week-nav {
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .week-nav button {
+        width: 100%;
+        min-height: 44px;
+        padding: 10px 12px;
+        font-size: 13px;
+      }
+
+      .week-label {
+        text-align: center;
+        width: 100%;
+        font-size: 13px;
+      }
+
+      .nav-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .nav-tab {
+        padding: 12px 14px;
+        min-height: 44px;
+        font-size: 12px;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .header {
+        padding: 12px;
+        flex-direction: row;
+        gap: 8px;
+      }
+
+      .header-logo {
+        font-size: 16px;
+      }
+
+      .header-subtitle {
+        font-size: 10px;
+        display: none;
+      }
+
+      .header-right {
+        gap: 8px;
+      }
+
+      .user-avatar {
+        width: 36px;
+        height: 36px;
+        font-size: 13px;
+      }
+
+      .logout-btn {
+        font-size: 18px;
+        padding: 6px;
+      }
+
+      .btn {
+        padding: 10px 12px;
+        font-size: 12px;
+        min-height: 44px;
+        width: 100%;
+      }
+
+      .btn-primary {
+        font-size: 13px;
+      }
+
+      .btn-secondary {
+        font-size: 13px;
+      }
+
+      .swap-actions {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .swap-item {
+        padding: 12px;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .swap-info {
+        flex: 1;
+      }
+
+      .swap-action {
+        width: 100%;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .swap-btn {
+        width: 100%;
+        min-height: 44px;
+        padding: 10px 12px;
+        font-size: 12px;
+      }
+
+      .approval-card {
+        padding: 16px;
+      }
+
+      .approval-header {
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .approval-actions {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .approval-btn {
+        padding: 10px 12px;
+        min-height: 44px;
+        font-size: 12px;
+      }
+
+      .approval-comment {
+        min-height: 44px;
+        font-size: 13px;
+      }
+
+      .pay-summary {
+        padding: 16px;
+      }
+
+      .pay-row {
+        padding: 10px 0;
+        font-size: 13px;
+      }
+
+      .pay-label {
+        font-size: 13px;
+      }
+
+      .pay-value {
+        font-size: 13px;
+      }
+
+      .pay-breakdown {
+        padding: 12px;
+      }
+
+      .breakdown-item {
+        font-size: 12px;
+      }
+
+      .bidding-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      .bid-card {
+        padding: 12px;
+      }
+
+      .bid-card-header {
+        font-size: 13px;
+      }
+
+      .bid-date {
+        font-size: 13px;
+      }
+
+      .bid-badge {
+        font-size: 10px;
+        padding: 3px 6px;
+      }
+
+      .bid-time {
+        font-size: 12px;
+      }
+
+      .bid-role {
+        font-size: 11px;
+      }
+
+      .bid-stats {
+        gap: 8px;
+        padding: 10px 0;
+        margin: 10px 0;
+        font-size: 11px;
+      }
+
+      .bid-stat-value {
+        font-size: 12px;
+      }
+
+      .bid-stat-label {
+        font-size: 10px;
+      }
+
+      .bid-action-btn {
+        padding: 8px;
+        margin-top: 10px;
+        font-size: 11px;
+        min-height: 40px;
+      }
+
+      .my-bid-item {
+        padding: 12px;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .my-bid-date {
+        font-size: 13px;
+      }
+
+      .my-bid-time {
+        font-size: 11px;
+      }
+
+      .my-bid-rate {
+        font-size: 12px;
+      }
+
+      .my-bid-status {
+        font-size: 10px;
+        padding: 3px 6px;
+      }
+
+      .form-group {
+        margin-bottom: 12px;
+      }
+
+      .form-label {
+        font-size: 12px;
+      }
+
+      .form-input,
+      .form-select {
+        padding: 10px 12px;
+        min-height: 44px;
+        font-size: 16px;
+      }
+
+      textarea.form-input {
+        min-height: 100px;
+      }
+
+      .modal {
+        padding: 12px;
+      }
+
+      .modal-content {
+        padding: 16px;
+        max-width: 100%;
+        border-radius: 8px;
+      }
+
+      .modal-header {
+        font-size: 16px;
+        margin-bottom: 12px;
+      }
+
+      .modal-close {
+        font-size: 20px;
+      }
+
+      .form-actions {
+        grid-template-columns: 1fr;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .availability-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .availability-day {
+        padding: 12px;
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+
+      .day-label {
+        margin-bottom: 8px;
+        font-size: 13px;
+      }
+
+      .availability-toggle {
+        gap: 8px;
+        justify-content: space-between;
+      }
+
+      .toggle-input {
+        width: 40px;
+        height: 24px;
+      }
+
+      .toggle-input::after {
+        width: 20px;
+        height: 20px;
+      }
+
+      .toggle-input:checked::after {
+        left: 18px;
+      }
+
+      .toggle-label {
+        font-size: 11px;
+      }
+
+      .hours-slider {
+        padding: 16px;
+        margin: 20px 0;
+      }
+
+      .slider-label {
+        font-size: 13px;
+        margin-bottom: 10px;
+      }
+
+      .slider-label-text {
+        font-size: 13px;
+      }
+
+      .slider-value {
+        font-size: 14px;
+      }
+
+      input[type="range"] {
+        height: 5px;
+      }
+
+      input[type="range"]::-webkit-slider-thumb {
+        width: 18px;
+        height: 18px;
+      }
+
+      input[type="range"]::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+      }
+
+      .quiet-hours-picker {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .time-input-group input[type="time"] {
+        padding: 10px 12px;
+        min-height: 44px;
+      }
+
+      .profile-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+
+      .profile-field {
+        padding: 12px;
+      }
+
+      .profile-label {
+        font-size: 11px;
+        margin-bottom: 6px;
+      }
+
+      .profile-value {
+        font-size: 14px;
+      }
+
+      .profile-input {
+        padding: 10px;
+        min-height: 44px;
+        font-size: 14px;
+      }
+
+      .cert-item {
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+
+      .cert-name {
+        font-size: 13px;
+      }
+
+      .cert-expiry {
+        font-size: 11px;
+      }
+
+      .cert-status {
+        font-size: 10px;
+        padding: 3px 6px;
+      }
+
+      .alert {
+        padding: 12px;
+        margin-bottom: 12px;
+        font-size: 12px;
+      }
+
+      .alert-icon {
+        font-size: 16px;
+      }
+
+      .notification-settings {
+        padding: 16px;
+      }
+
+      .notification-section {
+        margin-bottom: 20px;
+      }
+
+      .notification-section-title {
+        font-size: 13px;
+        margin-bottom: 12px;
+      }
+
+      .notification-item {
+        padding: 10px 0;
+      }
+
+      .notification-label {
+        font-size: 12px;
+      }
+
+      .notification-desc {
+        font-size: 11px;
+      }
+
+      .push-status {
+        padding: 8px 12px;
+        font-size: 11px;
+        margin-bottom: 12px;
+      }
+
+      .push-status-dot {
+        width: 7px;
+        height: 7px;
+      }
+
+      .time-input-label {
+        font-size: 11px;
+      }
+
+      /* Bottom padding for safe area on mobile */
+      .content {
+        padding-bottom: 24px;
+      }
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px 20px;
+      color: #718096;
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 40px;
+      height: 40px;
+      border: 4px solid #CBD5E0;
+      border-top-color: var(--brand-blue);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ============================================
+       LOADING SKELETONS
+       ============================================ */
+    .skeleton {
+      background: linear-gradient(90deg, #e0e0e0 25%, #d0d0d0 50%, #e0e0e0 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    .skeleton-text {
+      height: 16px;
+      margin-bottom: 8px;
+    }
+
+    .skeleton-card {
+      height: 120px;
+      margin-bottom: 12px;
+    }
+
+    .skeleton-table-row {
+      height: 40px;
+      margin-bottom: 4px;
+    }
+
+    /* ============================================
+       ERROR STATE & EMPTY STATE
+       ============================================ */
+    .error-card {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid #EF4444;
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .error-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .error-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+
+    .error-message {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+    }
+
+    .error-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    .connection-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: rgba(239, 68, 68, 0.1);
+      border-bottom: 2px solid #EF4444;
+      padding: 12px 24px;
+      display: none;
+      align-items: center;
+      gap: 12px;
+      z-index: 3000;
+      font-size: 14px;
+      color: #EF4444;
+    }
+
+    .connection-banner.show {
+      display: flex;
+    }
+
+    .connection-banner.connected {
+      background: rgba(16, 185, 129, 0.1);
+      border-bottom-color: #10B981;
+      color: #10B981;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #EF4444;
+      animation: pulse-connection 1.5s ease-in-out infinite;
+    }
+
+    .connection-banner.connected .pulse-dot {
+      background: #10B981;
+    }
+
+    @keyframes pulse-connection {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* ============================================
+       TOAST NOTIFICATIONS
+       ============================================ */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-width: 400px;
+    }
+
+    .toast {
+      background: var(--card-bg);
+      border-radius: 8px;
+      padding: 16px 24px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      animation: slideIn 0.3s ease-out;
+      color: var(--text-primary);
+    }
+
+    .toast.success {
+      border-left: 4px solid #10B981;
+    }
+
+    .toast.error {
+      border-left: 4px solid #EF4444;
+    }
+
+    .toast.warning {
+      border-left: 4px solid #F59E0B;
+    }
+
+    .toast.info {
+      border-left: 4px solid #3B82F6;
+    }
+
+    .toast-icon {
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .toast-message {
+      flex: 1;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    @keyframes slideOut {
+      from {
+        transform: translateX(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+    }
+
+    .toast.removing {
+      animation: slideOut 0.3s ease-out forwards;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- HEADER -->
+    <div class="header">
+      <div class="header-left">
+        <div>
+          <div class="header-logo">Roster<span>IQ</span></div>
+          <div class="header-subtitle">Staff Portal</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="user-menu">
+          <div class="user-avatar" id="userInitial">A</div>
+        </div>
+        <button class="logout-btn" id="logoutBtn" title="Logout">↗</button>
+      </div>
+    </div>
+
+    <!-- NAVIGATION TABS -->
+    <div class="nav-tabs" id="navTabs"></div>
+
+    <!-- CONTENT -->
+    <div class="content">
+      <!-- MY SHIFTS SECTION -->
+      <section id="shiftsSection" class="section active">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">My Shifts</div>
+              <div class="card-subtitle">Your upcoming roster</div>
+            </div>
+          </div>
+
+          <div class="week-nav">
+            <button id="prevWeekBtn">← Previous Week</button>
+            <span class="week-label" id="weekLabel"></span>
+            <button id="nextWeekBtn">Next Week →</button>
+          </div>
+
+          <div id="shiftsContent" class="shifts-grid"></div>
+        </div>
+      </section>
+
+      <!-- AVAILABILITY SECTION -->
+      <section id="availabilitySection" class="section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">My Availability</div>
+              <div class="card-subtitle">Set your preferred working hours</div>
+            </div>
+          </div>
+
+          <div id="availabilityContent" class="availability-grid"></div>
+
+          <div class="hours-slider">
+            <div class="slider-label">
+              <span class="slider-label-text">Preferred hours per week</span>
+              <span class="slider-value" id="hoursValue">38</span>
+            </div>
+            <input type="range" id="hoursSlider" min="5" max="60" value="38" step="1">
+          </div>
+
+          <button class="btn btn-primary" id="saveAvailabilityBtn" style="width: 100%;">Save Availability</button>
+        </div>
+      </section>
+
+      <!-- SHIFT SWAP BOARD SECTION -->
+      <section id="swapSection" class="section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Shift Swap Board</div>
+              <div class="card-subtitle">Offer or request shift swaps</div>
+            </div>
+          </div>
+
+          <div class="swap-actions">
+            <button class="btn btn-primary" id="offerShiftBtn">+ Offer My Shift</button>
+            <button class="btn btn-secondary" id="requestSwapBtn">Request Swap</button>
+          </div>
+
+          <div id="swapContent"></div>
+        </div>
+      </section>
+
+      <!-- PAY ESTIMATE SECTION -->
+      <section id="paySection" class="section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Pay Estimate</div>
+              <div class="card-subtitle">Estimated earnings for current roster</div>
+            </div>
+          </div>
+
+          <div id="payContent"></div>
+        </div>
+      </section>
+
+      <!-- SHIFT BIDDING SECTION -->
+      <section id="biddingSection" class="section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Shift Bidding Marketplace</div>
+              <div class="card-subtitle">Browse and bid on available shifts</div>
+            </div>
+          </div>
+
+          <!-- Bidding Tabs -->
+          <div style="display: flex; gap: 12px; margin-bottom: 24px; border-bottom: 1px solid #E2E8F0;">
+            <button class="bidding-tab-btn active" data-tab="open-shifts" style="padding: 12px 16px; background: none; border: none; color: var(--text-secondary); font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent;" onclick="switchBiddingTab(this)">Open Shifts</button>
+            <button class="bidding-tab-btn" data-tab="my-bids" style="padding: 12px 16px; background: none; border: none; color: var(--text-secondary); font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent;" onclick="switchBiddingTab(this)">My Bids</button>
+          </div>
+
+          <!-- Open Shifts Grid -->
+          <div id="openShiftsPanel" class="bidding-panel">
+            <div id="biddingContent" class="bidding-grid"></div>
+          </div>
+
+          <!-- My Bids -->
+          <div id="myBidsPanel" class="bidding-panel" style="display: none;">
+            <div id="myBidsContent" class="my-bids-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PUSH NOTIFICATIONS SECTION -->
+      <section id="notificationsSection" class="section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Push Notifications</div>
+              <div class="card-subtitle">Manage your notification preferences</div>
+            </div>
+          </div>
+
+          <div id="pushStatus" class="push-status disabled">
+            <span class="push-status-dot"></span>
+            <span id="pushStatusText">Push notifications unavailable</span>
+          </div>
+
+          <div class="notification-settings">
+            <!-- Notification Channels -->
+            <div class="notification-section">
+              <div class="notification-section-title">Notification Channels</div>
+              <div class="notification-item">
+                <div>
+                  <div class="notification-label">Push Notifications</div>
+                  <div class="notification-desc">Browser notifications</div>
+                </div>
+                <input type="checkbox" class="toggle-input" id="channelPush" checked>
+              </div>
+              <div class="notification-item">
+                <div>
+                  <div class="notification-label">Email Notifications</div>
+                  <div class="notification-desc">Email updates</div>
+                </div>
+                <input type="checkbox" class="toggle-input" id="channelEmail" checked>
+              </div>
+              <div class="notification-item">
+                <div>
+                  <div class="notification-label">SMS Notifications</div>
+                  <div class="notification-desc">Text message alerts</div>
+                </div>
+                <input type="checkbox" class="toggle-input" id="channelSMS">
+              </div>
+              <div class="notification-item">
+                <div>
+                  <div class="notification-label">In-App Notifications</div>
+                  <div class="notification-desc">Dashboard notifications</div>
+                </div>
+                <input type="checkbox" class="toggle-input" id="channelInApp" checked>
+              </div>
+            </div>
+
+            <!-- Event Types -->
+            <div class="notification-section">
+              <div class="notification-section-title">Event Type Preferences</div>
+              <div class="notification-item">
+                <div class="notification-label">Roster Published</div>
+                <input type="checkbox" class="toggle-input" id="eventRoster" checked>
+              </div>
+              <div class="notification-item">
+                <div class="notification-label">Shift Changes</div>
+                <input type="checkbox" class="toggle-input" id="eventChanges" checked>
+              </div>
+              <div class="notification-item">
+                <div class="notification-label">Swap Requests</div>
+                <input type="checkbox" class="toggle-input" id="eventSwaps" checked>
+              </div>
+              <div class="notification-item">
+                <div class="notification-label">Shift Reminders</div>
+                <input type="checkbox" class="toggle-input" id="eventReminders" checked>
+              </div>
+              <div class="notification-item">
+                <div class="notification-label">Bid Updates</div>
+                <input type="checkbox" class="toggle-input" id="eventBids" checked>
+              </div>
+            </div>
+
+            <!-- Quiet Hours -->
+            <div class="notification-section">
+              <div class="notification-section-title">Quiet Hours</div>
+              <div class="notification-desc" style="margin-bottom: 12px;">Pause notifications during these hours</div>
+              <div class="quiet-hours-picker">
+                <div class="time-input-group">
+                  <label class="time-input-label">Start Time</label>
+                  <input type="time" id="quietHoursStart" value="22:00">
+                </div>
+                <div class="time-input-group">
+                  <label class="time-input-label">End Time</label>
+                  <input type="time" id="quietHoursEnd" value="08:00">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" id="enablePushBtn" style="width: 100%; margin-top: 20px;">Enable Push Notifications</button>
+          <button class="btn btn-secondary" id="testPushBtn" style="width: 100%; margin-top: 12px;">Send Test Notification</button>
+          <button class="btn btn-primary" id="saveNotificationPrefsBtn" style="width: 100%; margin-top: 12px;">Save Preferences</button>
+        </div>
+      </section>
+
+      <!-- APPROVALS SECTION (Manager Role) -->
+      <section id="approvalsSection" class="section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Roster Approvals</div>
+              <div class="card-subtitle">Pending rosters requiring review</div>
+            </div>
+          </div>
+
+          <div id="approvalsContent" class="approvals-list"></div>
+        </div>
+      </section>
+
+      <!-- PROFILE SECTION -->
+      <section id="profileSection" class="section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">My Profile</div>
+              <div class="card-subtitle">View and manage your information</div>
+            </div>
+          </div>
+
+          <div id="profileContent" class="profile-grid"></div>
+
+          <button class="btn btn-primary" id="saveProfileBtn" style="width: 100%; margin-top: 24px;">Save Changes</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- OFFER SHIFT MODAL -->
+  <div id="offerModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>Offer My Shift</span>
+        <button class="modal-close" onclick="closeModal('offerModal')">×</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Select Shift</label>
+        <select id="offerShiftSelect" class="form-select"></select>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('offerModal')">Cancel</button>
+        <button class="btn btn-primary" id="confirmOfferBtn">Offer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REQUEST SWAP MODAL -->
+  <div id="requestModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>Request Swap</span>
+        <button class="modal-close" onclick="closeModal('requestModal')">×</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">My Shift</label>
+        <select id="requestMyShift" class="form-select"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Swap With</label>
+        <select id="requestSwapWith" class="form-select"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Message to Manager</label>
+        <textarea id="requestMessage" class="form-input" rows="3" placeholder="Reason for swap request..."></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('requestModal')">Cancel</button>
+        <button class="btn btn-primary" id="confirmRequestBtn">Request</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PLACE BID MODAL -->
+  <div id="placeBidModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>Place Bid on Shift</span>
+        <button class="modal-close" onclick="closeModal('placeBidModal')">×</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Shift</label>
+        <div id="bidShiftInfo" style="padding: 12px; background: #F7FAFC; border-radius: 6px; font-size: 13px; color: #1A202C; margin-bottom: 16px;"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Your Offered Rate ($/hr)</label>
+        <input type="number" id="bidOfferedRate" class="form-input" placeholder="e.g. 28.50" step="0.01" min="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Priority</label>
+        <select id="bidPriority" class="form-select">
+          <option value="low">Low - Available if no other matches</option>
+          <option value="medium" selected>Medium - Standard priority</option>
+          <option value="high">High - Very interested in this shift</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Message (Optional)</label>
+        <textarea id="bidMessage" class="form-input" rows="2" placeholder="Add a note about your availability or experience..."></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('placeBidModal')">Cancel</button>
+        <button class="btn btn-primary" id="confirmBidBtn">Place Bid</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPROVAL MODAL -->
+  <div id="approvalModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span id="approvalModalTitle">Review Roster</span>
+        <button class="modal-close" onclick="closeModal('approvalModal')">×</button>
+      </div>
+      <div id="approvalModalContent"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('approvalModal')">Close</button>
+        <button class="btn btn-primary" id="approvalSubmitBtn">Submit Review</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================
+    // UI STATE UTILITIES
+    // ============================================
+
+    /**
+     * Show error card with message and retry button
+     */
+    function showError(containerId, message, retryFn) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      const errorHtml = `
+        <div class="error-card">
+          <div class="error-icon">⚠️</div>
+          <div class="error-title">Error Loading Data</div>
+          <div class="error-message">${escapeHtml(message)}</div>
+          <div class="error-actions">
+            ${retryFn ? `<button class="btn btn-primary" onclick="retryFn()">🔄 Retry</button>` : ''}
+            <button class="btn btn-secondary" onclick="clearError('${containerId}')">Dismiss</button>
+          </div>
+        </div>
+      `;
+      container.innerHTML = errorHtml;
+    }
+
+    /**
+     * Show empty state with message
+     */
+    function showEmpty(containerId, message, icon = '📭') {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      container.innerHTML = `
+        <div style="text-align: center; padding: 48px 24px; color: var(--text-secondary);">
+          <div style="font-size: 48px; margin-bottom: 16px;">${icon}</div>
+          <div style="font-size: 14px;">${escapeHtml(message)}</div>
+        </div>
+      `;
+    }
+
+    /**
+     * Show loading skeleton placeholders
+     */
+    function showLoading(containerId, type = 'card', count = 3) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      let html = '';
+      for (let i = 0; i < count; i++) {
+        if (type === 'card') {
+          html += '<div class="skeleton skeleton-card"></div>';
+        } else if (type === 'text') {
+          html += '<div class="skeleton skeleton-text"></div>';
+        } else if (type === 'row') {
+          html += '<div class="skeleton skeleton-table-row"></div>';
+        }
+      }
+      container.innerHTML = html;
+    }
+
+    /**
+     * Clear skeleton/error/empty state
+     */
+    function clearState(containerId) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      container.innerHTML = '';
+    }
+
+    /**
+     * Escape HTML to prevent XSS
+     */
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    /**
+     * Show toast notification
+     */
+    function showToast(message, type = 'success', duration = 3000) {
+      let container = document.getElementById('toast-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+      }
+
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+
+      const icons = {
+        success: '✓',
+        error: '✕',
+        warning: '⚠',
+        info: 'ℹ'
+      };
+
+      toast.innerHTML = `
+        <div class="toast-icon">${icons[type] || icons.info}</div>
+        <div class="toast-message">${escapeHtml(message)}</div>
+      `;
+
+      container.appendChild(toast);
+
+      if (duration > 0) {
+        setTimeout(() => {
+          toast.classList.add('removing');
+          setTimeout(() => toast.remove(), 300);
+        }, duration);
+      }
+
+      return toast;
+    }
+
+    /**
+     * Connection status banner with auto-reconnect
+     */
+    class ConnectionManager {
+      constructor() {
+        this.connected = true;
+        this.reconnectDelay = 1000;
+        this.maxReconnectDelay = 30000;
+        this.reconnectAttempts = 0;
+        this.banner = null;
+        this.setupBanner();
+      }
+
+      setupBanner() {
+        this.banner = document.createElement('div');
+        this.banner.className = 'connection-banner';
+        this.banner.innerHTML = `
+          <div class="pulse-dot"></div>
+          <span>Connection lost. Reconnecting...</span>
+        `;
+        document.body.prepend(this.banner);
+      }
+
+      show() {
+        this.connected = false;
+        this.banner.classList.add('show');
+        this.banner.classList.remove('connected');
+      }
+
+      hide() {
+        this.connected = true;
+        this.banner.classList.remove('show');
+        this.banner.classList.add('connected');
+        this.banner.innerHTML = `
+          <div class="pulse-dot"></div>
+          <span>Connected</span>
+        `;
+        setTimeout(() => this.banner.classList.remove('connected'), 2000);
+      }
+
+      getDelay() {
+        const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
+        this.reconnectAttempts++;
+        return delay;
+      }
+
+      reset() {
+        this.reconnectDelay = 1000;
+        this.reconnectAttempts = 0;
+      }
+    }
+
+    const connectionManager = new ConnectionManager();
+
+    // ============================================
+    // STATE MANAGEMENT
+    // ============================================
+    const state = {
+      user: null,
+      token: null,
+      currentWeekStart: null,
+      shifts: [],
+      swaps: [],
+      payData: null,
+      profile: null,
+      availability: {},
+      openShifts: [],
+      myBids: [],
+      approvals: [],
+      ws: null,
+      wsConnected: false,
+    };
+
+    let wsReconnectDelay = 1000; // Start at 1s
+    const maxReconnectDelay = 30000; // Cap at 30s
+    let wsReconnectTimeout = null;
+
+    // ============================================
+    // MOBILE NAVIGATION
+    // ============================================
+
+    /**
+     * Toggle hamburger menu on mobile
+     */
+    function toggleMobileMenu() {
+      const header = document.querySelector('.header');
+      const navTabs = document.querySelector('.nav-tabs');
+
+      if (!header || !navTabs) return;
+
+      header.classList.toggle('menu-open');
+      navTabs.classList.toggle('menu-visible');
+    }
+
+    /**
+     * Close menu when selecting a tab
+     */
+    function closeMobileMenu() {
+      const header = document.querySelector('.header');
+      const navTabs = document.querySelector('.nav-tabs');
+
+      if (header) header.classList.remove('menu-open');
+      if (navTabs) navTabs.classList.remove('menu-visible');
+    }
+
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+    async function init() {
+      // Check if logged in
+      const token = sessionStorage.getItem('access_token');
+      if (!token) {
+        window.location.href = '/login';
+        return;
+      }
+
+      state.token = token;
+
+      // Decode JWT to get user info
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        state.user = {
+          id: payload.sub,
+          email: payload.email,
+          role: payload.role,
+          name: payload.email.split('@')[0],
+        };
+      } catch (e) {
+        console.error('Failed to decode token', e);
+        window.location.href = '/login';
+        return;
+      }
+
+      // Set user avatar initial
+      document.getElementById('userInitial').textContent = state.user.name.charAt(0).toUpperCase();
+
+      // Initialize navigation
+      initNavigation();
+
+      // Set current week
+      state.currentWeekStart = getWeekStart(new Date());
+
+      // Load data
+      await loadShifts();
+      await loadPayEstimate();
+      await loadProfile();
+      await loadAvailability();
+      await loadSwaps();
+      await loadOpenShifts();
+      await loadApprovals();
+
+      // Initialize push notifications
+      initPushNotifications();
+
+      // Connect to WebSocket for real-time updates
+      connectWebSocket();
+    }
+
+    function getWeekStart(date) {
+      const d = new Date(date);
+      const day = d.getDay();
+      const diff = d.getDate() - day;
+      return new Date(d.setDate(diff));
+    }
+
+    function formatDate(date) {
+      return date.toISOString().split('T')[0];
+    }
+
+    function initNavigation() {
+      const tabs = [
+        { id: 'shiftsSection', label: 'My Shifts', icon: '📅' },
+        { id: 'biddingSection', label: 'Shift Bidding', icon: '🎯' },
+        { id: 'notificationsSection', label: 'Notifications', icon: '🔔' },
+        { id: 'availabilitySection', label: 'Availability', icon: '📍' },
+        { id: 'swapSection', label: 'Swap Board', icon: '🔄' },
+        { id: 'approvalsSection', label: 'Approvals', icon: '✓' },
+        { id: 'paySection', label: 'Pay Estimate', icon: '💰' },
+        { id: 'profileSection', label: 'Profile', icon: '👤' },
+      ];
+
+      const navTabs = document.getElementById('navTabs');
+      tabs.forEach(tab => {
+        const btn = document.createElement('button');
+        btn.className = 'nav-tab';
+        if (tab.id === 'shiftsSection') btn.classList.add('active');
+        btn.textContent = tab.label;
+        btn.onclick = () => switchSection(tab.id, btn);
+        navTabs.appendChild(btn);
+      });
+    }
+
+    function switchSection(sectionId, tabElement) {
+      // Hide all sections
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      // Show selected section
+      document.getElementById(sectionId).classList.add('active');
+
+      // Update tab styling
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+      tabElement.classList.add('active');
+    }
+
+    // ============================================
+    // API CALLS
+    // ============================================
+    async function apiCall(endpoint, options = {}) {
+      const response = await fetch(endpoint, {
+        ...options,
+        headers: {
+          'Authorization': `Bearer ${state.token}`,
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          window.location.href = '/login';
+          return null;
+        }
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || `HTTP ${response.status}`);
+      }
+
+      return await response.json();
+    }
+
+    async function loadShifts() {
+      try {
+        const container = document.getElementById('shiftsContent');
+        if (container) showLoading('shiftsContent', 'card', 3);
+
+        const start = formatDate(state.currentWeekStart);
+        const data = await apiCall(`/api/staff/my-shifts?week_start=${start}`);
+        if (!data) throw new Error('No response');
+
+        state.shifts = data.shifts || [];
+        if (container) clearState('shiftsContent');
+        renderShifts();
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Failed to load shifts:', e);
+        connectionManager.show();
+        showToast('Failed to load shifts. Retrying...', 'error');
+        setTimeout(loadShifts, 5000);
+      }
+    }
+
+    async function loadPayEstimate() {
+      try {
+        const container = document.getElementById('payContent');
+        if (container) showLoading('payContent', 'text', 4);
+
+        const start = formatDate(state.currentWeekStart);
+        const data = await apiCall(`/api/staff/pay-estimate?week_start=${start}`);
+        if (!data) throw new Error('No response');
+
+        state.payData = data;
+        if (container) clearState('payContent');
+        renderPayEstimate();
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Failed to load pay estimate:', e);
+        connectionManager.show();
+        showToast('Failed to load pay estimate', 'error');
+      }
+    }
+
+    async function loadProfile() {
+      try {
+        const container = document.getElementById('profileContent');
+        if (container) showLoading('profileContent', 'text', 3);
+
+        const data = await apiCall('/api/staff/profile');
+        if (!data) throw new Error('No response');
+
+        state.profile = data;
+        if (container) clearState('profileContent');
+        renderProfile();
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Failed to load profile:', e);
+        connectionManager.show();
+        showToast('Failed to load profile', 'error');
+      }
+    }
+
+    async function loadAvailability() {
+      try {
+        const container = document.getElementById('availabilityContent');
+        if (container) showLoading('availabilityContent', 'card', 3);
+
+        const data = await apiCall('/api/staff/availability');
+        if (!data) throw new Error('No response');
+
+        state.availability = data.availability || {};
+        if (container) clearState('availabilityContent');
+        renderAvailability();
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Failed to load availability:', e);
+        connectionManager.show();
+        showToast('Failed to load availability', 'error');
+      }
+    }
+
+    async function loadSwaps() {
+      try {
+        const container = document.getElementById('swapsContent');
+        if (container) showLoading('swapsContent', 'card', 3);
+
+        const data = await apiCall('/api/staff/swap-board');
+        if (!data) throw new Error('No response');
+
+        state.swaps = data.swaps || [];
+        if (container) clearState('swapsContent');
+        renderSwaps();
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Failed to load swaps:', e);
+        connectionManager.show();
+        showToast('Failed to load swap board', 'error');
+      }
+    }
+
+    // ============================================
+    // RENDERING FUNCTIONS
+    // ============================================
+    function renderShifts() {
+      const container = document.getElementById('shiftsContent');
+      const weekEnd = new Date(state.currentWeekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+
+      // Update week label
+      document.getElementById('weekLabel').textContent =
+        `${state.currentWeekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`;
+
+      // Group shifts by day
+      const shiftsByDay = {};
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(state.currentWeekStart);
+        d.setDate(d.getDate() + i);
+        const dateKey = formatDate(d);
+        shiftsByDay[dateKey] = [];
+      }
+
+      state.shifts.forEach(shift => {
+        if (shiftsByDay[shift.date]) {
+          shiftsByDay[shift.date].push(shift);
+        }
+      });
+
+      // Render days
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      container.innerHTML = '';
+
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(state.currentWeekStart);
+        d.setDate(d.getDate() + i);
+        const dateKey = formatDate(d);
+        const shifts = shiftsByDay[dateKey];
+        const dayName = dayNames[d.getDay()];
+
+        const dayCard = document.createElement('div');
+        dayCard.className = 'day-card';
+
+        const header = document.createElement('div');
+        header.className = 'day-header';
+        header.innerHTML = `
+          <div class="day-name">${dayName}</div>
+          <div class="day-date">${d.toLocaleDateString('en-AU', { month: 'short', day: 'numeric' })}</div>
+        `;
+        dayCard.appendChild(header);
+
+        const content = document.createElement('div');
+        content.className = 'day-content';
+
+        if (shifts.length === 0) {
+          content.innerHTML = '<div class="no-shifts"><div class="no-shifts-icon">😴</div><div>No shifts</div></div>';
+        } else {
+          shifts.forEach(shift => {
+            const shiftType = getShiftType(shift.start_time);
+            const item = document.createElement('div');
+            item.className = `shift-item ${shiftType}`;
+            let conflictHtml = '';
+            if (shift.conflicts) {
+              const severity = shift.conflicts.length > 0 ? 'warning' : 'info';
+              const conflictMsg = shift.conflicts.map(c => c.message).join(', ');
+              conflictHtml = `
+                <div style="margin-top: 8px;">
+                  <span class="conflict-badge conflict-tooltip ${severity}" data-tooltip="${conflictMsg}">
+                    ⚠ Conflict Detected
+                  </span>
+                </div>
+              `;
+            }
+            item.innerHTML = `
+              <div class="shift-time">${shift.start_time} - ${shift.end_time}</div>
+              <div class="shift-details">
+                <div>${shift.role}</div>
+                <div>${shift.venue}</div>
+              </div>
+              ${conflictHtml}
+            `;
+            content.appendChild(item);
+          });
+        }
+
+        dayCard.appendChild(content);
+        container.appendChild(dayCard);
+      }
+    }
+
+    function getShiftType(startTime) {
+      const hour = parseInt(startTime.split(':')[0]);
+      if (hour < 12) return 'morning';
+      if (hour < 17) return 'afternoon';
+      if (hour < 22) return 'evening';
+      return 'night';
+    }
+
+    function renderAvailability() {
+      const container = document.getElementById('availabilityContent');
+      const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const timeBlocks = ['Morning', 'Afternoon', 'Evening'];
+
+      container.innerHTML = '';
+      dayNames.forEach(day => {
+        const dayCard = document.createElement('div');
+        dayCard.className = 'availability-day';
+
+        const label = document.createElement('div');
+        label.className = 'day-label';
+        label.textContent = day;
+        dayCard.appendChild(label);
+
+        timeBlocks.forEach(block => {
+          const toggle = document.createElement('div');
+          toggle.className = 'availability-toggle';
+
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.className = 'toggle-input';
+          input.id = `${day}-${block}`;
+          input.checked = state.availability[day]?.[block] || false;
+
+          const labelEl = document.createElement('label');
+          labelEl.className = 'toggle-label';
+          labelEl.htmlFor = input.id;
+          labelEl.textContent = block.substring(0, 3);
+
+          toggle.appendChild(input);
+          toggle.appendChild(labelEl);
+          dayCard.appendChild(toggle);
+        });
+
+        container.appendChild(dayCard);
+      });
+    }
+
+    function renderPayEstimate() {
+      const container = document.getElementById('payContent');
+      if (!state.payData) {
+        container.innerHTML = '<div class="loading">Loading...</div>';
+        return;
+      }
+
+      const data = state.payData;
+      const totalHours = data.total_hours || 0;
+      const baseRate = parseFloat(data.base_rate) || 0;
+      const basePay = totalHours * baseRate;
+      const penaltyPay = parseFloat(data.penalty_pay) || 0;
+      const totalPay = basePay + penaltyPay;
+
+      container.innerHTML = `
+        <div class="pay-summary">
+          <div class="pay-row">
+            <span class="pay-label">Total Hours</span>
+            <span class="pay-value">${totalHours.toFixed(1)}</span>
+          </div>
+          <div class="pay-row">
+            <span class="pay-label">Base Rate ($/hr)</span>
+            <span class="pay-value">$${baseRate.toFixed(2)}</span>
+          </div>
+          <div class="pay-row">
+            <span class="pay-label">Base Pay</span>
+            <span class="pay-value">$${basePay.toFixed(2)}</span>
+          </div>
+          <div class="pay-row">
+            <span class="pay-label">Penalty Rates</span>
+            <span class="pay-value">$${penaltyPay.toFixed(2)}</span>
+          </div>
+          <div class="pay-row pay-total-row">
+            <span class="pay-label">Estimated Gross Pay</span>
+            <span class="pay-value">$${totalPay.toFixed(2)}</span>
+          </div>
+        </div>
+        <div class="pay-breakdown">
+          <div style="font-weight: 600; margin-bottom: 12px; color: #1A202C;">Breakdown by Shift</div>
+          ${(data.shift_breakdown || []).map(shift => `
+            <div class="breakdown-item">
+              <span>${shift.date} ${shift.start_time}-${shift.end_time}</span>
+              <span>$${parseFloat(shift.total_pay).toFixed(2)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function renderProfile() {
+      const container = document.getElementById('profileContent');
+      if (!state.profile) {
+        container.innerHTML = '<div class="loading">Loading...</div>';
+        return;
+      }
+
+      const p = state.profile;
+      container.innerHTML = `
+        <div class="profile-field">
+          <label class="profile-label">Name</label>
+          <input type="text" id="profileName" class="profile-input" value="${p.name || ''}" />
+        </div>
+        <div class="profile-field">
+          <label class="profile-label">Email</label>
+          <div class="profile-value">${p.email}</div>
+        </div>
+        <div class="profile-field">
+          <label class="profile-label">Phone</label>
+          <input type="tel" id="profilePhone" class="profile-input" value="${p.phone || ''}" />
+        </div>
+        <div class="profile-field">
+          <label class="profile-label">Employment Type</label>
+          <div class="profile-value">${p.employment_type}</div>
+        </div>
+        <div class="profile-field">
+          <label class="profile-label">Certifications</label>
+          <div>
+            ${(p.certifications || []).map(cert => `
+              <div class="cert-item">
+                <div>
+                  <div class="cert-name">${cert.name}</div>
+                  <div class="cert-expiry">Expires: ${cert.expiry_date}</div>
+                </div>
+                <span class="cert-status ${getCertStatus(cert.expiry_date)}">${getCertStatusLabel(cert.expiry_date)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSwaps() {
+      const container = document.getElementById('swapContent');
+      if (state.swaps.length === 0) {
+        container.innerHTML = '<div class="no-shifts" style="padding: 40px 16px;"><div class="no-shifts-icon">📭</div><div>No available swaps</div></div>';
+        return;
+      }
+
+      container.innerHTML = `<div class="swap-list">${state.swaps.map(swap => `
+        <div class="swap-item">
+          <div class="swap-info">
+            <div class="swap-date">${swap.date}</div>
+            <div class="swap-time">${swap.start_time} - ${swap.end_time}</div>
+            <div class="swap-role">${swap.role} • ${swap.venue}</div>
+            <div class="swap-status ${swap.status}">${swap.status}</div>
+          </div>
+          <div class="swap-action">
+            ${swap.status === 'pending' ? `
+              <button class="swap-btn swap-btn-accept" onclick="acceptSwap('${swap.id}')">Accept</button>
+              <button class="swap-btn swap-btn-reject" onclick="rejectSwap('${swap.id}')">Reject</button>
+            ` : '<span></span>'}
+          </div>
+        </div>
+      `).join('')}</div>`;
+    }
+
+    function getCertStatus(expiryDate) {
+      const today = new Date();
+      const expiry = new Date(expiryDate);
+      const daysLeft = Math.floor((expiry - today) / (1000 * 60 * 60 * 24));
+      if (daysLeft < 0) return 'expired';
+      if (daysLeft < 30) return 'expiring';
+      return 'valid';
+    }
+
+    function getCertStatusLabel(expiryDate) {
+      const status = getCertStatus(expiryDate);
+      return status.charAt(0).toUpperCase() + status.slice(1);
+    }
+
+    // ============================================
+    // EVENT HANDLERS
+    // ============================================
+    document.getElementById('prevWeekBtn').onclick = () => {
+      state.currentWeekStart.setDate(state.currentWeekStart.getDate() - 7);
+      loadShifts();
+      loadPayEstimate();
+    };
+
+    document.getElementById('nextWeekBtn').onclick = () => {
+      state.currentWeekStart.setDate(state.currentWeekStart.getDate() + 7);
+      loadShifts();
+      loadPayEstimate();
+    };
+
+    document.getElementById('logoutBtn').onclick = () => {
+      sessionStorage.removeItem('access_token');
+      window.location.href = '/login';
+    };
+
+    document.getElementById('offerShiftBtn').onclick = () => {
+      const select = document.getElementById('offerShiftSelect');
+      select.innerHTML = state.shifts.map(s => `
+        <option value="${s.id}">${s.date} ${s.start_time}-${s.end_time} (${s.role})</option>
+      `).join('');
+      openModal('offerModal');
+    };
+
+    document.getElementById('requestSwapBtn').onclick = () => {
+      const mySelect = document.getElementById('requestMyShift');
+      const swapSelect = document.getElementById('requestSwapWith');
+      mySelect.innerHTML = state.shifts.map(s => `
+        <option value="${s.id}">${s.date} ${s.start_time}-${s.end_time}</option>
+      `).join('');
+      swapSelect.innerHTML = state.swaps.map(s => `
+        <option value="${s.id}">${s.date} ${s.start_time}-${s.end_time} (${s.role})</option>
+      `).join('');
+      openModal('requestModal');
+    };
+
+    document.getElementById('confirmOfferBtn').onclick = async () => {
+      const shiftId = document.getElementById('offerShiftSelect').value;
+      try {
+        await apiCall('/api/staff/swap/offer', {
+          method: 'POST',
+          body: JSON.stringify({ shift_id: shiftId }),
+        });
+        closeModal('offerModal');
+        showAlert('Shift offered to swap board', 'success');
+        await loadSwaps();
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    };
+
+    document.getElementById('confirmRequestBtn').onclick = async () => {
+      const myShiftId = document.getElementById('requestMyShift').value;
+      const swapId = document.getElementById('requestSwapWith').value;
+      const message = document.getElementById('requestMessage').value;
+      try {
+        await apiCall('/api/staff/swap/request', {
+          method: 'POST',
+          body: JSON.stringify({
+            my_shift_id: myShiftId,
+            swap_id: swapId,
+            message,
+          }),
+        });
+        closeModal('requestModal');
+        showAlert('Swap request sent to manager', 'success');
+        await loadSwaps();
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    };
+
+    document.getElementById('saveAvailabilityBtn').onclick = async () => {
+      const availability = {};
+      const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const timeBlocks = ['Morning', 'Afternoon', 'Evening'];
+
+      dayNames.forEach(day => {
+        availability[day] = {};
+        timeBlocks.forEach(block => {
+          const checkbox = document.getElementById(`${day}-${block}`);
+          availability[day][block] = checkbox.checked;
+        });
+      });
+
+      const hoursValue = parseInt(document.getElementById('hoursSlider').value);
+
+      try {
+        await apiCall('/api/staff/availability', {
+          method: 'PUT',
+          body: JSON.stringify({
+            availability,
+            preferred_hours_per_week: hoursValue,
+          }),
+        });
+        showAlert('Availability saved', 'success');
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    };
+
+    document.getElementById('saveProfileBtn').onclick = async () => {
+      const name = document.getElementById('profileName').value;
+      const phone = document.getElementById('profilePhone').value;
+
+      try {
+        await apiCall('/api/staff/profile', {
+          method: 'PUT',
+          body: JSON.stringify({ name, phone }),
+        });
+        showAlert('Profile updated', 'success');
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    };
+
+    document.getElementById('hoursSlider').oninput = (e) => {
+      document.getElementById('hoursValue').textContent = e.target.value;
+    };
+
+    async function acceptSwap(swapId) {
+      try {
+        await apiCall(`/api/staff/swap/${swapId}/accept`, { method: 'POST' });
+        showAlert('Swap accepted', 'success');
+        await loadSwaps();
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    }
+
+    async function rejectSwap(swapId) {
+      try {
+        await apiCall(`/api/staff/swap/${swapId}/reject`, { method: 'POST' });
+        showAlert('Swap rejected', 'success');
+        await loadSwaps();
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    }
+
+    // ============================================
+    // SHIFT BIDDING FUNCTIONS
+    // ============================================
+    async function loadOpenShifts() {
+      try {
+        const data = await apiCall('/api/bidding/shifts?venue_id=default&status_filter=open');
+        state.openShifts = data || [];
+        renderOpenShifts();
+      } catch (e) {
+        console.error('Failed to load open shifts:', e);
+      }
+    }
+
+    async function loadMyBids() {
+      try {
+        const data = await apiCall('/api/bidding/my-bids');
+        state.myBids = data || [];
+        renderMyBids();
+      } catch (e) {
+        console.error('Failed to load my bids:', e);
+      }
+    }
+
+    function renderOpenShifts() {
+      const container = document.getElementById('biddingContent');
+      if (!state.openShifts || state.openShifts.length === 0) {
+        container.innerHTML = '<div class="no-shifts" style="grid-column: 1/-1;"><div class="no-shifts-icon">📭</div><div>No open shifts available</div></div>';
+        return;
+      }
+
+      container.innerHTML = state.openShifts.map(shift => {
+        const shiftDate = new Date(shift.date);
+        const deadline = new Date(shift.deadline);
+        const isExpired = deadline < new Date();
+
+        return `
+          <div class="bid-card">
+            <div class="bid-card-header">
+              <div class="bid-date">${shiftDate.toLocaleDateString('en-AU', { month: 'short', day: 'numeric' })}</div>
+              <span class="bid-badge ${isExpired ? 'closed' : 'open'}">${isExpired ? 'Closed' : 'Open'}</span>
+            </div>
+            <div class="bid-time">${shift.start_time} - ${shift.end_time}</div>
+            <div class="bid-role">${shift.role_required}</div>
+            <div class="bid-stats">
+              <div class="bid-stat">
+                <span class="bid-stat-value" id="bids-${shift.id}">0</span>
+                <span class="bid-stat-label">Bids</span>
+              </div>
+              <div class="bid-stat">
+                <span class="bid-stat-value">$${shift.min_rate.toFixed(2)}</span>
+                <span class="bid-stat-label">Min Rate</span>
+              </div>
+            </div>
+            <div class="bid-range">
+              Min: $${shift.min_rate.toFixed(2)}${shift.max_rate ? ` - Max: $${shift.max_rate.toFixed(2)}` : ''}
+            </div>
+            ${!isExpired ? `
+              <button class="bid-action-btn primary" onclick="openBidModal('${shift.id}', '${shift.date}', '${shift.start_time}', '${shift.end_time}', '${shift.role_required}', ${shift.min_rate}, ${shift.max_rate || 'null'})">
+                Place Bid
+              </button>
+            ` : '
+              <button class="bid-action-btn secondary" disabled style="opacity: 0.5;">Bidding Closed</button>
+            '}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderMyBids() {
+      const container = document.getElementById('myBidsContent');
+      if (!state.myBids || state.myBids.length === 0) {
+        container.innerHTML = '<div class="no-shifts" style="padding: 40px 16px;"><div class="no-shifts-icon">📭</div><div>No active bids</div></div>';
+        return;
+      }
+
+      container.innerHTML = state.myBids.map(bid => `
+        <div class="my-bid-item">
+          <div class="my-bid-info">
+            <div class="my-bid-date">${bid.date}</div>
+            <div class="my-bid-time">${bid.start_time} - ${bid.end_time}</div>
+            <div class="my-bid-rate">Offered Rate: $${bid.offered_rate.toFixed(2)}/hr</div>
+          </div>
+          <div>
+            <span class="my-bid-status ${bid.status.toLowerCase()}">${bid.status}</span>
+            ${bid.status === 'pending' ? `
+              <button class="swap-btn swap-btn-reject" style="margin-top: 8px; display: block; width: 80px;" onclick="withdrawBid('${bid.id}')">Withdraw</button>
+            ` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function switchBiddingTab(btn) {
+      document.querySelectorAll('.bidding-tab-btn').forEach(b => {
+        b.classList.remove('active');
+        b.style.color = 'var(--text-secondary)';
+        b.style.borderBottom = '3px solid transparent';
+      });
+      btn.classList.add('active');
+      btn.style.color = 'var(--brand-blue)';
+      btn.style.borderBottom = '3px solid var(--brand-blue)';
+
+      const tab = btn.dataset.tab;
+      document.getElementById('openShiftsPanel').style.display = tab === 'open-shifts' ? 'block' : 'none';
+      document.getElementById('myBidsPanel').style.display = tab === 'my-bids' ? 'block' : 'none';
+
+      if (tab === 'my-bids') {
+        loadMyBids();
+      }
+    }
+
+    let currentBidShiftId = null;
+    function openBidModal(shiftId, date, startTime, endTime, role, minRate, maxRate) {
+      currentBidShiftId = shiftId;
+      document.getElementById('bidShiftInfo').innerHTML = `
+        <strong>${date}</strong> • ${startTime} - ${endTime}<br>
+        <small>${role}</small>
+      `;
+      document.getElementById('bidOfferedRate').value = minRate;
+      document.getElementById('bidOfferedRate').min = minRate;
+      if (maxRate) {
+        document.getElementById('bidOfferedRate').max = maxRate;
+      }
+      document.getElementById('bidPriority').value = 'medium';
+      document.getElementById('bidMessage').value = '';
+      openModal('placeBidModal');
+    }
+
+    document.getElementById('confirmBidBtn').onclick = async () => {
+      const rate = parseFloat(document.getElementById('bidOfferedRate').value);
+      const priority = document.getElementById('bidPriority').value;
+      const message = document.getElementById('bidMessage').value;
+
+      if (!rate || rate <= 0) {
+        showAlert('Please enter a valid rate', 'error');
+        return;
+      }
+
+      try {
+        await apiCall(`/api/bidding/bids?open_shift_id=${currentBidShiftId}`, {
+          method: 'POST',
+          body: JSON.stringify({
+            offered_rate: rate,
+            message: message || null,
+          }),
+        });
+        closeModal('placeBidModal');
+        showAlert('Bid placed successfully!', 'success');
+        await loadOpenShifts();
+        await loadMyBids();
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    };
+
+    async function withdrawBid(bidId) {
+      if (!confirm('Are you sure you want to withdraw this bid?')) return;
+      try {
+        await apiCall(`/api/bidding/bids/${bidId}`, { method: 'DELETE' });
+        showAlert('Bid withdrawn', 'success');
+        await loadMyBids();
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    }
+
+    // ============================================
+    // PUSH NOTIFICATIONS FUNCTIONS
+    // ============================================
+    async function initPushNotifications() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        updatePushStatus('unsupported');
+        return;
+      }
+
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          const subscription = await reg.pushManager.getSubscription();
+          if (subscription) {
+            updatePushStatus('enabled');
+          }
+        }
+      } catch (e) {
+        console.error('Push notification error:', e);
+      }
+    }
+
+    function updatePushStatus(status) {
+      const statusEl = document.getElementById('pushStatus');
+      const textEl = document.getElementById('pushStatusText');
+      const dot = statusEl.querySelector('.push-status-dot');
+
+      statusEl.className = 'push-status ' + status;
+      if (status === 'enabled') {
+        textEl.textContent = 'Push notifications enabled';
+        dot.style.background = '#10B981';
+      } else if (status === 'disabled') {
+        textEl.textContent = 'Push notifications disabled';
+        dot.style.background = '#EF4444';
+      } else {
+        textEl.textContent = 'Push notifications not supported in this browser';
+        dot.style.background = '#3B82F6';
+      }
+    }
+
+    document.getElementById('enablePushBtn').onclick = async () => {
+      if (!('serviceWorker' in navigator)) {
+        showAlert('Service workers not supported', 'error');
+        return;
+      }
+
+      try {
+        const reg = await navigator.serviceWorker.register('/sw.js').catch(() => null);
+        if (!reg) {
+          showAlert('Failed to register service worker', 'error');
+          return;
+        }
+
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          showAlert('Notification permission denied', 'error');
+          return;
+        }
+
+        // Get VAPID key
+        const vapidRes = await apiCall('/api/push/vapid-key');
+        const vapidKey = vapidRes.public_key;
+
+        // Subscribe
+        const subscription = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        });
+
+        // Send to server
+        await apiCall('/api/push/subscribe', {
+          method: 'POST',
+          body: JSON.stringify(subscription.toJSON()),
+        });
+
+        updatePushStatus('enabled');
+        showAlert('Push notifications enabled!', 'success');
+      } catch (e) {
+        console.error('Error enabling push:', e);
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    };
+
+    document.getElementById('testPushBtn').onclick = async () => {
+      try {
+        await apiCall('/api/push/test', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: 'Test Notification',
+            body: 'This is a test notification from RosterIQ',
+          }),
+        });
+        showAlert('Test notification sent!', 'success');
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    };
+
+    document.getElementById('saveNotificationPrefsBtn').onclick = async () => {
+      const prefs = {
+        channels: {
+          push: document.getElementById('channelPush').checked,
+          email: document.getElementById('channelEmail').checked,
+          sms: document.getElementById('channelSMS').checked,
+          in_app: document.getElementById('channelInApp').checked,
+        },
+        events: {
+          roster_published: document.getElementById('eventRoster').checked,
+          shift_changes: document.getElementById('eventChanges').checked,
+          swap_requests: document.getElementById('eventSwaps').checked,
+          shift_reminders: document.getElementById('eventReminders').checked,
+          bid_updates: document.getElementById('eventBids').checked,
+        },
+        quiet_hours: {
+          start: document.getElementById('quietHoursStart').value,
+          end: document.getElementById('quietHoursEnd').value,
+        },
+      };
+
+      try {
+        await apiCall('/api/staff/notification-preferences', {
+          method: 'PUT',
+          body: JSON.stringify(prefs),
+        });
+        showAlert('Notification preferences saved', 'success');
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    };
+
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+
+    // ============================================
+    // APPROVALS FUNCTIONS
+    // ============================================
+    async function loadApprovals() {
+      if (state.user.role !== 'manager') {
+        document.getElementById('approvalsSection').style.display = 'none';
+        return;
+      }
+
+      try {
+        const data = await apiCall('/api/approvals/pending');
+        state.approvals = data.approvals || [];
+        renderApprovals();
+      } catch (e) {
+        console.error('Failed to load approvals:', e);
+      }
+    }
+
+    function renderApprovals() {
+      const container = document.getElementById('approvalsContent');
+      if (!state.approvals || state.approvals.length === 0) {
+        container.innerHTML = '<div class="no-shifts"><div class="no-shifts-icon">✓</div><div>No pending approvals</div></div>';
+        return;
+      }
+
+      container.innerHTML = state.approvals.map(approval => `
+        <div class="approval-card">
+          <div class="approval-header">
+            <div>
+              <div class="approval-title">Roster ${approval.roster_id.substring(0, 8)}</div>
+              <div class="approval-subtitle">Submitted by ${approval.submitted_by} on ${new Date(approval.submitted_at).toLocaleDateString()}</div>
+            </div>
+            <span class="approval-status-badge ${approval.status.toLowerCase()}">${approval.status}</span>
+          </div>
+
+          <div class="approval-summary">
+            <strong>Tier:</strong> ${approval.tier} |
+            <strong>Revision:</strong> ${approval.revision_number}
+            ${approval.failed_rules.length > 0 ? `<br><strong>Rules to fix:</strong> ${approval.failed_rules.join(', ')}` : ''}
+          </div>
+
+          ${approval.status === 'pending' ? `
+            <textarea class="approval-comment" id="comment-${approval.id}" placeholder="Add review notes..."></textarea>
+            <div class="approval-actions">
+              <button class="approval-btn approval-btn-approve" onclick="reviewApproval('${approval.id}', true)">Approve</button>
+              <button class="approval-btn approval-btn-reject" onclick="reviewApproval('${approval.id}', false)">Reject</button>
+            </div>
+          ` : ''}
+
+          ${approval.review_notes ? `
+            <div class="approval-history">
+              <div class="approval-history-title">Review Notes</div>
+              <div style="font-size: 12px; color: #4A5568; background: #F7FAFC; padding: 8px; border-radius: 4px;">${approval.review_notes}</div>
+            </div>
+          ` : ''}
+
+          <div class="approval-history">
+            <div class="approval-history-title">History</div>
+            <div class="approval-timeline">
+              <div class="approval-entry">
+                <div class="approval-entry-dot"></div>
+                <div class="approval-entry-text">
+                  <div class="approval-entry-action">Submitted</div>
+                  <div class="approval-entry-time">${new Date(approval.submitted_at).toLocaleString()}</div>
+                </div>
+              </div>
+              ${approval.reviewed_at ? `
+                <div class="approval-entry">
+                  <div class="approval-entry-dot"></div>
+                  <div class="approval-entry-text">
+                    <div class="approval-entry-action">${approval.status === 'approved' ? 'Approved' : 'Rejected'} by ${approval.reviewed_by}</div>
+                    <div class="approval-entry-time">${new Date(approval.reviewed_at).toLocaleString()}</div>
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function reviewApproval(approvalId, approved) {
+      const comment = document.getElementById(`comment-${approvalId}`).value;
+      try {
+        const endpoint = approved ? `/api/approvals/${approvalId}/approve` : `/api/approvals/${approvalId}/reject`;
+        await apiCall(endpoint, {
+          method: 'POST',
+          body: JSON.stringify({
+            approved: approved,
+            notes: comment || null,
+          }),
+        });
+        showAlert(approved ? 'Roster approved' : 'Roster rejected', 'success');
+        await loadApprovals();
+      } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+      }
+    }
+
+    // ============================================
+    // CONFLICT DETECTION
+    // ============================================
+    async function checkShiftConflicts(shiftId) {
+      try {
+        // This would be called to check conflicts on individual shifts
+        // For now, integration with the shifts card would happen in renderShifts
+      } catch (e) {
+        console.error('Error checking conflicts:', e);
+      }
+    }
+
+    function openModal(id) {
+      document.getElementById(id).classList.add('active');
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('active');
+    }
+
+    function showAlert(message, type) {
+      const alert = document.createElement('div');
+      alert.className = `alert alert-${type}`;
+      alert.innerHTML = `
+        <div class="alert-icon">${type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ'}</div>
+        <div>${message}</div>
+      `;
+      document.querySelector('.content').insertBefore(alert, document.querySelector('.content').firstChild);
+      setTimeout(() => alert.remove(), 4000);
+    }
+
+    // ============================================
+    // WebSocket Connection with Exponential Backoff
+    // ============================================
+    function connectWebSocket() {
+      // Need to determine venue_id from somewhere - for now we'll get it from URL or use a default
+      const venueId = new URLSearchParams(window.location.search).get('venue_id') || 'default';
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = new URL(window.location.href);
+      wsUrl.protocol = protocol;
+      wsUrl.pathname = '/ws/ws/' + venueId;
+
+      // Add auth token as query param
+      if (state.token) {
+        wsUrl.searchParams.set('token', state.token);
+      }
+
+      try {
+        state.ws = new WebSocket(wsUrl.toString());
+
+        state.ws.onopen = () => {
+          console.log('Staff portal WebSocket connected');
+          state.wsConnected = true;
+          connectionManager.reset();
+          connectionManager.hide();
+        };
+
+        state.ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            handleStaffWSMessage(message);
+          } catch (e) {
+            console.error('Failed to parse WS message:', e);
+          }
+        };
+
+        state.ws.onerror = (event) => {
+          console.error('WebSocket error:', event);
+          state.wsConnected = false;
+          connectionManager.show();
+        };
+
+        state.ws.onclose = () => {
+          console.log('Staff portal WebSocket closed, reconnecting...');
+          state.wsConnected = false;
+          connectionManager.show();
+
+          // Exponential backoff reconnect using connection manager
+          const delay = connectionManager.getDelay();
+          wsReconnectTimeout = setTimeout(() => {
+            connectWebSocket();
+          }, delay);
+        };
+
+      } catch (e) {
+        console.error('Failed to create WebSocket:', e);
+      }
+    }
+
+    function sendWSMessage(message) {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify(message));
+      }
+    }
+
+    // Send ping every 30s to maintain connection
+    setInterval(() => {
+      if (state.wsConnected) {
+        sendWSMessage({ type: 'ping', timestamp: new Date().toISOString() });
+      }
+    }, 30000);
+
+    function handleStaffWSMessage(message) {
+      const type = message.type;
+
+      if (type === 'ping') {
+        // Respond to server ping with pong
+        sendWSMessage({ type: 'pong', timestamp: new Date().toISOString() });
+      }
+
+      else if (type === 'roster.published') {
+        console.log('New roster published:', message);
+        showAlert('New roster available! Check your shifts.', 'success');
+        loadShifts(); // Refresh shifts display
+      }
+
+      else if (type === 'shift.swapped') {
+        console.log('Shift swap completed:', message);
+        showAlert('Shift swap completed!', 'success');
+        loadShifts(); // Refresh shifts
+        loadSwaps();  // Refresh swap board
+      }
+
+      else if (type === 'shift.reminder') {
+        console.log('Shift reminder:', message);
+        // Show prominent reminder notification
+        const reminder = document.createElement('div');
+        reminder.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: var(--warning);
+          color: white;
+          padding: 20px;
+          border-radius: 12px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+          max-width: 400px;
+          z-index: 10000;
+          font-weight: 600;
+        `;
+        reminder.innerHTML = `
+          <div style="font-size: 16px; margin-bottom: 8px;">Shift Reminder</div>
+          <div style="font-size: 13px; opacity: 0.95;">
+            Your shift on ${message.shift_date} at ${message.shift_time} starts in ${message.starts_in_minutes} minutes!
+          </div>
+        `;
+        document.body.appendChild(reminder);
+        setTimeout(() => {
+          reminder.style.opacity = '0';
+          setTimeout(() => reminder.remove(), 300);
+        }, 8000);
+      }
+
+      else if (type === 'notification.new') {
+        console.log('Notification:', message);
+        showAlert(message.title + ': ' + message.body, 'info');
+        if (message.action_url) {
+          setTimeout(() => {
+            window.location.href = message.action_url;
+          }, 2000);
+        }
+      }
+
+      else if (type === 'initial_state' || type === 'pong' || type === 'subscribe_ack') {
+        // Ignore state messages
+        console.debug('Received', type);
+      }
+    }
+
+    // Initialize on page load
+    init();
+  </script>
+</body>
+</html>

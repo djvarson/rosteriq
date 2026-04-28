@@ -1,0 +1,1868 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "RosterIQ API",
+    "description": "AI-powered predictive rostering for Australian hospitality venues. Manage venues, employees, rosters, forecasts, and compliance with intelligent optimization.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "RosterIQ Support",
+      "url": "https://rosteriq.io",
+      "email": "support@rosteriq.io"
+    },
+    "license": {
+      "name": "Proprietary",
+      "url": "https://rosteriq.io/license"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.rosteriq.io",
+      "description": "Production server"
+    },
+    {
+      "url": "http://localhost:8000",
+      "description": "Development server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Authentication and user management"
+    },
+    {
+      "name": "Venues",
+      "description": "Manage hospitality locations"
+    },
+    {
+      "name": "Employees",
+      "description": "Manage staff and availability"
+    },
+    {
+      "name": "Rosters",
+      "description": "Generate and manage rosters"
+    },
+    {
+      "name": "Forecasts",
+      "description": "Demand forecasting and analytics"
+    },
+    {
+      "name": "Analytics",
+      "description": "Performance metrics and insights"
+    },
+    {
+      "name": "Optimiser",
+      "description": "Roster optimization engine"
+    },
+    {
+      "name": "Billing",
+      "description": "Subscription and billing management"
+    },
+    {
+      "name": "Webhooks",
+      "description": "Inbound and outbound webhook management"
+    },
+    {
+      "name": "Compliance",
+      "description": "Award compliance and breaks validation"
+    },
+    {
+      "name": "Admin",
+      "description": "Administrative and backup operations"
+    },
+    {
+      "name": "Tanda",
+      "description": "Tanda plugin integration"
+    },
+    {
+      "name": "Staff",
+      "description": "Staff-facing operations and preferences"
+    },
+    {
+      "name": "Dashboard",
+      "description": "Real-time dashboard data"
+    },
+    {
+      "name": "Awards",
+      "description": "Award rules and penalty rates"
+    },
+    {
+      "name": "POS",
+      "description": "Point-of-sale integration"
+    },
+    {
+      "name": "Reports",
+      "description": "Compliance and performance reports"
+    },
+    {
+      "name": "Templates",
+      "description": "Roster template management"
+    },
+    {
+      "name": "Approvals",
+      "description": "Roster approval workflows"
+    },
+    {
+      "name": "Health",
+      "description": "System health and readiness checks"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT token obtained from login endpoint"
+      },
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "API key for service-to-service authentication"
+      }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "example": "user_123abc"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "manager@venue.com.au"
+          },
+          "name": {
+            "type": "string",
+            "example": "Jane Smith"
+          },
+          "organisation": {
+            "type": "string",
+            "example": "org_456def"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-04-25T10:30:00Z"
+          }
+        },
+        "required": ["user_id", "email", "name"]
+      },
+      "AuthToken": {
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+          },
+          "token_type": {
+            "type": "string",
+            "example": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "example": 3600
+          }
+        },
+        "required": ["access_token", "token_type", "expires_in"]
+      },
+      "Venue": {
+        "type": "object",
+        "properties": {
+          "venue_id": {
+            "type": "string",
+            "example": "venue_123abc"
+          },
+          "name": {
+            "type": "string",
+            "example": "The Local Pub"
+          },
+          "address": {
+            "type": "string",
+            "example": "123 Smith St, Sydney NSW 2000"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
+            "example": "NSW"
+          },
+          "covers_per_staff": {
+            "type": "number",
+            "example": 6
+          },
+          "trading_hours": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "time"
+              }
+            },
+            "example": {
+              "monday": ["10:00", "23:00"],
+              "friday": ["10:00", "01:00"]
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["venue_id", "name", "address", "state"]
+      },
+      "Employee": {
+        "type": "object",
+        "properties": {
+          "employee_id": {
+            "type": "string",
+            "example": "emp_789xyz"
+          },
+          "venue_id": {
+            "type": "string",
+            "example": "venue_123abc"
+          },
+          "name": {
+            "type": "string",
+            "example": "Sarah Johnson"
+          },
+          "employment_type": {
+            "type": "string",
+            "enum": ["full_time", "part_time", "casual"],
+            "example": "full_time"
+          },
+          "award_level": {
+            "type": "string",
+            "example": "3"
+          },
+          "max_hours_per_week": {
+            "type": "number",
+            "example": 40
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": ["bartender", "floor_service"]
+          },
+          "availability": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "time"
+              }
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["employee_id", "venue_id", "name"]
+      },
+      "Shift": {
+        "type": "object",
+        "properties": {
+          "shift_id": {
+            "type": "string",
+            "example": "shift_001"
+          },
+          "roster_id": {
+            "type": "string",
+            "example": "roster_abc123"
+          },
+          "employee_id": {
+            "type": "string",
+            "example": "emp_789xyz"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-05-01"
+          },
+          "start_time": {
+            "type": "string",
+            "format": "time",
+            "example": "10:00"
+          },
+          "end_time": {
+            "type": "string",
+            "format": "time",
+            "example": "18:00"
+          },
+          "duration_hours": {
+            "type": "number",
+            "example": 8
+          },
+          "status": {
+            "type": "string",
+            "enum": ["scheduled", "published", "worked", "cancelled"],
+            "example": "scheduled"
+          },
+          "cost": {
+            "type": "number",
+            "example": 240.50
+          }
+        },
+        "required": ["shift_id", "employee_id", "date", "start_time", "end_time"]
+      },
+      "Roster": {
+        "type": "object",
+        "properties": {
+          "roster_id": {
+            "type": "string",
+            "example": "roster_abc123"
+          },
+          "venue_id": {
+            "type": "string",
+            "example": "venue_123abc"
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-05-01"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-05-14"
+          },
+          "shifts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Shift"
+            }
+          },
+          "shifts_count": {
+            "type": "integer",
+            "example": 42
+          },
+          "total_cost": {
+            "type": "number",
+            "example": 10080.50
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "published", "completed"],
+            "example": "draft"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["roster_id", "venue_id", "start_date"]
+      },
+      "DemandForecast": {
+        "type": "object",
+        "properties": {
+          "forecast_id": {
+            "type": "string",
+            "example": "fcst_123"
+          },
+          "venue_id": {
+            "type": "string",
+            "example": "venue_123abc"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-05-01"
+          },
+          "hour": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 23,
+            "example": 12
+          },
+          "predicted_covers": {
+            "type": "number",
+            "example": 45
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "example": 0.85
+          },
+          "source": {
+            "type": "string",
+            "enum": ["pos", "forecast_v2", "manual", "ensemble"],
+            "example": "ensemble"
+          }
+        },
+        "required": ["forecast_id", "venue_id", "date", "hour", "predicted_covers"]
+      },
+      "RosterAnalysis": {
+        "type": "object",
+        "properties": {
+          "roster_id": {
+            "type": "string"
+          },
+          "compliance": {
+            "type": "object",
+            "properties": {
+              "award_compliant": {
+                "type": "boolean"
+              },
+              "violations": {
+                "type": "integer"
+              },
+              "break_compliance": {
+                "type": "number",
+                "description": "Percentage compliant (0-100)"
+              }
+            }
+          },
+          "costs": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "number",
+                "example": 10080.50
+              },
+              "currency": {
+                "type": "string",
+                "example": "AUD"
+              },
+              "average_per_shift": {
+                "type": "number"
+              }
+            }
+          },
+          "coverage": {
+            "type": "number",
+            "description": "Percentage of demand covered (0-100)",
+            "example": 92.5
+          },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "total_hours": {
+                "type": "number"
+              },
+              "average_shift_length": {
+                "type": "number"
+              },
+              "staff_utilisation": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "Venue not found"
+          },
+          "code": {
+            "type": "string",
+            "example": "NOT_FOUND"
+          },
+          "status": {
+            "type": "integer",
+            "example": 404
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "details": {
+            "type": "object"
+          }
+        },
+        "required": ["error", "code", "status"]
+      }
+    }
+  },
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Register a new user account",
+        "operationId": "register",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "example": "manager@venue.com.au"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8,
+                    "example": "secure-password123"
+                  },
+                  "name": {
+                    "type": "string",
+                    "example": "Jane Smith"
+                  },
+                  "organisation": {
+                    "type": "string",
+                    "example": "Sydney Hospitality Group"
+                  }
+                },
+                "required": ["email", "password", "name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User successfully registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user_id": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Verification email sent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or user already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Login with email and password",
+        "operationId": "login",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthToken"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials"
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Refresh JWT token",
+        "operationId": "refresh_token",
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "New token issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthToken"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token expired or invalid"
+          }
+        }
+      }
+    },
+    "/auth/verify-email": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Verify email address with token",
+        "operationId": "verify_email",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": ["token"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email verified successfully"
+          },
+          "400": {
+            "description": "Invalid or expired verification token"
+          }
+        }
+      }
+    },
+    "/auth/forgot-password": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Request password reset",
+        "operationId": "forgot_password",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": ["email"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset email sent"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Reset password with token",
+        "operationId": "reset_password",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "new_password": {
+                    "type": "string",
+                    "minLength": 8
+                  }
+                },
+                "required": ["token", "new_password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset successful"
+          },
+          "400": {
+            "description": "Invalid token or password"
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get current user profile",
+        "operationId": "get_current_user",
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Current user details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "tags": ["Auth"],
+        "summary": "Update user profile",
+        "operationId": "update_user",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/venues": {
+      "post": {
+        "tags": ["Venues"],
+        "summary": "Create a new venue",
+        "operationId": "create_venue",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "The Local Pub"
+                  },
+                  "address": {
+                    "type": "string",
+                    "example": "123 Smith St, Sydney NSW 2000"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
+                  },
+                  "covers_per_staff": {
+                    "type": "number",
+                    "example": 6
+                  },
+                  "trading_hours": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  }
+                },
+                "required": ["name", "address", "state"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Venue created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Venue"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          }
+        }
+      },
+      "get": {
+        "tags": ["Venues"],
+        "summary": "List all venues for current user",
+        "operationId": "list_venues",
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "List of venues",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "venues": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Venue"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/venues/{venue_id}": {
+      "get": {
+        "tags": ["Venues"],
+        "summary": "Get venue details",
+        "operationId": "get_venue",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "venue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Venue details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Venue"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Venue not found"
+          }
+        }
+      }
+    },
+    "/employees": {
+      "post": {
+        "tags": ["Employees"],
+        "summary": "Create a single employee",
+        "operationId": "create_employee",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "venue_id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "employment_type": {
+                    "type": "string",
+                    "enum": ["full_time", "part_time", "casual"]
+                  },
+                  "award_level": {
+                    "type": "string"
+                  },
+                  "max_hours_per_week": {
+                    "type": "number"
+                  },
+                  "skills": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "availability": {
+                    "type": "object"
+                  }
+                },
+                "required": ["venue_id", "name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Employee created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Employee"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": ["Employees"],
+        "summary": "List employees for a venue",
+        "operationId": "list_employees",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "venue_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of employees",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "employees": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Employee"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/employees/bulk": {
+      "post": {
+        "tags": ["Employees"],
+        "summary": "Bulk import employees",
+        "operationId": "bulk_import_employees",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "venue_id": {
+                    "type": "string"
+                  },
+                  "employees": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "employment_type": {
+                          "type": "string"
+                        },
+                        "award_level": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bulk import result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "imported": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "integer"
+                    },
+                    "employee_ids": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rosters/generate": {
+      "post": {
+        "tags": ["Rosters"],
+        "summary": "Generate an optimized roster",
+        "operationId": "generate_roster",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "venue_id": {
+                    "type": "string"
+                  },
+                  "start_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "num_weeks": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 13
+                  },
+                  "constraints": {
+                    "type": "object",
+                    "properties": {
+                      "min_staff": {
+                        "type": "integer"
+                      },
+                      "max_consecutive_shifts": {
+                        "type": "integer"
+                      },
+                      "min_hours_between_shifts": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                },
+                "required": ["venue_id", "start_date", "num_weeks"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Roster generation started (async)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "roster_id": {
+                      "type": "string"
+                    },
+                    "job_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["pending", "processing", "completed"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rosters/{roster_id}": {
+      "get": {
+        "tags": ["Rosters"],
+        "summary": "Get roster details with all shifts",
+        "operationId": "get_roster",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Roster with shifts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Roster"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Roster not found"
+          }
+        }
+      }
+    },
+    "/rosters/{roster_id}/analyse": {
+      "get": {
+        "tags": ["Rosters"],
+        "summary": "Analyze roster compliance and costs",
+        "operationId": "analyse_roster",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Roster analysis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterAnalysis"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/forecasts": {
+      "post": {
+        "tags": ["Forecasts"],
+        "summary": "Submit demand forecast data",
+        "operationId": "create_forecast",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "venue_id": {
+                    "type": "string"
+                  },
+                  "date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "predicted_covers": {
+                    "type": "number"
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": ["venue_id", "date", "hour", "predicted_covers"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Forecast created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemandForecast"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": ["Forecasts"],
+        "summary": "Get forecasts for a date range",
+        "operationId": "list_forecasts",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "venue_id",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {"type": "string", "format": "date"}
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "schema": {"type": "string", "format": "date"}
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "schema": {"type": "string", "format": "date"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of forecasts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DemandForecast"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/forecasts/required-staff": {
+      "get": {
+        "tags": ["Forecasts"],
+        "summary": "Get required staffing based on forecasts",
+        "operationId": "get_required_staff",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "venue_id",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string", "format": "date"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Required staffing by hour",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/awards/day-type": {
+      "get": {
+        "tags": ["Awards"],
+        "summary": "Get day type (weekday/weekend/public holiday)",
+        "operationId": "get_day_type",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string", "format": "date"}
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Day type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "day_type": {
+                      "type": "string",
+                      "enum": ["weekday", "weekend", "public_holiday"]
+                    },
+                    "public_holiday_name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/awards/penalty-rate": {
+      "get": {
+        "tags": ["Awards"],
+        "summary": "Get penalty rate multiplier for a shift",
+        "operationId": "get_penalty_rate",
+        "parameters": [
+          {
+            "name": "award_level",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string", "format": "date"}
+          },
+          {
+            "name": "day_of_week",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "integer", "minimum": 0, "maximum": 6}
+          },
+          {
+            "name": "start_hour",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "integer"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Penalty rate multiplier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "multiplier": {
+                      "type": "number",
+                      "example": 1.5
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/summary/{venue_id}": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Get venue analytics summary",
+        "operationId": "get_analytics_summary",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "venue_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "schema": {"type": "string", "format": "date"}
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "schema": {"type": "string", "format": "date"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Analytics summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total_shifts": {"type": "integer"},
+                    "total_hours": {"type": "number"},
+                    "total_cost": {"type": "number"},
+                    "compliance_rate": {"type": "number"},
+                    "forecast_accuracy": {"type": "number"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/checkout": {
+      "post": {
+        "tags": ["Billing"],
+        "summary": "Create Stripe checkout session",
+        "operationId": "create_checkout",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "enum": ["starter", "professional", "enterprise"]
+                  },
+                  "billing_period": {
+                    "type": "string",
+                    "enum": ["monthly", "annual"]
+                  },
+                  "success_url": {"type": "string"},
+                  "cancel_url": {"type": "string"}
+                },
+                "required": ["plan", "billing_period"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Checkout session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkout_url": {"type": "string"},
+                    "session_id": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/subscription": {
+      "get": {
+        "tags": ["Billing"],
+        "summary": "Get current subscription status",
+        "operationId": "get_subscription",
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Subscription details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "plan": {"type": "string"},
+                    "status": {"type": "string"},
+                    "current_period_end": {"type": "string", "format": "date"},
+                    "next_invoice_date": {"type": "string", "format": "date"}
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active subscription"
+          }
+        }
+      }
+    },
+    "/admin/backup": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Create a backup of venue data",
+        "operationId": "create_backup",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "venue_id": {"type": "string"},
+                  "include_rosters": {"type": "boolean", "default": true},
+                  "include_analytics": {"type": "boolean", "default": true}
+                },
+                "required": ["venue_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Backup created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "backup_id": {"type": "string"},
+                    "created_at": {"type": "string", "format": "date-time"},
+                    "size_mb": {"type": "number"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/backups": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "List all backups",
+        "operationId": "list_backups",
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "List of backups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "backup_id": {"type": "string"},
+                      "venue_id": {"type": "string"},
+                      "created_at": {"type": "string", "format": "date-time"},
+                      "status": {"type": "string"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/restore/{backup_id}": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Restore data from a backup",
+        "operationId": "restore_backup",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "backup_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restore initiated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "restore_id": {"type": "string"},
+                    "status": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/approvals/pending": {
+      "get": {
+        "tags": ["Approvals"],
+        "summary": "Get pending approval requests",
+        "operationId": "list_pending_approvals",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "venue_id",
+            "in": "query",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of pending approvals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "request_id": {"type": "string"},
+                      "roster_id": {"type": "string"},
+                      "submitted_by": {"type": "string"},
+                      "submitted_at": {"type": "string", "format": "date-time"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/approvals/submit/{roster_id}": {
+      "post": {
+        "tags": ["Approvals"],
+        "summary": "Submit roster for approval",
+        "operationId": "submit_for_approval",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"}
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "comments": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Approval request created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "request_id": {"type": "string"},
+                    "status": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/approvals/{request_id}/approve": {
+      "post": {
+        "tags": ["Approvals"],
+        "summary": "Approve a roster request",
+        "operationId": "approve_request",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"}
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "comments": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Request approved"
+          }
+        }
+      }
+    },
+    "/breaks/validate/{roster_id}": {
+      "get": {
+        "tags": ["Compliance"],
+        "summary": "Validate break compliance for roster",
+        "operationId": "validate_breaks",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Break validation results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "compliant": {"type": "boolean"},
+                    "violations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "shift_id": {"type": "string"},
+                          "violation_type": {"type": "string"},
+                          "message": {"type": "string"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Check API health status",
+        "operationId": "health_check",
+        "responses": {
+          "200": {
+            "description": "API is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["healthy", "degraded", "unhealthy"]
+                    },
+                    "version": {"type": "string"},
+                    "timestamp": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Check API readiness (Kubernetes probe)",
+        "operationId": "readiness_check",
+        "responses": {
+          "200": {
+            "description": "API is ready"
+          },
+          "503": {
+            "description": "API is not ready"
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Get Prometheus metrics",
+        "operationId": "get_metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

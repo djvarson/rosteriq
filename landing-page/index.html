@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosterIQ — AI-Powered Rostering for Australian Hospitality</title>
+    <meta name="description" content="RosterIQ uses AI to predict demand and build smarter rosters for pubs, clubs, and restaurants. Cut labour costs by $800-1,500/month. Free pilot available.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --black: #111111;
+            --text: #333333;
+            --muted: #666666;
+            --light-muted: #999999;
+            --border: #e5e5e5;
+            --light-bg: #f5f4f0;
+            --white: #ffffff;
+            --blue: #0ea5e9;
+            --blue-dark: #0284c7;
+            --blue-light: #e0f2fe;
+            --green: #22c55e;
+            --amber: #f59e0b;
+            --amber-light: #fef3c7;
+            --radius: 16px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+            color: var(--text); line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ===== NAV ===== */
+        nav {
+            position: fixed; top: 0; width: 100%; z-index: 100;
+            background: rgba(255,255,255,0.85);
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+            padding: 0 2rem;
+        }
+        .nav-inner {
+            max-width: 1200px; margin: 0 auto;
+            display: flex; justify-content: space-between; align-items: center;
+            height: 56px;
+        }
+        .logo { text-decoration: none; display: flex; align-items: center; }
+        .logo img { height: 30px; }
+        .nav-links { display: flex; gap: 2rem; align-items: center; }
+        .nav-links a {
+            color: var(--muted); text-decoration: none; font-size: 0.88rem;
+            font-weight: 500;
+        }
+        .nav-links a:hover { color: var(--black); }
+        .nav-cta {
+            padding: 0.45rem 1.2rem; background: var(--black);
+            color: var(--white) !important; border-radius: 999px;
+            font-weight: 600; font-size: 0.85rem;
+        }
+        .nav-cta:hover { background: #333; }
+
+        /* ===== HERO ===== */
+        .hero {
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            text-align: center; padding: 8rem 2rem 4rem;
+            background: linear-gradient(180deg, #dbeef8 0%, #f7f5f2 35%, #f7f5f2 55%, #fce4c0 80%, #f5b870 100%);
+        }
+        .hero-inner { max-width: 750px; }
+        .hero-badge {
+            display: inline-block; padding: 0.4rem 1rem; margin-bottom: 2.5rem;
+            background: var(--amber-light); border-radius: 999px;
+            font-size: 0.78rem; font-weight: 600; color: #92400e;
+        }
+        .hero h1 {
+            font-size: clamp(3rem, 6.5vw, 4.8rem); font-weight: 900;
+            line-height: 1.05; letter-spacing: -2.5px; color: var(--black);
+            margin-bottom: 1.5rem;
+        }
+        .hero .lead {
+            font-size: 1.15rem; color: var(--muted); max-width: 560px;
+            margin: 0 auto 3rem; line-height: 1.7;
+        }
+        .hero-card {
+            max-width: 500px; margin: 0 auto 2.5rem;
+            background: var(--white); border-radius: var(--radius);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.04);
+            padding: 1rem 1.25rem; display: flex; align-items: center; gap: 0.75rem;
+        }
+        .hero-card input {
+            flex: 1; border: none; outline: none; font-size: 0.95rem;
+            font-family: inherit; color: var(--text); background: transparent;
+        }
+        .hero-card input::placeholder { color: #bbb; }
+        .hero-card button {
+            padding: 0.6rem 1.4rem; background: var(--blue); color: var(--white);
+            border: none; border-radius: 10px; font-weight: 700; font-size: 0.88rem;
+            font-family: inherit; cursor: pointer; white-space: nowrap;
+        }
+        .hero-card button:hover { background: var(--blue-dark); }
+        .hero-pills-label {
+            font-size: 0.72rem; color: var(--light-muted); text-transform: uppercase;
+            letter-spacing: 1.5px; font-weight: 600; margin-bottom: 0.75rem;
+        }
+        .hero-pills {
+            display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center;
+        }
+        .pill {
+            padding: 0.3rem 0.85rem; border: 1px solid var(--border);
+            border-radius: 999px; font-size: 0.8rem; color: var(--text);
+            background: rgba(255,255,255,0.6);
+        }
+
+        /* ===== BIG STATEMENT ===== */
+        .statement {
+            text-align: center; padding: 10rem 2rem;
+            background: var(--light-bg);
+        }
+        .statement h2 {
+            font-size: clamp(2.4rem, 5vw, 4rem); font-weight: 900;
+            letter-spacing: -2px; color: var(--black); line-height: 1.1;
+        }
+
+        /* ===== FEATURES (contained card area, like base44) ===== */
+        .features-wrap {
+            background: var(--light-bg); padding: 0 2rem 8rem;
+        }
+        .features-container {
+            max-width: 1100px; margin: 0 auto;
+            background: var(--white); border-radius: 24px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .feature-item {
+            display: flex; align-items: flex-start; gap: 3rem;
+            padding: 3.5rem 4rem; border-bottom: 1px solid var(--border);
+        }
+        .feature-item:last-child { border-bottom: none; }
+        .feature-num {
+            font-size: 0.82rem; font-weight: 600; color: var(--blue);
+            white-space: nowrap; padding-top: 0.3rem; min-width: 60px;
+        }
+        .feature-body { flex: 1; }
+        .feature-body h3 {
+            font-size: 1.5rem; font-weight: 800; color: var(--black);
+            letter-spacing: -0.5px; margin-bottom: 0.75rem;
+        }
+        .feature-body p {
+            font-size: 1rem; color: var(--muted); line-height: 1.7;
+            max-width: 480px;
+        }
+
+        /* ===== STATS (inside the gradient transition) ===== */
+        .stats-section {
+            background: linear-gradient(180deg, var(--light-bg) 0%, var(--white) 100%);
+            padding: 6rem 2rem;
+        }
+        .stats-row {
+            max-width: 900px; margin: 0 auto;
+            display: flex; justify-content: space-around; text-align: center;
+            flex-wrap: wrap; gap: 2rem;
+        }
+        .stat-number {
+            font-size: 3.2rem; font-weight: 900; color: var(--blue);
+            letter-spacing: -1.5px; font-variant-numeric: tabular-nums;
+        }
+        .stat-label {
+            font-size: 0.75rem; color: var(--light-muted); text-transform: uppercase;
+            letter-spacing: 1.5px; font-weight: 600; margin-top: 0.3rem;
+        }
+
+        /* ===== HOW IT WORKS ===== */
+        .how-section { padding: 7rem 2rem; background: var(--white); }
+        .how-inner { max-width: 1100px; margin: 0 auto; }
+        .how-header {
+            text-align: center; margin-bottom: 4rem;
+        }
+        .eyebrow {
+            font-size: 0.72rem; font-weight: 700; color: var(--blue);
+            text-transform: uppercase; letter-spacing: 2px; margin-bottom: 1rem;
+        }
+        .how-header h2 {
+            font-size: clamp(2rem, 4vw, 3rem); font-weight: 900;
+            letter-spacing: -1.5px; color: var(--black); line-height: 1.1;
+        }
+        .how-header p {
+            font-size: 1.05rem; color: var(--muted); margin-top: 1rem;
+            max-width: 520px; margin-left: auto; margin-right: auto; line-height: 1.7;
+        }
+        .how-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem;
+        }
+        .step-card {
+            background: var(--light-bg); border-radius: var(--radius);
+            padding: 2.5rem 2rem; border: 1px solid var(--border);
+        }
+        .step-dot {
+            width: 38px; height: 38px; border-radius: 50%;
+            background: var(--blue); color: var(--white);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 800; font-size: 0.95rem; margin-bottom: 1.25rem;
+        }
+        .step-card h3 {
+            font-size: 1.1rem; font-weight: 800; color: var(--black);
+            margin-bottom: 0.6rem;
+        }
+        .step-card p { font-size: 0.92rem; color: var(--muted); line-height: 1.65; }
+
+        /* ===== PRICING (3-col like base44) ===== */
+        .pricing-section {
+            padding: 7rem 2rem;
+            background: linear-gradient(180deg, var(--white) 0%, var(--light-bg) 100%);
+        }
+        .pricing-grid {
+            max-width: 1000px; margin: 0 auto;
+            display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem;
+        }
+        .pricing-intro {
+            display: flex; flex-direction: column; justify-content: center;
+            padding-right: 1rem;
+        }
+        .pricing-intro h2 {
+            font-size: 2.2rem; font-weight: 900; color: var(--black);
+            letter-spacing: -1px; line-height: 1.15; margin-bottom: 1rem;
+        }
+        .pricing-intro p {
+            font-size: 0.95rem; color: var(--muted); line-height: 1.65;
+            margin-bottom: 1.5rem;
+        }
+        .pricing-intro a {
+            display: inline-block; padding: 0.65rem 1.4rem;
+            background: var(--blue); color: var(--white); border-radius: 10px;
+            text-decoration: none; font-weight: 700; font-size: 0.88rem;
+            width: fit-content;
+        }
+        .pricing-intro a:hover { background: var(--blue-dark); }
+        .pricing-card {
+            background: var(--white); border-radius: var(--radius);
+            padding: 2.5rem 2rem; border: 1px solid var(--border);
+        }
+        .pricing-card.highlight {
+            background: linear-gradient(135deg, var(--blue-light), #f0f9ff);
+            border-color: #bae6fd;
+        }
+        .pricing-card h3 {
+            font-size: 1.3rem; font-weight: 800; color: var(--black);
+            margin-bottom: 1rem;
+        }
+        .pricing-card .price {
+            font-size: 3.2rem; font-weight: 900; color: var(--black);
+            letter-spacing: -2px;
+        }
+        .pricing-card .price span {
+            font-size: 0.95rem; font-weight: 500; color: var(--muted); letter-spacing: 0;
+        }
+        .pricing-card .note {
+            font-size: 0.88rem; color: var(--muted); margin: 0.5rem 0 1.5rem;
+        }
+        .pricing-card ul { list-style: none; }
+        .pricing-card li {
+            padding: 0.45rem 0; font-size: 0.92rem; color: var(--text);
+            display: flex; align-items: flex-start; gap: 0.5rem;
+        }
+        .pricing-card li::before {
+            content: "\2713"; color: var(--green); font-weight: 700;
+        }
+
+        /* ===== PILOT CTA ===== */
+        .pilot-section {
+            text-align: center; padding: 8rem 2rem;
+            background: linear-gradient(180deg, var(--light-bg) 0%, #dbeef8 30%, #fce4c0 70%, #f5b870 100%);
+        }
+        .pilot-section h2 {
+            font-size: clamp(2rem, 4vw, 3.2rem); font-weight: 900;
+            color: var(--black); letter-spacing: -1.5px;
+            margin-bottom: 1.25rem; line-height: 1.1;
+        }
+        .pilot-section .lead {
+            font-size: 1.05rem; color: var(--muted);
+            max-width: 520px; margin: 0 auto 3rem; line-height: 1.7;
+        }
+        .pilot-card {
+            max-width: 420px; margin: 0 auto;
+            background: var(--white); border-radius: var(--radius);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.04);
+            padding: 2rem;
+        }
+        .pilot-card input {
+            width: 100%; padding: 0.8rem 1rem;
+            border: 1px solid var(--border); border-radius: 10px;
+            font-size: 0.92rem; font-family: inherit;
+            color: var(--text); margin-bottom: 0.6rem;
+        }
+        .pilot-card input:focus { outline: none; border-color: var(--blue); }
+        .pilot-card input::placeholder { color: #bbb; }
+        .pilot-card button {
+            width: 100%; padding: 0.8rem;
+            background: var(--blue); color: var(--white);
+            border: none; border-radius: 10px;
+            font-weight: 700; font-size: 0.92rem;
+            font-family: inherit; cursor: pointer; margin-top: 0.25rem;
+        }
+        .pilot-card button:hover { background: var(--blue-dark); }
+        .pilot-card .fine {
+            font-size: 0.75rem; color: var(--light-muted); margin-top: 1rem;
+        }
+
+        /* ===== FOOTER ===== */
+        footer {
+            background: var(--white); border-top: 1px solid var(--border);
+            padding: 4rem 2rem 2rem;
+        }
+        .footer-inner {
+            max-width: 1100px; margin: 0 auto;
+            display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 3rem;
+        }
+        .footer-brand p {
+            font-size: 0.88rem; color: var(--muted); line-height: 1.65;
+            max-width: 260px; margin-top: 1rem;
+        }
+        .footer-col h4 {
+            font-size: 0.7rem; font-weight: 700; color: var(--black);
+            text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 1rem;
+        }
+        .footer-col a {
+            display: block; font-size: 0.88rem; color: var(--muted);
+            text-decoration: none; padding: 0.25rem 0;
+        }
+        .footer-col a:hover { color: var(--black); }
+        .footer-bottom {
+            max-width: 1100px; margin: 2.5rem auto 0;
+            padding-top: 1.5rem; border-top: 1px solid var(--border);
+            font-size: 0.78rem; color: var(--light-muted);
+        }
+
+        /* ===== ANIMATIONS (mirroring base44.com) ===== */
+
+        /* --- Hero staggered entrance (fade-in + slide up) --- */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .hero-badge   { animation: fadeUp 0.7s ease-out 0.1s both; }
+        .hero h1      { animation: fadeUp 0.7s ease-out 0.3s both; }
+        .hero .lead    { animation: fadeUp 0.7s ease-out 0.5s both; }
+        .hero-card    { animation: fadeUp 0.7s ease-out 0.65s both; }
+        .hero-pills-label,
+        .hero-pills   { animation: fadeUp 0.7s ease-out 0.8s both; }
+
+        /* --- Scroll animations ONLY apply when JS is ready (body.js-ready) --- */
+        /* Without JS, everything is visible by default */
+
+        body.js-ready .reveal {
+            opacity: 0; transform: translateY(40px);
+            transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        body.js-ready .reveal.vis { opacity: 1; transform: translateY(0); }
+
+        body.js-ready .stagger > * {
+            opacity: 0; transform: translateY(30px) scale(0.97);
+            transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        body.js-ready .stagger.vis > *:nth-child(1) { transition-delay: 0s; }
+        body.js-ready .stagger.vis > *:nth-child(2) { transition-delay: 0.12s; }
+        body.js-ready .stagger.vis > *:nth-child(3) { transition-delay: 0.24s; }
+        body.js-ready .stagger.vis > *:nth-child(4) { transition-delay: 0.36s; }
+        body.js-ready .stagger.vis > *:nth-child(5) { transition-delay: 0.48s; }
+        body.js-ready .stagger.vis > *:nth-child(6) { transition-delay: 0.6s; }
+        body.js-ready .stagger.vis > * { opacity: 1; transform: translateY(0) scale(1); }
+
+        body.js-ready .feature-item {
+            opacity: 0; transform: translateX(-30px);
+            transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        body.js-ready .feature-item.vis { opacity: 1; transform: translateX(0); }
+
+        body.js-ready .statement h2 {
+            opacity: 0; transform: scale(0.92);
+            transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 1s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        body.js-ready .statement.vis h2 { opacity: 1; transform: scale(1); }
+
+        @keyframes statPop {
+            0%   { opacity: 0; transform: scale(0.75); }
+            60%  { transform: scale(1.06); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        body.js-ready .stats-row > div { opacity: 0; }
+        body.js-ready .stats-row.vis > div {
+            animation: statPop 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        body.js-ready .stats-row.vis > div:nth-child(1) { animation-delay: 0s; }
+        body.js-ready .stats-row.vis > div:nth-child(2) { animation-delay: 0.15s; }
+        body.js-ready .stats-row.vis > div:nth-child(3) { animation-delay: 0.3s; }
+
+        /* --- Card hover lifts --- */
+        .step-card, .pricing-card {
+            transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                        box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .step-card:hover {
+            transform: translateY(-6px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+        }
+        .pricing-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.06);
+        }
+
+        /* --- Pill hover --- */
+        .pill {
+            transition: all 0.2s ease;
+        }
+        .pill:hover {
+            border-color: var(--blue); color: var(--blue);
+            background: var(--white); transform: translateY(-2px);
+        }
+
+        /* --- Nav gets shadow on scroll --- */
+        nav { transition: box-shadow 0.3s ease; }
+        nav.scrolled { box-shadow: 0 2px 20px rgba(0,0,0,0.06); }
+
+        /* --- Typing cursor for hero input --- */
+        @keyframes blink {
+            0%, 100% { border-right-color: transparent; }
+            50% { border-right-color: var(--blue); }
+        }
+        .hero-card input.typing {
+            border-right: 2px solid var(--blue);
+            animation: blink 0.8s steps(1) infinite;
+        }
+
+        /* --- CTA gentle pulse --- */
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(14,165,233,0.3); }
+            50% { box-shadow: 0 0 0 8px rgba(14,165,233,0); }
+        }
+        .hero-card button { animation: pulse 3s ease-in-out 2.5s infinite; }
+
+        /* --- Pilot form card hover --- */
+        .pilot-card {
+            transition: transform 0.35s ease, box-shadow 0.35s ease;
+        }
+        .pilot-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+        }
+
+        /* --- Reduced motion --- */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.01ms !important;
+            }
+            .reveal, .feature-item, .stagger > *, .statement h2,
+            .stats-row > div {
+                opacity: 1 !important; transform: none !important;
+            }
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 900px) {
+            .how-grid { grid-template-columns: 1fr; }
+            .pricing-grid { grid-template-columns: 1fr; max-width: 420px; }
+            .footer-inner { grid-template-columns: 1fr 1fr; }
+            .feature-item { flex-direction: column; gap: 0.5rem; padding: 2.5rem 2rem; }
+        }
+        @media (max-width: 640px) {
+            .nav-links a:not(.nav-cta) { display: none; }
+            .hero-card { flex-direction: column; }
+            .hero-card button { width: 100%; }
+            .stats-row { flex-direction: column; gap: 1.5rem; }
+            .footer-inner { grid-template-columns: 1fr; }
+            .statement { padding: 6rem 2rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+    <div class="nav-inner">
+        <a href="#" class="logo"><img src="logo.svg" alt="RosterIQ"></a>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#how">How It Works</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#pilot" class="nav-cta">Start Free Pilot</a>
+        </div>
+    </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <div class="hero-inner">
+        <div class="hero-badge">Now in pilot &middot; Free for 4 weeks</div>
+        <h1>Smarter rosters for every shift</h1>
+        <p class="lead">RosterIQ uses AI to predict demand and build cost-optimised rosters for Australian pubs, clubs, and restaurants. Plugs into Tanda in minutes.</p>
+        <div class="hero-card">
+            <input type="email" id="hero-email" placeholder="Enter your work email" />
+            <button onclick="document.getElementById('pilot').scrollIntoView({behavior:'smooth'})">Start Free Pilot</button>
+        </div>
+        <p class="hero-pills-label">Works with:</p>
+        <div class="hero-pills">
+            <span class="pill">Tanda</span>
+            <span class="pill">Lightspeed POS</span>
+            <span class="pill">Square</span>
+            <span class="pill">H&amp;L</span>
+        </div>
+    </div>
+</section>
+
+<!-- BIG STATEMENT -->
+<section class="statement reveal">
+    <h2>Stop guessing.<br>Start rostering with AI.</h2>
+</section>
+
+<!-- FEATURES (contained card, like base44) -->
+<div class="features-wrap" id="features">
+    <div class="features-container">
+        <div class="feature-item">
+            <div class="feature-num">01 / 06</div>
+            <div class="feature-body">
+                <h3>AI Demand Forecasting</h3>
+                <p>XGBoost + Prophet ensemble model trained on your venue's data. Predicts covers by hour with 85%+ accuracy after just 4 weeks.</p>
+            </div>
+        </div>
+        <div class="feature-item">
+            <div class="feature-num">02 / 06</div>
+            <div class="feature-body">
+                <h3>Fair Work Compliance</h3>
+                <p>Every roster is checked against the Hospitality Award (MA000009). Penalty rates, break rules, max hours, consecutive days &mdash; all handled automatically.</p>
+            </div>
+        </div>
+        <div class="feature-item">
+            <div class="feature-num">03 / 06</div>
+            <div class="feature-body">
+                <h3>Real-Time Cost Tracking</h3>
+                <p>See your labour cost as a percentage of revenue in real time. Get alerts when you're drifting over target before the week ends.</p>
+            </div>
+        </div>
+        <div class="feature-item">
+            <div class="feature-num">04 / 06</div>
+            <div class="feature-body">
+                <h3>Cut &amp; Call-In Engine</h3>
+                <p>When demand drops mid-shift, RosterIQ tells you exactly who to cut and who to call in &mdash; ranked by savings and fairness.</p>
+            </div>
+        </div>
+        <div class="feature-item">
+            <div class="feature-num">05 / 06</div>
+            <div class="feature-body">
+                <h3>POS Integration</h3>
+                <p>Imports from H&amp;L, Lightspeed, and Square out of the box. Real-time sales data feeds the variance engine for live staffing adjustments.</p>
+            </div>
+        </div>
+        <div class="feature-item">
+            <div class="feature-num">06 / 06</div>
+            <div class="feature-body">
+                <h3>Tanda Native</h3>
+                <p>Connects directly to Tanda via API. Pulls employees, shifts, and rosters. Pushes optimised schedules back. No double-handling.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- STATS -->
+<section class="stats-section">
+    <div class="stats-row">
+        <div>
+            <div class="stat-number">$62K</div>
+            <div class="stat-label">Avg Annual Overspend</div>
+        </div>
+        <div>
+            <div class="stat-number">4+ hrs</div>
+            <div class="stat-label">Wasted Weekly on Rostering</div>
+        </div>
+        <div>
+            <div class="stat-number">68%</div>
+            <div class="stat-label">Shifts Wrongly Staffed</div>
+        </div>
+    </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how-section" id="how">
+    <div class="how-inner">
+        <div class="how-header reveal">
+            <div class="eyebrow">How It Works</div>
+            <h2>Three steps to<br>smarter rosters</h2>
+            <p>RosterIQ connects to your existing systems, learns your patterns, and starts optimising within days.</p>
+        </div>
+        <div class="how-grid stagger">
+            <div class="step-card">
+                <div class="step-dot">1</div>
+                <h3>Connect</h3>
+                <p>Plug in your Tanda account and POS system. We pull your historical data and start learning your venue's patterns.</p>
+            </div>
+            <div class="step-card">
+                <div class="step-dot">2</div>
+                <h3>Predict</h3>
+                <p>Our AI analyses weather, events, booking trends, and your sales history to forecast demand hour-by-hour.</p>
+            </div>
+            <div class="step-card">
+                <div class="step-dot">3</div>
+                <h3>Roster</h3>
+                <p>RosterIQ generates cost-optimised rosters that match staff to demand and keep labour costs under your target.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- PRICING -->
+<section class="pricing-section" id="pricing">
+    <div class="pricing-grid stagger">
+        <div class="pricing-intro">
+            <h2>Simple pricing,<br>real savings</h2>
+            <p>No setup fees. No contracts. Cancel anytime.</p>
+            <a href="#pilot">Start Free Pilot</a>
+        </div>
+        <div class="pricing-card highlight">
+            <h3>Free pilot</h3>
+            <ul>
+                <li>Full platform access for 4 weeks</li>
+                <li>AI demand forecasting</li>
+                <li>Cost-optimised roster generation</li>
+                <li>Fair Work compliance checks</li>
+                <li>Dedicated onboarding support</li>
+            </ul>
+        </div>
+        <div class="pricing-card">
+            <h3>After pilot</h3>
+            <div class="price">$3<span>/emp/mo</span></div>
+            <p class="note">Less than $150/month for most venues</p>
+            <ul>
+                <li>Everything in the pilot, plus:</li>
+                <li>Real-time cut &amp; call-in engine</li>
+                <li>Tanda + POS integration</li>
+                <li>Weekly cost vs revenue reports</li>
+                <li>Email + chat support</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<!-- PILOT CTA -->
+<section class="pilot-section" id="pilot">
+    <h2 class="reveal">Ready to see what RosterIQ<br>can do with your venue's data?</h2>
+    <p class="lead reveal">We'll connect to your Tanda account, analyse 12 weeks of history, and show you exactly where you're overspending &mdash; free, no strings attached.</p>
+    <div class="pilot-card reveal">
+        <form id="pilot-form">
+            <input type="text" placeholder="Your name" required>
+            <input type="text" placeholder="Venue name" required>
+            <input type="email" placeholder="Email address" required>
+            <input type="tel" placeholder="Phone (optional)">
+            <button type="submit">Start My Free 4-Week Pilot</button>
+        </form>
+        <p class="fine">No credit card required. We'll be in touch within 24 hours.</p>
+    </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+    <div class="footer-inner">
+        <div class="footer-brand">
+            <a href="#" class="logo"><img src="logo.svg" alt="RosterIQ" style="height: 26px;"></a>
+            <p>AI-powered rostering for Australian hospitality. Predict demand, optimise costs, and roster smarter.</p>
+        </div>
+        <div class="footer-col">
+            <h4>Product</h4>
+            <a href="#features">Features</a>
+            <a href="#how">How It Works</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#pilot">Free Pilot</a>
+        </div>
+        <div class="footer-col">
+            <h4>Integrations</h4>
+            <a href="#">Tanda</a>
+            <a href="#">Lightspeed POS</a>
+            <a href="#">Square</a>
+            <a href="#">H&amp;L</a>
+        </div>
+        <div class="footer-col">
+            <h4>Company</h4>
+            <a href="mailto:hello@rosteriq.com.au">Contact</a>
+            <a href="#">Privacy Policy</a>
+            <a href="#">Terms of Service</a>
+        </div>
+    </div>
+    <div class="footer-bottom">
+        RosterIQ &copy; 2026. Built in Melbourne for Australian hospitality.
+    </div>
+</footer>
+
+<script>
+    // Activate animation CSS (progressive enhancement: content visible without JS)
+    document.body.classList.add('js-ready');
+
+    // ---- Smooth anchor scroll ----
+    document.querySelectorAll('a[href^="#"]').forEach(link => {
+        link.addEventListener('click', e => {
+            e.preventDefault();
+            const t = document.querySelector(link.getAttribute('href'));
+            if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+
+    // ---- Scroll-triggered reveals (IntersectionObserver) ----
+    const obs = new IntersectionObserver(entries => {
+        entries.forEach(e => {
+            if (e.isIntersecting) { e.target.classList.add('vis'); obs.unobserve(e.target); }
+        });
+    }, { threshold: 0.15, rootMargin: '0px 0px -50px 0px' });
+
+    document.querySelectorAll('.reveal, .stagger, .feature-item, .statement, .stats-row').forEach(el => obs.observe(el));
+
+    // ---- Nav shadow on scroll ----
+    const nav = document.querySelector('nav');
+    window.addEventListener('scroll', () => {
+        nav.classList.toggle('scrolled', window.scrollY > 30);
+    }, { passive: true });
+
+    // ---- Hero typing animation (mirrors base44's rotating text) ----
+    const heroInput = document.getElementById('hero-email');
+    const phrases = [
+        'manager@thegrandpub.com.au',
+        'ops@coastalclub.com.au',
+        'roster@barandgrill.com.au',
+        'admin@sydneybistro.com.au',
+        'hello@melbournebar.com.au'
+    ];
+    let pi = 0, ci = 0, del = false;
+
+    function typeLoop() {
+        if (heroInput === document.activeElement) {
+            heroInput.classList.remove('typing');
+            return setTimeout(typeLoop, 800);
+        }
+        heroInput.classList.add('typing');
+        const word = phrases[pi];
+        if (!del) {
+            heroInput.placeholder = word.substring(0, ci + 1);
+            ci++;
+            if (ci === word.length) { del = true; return setTimeout(typeLoop, 2200); }
+            return setTimeout(typeLoop, 65 + Math.random() * 40);
+        } else {
+            heroInput.placeholder = word.substring(0, ci - 1);
+            ci--;
+            if (ci === 0) { del = false; pi = (pi + 1) % phrases.length; return setTimeout(typeLoop, 400); }
+            return setTimeout(typeLoop, 30);
+        }
+    }
+    setTimeout(typeLoop, 1800);
+
+    heroInput.addEventListener('focus', () => {
+        heroInput.classList.remove('typing');
+        if (!heroInput.value) heroInput.placeholder = 'Enter your work email';
+    });
+    heroInput.addEventListener('blur', () => {
+        if (!heroInput.value) { ci = 0; del = false; setTimeout(typeLoop, 500); }
+    });
+
+    // ---- Parallax hero gradient shift on scroll ----
+    const hero = document.querySelector('.hero');
+    window.addEventListener('scroll', () => {
+        hero.style.backgroundPosition = 'center ' + (window.scrollY * 0.15) + 'px';
+    }, { passive: true });
+
+    // ---- Form submission ----
+    document.getElementById('pilot-form').addEventListener('submit', e => {
+        e.preventDefault();
+        const form = e.target, btn = form.querySelector('button');
+        btn.textContent = 'Thanks! We\'ll be in touch.';
+        btn.style.background = '#22c55e';
+        btn.disabled = true;
+        form.querySelectorAll('input').forEach(i => i.disabled = true);
+    });
+</script>
+
+</body>
+</html>

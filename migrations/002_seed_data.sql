@@ -1,0 +1,120 @@
+-- RosterIQ Seed Data
+-- Optional seed data for development and demo environments
+-- Uncomment lines to enable seed data loading
+
+-- Note: This file is optional and only runs if explicitly included in the migration runner
+
+-- ============================================================================
+-- Demo Venue
+-- ============================================================================
+
+-- INSERT INTO venues (id, name, tanda_org_id, state, timezone, min_staff, max_labour_pct, pos_system, created_at)
+-- VALUES (
+--     'demo-venue',
+--     'The Ace Hotel',
+--     'tanda-org-12345',
+--     'vic',
+--     'Australia/Melbourne',
+--     '{"host": 2, "chef": 1, "bartender": 1}'::jsonb,
+--     28.5,
+--     'square',
+--     NOW()
+-- );
+
+-- ============================================================================
+-- Demo Employees
+-- ============================================================================
+
+-- INSERT INTO employees (
+--     id, venue_id, tanda_id, name, employment_type, award_level,
+--     hourly_base_rate, skills, availability, max_hours_per_week,
+--     consecutive_days, phone, email, active, created_at, updated_at
+-- )
+-- VALUES
+-- (
+--     'emp-001',
+--     'demo-venue',
+--     'tanda-emp-001',
+--     'Alice Johnson',
+--     'full_time',
+--     'level_3',
+--     28.50,
+--     '["host", "bartender", "foh"]'::jsonb,
+--     '{
+--         "monday": [{"start": "11:00", "end": "23:00"}],
+--         "tuesday": [{"start": "11:00", "end": "23:00"}],
+--         "wednesday": [{"start": "11:00", "end": "23:00"}],
+--         "thursday": [{"start": "11:00", "end": "23:00"}],
+--         "friday": [{"start": "11:00", "end": "23:00"}],
+--         "saturday": [{"start": "11:00", "end": "23:00"}],
+--         "sunday": [{"start": "11:00", "end": "23:00"}]
+--     }'::jsonb,
+--     38.0,
+--     6,
+--     '0412345678',
+--     'alice@example.com',
+--     true,
+--     NOW(),
+--     NOW()
+-- ),
+-- (
+--     'emp-002',
+--     'demo-venue',
+--     'tanda-emp-002',
+--     'Bob Smith',
+--     'part_time',
+--     'level_2',
+--     24.50,
+--     '["host", "foh"]'::jsonb,
+--     '{
+--         "friday": [{"start": "17:00", "end": "23:00"}],
+--         "saturday": [{"start": "11:00", "end": "23:00"}],
+--         "sunday": [{"start": "11:00", "end": "22:00"}]
+--     }'::jsonb,
+--     16.0,
+--     6,
+--     '0487654321',
+--     'bob@example.com',
+--     true,
+--     NOW(),
+--     NOW()
+-- ),
+-- (
+--     'emp-003',
+--     'demo-venue',
+--     'tanda-emp-003',
+--     'Carol White',
+--     'casual',
+--     'level_1',
+--     22.50,
+--     '["bartender"]'::jsonb,
+--     '{
+--         "thursday": [{"start": "17:00", "end": "23:00"}],
+--         "friday": [{"start": "17:00", "end": "23:00"}],
+--         "saturday": [{"start": "17:00", "end": "00:00"}],
+--         "sunday": [{"start": "15:00", "end": "22:00"}]
+--     }'::jsonb,
+--     12.0,
+--     5,
+--     '0499999999',
+--     'carol@example.com',
+--     true,
+--     NOW(),
+--     NOW()
+-- );
+
+-- ============================================================================
+-- Demo User
+-- ============================================================================
+
+-- INSERT INTO users (id, email, password_hash, name, role, api_key_hash, is_active, created_at)
+-- VALUES (
+--     'user-demo-001',
+--     'manager@rosteriq.demo',
+--     '$2b$12$demo.hash.for.testing.purposes.only',
+--     'Demo Manager',
+--     'manager',
+--     '',
+--     true,
+--     NOW()
+-- );

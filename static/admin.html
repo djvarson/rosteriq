@@ -1,0 +1,3103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RosterIQ Admin Panel</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --dark-navy: #0F1629;
+      --dark-bg: #1A202C;
+      --card-bg: #2D3748;
+      --light-bg: #F0F2F5;
+      --text-primary: #FFFFFF;
+      --text-secondary: #A0AEC0;
+      --text-muted: #718096;
+      --brand-blue: #3366FF;
+      --success: #10B981;
+      --warning: #F59E0B;
+      --danger: #EF4444;
+      --info: #3B82F6;
+      --border: #4A5568;
+      --light-text: #1A202C;
+      --light-border: #E2E8F0;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--light-bg);
+      color: var(--light-text);
+    }
+
+    /* Layout */
+    .app-container {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      width: 260px;
+      background: var(--dark-navy);
+      border-right: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 24px 0;
+      overflow-y: auto;
+      position: fixed;
+      height: 100vh;
+      left: 0;
+      top: 0;
+      z-index: 1000;
+    }
+
+    .sidebar-logo {
+      padding: 0 20px 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sidebar-logo-text {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .sidebar-logo-text span {
+      color: var(--brand-blue);
+    }
+
+    .sidebar-section-title {
+      padding: 12px 20px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 16px;
+      margin-bottom: 8px;
+    }
+
+    .sidebar-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 0 12px;
+    }
+
+    .nav-item {
+      padding: 12px 16px;
+      border-radius: 8px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 14px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      user-select: none;
+    }
+
+    .nav-item:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+    }
+
+    .nav-item.active {
+      background: var(--brand-blue);
+      color: var(--text-primary);
+    }
+
+    .main-content {
+      flex: 1;
+      margin-left: 260px;
+      background: var(--light-bg);
+    }
+
+    .top-bar {
+      background: white;
+      border-bottom: 1px solid var(--light-border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .top-bar-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--light-text);
+    }
+
+    .content {
+      padding: 32px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .page-header {
+      margin-bottom: 32px;
+    }
+
+    .page-title {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--light-text);
+      margin-bottom: 8px;
+    }
+
+    .page-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    /* Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      margin-bottom: 32px;
+    }
+
+    .kpi-card {
+      background: white;
+      border: 1px solid var(--light-border);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.3s;
+    }
+
+    .kpi-card:hover {
+      border-color: var(--brand-blue);
+      box-shadow: 0 4px 12px rgba(51, 102, 255, 0.1);
+    }
+
+    .kpi-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .kpi-value {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--light-text);
+      line-height: 1.1;
+    }
+
+    .kpi-change {
+      font-size: 12px;
+      color: var(--success);
+      margin-top: 8px;
+    }
+
+    /* Card */
+    .card {
+      background: white;
+      border: 1px solid var(--light-border);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      margin-bottom: 24px;
+    }
+
+    .card-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--light-text);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    thead {
+      background: var(--light-bg);
+      border-bottom: 1px solid var(--light-border);
+    }
+
+    th {
+      padding: 12px;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    td {
+      padding: 12px;
+      border-bottom: 1px solid var(--light-border);
+      font-size: 14px;
+      color: var(--light-text);
+    }
+
+    tbody tr:hover {
+      background: var(--light-bg);
+    }
+
+    /* Badge */
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge.success {
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--success);
+    }
+
+    .badge.warning {
+      background: rgba(245, 158, 11, 0.1);
+      color: var(--warning);
+    }
+
+    .badge.danger {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--danger);
+    }
+
+    /* Button */
+    .btn {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: var(--brand-blue);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2552cc;
+    }
+
+    .btn-secondary {
+      background: var(--light-bg);
+      color: var(--light-text);
+      border: 1px solid var(--light-border);
+    }
+
+    .btn-secondary:hover {
+      background: #E2E8F0;
+    }
+
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    /* Status */
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .status-dot.online {
+      background: var(--success);
+    }
+
+    .status-dot.offline {
+      background: var(--danger);
+    }
+
+    /* Loading */
+    .loading {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--light-border);
+      border-top-color: var(--brand-blue);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ============================================
+       LOADING SKELETONS
+       ============================================ */
+    .skeleton {
+      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    .skeleton-text {
+      height: 16px;
+      margin-bottom: 8px;
+    }
+
+    .skeleton-card {
+      height: 120px;
+      margin-bottom: 12px;
+    }
+
+    .skeleton-table-row {
+      height: 40px;
+      margin-bottom: 4px;
+    }
+
+    /* ============================================
+       ERROR STATE & EMPTY STATE
+       ============================================ */
+    .error-card {
+      background: rgba(239, 68, 68, 0.05);
+      border: 1px solid var(--danger);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .error-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .error-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--light-text);
+      margin-bottom: 8px;
+    }
+
+    .error-message {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .error-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    .connection-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: rgba(239, 68, 68, 0.1);
+      border-bottom: 2px solid var(--danger);
+      padding: 12px 24px;
+      display: none;
+      align-items: center;
+      gap: 12px;
+      z-index: 3000;
+      font-size: 14px;
+      color: var(--danger);
+    }
+
+    .connection-banner.show {
+      display: flex;
+    }
+
+    .connection-banner.connected {
+      background: rgba(16, 185, 129, 0.1);
+      border-bottom-color: var(--success);
+      color: var(--success);
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--danger);
+      animation: pulse-connection 1.5s ease-in-out infinite;
+    }
+
+    .connection-banner.connected .pulse-dot {
+      background: var(--success);
+    }
+
+    @keyframes pulse-connection {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* ============================================
+       TOAST NOTIFICATIONS
+       ============================================ */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-width: 400px;
+    }
+
+    .toast {
+      background: white;
+      border-radius: 8px;
+      padding: 16px 24px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    .toast.success {
+      border-left: 4px solid var(--success);
+    }
+
+    .toast.error {
+      border-left: 4px solid var(--danger);
+    }
+
+    .toast.warning {
+      border-left: 4px solid var(--warning);
+    }
+
+    .toast.info {
+      border-left: 4px solid var(--info);
+    }
+
+    .toast-icon {
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .toast-message {
+      flex: 1;
+      font-size: 14px;
+      color: var(--light-text);
+      font-weight: 500;
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    @keyframes slideOut {
+      from {
+        transform: translateX(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+    }
+
+    .toast.removing {
+      animation: slideOut 0.3s ease-out forwards;
+    }
+
+    .section {
+      display: none;
+    }
+
+    .section.active {
+      display: block;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--text-muted);
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    /* Health Status Cards */
+    .health-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .health-card {
+      background: white;
+      border: 1px solid var(--light-border);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .health-card.degraded {
+      border-color: var(--warning);
+      background: rgba(245, 158, 11, 0.02);
+    }
+
+    .health-card.down {
+      border-color: var(--danger);
+      background: rgba(239, 68, 68, 0.02);
+    }
+
+    .health-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .health-indicator.up {
+      background: var(--success);
+    }
+
+    .health-indicator.degraded {
+      background: var(--warning);
+      animation: pulse-warning 2s ease-in-out infinite;
+    }
+
+    .health-indicator.down {
+      background: var(--danger);
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    @keyframes pulse-warning {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .health-info {
+      flex: 1;
+    }
+
+    .health-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .health-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--light-text);
+    }
+
+    /* Activity Feed */
+    .activity-feed {
+      max-height: 500px;
+      overflow-y: auto;
+      border: 1px solid var(--light-border);
+      border-radius: 12px;
+      background: white;
+    }
+
+    .activity-entry {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--light-border);
+      display: flex;
+      gap: 12px;
+      font-size: 13px;
+    }
+
+    .activity-entry:last-child {
+      border-bottom: none;
+    }
+
+    .activity-entry:hover {
+      background: var(--light-bg);
+    }
+
+    .activity-badge {
+      width: 4px;
+      height: 100%;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .activity-badge.create {
+      background: var(--success);
+    }
+
+    .activity-badge.update {
+      background: var(--info);
+    }
+
+    .activity-badge.delete {
+      background: var(--danger);
+    }
+
+    .activity-badge.auth {
+      background: var(--warning);
+    }
+
+    .activity-content {
+      flex: 1;
+    }
+
+    .activity-time {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .activity-action {
+      color: var(--light-text);
+      font-weight: 500;
+    }
+
+    .activity-resource {
+      color: var(--text-muted);
+    }
+
+    /* Filter Controls */
+    .filter-controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .filter-group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .filter-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .filter-select {
+      padding: 8px 12px;
+      border: 1px solid var(--light-border);
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--light-text);
+      background: white;
+      cursor: pointer;
+    }
+
+    .filter-select:focus {
+      outline: none;
+      border-color: var(--brand-blue);
+      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+    }
+
+    /* Chart Container */
+    .chart-container {
+      position: relative;
+      height: 300px;
+      margin-bottom: 24px;
+    }
+
+    .chart-container.small {
+      height: 250px;
+    }
+
+    /* Toggle Switch */
+    .toggle-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toggle {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      background: var(--light-border);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    .toggle.active {
+      background: var(--success);
+    }
+
+    .toggle::after {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      top: 2px;
+      left: 2px;
+      transition: left 0.3s;
+    }
+
+    .toggle.active::after {
+      left: 22px;
+    }
+
+    /* Sessions Table */
+    .sessions-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .sessions-table td {
+      padding: 12px;
+      border-bottom: 1px solid var(--light-border);
+      font-size: 13px;
+    }
+
+    .sessions-table th {
+      padding: 12px;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: var(--light-bg);
+      border-bottom: 1px solid var(--light-border);
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-box {
+      background: white;
+      border: 1px solid var(--light-border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--light-text);
+    }
+
+    .stat-unit {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-left: 4px;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal.open {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      padding: 32px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 20px 25px rgba(0, 0, 0, 0.15);
+    }
+
+    .modal-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: var(--light-text);
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--light-text);
+      margin-bottom: 8px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--light-border);
+      border-radius: 8px;
+      font-size: 14px;
+      color: var(--light-text);
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: var(--brand-blue);
+      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .modal-actions .btn {
+      flex: 1;
+    }
+
+    /* ============================================
+       RESPONSIVE: Tablet (768px and below)
+       ============================================ */
+    @media (max-width: 768px) {
+      .sidebar {
+        width: 260px;
+        transform: translateX(-260px);
+        transition: transform 0.3s ease;
+        box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+      }
+
+      .sidebar.open {
+        transform: translateX(0);
+      }
+
+      .main-content {
+        margin-left: 0;
+        transition: margin-left 0.3s ease;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+
+      .content {
+        padding: 16px;
+        max-width: 100%;
+      }
+
+      .top-bar {
+        padding: 12px 16px;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .top-bar-title {
+        font-size: 16px;
+      }
+
+      .page-title {
+        font-size: 20px;
+      }
+
+      .page-subtitle {
+        font-size: 12px;
+      }
+
+      .kpi-card {
+        padding: 16px;
+      }
+
+      .kpi-value {
+        font-size: 24px;
+      }
+
+      .kpi-label {
+        font-size: 11px;
+      }
+
+      .card {
+        padding: 16px;
+      }
+
+      .card-title {
+        font-size: 16px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        min-height: 44px;
+        padding: 12px 16px;
+        font-size: 13px;
+      }
+
+      .btn-small {
+        min-height: 40px;
+        padding: 10px 12px;
+      }
+
+      table {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        font-size: 12px;
+      }
+
+      th, td {
+        padding: 10px 8px;
+        white-space: nowrap;
+      }
+
+      .filter-controls {
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .filter-group {
+        flex: 1;
+        min-width: 160px;
+      }
+
+      .filter-select {
+        font-size: 12px;
+        padding: 8px;
+      }
+
+      .chart-container {
+        padding: 16px;
+      }
+
+      .chart-wrap {
+        height: 250px;
+      }
+
+      .form-input,
+      .form-select {
+        min-height: 44px;
+        padding: 12px;
+        font-size: 14px;
+      }
+
+      .modal-content {
+        padding: 20px;
+        max-width: 90%;
+      }
+
+      .modal-actions {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .modal-actions .btn {
+        width: 100%;
+      }
+
+      .health-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      .health-card {
+        padding: 16px;
+      }
+
+      .activity-feed {
+        max-height: 400px;
+      }
+
+      .activity-entry {
+        padding: 10px 12px;
+        font-size: 12px;
+        gap: 10px;
+      }
+
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+      }
+
+      .stat-box {
+        padding: 12px;
+      }
+
+      .stat-label {
+        font-size: 10px;
+      }
+
+      .stat-value {
+        font-size: 18px;
+      }
+    }
+
+    /* ============================================
+       RESPONSIVE: Mobile (480px and below)
+       ============================================ */
+    @media (max-width: 480px) {
+      .sidebar {
+        width: 220px;
+      }
+
+      .sidebar-logo-text {
+        font-size: 14px;
+      }
+
+      .sidebar-section-title {
+        font-size: 9px;
+        padding: 8px 16px;
+      }
+
+      .nav-item {
+        padding: 10px 12px;
+        font-size: 12px;
+        gap: 8px;
+      }
+
+      .nav-item-icon {
+        font-size: 14px;
+      }
+
+      .top-bar {
+        padding: 10px 12px;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .top-bar-left,
+      .top-bar-right {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .top-bar-title {
+        font-size: 14px;
+      }
+
+      .content {
+        padding: 12px;
+      }
+
+      .page-header {
+        margin-bottom: 16px;
+      }
+
+      .page-title {
+        font-size: 18px;
+        margin-bottom: 4px;
+      }
+
+      .page-subtitle {
+        font-size: 11px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .kpi-card {
+        padding: 12px;
+      }
+
+      .kpi-label {
+        font-size: 10px;
+        margin-bottom: 8px;
+      }
+
+      .kpi-value {
+        font-size: 20px;
+        margin-bottom: 4px;
+      }
+
+      .kpi-change {
+        font-size: 11px;
+      }
+
+      .card {
+        padding: 12px;
+        margin-bottom: 16px;
+        border-radius: 8px;
+      }
+
+      .card-title {
+        font-size: 14px;
+        gap: 8px;
+      }
+
+      .btn {
+        padding: 10px 12px;
+        font-size: 12px;
+        min-height: 44px;
+        width: 100%;
+      }
+
+      .btn-small {
+        padding: 8px 10px;
+        font-size: 11px;
+        min-height: 40px;
+      }
+
+      /* Hamburger menu */
+      .hamburger {
+        display: flex;
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 1100;
+        width: 40px;
+        height: 40px;
+        border: none;
+        background: white;
+        border-radius: 8px;
+        cursor: pointer;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .hamburger span {
+        width: 18px;
+        height: 2px;
+        background: #1A202C;
+        margin: 3px 0;
+        border-radius: 1px;
+        transition: all 0.3s;
+      }
+
+      /* Table responsiveness */
+      .table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 -12px;
+        padding: 0 12px;
+        border-radius: 0;
+      }
+
+      table {
+        min-width: 600px;
+        font-size: 11px;
+      }
+
+      th, td {
+        padding: 8px;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      /* Sticky first column */
+      th:first-child,
+      td:first-child {
+        position: sticky;
+        left: 0;
+        background: white;
+        z-index: 10;
+        min-width: 80px;
+      }
+
+      thead th:first-child {
+        background: #F7FAFC;
+      }
+
+      .badge {
+        padding: 2px 6px;
+        font-size: 10px;
+      }
+
+      .status {
+        font-size: 11px;
+      }
+
+      .status-dot {
+        width: 6px;
+        height: 6px;
+      }
+
+      /* Filter controls stacked */
+      .filter-controls {
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .filter-group {
+        width: 100%;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .filter-label {
+        font-size: 10px;
+      }
+
+      .filter-select {
+        padding: 10px;
+        font-size: 13px;
+        min-height: 44px;
+      }
+
+      .chart-container {
+        padding: 12px;
+        margin-bottom: 16px;
+      }
+
+      .chart-title {
+        font-size: 13px;
+        margin-bottom: 12px;
+      }
+
+      .chart-wrap {
+        height: 200px;
+      }
+
+      /* Modal adjustments */
+      .modal {
+        padding: 12px;
+      }
+
+      .modal-content {
+        padding: 16px;
+        width: 95%;
+        max-width: 100%;
+        border-radius: 8px;
+      }
+
+      .modal-title {
+        font-size: 16px;
+        margin-bottom: 12px;
+      }
+
+      .form-group {
+        margin-bottom: 12px;
+      }
+
+      .form-label {
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+
+      .form-input,
+      .form-select {
+        padding: 10px 12px;
+        min-height: 44px;
+        font-size: 14px;
+        border-radius: 6px;
+      }
+
+      .modal-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .modal-actions .btn {
+        width: 100%;
+      }
+
+      /* Health indicators */
+      .health-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .health-card {
+        padding: 12px;
+      }
+
+      .health-label {
+        font-size: 10px;
+      }
+
+      .health-value {
+        font-size: 14px;
+      }
+
+      /* Activity feed */
+      .activity-feed {
+        max-height: 300px;
+      }
+
+      .activity-entry {
+        padding: 10px;
+        font-size: 11px;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .activity-time {
+        font-size: 10px;
+        width: 100%;
+      }
+
+      .activity-action {
+        font-size: 12px;
+      }
+
+      .activity-resource {
+        font-size: 10px;
+      }
+
+      /* Stats grid */
+      .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .stat-box {
+        padding: 10px;
+      }
+
+      .stat-label {
+        font-size: 9px;
+      }
+
+      .stat-value {
+        font-size: 16px;
+      }
+
+      .stat-unit {
+        font-size: 9px;
+      }
+
+      /* Empty state */
+      .empty-state {
+        padding: 24px 12px;
+      }
+
+      .empty-state-icon {
+        font-size: 32px;
+      }
+
+      /* Toast notifications */
+      .toast-container {
+        bottom: 12px;
+        right: 12px;
+        max-width: 90vw;
+      }
+
+      .toast {
+        padding: 12px 16px;
+        font-size: 12px;
+        border-radius: 6px;
+      }
+
+      .toast-message {
+        font-size: 12px;
+      }
+
+      /* Error states */
+      .error-card {
+        padding: 16px;
+      }
+
+      .error-icon {
+        font-size: 32px;
+        margin-bottom: 12px;
+      }
+
+      .error-title {
+        font-size: 14px;
+      }
+
+      .error-message {
+        font-size: 12px;
+      }
+
+      /* Readable fonts and touch targets */
+      button, input, select, textarea {
+        font-size: 14px;
+      }
+
+      /* Connection banner */
+      .connection-banner {
+        padding: 10px 16px;
+        font-size: 12px;
+        left: 0;
+        right: 0;
+      }
+
+      .pulse-dot {
+        width: 6px;
+        height: 6px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-logo">
+        <span style="font-size: 24px;">🎯</span>
+        <div class="sidebar-logo-text">Roster<span>IQ</span></div>
+      </div>
+
+      <div class="sidebar-section-title">Admin</div>
+      <div class="sidebar-nav">
+        <div class="nav-item active" onclick="switchSection('overview')">📊 Overview</div>
+        <div class="nav-item" onclick="switchSection('activity')">📋 Activity Feed</div>
+        <div class="nav-item" onclick="switchSection('sessions')">🔑 Sessions</div>
+        <div class="nav-item" onclick="switchSection('api-stats')">📈 API Stats</div>
+        <div class="nav-item" onclick="switchSection('users')">👥 Users</div>
+        <div class="nav-item" onclick="switchSection('venues')">🏢 Venues</div>
+        <div class="nav-item" onclick="switchSection('health')">❤️ System Health</div>
+        <div class="nav-item" onclick="switchSection('billing')">💳 Billing</div>
+        <div class="nav-item" onclick="switchSection('plugins')">🔌 Plugins</div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="top-bar">
+        <div class="top-bar-title">RosterIQ Admin Panel</div>
+        <div style="font-size: 14px; color: var(--text-muted);">
+          <span id="current-time">--:--:--</span>
+        </div>
+      </div>
+
+      <div class="content">
+        <!-- Overview Section -->
+        <div id="overview" class="section active">
+          <div class="page-header">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div>
+                <div class="page-title">System Overview</div>
+                <div class="page-subtitle">Key metrics and status</div>
+              </div>
+              <div class="toggle-switch">
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Auto-refresh</span>
+                <div class="toggle active" id="auto-refresh-toggle" onclick="toggleAutoRefresh(event)"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- System Health Overview -->
+          <div style="margin-bottom: 32px;">
+            <h3 style="font-size: 16px; font-weight: 700; color: var(--light-text); margin-bottom: 16px;">System Health</h3>
+            <div class="health-grid" id="health-grid">
+              <div class="health-card">
+                <div class="health-indicator up"></div>
+                <div class="health-info">
+                  <div class="health-label">API Uptime</div>
+                  <div class="health-value" id="health-uptime">--:--</div>
+                </div>
+              </div>
+              <div class="health-card">
+                <div class="health-indicator up" id="db-indicator"></div>
+                <div class="health-info">
+                  <div class="health-label">Database Status</div>
+                  <div class="health-value" id="health-db-status">Checking...</div>
+                </div>
+              </div>
+              <div class="health-card">
+                <div class="health-indicator up" id="memory-indicator"></div>
+                <div class="health-info">
+                  <div class="health-label">Memory Usage</div>
+                  <div class="health-value" id="health-memory">-- %</div>
+                </div>
+              </div>
+              <div class="health-card">
+                <div class="health-indicator up" id="connections-indicator"></div>
+                <div class="health-info">
+                  <div class="health-label">Active Connections</div>
+                  <div class="health-value" id="health-connections">--</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Total Users</div>
+              <div class="kpi-value" id="user-count">-</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Active Venues</div>
+              <div class="kpi-value" id="venue-count">-</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Total Employees</div>
+              <div class="kpi-value" id="employee-count">-</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Uptime (hours)</div>
+              <div class="kpi-value" id="uptime">-</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">API Health Status</div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+              <div class="status">
+                <div class="status-dot online"></div>
+                <div>
+                  <div style="font-weight: 600;">Database</div>
+                  <div style="font-size: 12px; color: var(--text-muted);" id="db-status">Checking...</div>
+                </div>
+              </div>
+              <div class="status">
+                <div class="status-dot online"></div>
+                <div>
+                  <div style="font-weight: 600;">Scheduler</div>
+                  <div style="font-size: 12px; color: var(--text-muted);" id="scheduler-status">Checking...</div>
+                </div>
+              </div>
+              <div class="status">
+                <div class="status-dot online"></div>
+                <div>
+                  <div style="font-weight: 600;">API</div>
+                  <div style="font-size: 12px; color: var(--text-muted);">Online</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Users Section -->
+        <div id="users" class="section">
+          <div class="page-header">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div>
+                <div class="page-title">User Management</div>
+                <div class="page-subtitle">Manage system users and permissions</div>
+              </div>
+              <button class="btn btn-primary" onclick="openInviteModal()">+ Invite User</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">All Users</div>
+            <table id="users-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Last Login</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody">
+                <tr>
+                  <td colspan="6" style="text-align: center; padding: 24px;">
+                    <div class="loading"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Venues Section -->
+        <div id="venues" class="section">
+          <div class="page-header">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div>
+                <div class="page-title">Venue Management</div>
+                <div class="page-subtitle">Overview of all venues and subscriptions</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">All Venues</div>
+            <table id="venues-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Subscription</th>
+                  <th>Employees</th>
+                  <th>Last Roster</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="venues-tbody">
+                <tr>
+                  <td colspan="5" style="text-align: center; padding: 24px;">
+                    <div class="loading"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Health Section -->
+        <div id="health" class="section">
+          <div class="page-header">
+            <div class="page-title">System Health</div>
+            <div class="page-subtitle">Detailed system and performance metrics</div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Performance Metrics</div>
+            <table>
+              <tbody id="metrics-tbody">
+                <tr>
+                  <td colspan="2" style="text-align: center; padding: 24px;">
+                    <div class="loading"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Billing Section -->
+        <div id="billing" class="section">
+          <div class="page-header">
+            <div class="page-title">Billing Summary</div>
+            <div class="page-subtitle">Subscription tiers and revenue</div>
+          </div>
+
+          <div class="grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Active Subscriptions</div>
+              <div class="kpi-value" id="subscription-count">-</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Monthly Revenue</div>
+              <div class="kpi-value" id="monthly-revenue">-</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Churn Rate</div>
+              <div class="kpi-value" id="churn-rate">-</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Subscription Breakdown</div>
+            <table id="billing-table">
+              <thead>
+                <tr>
+                  <th>Tier</th>
+                  <th>Count</th>
+                  <th>MRR</th>
+                </tr>
+              </thead>
+              <tbody id="billing-tbody">
+                <tr>
+                  <td colspan="3" style="text-align: center; padding: 24px;">
+                    <div class="loading"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Plugins Section -->
+        <div id="plugins" class="section">
+          <div class="page-header">
+            <div class="page-title">Plugin Installations</div>
+            <div class="page-subtitle">Tanda marketplace plugin deployments</div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Installed Plugins</div>
+            <table id="plugins-table">
+              <thead>
+                <tr>
+                  <th>Organization ID</th>
+                  <th>Venue ID</th>
+                  <th>Status</th>
+                  <th>Installed</th>
+                  <th>Last Updated</th>
+                </tr>
+              </thead>
+              <tbody id="plugins-tbody">
+                <tr>
+                  <td colspan="5" style="text-align: center; padding: 24px;">
+                    <div class="loading"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Activity Feed Section -->
+        <div id="activity" class="section">
+          <div class="page-header">
+            <div class="page-title">Activity Feed</div>
+            <div class="page-subtitle">Audit trail of recent system actions</div>
+          </div>
+
+          <div class="card">
+            <div class="card-title" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+              <span>Recent Activity</span>
+              <div class="toggle-switch">
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Auto-refresh</span>
+                <div class="toggle active" id="activity-refresh-toggle" onclick="toggleActivityRefresh(event)"></div>
+              </div>
+            </div>
+
+            <!-- Filter Controls -->
+            <div class="filter-controls">
+              <div class="filter-group">
+                <label class="filter-label">Action Type:</label>
+                <select class="filter-select" id="activity-filter-type" onchange="filterActivityFeed()">
+                  <option value="">All Actions</option>
+                  <option value="create">Create</option>
+                  <option value="update">Update</option>
+                  <option value="delete">Delete</option>
+                  <option value="auth">Auth</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label class="filter-label">User:</label>
+                <input type="text" class="filter-select" id="activity-filter-user" placeholder="Filter by user..." onkeyup="filterActivityFeed()" style="width: 200px;">
+              </div>
+              <div class="filter-group">
+                <label class="filter-label">Date Range:</label>
+                <select class="filter-select" id="activity-filter-date" onchange="filterActivityFeed()">
+                  <option value="">Last 24 hours</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="activity-feed" id="activity-feed">
+              <div style="padding: 48px 24px; text-align: center; color: var(--text-muted);">
+                <div class="loading"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sessions Section -->
+        <div id="sessions" class="section">
+          <div class="page-header">
+            <div class="page-title">Active User Sessions</div>
+            <div class="page-subtitle">Manage user sessions and access</div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">
+              <span>Sessions <span style="font-size: 12px; color: var(--text-muted); font-weight: 400;">(<span id="session-count">0</span> active)</span></span>
+              <button class="btn btn-secondary btn-small" onclick="loadSessionsData()">🔄 Refresh</button>
+            </div>
+
+            <table class="sessions-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Login Time</th>
+                  <th>Last Activity</th>
+                  <th>IP Address</th>
+                  <th>User Agent</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="sessions-tbody">
+                <tr>
+                  <td colspan="7" style="text-align: center; padding: 24px;">
+                    <div class="loading"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- API Stats Section -->
+        <div id="api-stats" class="section">
+          <div class="page-header">
+            <div class="page-title">API Usage Statistics</div>
+            <div class="page-subtitle">Request metrics and performance data</div>
+          </div>
+
+          <!-- Performance Stats -->
+          <div class="stats-grid" style="margin-bottom: 24px;">
+            <div class="stat-box">
+              <div class="stat-label">Requests/Min</div>
+              <div class="stat-value" id="stat-rpm">-</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Error Rate</div>
+              <div class="stat-value" id="stat-error-rate">-%</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">P95 Response Time</div>
+              <div class="stat-value" id="stat-p95">-<span class="stat-unit">ms</span></div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Total Requests (24h)</div>
+              <div class="stat-value" id="stat-total-requests">-</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Requests Over Time (Last Hour)</div>
+            <div class="chart-container">
+              <canvas id="requests-chart"></canvas>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div class="card">
+              <div class="card-title">Top 10 Endpoints</div>
+              <div class="chart-container small">
+                <canvas id="endpoints-chart"></canvas>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">Backup Status</div>
+              <div style="padding: 20px 0;">
+                <div style="margin-bottom: 16px;">
+                  <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Last Backup</div>
+                  <div style="font-size: 16px; font-weight: 600; color: var(--light-text); margin-bottom: 4px;" id="backup-time">--</div>
+                  <div style="font-size: 12px; color: var(--text-muted);" id="backup-size">-- MB</div>
+                </div>
+                <div style="margin-bottom: 16px;">
+                  <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Status</div>
+                  <div style="font-size: 14px; font-weight: 600;" id="backup-status">
+                    <span class="status">
+                      <span class="status-dot online"></span>
+                      <span>Checking...</span>
+                    </span>
+                  </div>
+                </div>
+                <button class="btn btn-primary" onclick="createBackupNow()" style="width: 100%; margin-top: 16px;">
+                  💾 Create Backup Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Invite Modal -->
+  <div id="invite-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-title">Invite User</div>
+      <form onsubmit="submitInvite(event)">
+        <div class="form-group">
+          <label class="form-label">Email</label>
+          <input type="email" id="invite-email" class="form-input" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Name</label>
+          <input type="text" id="invite-name" class="form-input" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Role</label>
+          <select id="invite-role" class="form-input">
+            <option value="staff">Staff</option>
+            <option value="manager">Manager</option>
+            <option value="owner">Owner</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeInviteModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Send Invite</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+  <script>
+    // ========================================================================
+    // UI STATE UTILITIES
+    // ========================================================================
+
+    /**
+     * Show error card with message and retry button
+     */
+    function showError(containerId, message, retryFn) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      const errorHtml = `
+        <div class="error-card">
+          <div class="error-icon">⚠️</div>
+          <div class="error-title">Error Loading Data</div>
+          <div class="error-message">${escapeHtml(message)}</div>
+          <div class="error-actions">
+            ${retryFn ? `<button class="btn btn-primary" onclick="retryFn()">🔄 Retry</button>` : ''}
+            <button class="btn btn-secondary" onclick="clearError('${containerId}')">Dismiss</button>
+          </div>
+        </div>
+      `;
+      container.innerHTML = errorHtml;
+    }
+
+    /**
+     * Show empty state with message
+     */
+    function showEmpty(containerId, message, icon = '📭') {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      container.innerHTML = `
+        <div style="text-align: center; padding: 48px 24px; color: var(--text-muted);">
+          <div style="font-size: 48px; margin-bottom: 16px;">${icon}</div>
+          <div style="font-size: 14px;">${escapeHtml(message)}</div>
+        </div>
+      `;
+    }
+
+    /**
+     * Show loading skeleton placeholders
+     */
+    function showLoading(containerId, type = 'card', count = 3) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      let html = '';
+      for (let i = 0; i < count; i++) {
+        if (type === 'card') {
+          html += '<div class="skeleton skeleton-card"></div>';
+        } else if (type === 'text') {
+          html += '<div class="skeleton skeleton-text"></div>';
+        } else if (type === 'row') {
+          html += '<div class="skeleton skeleton-table-row"></div>';
+        }
+      }
+      container.innerHTML = html;
+    }
+
+    /**
+     * Clear skeleton/error/empty state and make ready for content
+     */
+    function clearState(containerId) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      container.innerHTML = '';
+    }
+
+    /**
+     * Escape HTML to prevent XSS
+     */
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    /**
+     * Show toast notification
+     */
+    function showToast(message, type = 'success', duration = 3000) {
+      let container = document.getElementById('toast-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+      }
+
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+
+      const icons = {
+        success: '✓',
+        error: '✕',
+        warning: '⚠',
+        info: 'ℹ'
+      };
+
+      toast.innerHTML = `
+        <div class="toast-icon">${icons[type] || icons.info}</div>
+        <div class="toast-message">${escapeHtml(message)}</div>
+      `;
+
+      container.appendChild(toast);
+
+      if (duration > 0) {
+        setTimeout(() => {
+          toast.classList.add('removing');
+          setTimeout(() => toast.remove(), 300);
+        }, duration);
+      }
+
+      return toast;
+    }
+
+    /**
+     * Connection status banner with auto-reconnect
+     */
+    class ConnectionManager {
+      constructor() {
+        this.connected = true;
+        this.reconnectDelay = 1000;
+        this.maxReconnectDelay = 30000;
+        this.reconnectAttempts = 0;
+        this.banner = null;
+        this.setupBanner();
+      }
+
+      setupBanner() {
+        this.banner = document.createElement('div');
+        this.banner.className = 'connection-banner';
+        this.banner.innerHTML = `
+          <div class="pulse-dot"></div>
+          <span>Connection lost. Reconnecting...</span>
+        `;
+        document.body.prepend(this.banner);
+      }
+
+      show() {
+        this.connected = false;
+        this.banner.classList.add('show');
+        this.banner.classList.remove('connected');
+      }
+
+      hide() {
+        this.connected = true;
+        this.banner.classList.remove('show');
+        this.banner.classList.add('connected');
+        this.banner.innerHTML = `
+          <div class="pulse-dot"></div>
+          <span>Connected</span>
+        `;
+        setTimeout(() => this.banner.classList.remove('connected'), 2000);
+      }
+
+      getDelay() {
+        const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
+        this.reconnectAttempts++;
+        return delay;
+      }
+
+      reset() {
+        this.reconnectDelay = 1000;
+        this.reconnectAttempts = 0;
+      }
+    }
+
+    const connectionManager = new ConnectionManager();
+
+    // ========================================================================
+    // Config and State
+    // ========================================================================
+    const API_BASE = '/api/v1';
+    const HEALTH_REFRESH_INTERVAL = 30000; // 30 seconds
+    const ACTIVITY_REFRESH_INTERVAL = 10000; // 10 seconds
+
+    let autoRefreshEnabled = true;
+    let activityRefreshEnabled = true;
+    let activityData = [];
+    let chartsInstance = { requests: null, endpoints: null };
+
+    // Get JWT token from localStorage or sessionStorage
+    function getAuthToken() {
+      return localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token') || '';
+    }
+
+    async function fetchWithAuth(url, options = {}) {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      };
+
+      const token = getAuthToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      try {
+        const response = await fetch(url, { ...options, headers });
+        if (!response.ok) {
+          console.error(`API Error: ${response.status} ${response.statusText}`);
+          return null;
+        }
+        return await response.json();
+      } catch (e) {
+        console.error(`Fetch Error: ${e.message}`);
+        return null;
+      }
+    }
+
+    // ========================================================================
+    // Health Status Updates
+    // ========================================================================
+    async function loadHealthStatus() {
+      try {
+        const health = await fetchWithAuth(`${API_BASE}/health/detailed`);
+        if (!health) {
+          console.log('Health endpoint not available, using fallback');
+          return;
+        }
+        connectionManager.hide();
+
+        // API Uptime
+        const uptime = health.uptime_seconds || 0;
+        const hours = Math.floor(uptime / 3600);
+        const minutes = Math.floor((uptime % 3600) / 60);
+        document.getElementById('health-uptime').textContent = `${hours}h ${minutes}m`;
+
+        // Database Status
+        const dbHealth = health.database?.status || 'unknown';
+        const dbIndicator = document.getElementById('db-indicator');
+        const dbStatus = document.getElementById('health-db-status');
+
+        if (dbHealth === 'connected') {
+          dbIndicator.className = 'health-indicator up';
+          dbStatus.textContent = '✓ Connected';
+          dbStatus.style.color = 'var(--success)';
+        } else if (dbHealth === 'degraded') {
+          dbIndicator.className = 'health-indicator degraded';
+          dbStatus.textContent = '⚠ Degraded';
+          dbStatus.style.color = 'var(--warning)';
+        } else {
+          dbIndicator.className = 'health-indicator down';
+          dbStatus.textContent = '✗ Down';
+          dbStatus.style.color = 'var(--danger)';
+        }
+
+        // Memory Usage
+        const memoryPct = health.memory?.usage_percent || 0;
+        const memoryIndicator = document.getElementById('memory-indicator');
+        const memoryStatus = document.getElementById('health-memory');
+
+        if (memoryPct < 70) {
+          memoryIndicator.className = 'health-indicator up';
+        } else if (memoryPct < 85) {
+          memoryIndicator.className = 'health-indicator degraded';
+        } else {
+          memoryIndicator.className = 'health-indicator down';
+        }
+        memoryStatus.textContent = `${memoryPct.toFixed(1)} %`;
+
+        // Active Connections
+        const connections = health.connections?.active || 0;
+        const connIndicator = document.getElementById('connections-indicator');
+        const connStatus = document.getElementById('health-connections');
+
+        if (connections < 100) {
+          connIndicator.className = 'health-indicator up';
+        } else if (connections < 200) {
+          connIndicator.className = 'health-indicator degraded';
+        } else {
+          connIndicator.className = 'health-indicator down';
+        }
+        connStatus.textContent = connections;
+      } catch (e) {
+        console.error('Error loading health status:', e);
+      }
+    }
+
+    // ========================================================================
+    // Activity Feed
+    // ========================================================================
+    async function loadActivityFeed() {
+      const feedContainer = document.getElementById('activity-feed');
+      if (!feedContainer) return;
+
+      showLoading(feedContainer.parentElement.id || 'activity-feed', 'row', 5);
+
+      try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/audit-log?limit=50`);
+        if (!response) {
+          showError(feedContainer.parentElement.id || 'activity-feed', 'Failed to load activity feed. Please try again.', loadActivityFeed);
+          return;
+        }
+
+        connectionManager.hide();
+        activityData = response.entries || [];
+        if (activityData.length === 0) {
+          showEmpty(feedContainer.parentElement.id || 'activity-feed', 'No activity recorded', '📭');
+        } else {
+          clearState(feedContainer.parentElement.id || 'activity-feed');
+          renderActivityFeed(activityData);
+        }
+      } catch (e) {
+        console.error('Error loading activity feed:', e);
+        connectionManager.show();
+        showError(feedContainer.parentElement.id || 'activity-feed', 'Network error. Check your connection.', loadActivityFeed);
+      }
+    }
+
+    function renderActivityFeed(entries) {
+      const feed = document.getElementById('activity-feed');
+
+      if (!entries || entries.length === 0) {
+        feed.innerHTML = '<div style="padding: 48px 24px; text-align: center; color: var(--text-muted);">No activity recorded</div>';
+        return;
+      }
+
+      feed.innerHTML = entries.map(entry => {
+        const timestamp = new Date(entry.timestamp);
+        const timeStr = timestamp.toLocaleTimeString();
+        const dateStr = timestamp.toLocaleDateString();
+
+        let actionType = entry.action?.toLowerCase() || 'unknown';
+        let badgeClass = 'auth';
+
+        if (actionType.includes('create')) badgeClass = 'create';
+        else if (actionType.includes('update')) badgeClass = 'update';
+        else if (actionType.includes('delete')) badgeClass = 'delete';
+
+        return `
+          <div class="activity-entry">
+            <div class="activity-badge ${badgeClass}"></div>
+            <div class="activity-content">
+              <div class="activity-time">${timeStr} • ${dateStr}</div>
+              <div class="activity-action">${entry.action} • ${entry.user || 'System'}</div>
+              <div class="activity-resource">${entry.resource} ${entry.resource_id ? `(${entry.resource_id})` : ''}</div>
+              <div class="activity-resource" style="font-size: 11px; margin-top: 4px;">IP: ${entry.ip_address || '--'}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function filterActivityFeed() {
+      const filterType = document.getElementById('activity-filter-type').value;
+      const filterUser = document.getElementById('activity-filter-user').value.toLowerCase();
+
+      const filtered = activityData.filter(entry => {
+        const matchType = !filterType || entry.action?.toLowerCase().includes(filterType);
+        const matchUser = !filterUser || (entry.user || 'system').toLowerCase().includes(filterUser);
+        return matchType && matchUser;
+      });
+
+      renderActivityFeed(filtered);
+    }
+
+    // ========================================================================
+    // Sessions Management
+    // ========================================================================
+    async function loadSessionsData() {
+      const tbody = document.getElementById('sessions-tbody');
+      if (!tbody) return;
+
+      showLoading('sessions-tbody', 'row', 5);
+
+      try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/sessions`);
+        if (!response) {
+          clearState('sessions-tbody');
+          tbody.innerHTML = '<tr><td colspan="7"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Failed to Load Sessions</div><div class="error-message">Unable to fetch sessions data.</div><button class="btn btn-primary" onclick="loadSessionsData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+          return;
+        }
+
+        connectionManager.hide();
+        const sessions = response.sessions || [];
+        document.getElementById('session-count').textContent = sessions.length;
+
+        if (sessions.length === 0) {
+          clearState('sessions-tbody');
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 24px; color: var(--text-muted);">No active sessions</td></tr>';
+          return;
+        }
+
+        clearState('sessions-tbody');
+        tbody.innerHTML = sessions.map(session => {
+          const loginTime = new Date(session.login_time).toLocaleString();
+          const lastActivity = new Date(session.last_activity).toLocaleString();
+          const userAgent = session.user_agent ? session.user_agent.substring(0, 40) + '...' : '--';
+
+          return `
+            <tr>
+              <td>${session.user_email || '--'}</td>
+              <td><span class="badge success">${session.role || 'User'}</span></td>
+              <td>${loginTime}</td>
+              <td>${lastActivity}</td>
+              <td><code style="font-size: 11px; background: var(--light-bg); padding: 4px 8px; border-radius: 4px;">${session.ip_address || '--'}</code></td>
+              <td><span title="${session.user_agent}" style="cursor: help;">${userAgent}</span></td>
+              <td><button class="btn btn-small btn-secondary" onclick="revokeSession('${session.id}')">Revoke</button></td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        console.error('Error loading sessions:', e);
+        connectionManager.show();
+        clearState('sessions-tbody');
+        tbody.innerHTML = '<tr><td colspan="7"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Network Error</div><div class="error-message">Failed to load sessions. Check your connection.</div><button class="btn btn-primary" onclick="loadSessionsData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+      }
+    }
+
+    async function revokeSession(sessionId) {
+      if (!confirm('Are you sure you want to revoke this session?')) return;
+
+      try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/sessions/${sessionId}`, { method: 'DELETE' });
+        if (response) {
+          alert('Session revoked successfully');
+          loadSessionsData();
+        }
+      } catch (e) {
+        console.error('Error revoking session:', e);
+        alert('Failed to revoke session');
+      }
+    }
+
+    // ========================================================================
+    // API Statistics
+    // ========================================================================
+    async function loadApiStats() {
+      try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/api-stats`);
+        if (!response) {
+          showToast('Failed to load API statistics', 'error');
+          return;
+        }
+
+        connectionManager.hide();
+        const stats = response.stats || {};
+
+        // Update stat boxes
+        document.getElementById('stat-rpm').textContent = (stats.requests_per_minute || 0).toFixed(1);
+        document.getElementById('stat-error-rate').textContent = ((stats.error_rate || 0) * 100).toFixed(1);
+        document.getElementById('stat-p95').textContent = (stats.p95_response_time_ms || 0).toFixed(0);
+        document.getElementById('stat-total-requests').textContent = (stats.total_requests_24h || 0).toLocaleString();
+
+        // Requests over time chart
+        if (stats.requests_over_time) {
+          updateRequestsChart(stats.requests_over_time);
+        }
+
+        // Top endpoints chart
+        if (stats.top_endpoints) {
+          updateEndpointsChart(stats.top_endpoints);
+        }
+      } catch (e) {
+        console.error('Error loading API stats:', e);
+        connectionManager.show();
+        showToast('Network error loading API stats', 'error');
+      }
+    }
+
+    function updateRequestsChart(data) {
+      const ctx = document.getElementById('requests-chart');
+      if (!ctx) return;
+
+      const labels = data.map(d => d.timestamp || '--');
+      const values = data.map(d => d.count || 0);
+
+      if (chartsInstance.requests) {
+        chartsInstance.requests.data.labels = labels;
+        chartsInstance.requests.data.datasets[0].data = values;
+        chartsInstance.requests.update();
+        return;
+      }
+
+      chartsInstance.requests = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Requests',
+            data: values,
+            borderColor: '#3366FF',
+            backgroundColor: 'rgba(51, 102, 255, 0.1)',
+            tension: 0.4,
+            fill: true,
+            pointRadius: 4,
+            pointBackgroundColor: '#3366FF',
+            pointBorderColor: 'white',
+            pointBorderWidth: 2,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: false
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: {
+                color: '#718096',
+                font: { size: 12 }
+              },
+              grid: {
+                color: 'rgba(226, 232, 240, 0.5)'
+              }
+            },
+            x: {
+              ticks: {
+                color: '#718096',
+                font: { size: 12 }
+              },
+              grid: {
+                display: false
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function updateEndpointsChart(endpoints) {
+      const ctx = document.getElementById('endpoints-chart');
+      if (!ctx) return;
+
+      const labels = endpoints.map(e => e.endpoint || '--').slice(0, 10);
+      const values = endpoints.map(e => e.count || 0).slice(0, 10);
+
+      if (chartsInstance.endpoints) {
+        chartsInstance.endpoints.data.labels = labels;
+        chartsInstance.endpoints.data.datasets[0].data = values;
+        chartsInstance.endpoints.update();
+        return;
+      }
+
+      chartsInstance.endpoints = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Request Count',
+            data: values,
+            backgroundColor: '#3366FF',
+            borderRadius: 6,
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: false
+            }
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              ticks: {
+                color: '#718096',
+                font: { size: 11 }
+              },
+              grid: {
+                color: 'rgba(226, 232, 240, 0.5)'
+              }
+            },
+            y: {
+              ticks: {
+                color: '#718096',
+                font: { size: 11 }
+              },
+              grid: {
+                display: false
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // ========================================================================
+    // Backup Status
+    // ========================================================================
+    async function loadBackupStatus() {
+      try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/backups?limit=1`);
+        if (!response || !response.backups || response.backups.length === 0) {
+          document.getElementById('backup-time').textContent = 'Never';
+          document.getElementById('backup-size').textContent = '--';
+          return;
+        }
+
+        const backup = response.backups[0];
+        const backupDate = new Date(backup.timestamp);
+        document.getElementById('backup-time').textContent = backupDate.toLocaleString();
+        document.getElementById('backup-size').textContent = `${(backup.size_bytes / 1024 / 1024).toFixed(2)} MB`;
+
+        const statusEl = document.getElementById('backup-status');
+        statusEl.innerHTML = `
+          <span class="status">
+            <span class="status-dot online"></span>
+            <span>${backup.status || 'Complete'}</span>
+          </span>
+        `;
+      } catch (e) {
+        console.error('Error loading backup status:', e);
+      }
+    }
+
+    async function createBackupNow() {
+      if (!confirm('Create a new backup now?')) return;
+
+      try {
+        const response = await fetchWithAuth(`${API_BASE}/admin/backup`, { method: 'POST' });
+        if (response) {
+          alert('Backup created successfully');
+          loadBackupStatus();
+        }
+      } catch (e) {
+        console.error('Error creating backup:', e);
+        alert('Failed to create backup');
+      }
+    }
+
+    // ========================================================================
+    // Auto-refresh Controls
+    // ========================================================================
+    function toggleAutoRefresh(event) {
+      event.stopPropagation();
+      const toggle = event.currentTarget;
+      autoRefreshEnabled = !autoRefreshEnabled;
+      toggle.classList.toggle('active');
+    }
+
+    function toggleActivityRefresh(event) {
+      event.stopPropagation();
+      const toggle = event.currentTarget;
+      activityRefreshEnabled = !activityRefreshEnabled;
+      toggle.classList.toggle('active');
+    }
+
+    // ========================================================================
+    // Section Navigation & Data Loading
+    // ========================================================================
+    function switchSection(sectionId) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.getElementById(sectionId).classList.add('active');
+      event.target.classList.add('active');
+
+      loadSectionData(sectionId);
+    }
+
+    async function loadSectionData(sectionId) {
+      if (sectionId === 'overview') {
+        loadOverviewData();
+        loadHealthStatus();
+      } else if (sectionId === 'activity') {
+        loadActivityFeed();
+      } else if (sectionId === 'sessions') {
+        loadSessionsData();
+      } else if (sectionId === 'api-stats') {
+        loadApiStats();
+        loadBackupStatus();
+      } else if (sectionId === 'users') {
+        loadUsersData();
+      } else if (sectionId === 'venues') {
+        loadVenuesData();
+      } else if (sectionId === 'health') {
+        loadHealthData();
+      } else if (sectionId === 'billing') {
+        loadBillingData();
+      } else if (sectionId === 'plugins') {
+        loadPluginsData();
+      }
+    }
+
+    // ========================================================================
+    // Existing Functions (kept from original)
+    // ========================================================================
+    async function loadOverviewData() {
+      try {
+        const metricsRes = await fetch('/metrics');
+        const metrics = await metricsRes.json();
+
+        document.getElementById('user-count').textContent = '0';
+        document.getElementById('venue-count').textContent = metrics.data?.venues || '0';
+        document.getElementById('employee-count').textContent = metrics.data?.employees || '0';
+        document.getElementById('uptime').textContent = Math.round(metrics.uptime_seconds / 3600);
+
+        const readyRes = await fetch('/ready');
+        const ready = await readyRes.json();
+        document.getElementById('db-status').textContent = ready.checks?.database ? '✓ Connected' : '✗ Error';
+        document.getElementById('scheduler-status').textContent = ready.checks?.scheduler ? '✓ Running' : '⊘ Inactive';
+      } catch (e) {
+        console.error('Error loading overview:', e);
+      }
+    }
+
+    async function loadUsersData() {
+      try {
+        const tbody = document.getElementById('users-tbody');
+        tbody.innerHTML = `
+          <tr>
+            <td>Demo User</td>
+            <td>admin@rosteriq.dev</td>
+            <td><span class="badge success">Owner</span></td>
+            <td><span class="status"><span class="status-dot online"></span> Active</span></td>
+            <td>Just now</td>
+            <td><button class="btn btn-small btn-secondary">Edit</button></td>
+          </tr>
+        `;
+      } catch (e) {
+        console.error('Error loading users:', e);
+      }
+    }
+
+    async function loadVenuesData() {
+      try {
+        const metricsRes = await fetch('/metrics');
+        const metrics = await metricsRes.json();
+
+        const tbody = document.getElementById('venues-tbody');
+        if (metrics.data?.venues > 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td>Demo Venue</td>
+              <td><span class="badge success">Professional</span></td>
+              <td>${metrics.data?.employees || 0}</td>
+              <td>Today</td>
+              <td><span class="status"><span class="status-dot online"></span> Active</span></td>
+            </tr>
+          `;
+        } else {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="5" style="text-align: center; padding: 32px; color: var(--text-muted);">No venues created yet</td>
+            </tr>
+          `;
+        }
+      } catch (e) {
+        console.error('Error loading venues:', e);
+      }
+    }
+
+    async function loadHealthData() {
+      const tbody = document.getElementById('metrics-tbody');
+      if (!tbody) return;
+
+      showLoading('metrics-tbody', 'row', 3);
+
+      try {
+        const metricsRes = await fetch('/metrics');
+        const metrics = await metricsRes.json();
+
+        connectionManager.hide();
+        clearState('metrics-tbody');
+        tbody.innerHTML = `
+          <tr>
+            <td style="font-weight: 600;">Total Requests</td>
+            <td>${metrics.total_requests || 0}</td>
+          </tr>
+          <tr>
+            <td style="font-weight: 600;">Total Errors</td>
+            <td>${metrics.total_errors || 0}</td>
+          </tr>
+          <tr>
+            <td style="font-weight: 600;">Error Rate</td>
+            <td>${(metrics.error_rate * 100).toFixed(2)}%</td>
+          </tr>
+          <tr>
+            <td style="font-weight: 600;">Avg Response Time</td>
+            <td>${metrics.average_response_time_ms?.toFixed(2) || 0}ms</td>
+          </tr>
+          <tr>
+            <td style="font-weight: 600;">Uptime</td>
+            <td>${(metrics.uptime_seconds / 3600).toFixed(1)} hours</td>
+          </tr>
+        `;
+      } catch (e) {
+        console.error('Error loading health data:', e);
+        connectionManager.show();
+        clearState('metrics-tbody');
+        tbody.innerHTML = '<tr><td colspan="2"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Failed to Load Metrics</div><button class="btn btn-primary" onclick="loadHealthData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+      }
+    }
+
+    async function loadBillingData() {
+      const tbody = document.getElementById('billing-tbody');
+      if (!tbody) return;
+
+      showLoading('billing-tbody', 'row', 2);
+
+      try {
+        document.getElementById('subscription-count').textContent = '0';
+        document.getElementById('monthly-revenue').textContent = '$0';
+        document.getElementById('churn-rate').textContent = '0%';
+
+        clearState('billing-tbody');
+        tbody.innerHTML = `
+          <tr>
+            <td>No billing data</td>
+            <td>-</td>
+            <td>-</td>
+          </tr>
+        `;
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Error loading billing data:', e);
+        connectionManager.show();
+        clearState('billing-tbody');
+        tbody.innerHTML = '<tr><td colspan="3"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Failed to Load Billing</div><button class="btn btn-primary" onclick="loadBillingData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+      }
+    }
+
+    async function loadPluginsData() {
+      const tbody = document.getElementById('plugins-tbody');
+      if (!tbody) return;
+
+      showLoading('plugins-tbody', 'row', 2);
+
+      try {
+        clearState('plugins-tbody');
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" style="text-align: center; padding: 32px; color: var(--text-muted);">No plugins installed</td>
+          </tr>
+        `;
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Error loading plugins:', e);
+        connectionManager.show();
+        clearState('plugins-tbody');
+        tbody.innerHTML = '<tr><td colspan="5"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Failed to Load Plugins</div><button class="btn btn-primary" onclick="loadPluginsData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+      }
+    }
+
+    // ========================================================================
+    // MOBILE NAVIGATION
+    // ========================================================================
+
+    /**
+     * Toggle hamburger menu and sidebar on mobile
+     */
+    function toggleMobileMenu() {
+      const sidebar = document.querySelector('.sidebar');
+      const hamburger = document.querySelector('.hamburger');
+      if (!sidebar) return;
+
+      sidebar.classList.toggle('open');
+
+      if (hamburger) {
+        hamburger.classList.toggle('open');
+      }
+    }
+
+    /**
+     * Close sidebar when clicking outside on mobile
+     */
+    function closeMobileMenu() {
+      const sidebar = document.querySelector('.sidebar');
+      if (!sidebar) return;
+
+      if (window.innerWidth <= 768) {
+        sidebar.classList.remove('open');
+        const hamburger = document.querySelector('.hamburger');
+        if (hamburger) {
+          hamburger.classList.remove('open');
+        }
+      }
+    }
+
+    // ========================================================================
+    // Initialization
+    // ========================================================================
+    document.addEventListener('DOMContentLoaded', () => {
+      // Setup hamburger menu for mobile
+      const hamburger = document.querySelector('.hamburger');
+      if (hamburger) {
+        hamburger.addEventListener('click', function(e) {
+          e.stopPropagation();
+          toggleMobileMenu();
+        });
+      }
+
+      // Close menu when clicking on main content
+      const mainContent = document.querySelector('.main-content');
+      if (mainContent) {
+        mainContent.addEventListener('click', closeMobileMenu);
+      }
+
+      // Close menu when resizing to desktop
+      window.addEventListener('resize', function() {
+        if (window.innerWidth > 768) {
+          const sidebar = document.querySelector('.sidebar');
+          if (sidebar && sidebar.classList.contains('open')) {
+            sidebar.classList.remove('open');
+          }
+        }
+      });
+      // Load overview on page load
+      loadOverviewData();
+      loadHealthStatus();
+
+      // Set up auto-refresh intervals
+      setInterval(() => {
+        if (autoRefreshEnabled) {
+          loadHealthStatus();
+        }
+      }, HEALTH_REFRESH_INTERVAL);
+
+      setInterval(() => {
+        if (activityRefreshEnabled) {
+          const activeSection = document.querySelector('.section.active');
+          if (activeSection && activeSection.id === 'activity') {
+            loadActivityFeed();
+          }
+        }
+      }, ACTIVITY_REFRESH_INTERVAL);
+    });
+
+    // Clock
+    setInterval(() => {
+      const now = new Date();
+      document.getElementById('current-time').textContent = now.toLocaleTimeString();
+    }, 1000);
+
+    async function loadOverviewData() {
+      try {
+        const metricsRes = await fetch('/metrics');
+        const metrics = await metricsRes.json();
+
+        document.getElementById('user-count').textContent = '0';
+        document.getElementById('venue-count').textContent = metrics.data?.venues || '0';
+        document.getElementById('employee-count').textContent = metrics.data?.employees || '0';
+        document.getElementById('uptime').textContent = Math.round(metrics.uptime_seconds / 3600);
+
+        const readyRes = await fetch('/ready');
+        const ready = await readyRes.json();
+        document.getElementById('db-status').textContent = ready.checks?.database ? '✓ Connected' : '✗ Error';
+        document.getElementById('scheduler-status').textContent = ready.checks?.scheduler ? '✓ Running' : '⊘ Inactive';
+      } catch (e) {
+        console.error('Error loading overview:', e);
+      }
+    }
+
+    async function loadUsersData() {
+      const tbody = document.getElementById('users-tbody');
+      if (!tbody) return;
+
+      showLoading('users-tbody', 'row', 3);
+
+      try {
+        // Mock user data - in production, fetch from /api/auth/users
+        clearState('users-tbody');
+        tbody.innerHTML = `
+          <tr>
+            <td>Demo User</td>
+            <td>admin@rosteriq.dev</td>
+            <td><span class="badge success">Owner</span></td>
+            <td><span class="status"><span class="status-dot online"></span> Active</span></td>
+            <td>Just now</td>
+            <td><button class="btn btn-small btn-secondary">Edit</button></td>
+          </tr>
+        `;
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Error loading users:', e);
+        connectionManager.show();
+        clearState('users-tbody');
+        tbody.innerHTML = '<tr><td colspan="6"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Failed to Load Users</div><button class="btn btn-primary" onclick="loadUsersData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+      }
+    }
+
+    async function loadVenuesData() {
+      const tbody = document.getElementById('venues-tbody');
+      if (!tbody) return;
+
+      showLoading('venues-tbody', 'row', 3);
+
+      try {
+        const metricsRes = await fetch('/metrics');
+        const metrics = await metricsRes.json();
+
+        connectionManager.hide();
+
+        if (metrics.data?.venues > 0) {
+          clearState('venues-tbody');
+          tbody.innerHTML = `
+            <tr>
+              <td>Demo Venue</td>
+              <td><span class="badge success">Professional</span></td>
+              <td>${metrics.data?.employees || 0}</td>
+              <td>Today</td>
+              <td><span class="status"><span class="status-dot online"></span> Active</span></td>
+            </tr>
+          `;
+        } else {
+          clearState('venues-tbody');
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="5" style="text-align: center; padding: 32px; color: var(--text-muted);">No venues created yet</td>
+            </tr>
+          `;
+        }
+      } catch (e) {
+        console.error('Error loading venues:', e);
+        connectionManager.show();
+        clearState('venues-tbody');
+        tbody.innerHTML = '<tr><td colspan="5"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Failed to Load Venues</div><button class="btn btn-primary" onclick="loadVenuesData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+      }
+    }
+
+    async function loadHealthData() {
+      const tbody = document.getElementById('metrics-tbody');
+      if (!tbody) return;
+
+      showLoading('metrics-tbody', 'row', 3);
+
+      try {
+        const metricsRes = await fetch('/metrics');
+        const metrics = await metricsRes.json();
+
+        connectionManager.hide();
+        clearState('metrics-tbody');
+        tbody.innerHTML = `
+          <tr>
+            <td style="font-weight: 600;">Total Requests</td>
+            <td>${metrics.total_requests || 0}</td>
+          </tr>
+          <tr>
+            <td style="font-weight: 600;">Total Errors</td>
+            <td>${metrics.total_errors || 0}</td>
+          </tr>
+          <tr>
+            <td style="font-weight: 600;">Error Rate</td>
+            <td>${(metrics.error_rate * 100).toFixed(2)}%</td>
+          </tr>
+          <tr>
+            <td style="font-weight: 600;">Avg Response Time</td>
+            <td>${metrics.average_response_time_ms?.toFixed(2) || 0}ms</td>
+          </tr>
+          <tr>
+            <td style="font-weight: 600;">Uptime</td>
+            <td>${(metrics.uptime_seconds / 3600).toFixed(1)} hours</td>
+          </tr>
+        `;
+      } catch (e) {
+        console.error('Error loading health data:', e);
+        connectionManager.show();
+        clearState('metrics-tbody');
+        tbody.innerHTML = '<tr><td colspan="2"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Failed to Load Metrics</div><button class="btn btn-primary" onclick="loadHealthData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+      }
+    }
+
+    async function loadBillingData() {
+      const tbody = document.getElementById('billing-tbody');
+      if (!tbody) return;
+
+      showLoading('billing-tbody', 'row', 2);
+
+      try {
+        document.getElementById('subscription-count').textContent = '0';
+        document.getElementById('monthly-revenue').textContent = '$0';
+        document.getElementById('churn-rate').textContent = '0%';
+
+        clearState('billing-tbody');
+        tbody.innerHTML = `
+          <tr>
+            <td>No billing data</td>
+            <td>-</td>
+            <td>-</td>
+          </tr>
+        `;
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Error loading billing data:', e);
+        connectionManager.show();
+        clearState('billing-tbody');
+        tbody.innerHTML = '<tr><td colspan="3"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Failed to Load Billing</div><button class="btn btn-primary" onclick="loadBillingData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+      }
+    }
+
+    async function loadPluginsData() {
+      const tbody = document.getElementById('plugins-tbody');
+      if (!tbody) return;
+
+      showLoading('plugins-tbody', 'row', 2);
+
+      try {
+        clearState('plugins-tbody');
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" style="text-align: center; padding: 32px; color: var(--text-muted);">No plugins installed</td>
+          </tr>
+        `;
+        connectionManager.hide();
+      } catch (e) {
+        console.error('Error loading plugins:', e);
+        connectionManager.show();
+        clearState('plugins-tbody');
+        tbody.innerHTML = '<tr><td colspan="5"><div class="error-card"><div class="error-icon">⚠️</div><div class="error-title">Failed to Load Plugins</div><button class="btn btn-primary" onclick="loadPluginsData()" style="margin-top: 12px;">🔄 Retry</button></div></td></tr>';
+      }
+    }
+
+    function openInviteModal() {
+      document.getElementById('invite-modal').classList.add('open');
+    }
+
+    function closeInviteModal() {
+      document.getElementById('invite-modal').classList.remove('open');
+    }
+
+    function submitInvite(event) {
+      event.preventDefault();
+      const email = document.getElementById('invite-email').value;
+      const name = document.getElementById('invite-name').value;
+      const role = document.getElementById('invite-role').value;
+
+      console.log('Inviting user:', { email, name, role });
+      alert(`Invite sent to ${email}`);
+      closeInviteModal();
+    }
+  </script>
+</body>
+</html>
