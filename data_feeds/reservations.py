@@ -2,7 +2,7 @@
 Reservations/Bookings data feed adapter for RosterIQ.
 
 Integrates with major Australian reservation platforms (ResDiary, Now Book It,
-OpenTable, SevenRooms) and generic direct booking systems. Translates booking
+OpenTable, SevenRooms, BookitLive) and generic direct booking systems. Translates booking
 patterns into demand signals weighted by party size, no-show history, and
 booking-to-forecast ratios.
 """
@@ -1009,6 +1009,232 @@ class DirectBookingImporter(ReservationsAdapter):
 
 
 # ============================================================================
+# Book It Live Adapter
+# ============================================================================
+
+
+class BookitLiveAdapter(ReservationsAdapter):
+    """
+    Adapter for BookitLive, an Australian online booking platform.
+
+    BookitLive is used across hospitality, health, fitness, and services.
+    Supports appointment-style and table bookings via REST API.
+
+    API: https://api.bookitlive.net/api/v1/
+    """
+
+    base_url = "https://api.bookitlive.net/api/v1"
+    source_name = "bookitlive"
+
+    async def fetch_signals(
+        self,
+        location: Location,
+        start_date: date,
+        end_date: date,
+        venue_id: Optional[str] = None,
+    ) -> list[FeedSignal]:
+        """
+        Fetch reservation signals from BookitLive.
+
+        Args:
+            location: Venue location.
+            start_date: First date to fetch.
+            end_date: Last date to fetch (inclusive).
+            venue_id: BookitLive venue/account ID.
+
+        Returns:
+            List of FeedSignal objects.
+        """
+        if not venue_id:
+            logger.warning("BookitLive requires venue_id; skipping fetch")
+            return []
+
+        signals = []
+
+        try:
+            bookings = await self._fetch_bookings_range(venue_id, start_date, end_date)
+
+            # Group bookings by date and hour for granular signals
+            bookings_by_datetime: dict[tuple[date, int], list[dict]] = {}
+            bookings_by_date: dict[date, list[dict]] = {}
+
+            for booking in bookings:
+                booking_time = booking.get("booking_datetime") or booking.get("start_time", "")
+                booking_date = self._parse_date(booking_time)
+
+                if booking_date:
+                    bookings_by_date.setdefault(booking_date, []).append(booking)
+
+                    # Extract hour if available
+                    hour = self._extract_hour(booking_time)
+                    if hour is not None:
+                        key = (booking_date, hour)
+                        bookings_by_datetime.setdefault(key, []).append(booking)
+
+            # Prefer hourly signals if time data is available, else daily
+            if bookings_by_datetime:
+                for (bdate, hour), hour_bookings in sorted(bookings_by_datetime.items()):
+                    snapshot = self._process_bookings(hour_bookings, bdate, hour=hour)
+
+                    signal = self._make_signal(
+                        signal_date=bdate,
+                        strength=self._calculate_signal_strength(snapshot, 30.0),
+                        description=(
+                            f"BookitLive {hour:02d}:00: {snapshot.total_bookings} bookings, "
+                            f"{snapshot.no_show_adjusted_covers:.0f} adjusted covers"
+                        ),
+                        confidence=self._calculate_confidence(bdate),
+                        hour=hour,
+                        raw_data={"snapshot": vars(snapshot)},
+                        venue_id=venue_id,
+                        ttl_minutes=10,
+                    )
+                    signals.append(signal)
+            else:
+                for bdate in sorted(bookings_by_date.keys()):
+                    snapshot = self._process_bookings(bookings_by_date[bdate], bdate)
+
+                    signal = self._make_signal(
+                        signal_date=bdate,
+                        strength=self._calculate_signal_strength(snapshot, 30.0),
+                        description=(
+                            f"BookitLive: {snapshot.total_bookings} bookings, "
+                            f"{snapshot.no_show_adjusted_covers:.0f} adjusted covers"
+                        ),
+                        confidence=self._calculate_confidence(bdate),
+                        hour=19,  # Default evening
+                        raw_data={"snapshot": vars(snapshot)},
+                        venue_id=venue_id,
+                        ttl_minutes=10,
+                    )
+                    signals.append(signal)
+
+        except Exception as e:
+            logger.error(f"BookitLive fetch failed for {venue_id}: {e}")
+
+        return signals
+
+    async def _fetch_bookings_range(
+        self,
+        venue_id: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch bookings from BookitLive for a date range.
+
+        Args:
+            venue_id: Venue/account ID.
+            start_date: Start date.
+            end_date: End date.
+
+        Returns:
+            List of booking dictionaries.
+        """
+        url = f"{self.base_url}/bookings"
+        params = {
+            "account_id": venue_id,
+            "date_from": start_date.isoformat(),
+            "date_to": end_date.isoformat(),
+            "status": "confirmed,pending",
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+        }
+
+        try:
+            response = await self.http_client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("bookings", data.get("data", []))
+        except httpx.HTTPError as e:
+            logger.error(f"BookitLive API error: {e}")
+            return []
+
+    def _process_bookings(
+        self,
+        bookings: list[dict[str, Any]],
+        booking_date: date,
+        hour: Optional[int] = None,
+    ) -> BookingSnapshot:
+        """
+        Process BookitLive booking data into a snapshot.
+
+        BookitLive bookings may use 'guests', 'party_size', or 'num_people'
+        for party size depending on venue configuration.
+
+        Args:
+            bookings: List of booking dictionaries.
+            booking_date: Date of bookings.
+            hour: Hour of bookings (optional).
+
+        Returns:
+            BookingSnapshot.
+        """
+        snapshot = BookingSnapshot(date=booking_date, hour=hour)
+
+        for booking in bookings:
+            # BookitLive uses varying field names for party size
+            party_size = (
+                booking.get("party_size")
+                or booking.get("guests")
+                or booking.get("num_people")
+                or 1
+            )
+            party_size = int(party_size)
+
+            snapshot.total_bookings += 1
+            snapshot.total_covers += party_size
+
+            if party_size >= 10:
+                snapshot.large_parties += 1
+
+        snapshot.no_show_adjusted_covers = self._adjust_for_no_shows(snapshot.total_covers)
+        return snapshot
+
+    @staticmethod
+    def _parse_date(date_str: str) -> Optional[date]:
+        """Parse date/datetime string to date object."""
+        if not date_str:
+            return None
+        try:
+            if "T" in date_str:
+                return datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+            return datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+        except (ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def _extract_hour(dt_str: str) -> Optional[int]:
+        """Extract hour from a datetime string."""
+        if not dt_str:
+            return None
+        try:
+            if "T" in dt_str:
+                return datetime.fromisoformat(dt_str.replace("Z", "+00:00")).hour
+            return None
+        except (ValueError, AttributeError):
+            return None
+
+    async def is_available(self) -> bool:
+        """Check if BookitLive API is reachable."""
+        if not self.api_key:
+            return False
+
+        try:
+            response = await self.http_client.get(
+                f"{self.base_url}/health",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=5.0,
+            )
+            return response.status_code == 200
+        except Exception as e:
+            logger.debug(f"BookitLive health check failed: {e}")
+            return False
+
+
+# ============================================================================
 # Reservations Aggregator
 # ============================================================================
 
@@ -1017,8 +1243,8 @@ class ReservationsAggregator(DataFeedAdapter):
     """
     Composite adapter that combines signals from multiple reservation platforms.
 
-    Merges signals from ResDiary, Now Book It, OpenTable, SevenRooms, and
-    direct bookings into a unified view of reservation demand.
+    Merges signals from ResDiary, Now Book It, OpenTable, SevenRooms,
+    BookitLive, and direct bookings into a unified view of reservation demand.
     """
 
     category = FeedCategory.reservations
