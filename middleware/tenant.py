@@ -11,7 +11,7 @@ import logging
 from typing import Optional, List
 from functools import wraps
 
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, sttus, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from rosteriq.middleware.auth import UserContext, get_current_user, SKIP_AUTH_PATHS, WEBHOOK_PATHS
@@ -52,6 +52,7 @@ class TenantContext:
 
 # Exempt paths from tenant validation
 EXEMPT_PATHS = {
+    "/",
     "/health",
     "/ready",
     "/metrics",
@@ -63,7 +64,15 @@ EXEMPT_PATHS = {
     "/api/auth/refresh",
     "/api/auth/logout",
     "/graphql",
+    "/admin",
+    "/staff",
+    "/sw.js",
+    "/docs/api",
+    "/favicon.ico",
 }
+
+# Path prefixes exempt from tenant validation
+EXEMPT_PREFIXES = {"/static/", "/api/auth/"}
 
 WEBHOOK_EXEMPT = {"/api/webhooks", "/api/events"}
 
@@ -116,7 +125,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
         """Check if path is exempt from tenant validation."""
         if path in EXEMPT_PATHS:
             return True
-        return any(path.startswith(p) for p in EXEMPT_PATHS if p.endswith('/'))
+        return any(path.startswith(p) for p in EXEMPT_PREFIXES)
 
     @staticmethod
     def _is_webhook_exempt(path: str) -> bool:
