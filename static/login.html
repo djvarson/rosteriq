@@ -4,18 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RosterIQ - AI-Powered Rostering</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --brand-blue: #4F46E5;
-            --brand-blue-hover: #4339CA;
-            --navy-dark: #1E293B;
+            --brand-blue: #3B82F6;
+            --brand-blue-hover: #2563EB;
+            --navy-dark: #0B0F1A;
+            --panel-bg: #111827;
+            --card-bg: #1F2937;
             --white: #FFFFFF;
-            --text-primary: #1F2937;
-            --text-secondary: #6B7280;
-            --border-color: #E5E7EB;
+            --text-primary: #F1F5F9;
+            --text-secondary: #94A3B8;
+            --border-color: #1E293B;
+            --input-bg: #0F172A;
+            --input-border: #334155;
             --error-red: #EF4444;
             --success-green: #10B981;
-            --transition: all 0.3s ease;
+            --transition: all 0.2s ease;
         }
 
         * {
@@ -25,8 +30,8 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: var(--white);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--navy-dark);
             color: var(--text-primary);
         }
 
@@ -39,13 +44,13 @@
 
         /* Left Panel - Branding */
         .left-panel {
-            background: linear-gradient(135deg, var(--navy-dark) 0%, #0F172A 100%);
-            color: var(--white);
+            background: var(--panel-bg);
+            color: var(--text-primary);
             padding: 60px 50px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+            border-right: 1px solid var(--border-color);
         }
 
         .brand-section {
@@ -88,10 +93,22 @@
         }
 
         .feature-icon {
-            font-size: 24px;
-            min-width: 28px;
+            min-width: 20px;
+            width: 20px;
+            height: 20px;
             display: flex;
             align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .feature-icon svg {
+            width: 18px;
+            height: 18px;
+            stroke: var(--brand-blue);
+            stroke-width: 2;
+            fill: none;
         }
 
         .feature-text {
@@ -106,7 +123,7 @@
 
         /* Right Panel - Login Form */
         .right-panel {
-            background: var(--white);
+            background: var(--navy-dark);
             padding: 60px 50px;
             display: flex;
             flex-direction: column;
@@ -153,11 +170,11 @@
         input[type="password"] {
             width: 100%;
             padding: 12px 14px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--input-border);
             border-radius: 6px;
             font-size: 14px;
             transition: var(--transition);
-            background: var(--white);
+            background: var(--input-bg);
             color: var(--text-primary);
         }
 
@@ -165,12 +182,12 @@
         input[type="password"]:focus {
             outline: none;
             border-color: var(--brand-blue);
-            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
         }
 
         input[type="email"]::placeholder,
         input[type="password"]::placeholder {
-            color: var(--text-secondary);
+            color: #475569;
         }
 
         .form-footer {
@@ -182,15 +199,14 @@
         }
 
         .forgot-link {
-            color: var(--brand-blue);
+            color: var(--text-secondary);
             text-decoration: none;
             font-weight: 500;
             transition: var(--transition);
         }
 
         .forgot-link:hover {
-            color: var(--brand-blue-hover);
-            text-decoration: underline;
+            color: var(--text-primary);
         }
 
         .remember-me {
@@ -229,8 +245,7 @@
 
         .button-primary:hover:not(:disabled) {
             background: var(--brand-blue-hover);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
         }
 
         .button-primary:disabled {
@@ -240,13 +255,14 @@
 
         .button-secondary {
             background: transparent;
-            color: var(--brand-blue);
-            border: 2px solid var(--brand-blue);
+            color: var(--text-secondary);
+            border: 1px solid var(--input-border);
         }
 
         .button-secondary:hover {
-            background: rgba(79, 70, 229, 0.05);
-            transform: translateY(-1px);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            border-color: #475569;
         }
 
         .divider-section {
@@ -259,7 +275,7 @@
         .divider-line {
             flex: 1;
             height: 1px;
-            background: var(--border-color);
+            background: var(--input-border);
         }
 
         .divider-text {
@@ -289,7 +305,7 @@
 
         .error-message {
             background: rgba(239, 68, 68, 0.1);
-            color: var(--error-red);
+            color: #FCA5A5;
             padding: 12px 14px;
             border-radius: 6px;
             font-size: 13px;
@@ -305,7 +321,7 @@
 
         .success-message {
             background: rgba(16, 185, 129, 0.1);
-            color: var(--success-green);
+            color: #6EE7B7;
             padding: 12px 14px;
             border-radius: 6px;
             font-size: 13px;
@@ -458,19 +474,19 @@
                 </div>
                 <div class="features">
                     <div class="feature">
-                        <div class="feature-icon">🤖</div>
+                        <div class="feature-icon"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/><path d="M6 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><circle cx="12" cy="6" r="1" fill="currentColor" stroke="none"/></svg></div>
                         <div class="feature-text">AI roster optimisation with award compliance</div>
                     </div>
                     <div class="feature">
-                        <div class="feature-icon">📊</div>
+                        <div class="feature-icon"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></div>
                         <div class="feature-text">Real-time revenue vs labour tracking</div>
                     </div>
                     <div class="feature">
-                        <div class="feature-icon">⚡</div>
+                        <div class="feature-icon"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
                         <div class="feature-text">Tanda, Deputy & Xero integration</div>
                     </div>
                     <div class="feature">
-                        <div class="feature-icon">🇦🇺</div>
+                        <div class="feature-icon"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
                         <div class="feature-text">Built for Australian Fair Work awards</div>
                     </div>
                 </div>

@@ -10,19 +10,19 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
   <style>
     :root {
-      --dark-navy: #0F1629;
-      --dark-bg: #1A202C;
-      --card-bg: #2D3748;
-      --light-bg: #F0F2F5;
-      --text-primary: #FFFFFF;
-      --text-secondary: #A0AEC0;
-      --text-muted: #718096;
-      --brand-blue: #3366FF;
+      --dark-navy: #0B0F1A;
+      --dark-bg: #111827;
+      --card-bg: #1F2937;
+      --light-bg: #0F172A;
+      --text-primary: #F1F5F9;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --brand-blue: #3B82F6;
       --success: #10B981;
       --warning: #F59E0B;
       --danger: #EF4444;
       --info: #3B82F6;
-      --border: #4A5568;
+      --border: #1E293B;
     }
 
     * {
@@ -223,13 +223,12 @@
        TOP BAR
        ============================================ */
     .top-bar {
-      background: white;
-      border-bottom: 1px solid #E2E8F0;
+      background: var(--dark-bg);
+      border-bottom: 1px solid var(--border);
       padding: 16px 32px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     }
 
     .top-bar-left {
@@ -241,7 +240,7 @@
     .top-bar-title {
       font-size: 18px;
       font-weight: 700;
-      color: #1A202C;
+      color: var(--text-primary);
     }
 
     .top-bar-right {
@@ -252,7 +251,7 @@
 
     .clock {
       font-size: 13px;
-      color: #718096;
+      color: var(--text-muted);
       font-variant-numeric: tabular-nums;
     }
 
@@ -270,7 +269,7 @@
       display: block;
       width: 20px;
       height: 2px;
-      background: #1A202C;
+      background: var(--text-secondary);
       margin: 4px 0;
       border-radius: 1px;
       transition: all 0.3s;
@@ -290,64 +289,61 @@
     }
 
     .page-title {
-      font-size: 28px;
-      font-weight: 800;
-      color: #1A202C;
-      margin-bottom: 8px;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 6px;
     }
 
     .page-subtitle {
       font-size: 14px;
-      color: #718096;
+      color: var(--text-muted);
     }
 
     /* ============================================
        CARDS & GRID
        ============================================ */
     .card {
-      background: white;
-      border: 1px solid #E2E8F0;
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-      transition: all 0.3s;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      transition: all 0.2s;
     }
 
     .card:hover {
-      border-color: var(--brand-blue);
-      box-shadow: 0 4px 12px rgba(51, 102, 255, 0.1);
+      border-color: #334155;
     }
 
     .kpi-card {
-      background: white;
-      border: 1px solid #E2E8F0;
-      border-radius: 12px;
-      padding: 24px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
       display: flex;
       flex-direction: column;
-      transition: all 0.3s;
+      transition: all 0.2s;
     }
 
     .kpi-card:hover {
-      border-color: var(--brand-blue);
-      box-shadow: 0 4px 12px rgba(51, 102, 255, 0.1);
+      border-color: #334155;
     }
 
     .kpi-label {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
-      color: #718096;
+      color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
 
     .kpi-value {
-      font-size: 32px;
-      font-weight: 800;
-      color: #1A202C;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-primary);
       line-height: 1.1;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
     .kpi-value.success {
@@ -364,19 +360,19 @@
 
     .kpi-sub {
       font-size: 13px;
-      color: #718096;
-      margin-bottom: 12px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
     }
 
     .kpi-detail {
       font-size: 12px;
-      color: #A0AEC0;
+      color: var(--text-muted);
     }
 
     .progress-bar {
       width: 100%;
       height: 6px;
-      background: #E2E8F0;
+      background: #334155;
       border-radius: 3px;
       overflow: hidden;
       margin-top: 12px;
@@ -421,17 +417,18 @@
        CHART CONTAINERS
        ============================================ */
     .chart-container {
-      background: white;
-      border: 1px solid #E2E8F0;
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
     }
 
     .chart-title {
-      font-size: 14px;
-      font-weight: 700;
-      color: #1A202C;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
       margin-bottom: 16px;
       display: flex;
       align-items: center;
@@ -459,23 +456,23 @@
     }
 
     .roster-table th {
-      background: #F7FAFC;
-      border: 1px solid #E2E8F0;
+      background: var(--dark-bg);
+      border: 1px solid var(--border);
       padding: 12px;
       font-weight: 600;
-      color: #718096;
+      color: var(--text-muted);
       text-align: left;
       white-space: nowrap;
     }
 
     .roster-table td {
-      border: 1px solid #E2E8F0;
+      border: 1px solid var(--border);
       padding: 12px;
-      color: #1A202C;
+      color: var(--text-primary);
     }
 
     .roster-table tbody tr:hover {
-      background: #F7FAFC;
+      background: rgba(255, 255, 255, 0.03);
     }
 
     .shift-cell {
@@ -510,22 +507,27 @@
       align-items: flex-start;
       gap: 12px;
       padding: 12px;
-      background: #F7FAFC;
-      border: 1px solid #E2E8F0;
+      background: var(--dark-bg);
+      border: 1px solid var(--border);
       border-radius: 8px;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
       transition: all 0.2s;
     }
 
     .alert-item:hover {
-      background: #EDF2F7;
-      border-color: var(--brand-blue);
+      background: rgba(255, 255, 255, 0.03);
+      border-color: #334155;
     }
 
     .alert-icon {
-      font-size: 18px;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       flex-shrink: 0;
-      margin-top: 2px;
+      font-size: 14px;
     }
 
     .alert-body {
@@ -536,13 +538,13 @@
     .alert-title {
       font-size: 13px;
       font-weight: 600;
-      color: #1A202C;
+      color: var(--text-primary);
       margin-bottom: 4px;
     }
 
     .alert-desc {
       font-size: 12px;
-      color: #718096;
+      color: var(--text-muted);
       margin-bottom: 4px;
     }
 
@@ -602,12 +604,14 @@
     }
 
     .btn-secondary {
-      background: #EDF2F7;
-      color: #1A202C;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
     }
 
     .btn-secondary:hover {
-      background: #E2E8F0;
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-primary);
     }
 
     .btn-success {
@@ -634,18 +638,19 @@
     .input-group label {
       font-size: 13px;
       font-weight: 600;
-      color: #1A202C;
+      color: var(--text-secondary);
     }
 
     .input-group input,
     .input-group select,
     .input-group textarea {
       padding: 10px 12px;
-      border: 1px solid #E2E8F0;
+      border: 1px solid var(--border);
       border-radius: 8px;
       font-family: inherit;
       font-size: 13px;
-      color: #1A202C;
+      color: var(--text-primary);
+      background: var(--dark-bg);
       transition: all 0.2s;
     }
 
@@ -654,7 +659,7 @@
     .input-group textarea:focus {
       outline: none;
       border-color: var(--brand-blue);
-      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
     }
 
     /* ============================================
@@ -671,23 +676,23 @@
     }
 
     .table th {
-      background: #F7FAFC;
-      border-bottom: 2px solid #E2E8F0;
+      background: var(--dark-bg);
+      border-bottom: 2px solid var(--border);
       padding: 12px;
       font-weight: 600;
-      color: #718096;
+      color: var(--text-muted);
       text-align: left;
       white-space: nowrap;
     }
 
     .table td {
-      border-bottom: 1px solid #E2E8F0;
+      border-bottom: 1px solid var(--border);
       padding: 12px;
-      color: #1A202C;
+      color: var(--text-primary);
     }
 
     .table tbody tr:hover {
-      background: #F7FAFC;
+      background: rgba(255, 255, 255, 0.03);
     }
 
     /* ============================================
@@ -696,7 +701,7 @@
     .tabs {
       display: flex;
       gap: 8px;
-      border-bottom: 2px solid #E2E8F0;
+      border-bottom: 1px solid var(--border);
       margin-bottom: 20px;
     }
 
@@ -707,14 +712,14 @@
       cursor: pointer;
       font-size: 13px;
       font-weight: 600;
-      color: #718096;
-      border-bottom: 3px solid transparent;
-      margin-bottom: -2px;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
       transition: all 0.2s;
     }
 
     .tab:hover {
-      color: #1A202C;
+      color: var(--text-primary);
     }
 
     .tab.active {
@@ -751,18 +756,19 @@
     }
 
     .modal-content {
-      background: white;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
       border-radius: 12px;
       padding: 32px;
       max-width: 500px;
       width: 90%;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
     }
 
     .modal-header {
       font-size: 18px;
       font-weight: 700;
-      color: #1A202C;
+      color: var(--text-primary);
       margin-bottom: 16px;
     }
 
@@ -784,14 +790,14 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
-      color: #718096;
+      color: var(--text-muted);
       font-size: 13px;
     }
 
     .spinner {
       width: 16px;
       height: 16px;
-      border: 2px solid #E2E8F0;
+      border: 2px solid var(--border);
       border-top-color: var(--brand-blue);
       border-radius: 50%;
       animation: spin 0.6s linear infinite;
@@ -835,9 +841,9 @@
       align-items: center;
       gap: 12px;
       padding: 12px;
-      background: #F7FAFC;
+      background: var(--dark-bg);
       border-radius: 8px;
-      border: 1px solid #E2E8F0;
+      border: 1px solid var(--border);
       transition: all 0.2s;
     }
 
@@ -868,13 +874,13 @@
     .staff-name {
       font-size: 13px;
       font-weight: 600;
-      color: #1A202C;
+      color: var(--text-primary);
       margin-bottom: 4px;
     }
 
     .staff-meta {
       font-size: 12px;
-      color: #718096;
+      color: var(--text-muted);
     }
 
     .staff-status {
@@ -892,7 +898,7 @@
 
     .staff-status.off-shift {
       background: rgba(100, 116, 139, 0.1);
-      color: #718096;
+      color: var(--text-muted);
     }
 
     /* ============================================
@@ -903,8 +909,8 @@
       flex-direction: column;
       gap: 8px;
       padding: 12px;
-      background: #F7FAFC;
-      border: 1px solid #E2E8F0;
+      background: var(--dark-bg);
+      border: 1px solid var(--border);
       border-radius: 8px;
       margin-bottom: 12px;
       transition: all 0.2s;
@@ -933,12 +939,12 @@
       align-items: center;
       gap: 8px;
       font-weight: 600;
-      color: #1A202C;
+      color: var(--text-primary);
     }
 
     .conflict-message {
       font-size: 13px;
-      color: #718096;
+      color: var(--text-muted);
       margin-bottom: 4px;
     }
 
@@ -950,7 +956,7 @@
     }
 
     .conflict-employees {
-      color: #718096;
+      color: var(--text-muted);
     }
 
     .conflict-suggestion {
@@ -1203,7 +1209,7 @@
       /* Tab styling for mobile */
       .tabs {
         gap: 4px;
-        border-bottom: 1px solid #E2E8F0;
+        border-bottom: 1px solid var(--border);
       }
 
       .tab-btn {
@@ -1571,15 +1577,15 @@
       <div class="sidebar-section-title">Main</div>
       <div class="sidebar-nav">
         <div class="nav-item active" data-page="dashboard">
-          <span class="nav-item-icon">📊</span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></span>
           <span>Dashboard</span>
         </div>
         <div class="nav-item" data-page="roster">
-          <span class="nav-item-icon">📅</span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg></span>
           <span>Roster</span>
         </div>
         <div class="nav-item" data-page="on-shift">
-          <span class="nav-item-icon">⏱️</span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>
           <span>On-Shift Ops</span>
         </div>
       </div>
@@ -1589,15 +1595,15 @@
       <div class="sidebar-section-title">Management</div>
       <div class="sidebar-nav">
         <div class="nav-item" data-page="staff">
-          <span class="nav-item-icon">👥</span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
           <span>Staff</span>
         </div>
         <div class="nav-item" data-page="compliance">
-          <span class="nav-item-icon">✅</span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
           <span>Compliance</span>
         </div>
         <div class="nav-item" data-page="reports">
-          <span class="nav-item-icon">📈</span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
           <span>Reports</span>
         </div>
       </div>
@@ -1607,7 +1613,7 @@
       <div class="sidebar-section-title">Other</div>
       <div class="sidebar-nav">
         <div class="nav-item" data-page="settings">
-          <span class="nav-item-icon">⚙️</span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
           <span>Settings</span>
         </div>
       </div>
@@ -1713,7 +1719,7 @@
               <div class="kpi-label">Vs Forecast</div>
               <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
                 <div style="flex: 1;">
-                  <div class="progress-bar" style="height: 8px; background: var(--border); border-radius: 4px;">
+                  <div class="progress-bar" style="height: 8px; background: #334155; border-radius: 4px;">
                     <div id="variance-bar" class="progress-fill" style="width: 0%; background: var(--success); border-radius: 4px; transition: all 0.3s;"></div>
                   </div>
                 </div>
@@ -1763,13 +1769,13 @@
             <div class="chart-title">Quick Actions</div>
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
               <button class="btn btn-primary" id="btn-generate-roster">
-                📊 Generate AI Roster
+                Generate AI Roster
               </button>
               <button class="btn btn-secondary" id="btn-view-forecast">
-                🔮 View Forecast
+                View Forecast
               </button>
               <button class="btn btn-secondary" id="btn-export-report">
-                📥 Export Report
+                Export Report
               </button>
             </div>
           </div>
@@ -1782,7 +1788,7 @@
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px;">
               <div class="input-group">
                 <label>Strategy</label>
-                <select id="optimiser-strategy" style="padding: 10px 12px; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 13px;">
+                <select id="optimiser-strategy" style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--dark-bg); color: var(--text-primary);">
                   <option value="balanced">Balanced</option>
                   <option value="cost_optimized">Cost Optimised</option>
                   <option value="coverage_first">Coverage First</option>
@@ -1790,7 +1796,7 @@
               </div>
               <div class="input-group">
                 <label>Solver Preference</label>
-                <select id="optimiser-solver" style="padding: 10px 12px; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 13px;">
+                <select id="optimiser-solver" style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--dark-bg); color: var(--text-primary);">
                   <option value="hybrid">Auto (MILP → Greedy)</option>
                   <option value="milp">MILP Only</option>
                   <option value="greedy">Greedy Only</option>
@@ -1798,17 +1804,17 @@
               </div>
               <div style="display: flex; align-items: flex-end;">
                 <button class="btn btn-primary" id="btn-optimiser-generate" style="width: 100%;">
-                  <span id="optimiser-btn-text">🚀 Generate Optimal Roster</span>
+                  <span id="optimiser-btn-text">Generate Optimal Roster</span>
                 </button>
               </div>
             </div>
 
             <!-- Results Card -->
-            <div id="optimiser-results" style="display: none; background: #F7FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+            <div id="optimiser-results" style="display: none; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
               <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;">
                 <div>
                   <div class="kpi-label">Solver Used</div>
-                  <div style="font-size: 14px; font-weight: 600; color: #1A202C; margin-top: 4px;" id="optimiser-solver-used">—</div>
+                  <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-top: 4px;" id="optimiser-solver-used">—</div>
                 </div>
                 <div>
                   <div class="kpi-label">Total Cost</div>
@@ -1816,7 +1822,7 @@
                 </div>
                 <div>
                   <div class="kpi-label">Shift Count</div>
-                  <div style="font-size: 14px; font-weight: 600; color: #1A202C; margin-top: 4px;" id="optimiser-shift-count">—</div>
+                  <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-top: 4px;" id="optimiser-shift-count">—</div>
                 </div>
                 <div>
                   <div class="kpi-label">Quality Score</div>
@@ -1834,11 +1840,11 @@
             <div id="optimiser-progress" style="display: none;">
               <div style="display: flex; align-items: center; gap: 12px;">
                 <div style="flex: 1;">
-                  <div class="progress-bar" style="height: 8px; background: #E2E8F0;">
+                  <div class="progress-bar" style="height: 8px; background: #334155;">
                     <div class="progress-fill" id="optimiser-progress-bar" style="width: 0%; background: var(--brand-blue); transition: width 0.3s;"></div>
                   </div>
                 </div>
-                <span id="optimiser-status-text" style="font-size: 12px; color: #718096; min-width: 80px;">Initializing...</span>
+                <span id="optimiser-status-text" style="font-size: 12px; color: var(--text-muted); min-width: 80px;">Initializing...</span>
               </div>
             </div>
           </div>
@@ -1849,7 +1855,7 @@
           <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
               <div class="chart-title" style="margin: 0;">Conflict Detection</div>
-              <button class="btn btn-primary btn-small" id="btn-conflict-scan">🔍 Scan for Conflicts</button>
+              <button class="btn btn-primary btn-small" id="btn-conflict-scan">Scan for Conflicts</button>
             </div>
 
             <!-- Conflict Summary -->
@@ -1879,8 +1885,8 @@
             </div>
 
             <!-- Empty State -->
-            <div id="conflict-empty" style="text-align: center; padding: 32px; color: #718096;">
-              <div style="font-size: 32px; margin-bottom: 8px;">✓</div>
+            <div id="conflict-empty" style="text-align: center; padding: 32px; color: var(--text-muted);">
+              <div style="font-size: 16px; margin-bottom: 8px; color: var(--success);">No issues</div>
               <div>No conflicts detected. Roster is compliant!</div>
             </div>
           </div>
@@ -1892,14 +1898,14 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
               <div class="chart-title" style="margin: 0;">Backup & Recovery</div>
               <div style="display: flex; gap: 8px;">
-                <button class="btn btn-primary btn-small" id="btn-backup-create">💾 Create Backup</button>
-                <button class="btn btn-secondary btn-small" id="btn-backup-export">📥 Export Venue Data</button>
-                <button class="btn btn-secondary btn-small" id="btn-backup-import">📤 Import Venue Data</button>
+                <button class="btn btn-primary btn-small" id="btn-backup-create">Create Backup</button>
+                <button class="btn btn-secondary btn-small" id="btn-backup-export">Export Venue Data</button>
+                <button class="btn btn-secondary btn-small" id="btn-backup-import">Import Venue Data</button>
               </div>
             </div>
 
             <!-- Backup Type Toggle -->
-            <div id="backup-type-select" style="display: none; margin-bottom: 16px; padding: 12px; background: #F7FAFC; border-radius: 8px;">
+            <div id="backup-type-select" style="display: none; margin-bottom: 16px; padding: 12px; background: var(--dark-bg); border-radius: 8px;">
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input type="radio" name="backup-type" value="full" checked style="cursor: pointer;">
                 <span>Full Backup</span>
@@ -1967,21 +1973,21 @@
               <canvas id="notification-channels-chart"></canvas>
             </div>
             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 12px;">
-              <div style="text-align: center; padding: 8px; background: #F7FAFC; border-radius: 6px;">
+              <div style="text-align: center; padding: 8px; background: var(--dark-bg); border-radius: 6px;">
                 <div style="font-weight: 600; color: var(--info);" id="stat-email">0</div>
-                <div style="color: #718096;">Email</div>
+                <div style="color: var(--text-muted);">Email</div>
               </div>
-              <div style="text-align: center; padding: 8px; background: #F7FAFC; border-radius: 6px;">
+              <div style="text-align: center; padding: 8px; background: var(--dark-bg); border-radius: 6px;">
                 <div style="font-weight: 600; color: var(--success);" id="stat-sms">0</div>
-                <div style="color: #718096;">SMS</div>
+                <div style="color: var(--text-muted);">SMS</div>
               </div>
-              <div style="text-align: center; padding: 8px; background: #F7FAFC; border-radius: 6px;">
+              <div style="text-align: center; padding: 8px; background: var(--dark-bg); border-radius: 6px;">
                 <div style="font-weight: 600; color: var(--warning);" id="stat-push">0</div>
-                <div style="color: #718096;">Push</div>
+                <div style="color: var(--text-muted);">Push</div>
               </div>
-              <div style="text-align: center; padding: 8px; background: #F7FAFC; border-radius: 6px;">
+              <div style="text-align: center; padding: 8px; background: var(--dark-bg); border-radius: 6px;">
                 <div style="font-weight: 600; color: var(--brand-blue);" id="stat-websocket">0</div>
-                <div style="color: #718096;">WebSocket</div>
+                <div style="color: var(--text-muted);">WebSocket</div>
               </div>
             </div>
           </div>
@@ -1992,36 +1998,36 @@
               <span id="failed-alert" style="display: none; padding: 4px 8px; background: rgba(239, 68, 68, 0.1); color: var(--danger); border-radius: 4px; font-size: 11px; font-weight: 600;">Failed: <span id="failed-count">0</span></span>
             </div>
             <div id="notification-log" style="max-height: 300px; overflow-y: auto; font-size: 12px;">
-              <div style="padding: 8px; border-bottom: 1px solid #E2E8F0;">
+              <div style="padding: 8px; border-bottom: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
-                  <strong style="color: #1A202C;">Roster Updated</strong>
+                  <strong style="color: var(--text-primary);">Roster Updated</strong>
                   <span style="background: rgba(16, 185, 129, 0.1); color: var(--success); padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">
                     Sent
                   </span>
                 </div>
-                <div style="color: #718096; font-size: 11px;">
+                <div style="color: var(--text-muted); font-size: 11px;">
                   venue-001 • 2:45 PM
                 </div>
               </div>
-              <div style="padding: 8px; border-bottom: 1px solid #E2E8F0;">
+              <div style="padding: 8px; border-bottom: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
-                  <strong style="color: #1A202C;">Staffing Alert</strong>
+                  <strong style="color: var(--text-primary);">Staffing Alert</strong>
                   <span style="background: rgba(16, 185, 129, 0.1); color: var(--success); padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">
                     Sent
                   </span>
                 </div>
-                <div style="color: #718096; font-size: 11px;">
+                <div style="color: var(--text-muted); font-size: 11px;">
                   venue-001 • 2:30 PM
                 </div>
               </div>
-              <div style="padding: 8px; border-bottom: 1px solid #E2E8F0;">
+              <div style="padding: 8px; border-bottom: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
-                  <strong style="color: #1A202C;">Revenue Report</strong>
+                  <strong style="color: var(--text-primary);">Revenue Report</strong>
                   <span style="background: rgba(16, 185, 129, 0.1); color: var(--success); padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">
                     Sent
                   </span>
                 </div>
-                <div style="color: #718096; font-size: 11px;">
+                <div style="color: var(--text-muted); font-size: 11px;">
                   venue-001 • 2:00 PM
                 </div>
               </div>
@@ -2208,7 +2214,7 @@
             <div id="onshift-recommendations" style="display: flex; flex-direction: column; gap: 12px;">
               <div class="conflict-item info">
                 <div class="conflict-header">
-                  <span>🎯</span>
+                  <span></span>
                   <span>Consider adding 1 staff member for expected AFL game crowd</span>
                 </div>
               </div>
@@ -2224,7 +2230,7 @@
               <textarea placeholder="Add a shift note (visible to all managers)..." style="min-height: 80px;" id="shift-notes"></textarea>
               <button class="btn btn-primary" style="align-self: flex-start;" id="btn-save-note">Save Note</button>
             </div>
-            <div id="notes-history" style="max-height: 200px; overflow-y: auto; border-top: 1px solid #E2E8F0; padding-top: 16px; margin-top: 16px;">
+            <div id="notes-history" style="max-height: 200px; overflow-y: auto; border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px;">
               <!-- Notes will appear here -->
             </div>
           </div>
@@ -2236,7 +2242,7 @@
             <div class="chart-title">Weather & Event Alerts</div>
             <div id="weather-alerts">
               <div class="alert-item">
-                <div class="alert-icon">🌞</div>
+                <div class="alert-icon" style="background: rgba(245, 158, 11, 0.15);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></div>
                 <div class="alert-body">
                   <div class="alert-title">Hot Day Forecast</div>
                   <div class="alert-desc">38°C expected today, +12% demand expected</div>
@@ -2244,7 +2250,7 @@
                 </div>
               </div>
               <div class="alert-item">
-                <div class="alert-icon">🏈</div>
+                <div class="alert-icon" style="background: rgba(59, 130, 246, 0.15);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></div>
                 <div class="alert-body">
                   <div class="alert-title">AFL Game Nearby</div>
                   <div class="alert-desc">Local match 6-8pm, expect crowd surge</div>
@@ -2271,14 +2277,14 @@
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
-              <input type="text" placeholder="Search by name..." style="padding: 10px 12px; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 13px;" id="staff-search">
-              <select style="padding: 10px 12px; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 13px;" id="staff-role-filter">
+              <input type="text" placeholder="Search by name..." style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--dark-bg); color: var(--text-primary);" id="staff-search">
+              <select style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--dark-bg); color: var(--text-primary);" id="staff-role-filter">
                 <option value="">All Roles</option>
                 <option value="kitchen">Kitchen</option>
                 <option value="bar">Bar</option>
                 <option value="floor">Floor</option>
               </select>
-              <select style="padding: 10px 12px; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 13px;" id="staff-sort">
+              <select style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--dark-bg); color: var(--text-primary);" id="staff-sort">
                 <option value="name">Sort by Name</option>
                 <option value="award">Sort by Award Level</option>
                 <option value="rate">Sort by Rate</option>
@@ -2550,14 +2556,14 @@
               <div class="chart-title">Fatigue Alerts</div>
               <div id="fatigue-alerts">
                 <div class="alert-item">
-                  <div class="alert-icon">😴</div>
+                  <div class="alert-icon"></div>
                   <div class="alert-body">
                     <div class="alert-title">Sarah Chen</div>
                     <div class="alert-desc">High fatigue: 18 hours worked this week (above 15 hr threshold)</div>
                     <span class="alert-badge badge-warning">High</span>
                   </div>
                 </div>
-                <div style="text-align: center; padding: 20px; color: #718096; font-size: 13px;">
+                <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 13px;">
                   All other staff have normal fatigue levels
                 </div>
               </div>
@@ -2671,7 +2677,7 @@
           <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
               <div class="chart-title" style="margin: 0;">Performance Summary</div>
-              <button class="btn btn-secondary btn-small" id="btn-export-csv">📥 Export CSV</button>
+              <button class="btn btn-secondary btn-small" id="btn-export-csv">Export CSV</button>
             </div>
             <div class="table-container">
               <table class="table" id="report-table">
@@ -2797,119 +2803,119 @@
           <div class="grid-1">
             <div class="card">
               <div class="chart-title">Integrations</div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">Tanda (Workforce Management)</div>
-                    <div style="font-size: 12px; color: #718096;">Sync rosters, employees, and shifts</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Tanda (Workforce Management)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Sync rosters, employees, and shifts</div>
                   </div>
                   <div style="color: var(--success); font-weight: 600; font-size: 12px;">✓ Connected</div>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">SwiftPOS (POS System)</div>
-                    <div style="font-size: 12px; color: #718096;">Track covers, revenue, and transaction data</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">SwiftPOS (POS System)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Track covers, revenue, and transaction data</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">BOM Weather Data</div>
-                    <div style="font-size: 12px; color: #718096;">Improve demand forecasts with weather patterns</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">BOM Weather Data</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Improve demand forecasts with weather patterns</div>
                   </div>
                   <div style="color: var(--success); font-weight: 600; font-size: 12px;">✓ Connected</div>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">Deputy (Workforce Management)</div>
-                    <div style="font-size: 12px; color: #718096;">Sync rosters, employees, and timesheets from Deputy</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Deputy (Workforce Management)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Sync rosters, employees, and timesheets from Deputy</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">HumanForce (Workforce Management)</div>
-                    <div style="font-size: 12px; color: #718096;">Import staff, shifts, and award data from HumanForce</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">HumanForce (Workforce Management)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Import staff, shifts, and award data from HumanForce</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">NowBookIt (Reservations)</div>
-                    <div style="font-size: 12px; color: #718096;">Sync reservation covers for demand forecasting</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">NowBookIt (Reservations)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Sync reservation covers for demand forecasting</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">BookitLive (Reservations)</div>
-                    <div style="font-size: 12px; color: #718096;">Import bookings and covers from BookitLive for demand signals</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">BookitLive (Reservations)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Import bookings and covers from BookitLive for demand signals</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">Xero (Accounting)</div>
-                    <div style="font-size: 12px; color: #718096;">Bidirectional revenue sync and payroll export</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Xero (Accounting)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Bidirectional revenue sync and payroll export</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">Lightspeed (POS System)</div>
-                    <div style="font-size: 12px; color: #718096;">Import sales data and transaction history</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Lightspeed (POS System)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Import sales data and transaction history</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">Kounta (POS System)</div>
-                    <div style="font-size: 12px; color: #718096;">Real-time sales and product mix data</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Kounta (POS System)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Real-time sales and product mix data</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">KeyPay (Payroll)</div>
-                    <div style="font-size: 12px; color: #718096;">Export timesheets and award interpretations</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">KeyPay (Payroll)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Export timesheets and award interpretations</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">Stripe (Billing)</div>
-                    <div style="font-size: 12px; color: #718096;">Subscription management and usage metering</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Stripe (Billing)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Subscription management and usage metering</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px;">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
-                    <div style="font-weight: 600; color: #1A202C;">Twilio (SMS Notifications)</div>
-                    <div style="font-size: 12px; color: #718096;">Send shift alerts and roster updates via SMS</div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Twilio (SMS Notifications)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Send shift alerts and roster updates via SMS</div>
                   </div>
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
@@ -2924,21 +2930,21 @@
             <div class="card">
               <div class="chart-title">Alert Preferences</div>
               <div style="display: flex; flex-direction: column; gap: 16px;">
-                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 14px; color: #1A202C;">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 14px; color: var(--text-primary);">
                   <input type="checkbox" id="alert-email" checked style="width: 18px; height: 18px;">
-                  <span style="color: #1A202C; font-weight: 500;">Email alerts for variance &gt; 15%</span>
+                  <span style="color: var(--text-primary); font-weight: 500;">Email alerts for variance &gt; 15%</span>
                 </label>
-                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 14px; color: #1A202C;">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 14px; color: var(--text-primary);">
                   <input type="checkbox" id="alert-compliance" checked style="width: 18px; height: 18px;">
-                  <span style="color: #1A202C; font-weight: 500;">Compliance warnings (breaks, fatigue)</span>
+                  <span style="color: var(--text-primary); font-weight: 500;">Compliance warnings (breaks, fatigue)</span>
                 </label>
-                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 14px; color: #1A202C;">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 14px; color: var(--text-primary);">
                   <input type="checkbox" id="alert-weather" checked style="width: 18px; height: 18px;">
-                  <span style="color: #1A202C; font-weight: 500;">Weather impact notifications</span>
+                  <span style="color: var(--text-primary); font-weight: 500;">Weather impact notifications</span>
                 </label>
-                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 14px; color: #1A202C;">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 14px; color: var(--text-primary);">
                   <input type="checkbox" id="alert-events" checked style="width: 18px; height: 18px;">
-                  <span style="color: #1A202C; font-weight: 500;">Local event alerts</span>
+                  <span style="color: var(--text-primary); font-weight: 500;">Local event alerts</span>
                 </label>
               </div>
               <button class="btn btn-primary" style="margin-top: 16px;" id="btn-save-alerts">Save Preferences</button>
@@ -2987,7 +2993,7 @@
   <div class="modal-content">
     <div class="modal-header">Generate AI Roster</div>
     <div class="modal-body">
-      <p style="color: #718096; margin-bottom: 16px;">Generate an optimized weekly roster based on demand forecasts and staff availability.</p>
+      <p style="color: var(--text-muted); margin-bottom: 16px;">Generate an optimized weekly roster based on demand forecasts and staff availability.</p>
       <div class="input-group">
         <label>Week Starting</label>
         <input type="date" id="modal-roster-date">
@@ -3082,11 +3088,11 @@ function showError(containerId, message, retryFn) {
 
   const errorHtml = `
     <div class="error-card">
-      <div class="error-icon">⚠️</div>
+      <div class="error-icon" style="color: var(--warning); font-size: 18px;">!</div>
       <div class="error-title">Error Loading Data</div>
       <div class="error-message">${escapeHtml(message)}</div>
       <div class="error-actions">
-        ${retryFn ? `<button class="btn btn-primary" onclick="retryFn()">🔄 Retry</button>` : ''}
+        ${retryFn ? `<button class="btn btn-primary" onclick="retryFn()">Retry</button>` : ''}
         <button class="btn btn-secondary" onclick="clearError('${containerId}')">Dismiss</button>
       </div>
     </div>
@@ -3097,7 +3103,7 @@ function showError(containerId, message, retryFn) {
 /**
  * Show empty state with message
  */
-function showEmpty(containerId, message, icon = '📭') {
+function showEmpty(containerId, message, icon = '—') {
   const container = document.getElementById(containerId);
   if (!container) return;
 
@@ -3323,8 +3329,8 @@ const demoData = {
   },
 
   alerts: [
-    { type: 'warning', icon: '🌞', title: 'Hot Day Forecast', desc: '38°C expected today, +12% demand', badge: 'Weather' },
-    { type: 'info', icon: '🏈', title: 'AFL Game Nearby', desc: 'Local match 6-8pm, expect crowd', badge: 'Event' },
+    { type: 'warning', icon: '', title: 'Hot Day Forecast', desc: '38°C expected today, +12% demand', badge: 'Weather' },
+    { type: 'info', icon: '', title: 'AFL Game Nearby', desc: 'Local match 6-8pm, expect crowd', badge: 'Event' },
   ],
 
   roster_week: {
@@ -3512,6 +3518,13 @@ document.querySelectorAll('.tab').forEach(tab => {
 // ============================================
 // CHART.JS SETUP
 // ============================================
+// Dark theme defaults
+Chart.defaults.color = '#94A3B8';
+Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
+Chart.defaults.plugins.legend.labels.color = '#94A3B8';
+Chart.defaults.scale.grid = { color: 'rgba(255,255,255,0.06)' };
+Chart.defaults.scale.ticks = { color: '#64748B' };
+
 let charts = {};
 
 function createChart(canvasId, config) {
@@ -3584,7 +3597,7 @@ function initHourlyBreakdownChart(isDemo = false) {
       scales: {
         y: {
           beginAtZero: true,
-          grid: { color: 'rgba(0,0,0,0.05)' },
+          grid: { color: 'rgba(255,255,255,0.06)' },
           ticks: { callback: (v) => '$' + v.toLocaleString() },
         },
         x: {
@@ -3880,10 +3893,10 @@ function updateDemoDashboardKPIs() {
 
 function populateAlerts() {
   const alerts = [
-    { type: 'info', icon: '⚠️', title: 'High Demand Forecast', desc: 'Saturday evening expecting +18% covers', badge: 'Forecast' },
-    { type: 'warning', icon: '🌧️', title: 'Weather Alert', desc: 'Heavy rain expected 6-9pm', badge: 'Weather' },
+    { type: 'info', icon: '', title: 'High Demand Forecast', desc: 'Saturday evening expecting +18% covers', badge: 'Forecast' },
+    { type: 'warning', icon: '', title: 'Weather Alert', desc: 'Heavy rain expected 6-9pm', badge: 'Weather' },
     { type: 'danger', icon: '⏰', title: 'Break Compliance', desc: 'Sarah needs break in next 30 mins', badge: 'Urgent' },
-    { type: 'info', icon: '📅', title: 'Event Nearby', desc: 'Concert at venue nearby: +15% expected', badge: 'Event' },
+    { type: 'info', icon: '', title: 'Event Nearby', desc: 'Concert at venue nearby: +15% expected', badge: 'Event' },
   ];
 
   const container = document.getElementById('alerts-panel');
@@ -3917,7 +3930,7 @@ function populateDemoAlerts() {
 function populateStaffList() {
   const staffList = document.getElementById('on-shift-list');
   if (state.employees.length === 0) {
-    staffList.innerHTML = '<div style="color: #718096; font-size: 13px; padding: 20px; text-align: center;">No staff currently on shift</div>';
+    staffList.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center;">No staff currently on shift</div>';
     return;
   }
 
@@ -4003,10 +4016,10 @@ document.getElementById('btn-save-note').addEventListener('click', async () => {
 
   const historyEl = document.getElementById('notes-history');
   const noteEl = document.createElement('div');
-  noteEl.style.cssText = 'padding: 12px; background: #F7FAFC; border-radius: 6px; margin-bottom: 8px; font-size: 12px;';
+  noteEl.style.cssText = 'padding: 12px; background: var(--dark-bg); border-radius: 6px; margin-bottom: 8px; font-size: 12px;';
   noteEl.innerHTML = `
-    <div style="color: #1A202C; margin-bottom: 4px;"><strong>You</strong> • just now</div>
-    <div style="color: #718096;">${note}</div>
+    <div style="color: var(--text-primary); margin-bottom: 4px;"><strong>You</strong> • just now</div>
+    <div style="color: var(--text-muted);">${note}</div>
   `;
   historyEl.insertBefore(noteEl, historyEl.firstChild);
   document.getElementById('shift-notes').value = '';
@@ -4049,7 +4062,7 @@ async function startOptimisation() {
     pollOptimisationStatus();
   } catch (error) {
     console.error('Optimisation failed:', error);
-    document.getElementById('optimiser-btn-text').textContent = '🚀 Generate Optimal Roster';
+    document.getElementById('optimiser-btn-text').textContent = 'Generate Optimal Roster';
     document.getElementById('btn-optimiser-generate').disabled = false;
     document.getElementById('optimiser-progress').style.display = 'none';
     showError('#page-dashboard', 'Optimisation failed: ' + error.message);
@@ -4081,7 +4094,7 @@ function pollOptimisationStatus() {
         clearInterval(optimisationPollInterval);
         document.getElementById('optimiser-progress').style.display = 'none';
         document.getElementById('btn-optimiser-generate').disabled = false;
-        document.getElementById('optimiser-btn-text').textContent = '🚀 Generate Optimal Roster';
+        document.getElementById('optimiser-btn-text').textContent = 'Generate Optimal Roster';
         showError('#page-dashboard', 'Optimisation failed: ' + (response.error_message || 'Unknown error'));
       }
     } catch (error) {
@@ -4103,7 +4116,7 @@ function displayOptimisationResults(jobData) {
       document.getElementById('optimiser-quality').textContent = (Math.random() * 0.2 + 0.8).toFixed(2);
 
       document.getElementById('btn-optimiser-generate').disabled = false;
-      document.getElementById('optimiser-btn-text').textContent = '🚀 Generate Optimal Roster';
+      document.getElementById('optimiser-btn-text').textContent = 'Generate Optimal Roster';
     })
     .catch(error => {
       console.error('Failed to fetch roster details:', error);
@@ -4192,7 +4205,7 @@ function displayConflicts(data) {
   const listEl = document.getElementById('conflict-list');
   listEl.innerHTML = Object.entries(grouped).map(([type, items]) => `
     <div style="margin-bottom: 20px;">
-      <div style="font-weight: 600; color: #1A202C; margin-bottom: 8px; font-size: 13px; text-transform: uppercase; color: #718096;">
+      <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 8px; font-size: 13px; text-transform: uppercase; color: var(--text-muted);">
         ${type.replace(/_/g, ' ')}
       </div>
       ${items.map(conflict => `
@@ -4213,11 +4226,11 @@ function displayConflicts(data) {
 
 function getSeverityIcon(severity) {
   const icons = {
-    'CRITICAL': '🔴',
-    'WARNING': '🟠',
-    'INFO': '🔵',
+    'CRITICAL': '',
+    'WARNING': '',
+    'INFO': '',
   };
-  return icons[severity] || '⚪';
+  return icons[severity] || '';
 }
 
 document.getElementById('btn-conflict-scan').addEventListener('click', scanConflicts);
@@ -4257,7 +4270,7 @@ async function loadBackups() {
 function displayBackupHistory(backups) {
   const tbody = document.getElementById('backup-body');
   if (backups.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #718096;">No backups yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-muted);">No backups yet</td></tr>';
     return;
   }
 
@@ -4460,7 +4473,7 @@ function displayNotificationStats(stats) {
 function displayNotificationLog(auditData) {
   const { entries, total } = auditData;
   if (!entries || entries.length === 0) {
-    document.getElementById('notification-log').innerHTML = '<div style="text-align: center; padding: 20px; color: #718096;">No notifications sent yet</div>';
+    document.getElementById('notification-log').innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">No notifications sent yet</div>';
     return;
   }
 
@@ -4471,14 +4484,14 @@ function displayNotificationLog(auditData) {
   }
 
   document.getElementById('notification-log').innerHTML = entries.slice(0, 20).map(entry => `
-    <div style="padding: 8px; border-bottom: 1px solid #E2E8F0; font-size: 12px;">
+    <div style="padding: 8px; border-bottom: 1px solid var(--border); font-size: 12px;">
       <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
-        <strong style="color: #1A202C;">${esc(entry.event_type)}</strong>
+        <strong style="color: var(--text-primary);">${esc(entry.event_type)}</strong>
         <span style="background: ${entry.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)'}; color: ${entry.status === 'failed' ? 'var(--danger)' : 'var(--success)'}; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;">
           ${entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}
         </span>
       </div>
-      <div style="color: #718096; font-size: 11px;">
+      <div style="color: var(--text-muted); font-size: 11px;">
         ${esc(entry.employee_id)} • ${new Date(entry.timestamp).toLocaleTimeString('en-AU')}
       </div>
     </div>
