@@ -8,49 +8,49 @@ FROM python:3.11-slim as builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-        libpq-dev \
-            && rm -rf /var/lib/apt/lists/*
+    libpq-dev \
+        && rm -rf /var/lib/apt/lists/*
 
-            RUN python -m venv /opt/venv
-            ENV PATH="/opt/venv/bin:$PATH"
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-            COPY requirements.txt .
-            RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-                pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
-                # ============================================================================
-                # Stage 2: Runtime
-                # ============================================================================
-                FROM python:3.11-slim
+# ============================================================================
+# Stage 2: Runtime
+# ============================================================================
+FROM python:3.11-slim
 
-                RUN apt-get update && apt-get install -y --no-install-recommends \
-                    libpq5 \
-                        curl \
-                            && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-                            RUN useradd -m -u 1000 appuser
+RUN useradd -m -u 1000 appuser
 
-                            COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/venv /opt/venv
 
-                            WORKDIR /app
+WORKDIR /app
 
-                            ENV PATH="/opt/venv/bin:$PATH" \
-                                PYTHONUNBUFFERED=1 \
-                                    PYTHONPATH="/app" \
-                                        ENVIRONMENT=production
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH="/app" \
+    ENVIRONMENT=production
 
-                                        # Copy entire repo as the rosteriq package (repo root = package root)
-                                        COPY --chown=appuser:appuser . ./rosteriq/
-                                        # Copy pyproject.toml to app root
-                                        COPY --chown=appuser:appuser pyproject.toml .
+# Copy entire repo as the rosteriq package (repo root = package root)
+COPY --chown=appuser:appuser . ./rosteriq/
+# Copy pyproject.toml to app root
+COPY --chown=appuser:appuser pyproject.toml .
 
-                                        RUN chown -R appuser:appuser /app
+RUN chown -R appuser:appuser /app
 
-                                        USER appuser
+USER appuser
 
-                                        EXPOSE 8000
+EXPOSE 8000
 
-                                        HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
-                                            CMD curl -f http://localhost:8000/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+    CMD curl -f http://localhost:8000/health || exit 1
 
-                                            CMD ["uvicorn", "rosteriq.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["sh", "-c", "python -m rosteriq.migrations.run_migrations --run && exec uvicorn rosteriq.api:app --host 0.0.0.0 --port 8000 --workers 2"]
