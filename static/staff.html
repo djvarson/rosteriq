@@ -2799,7 +2799,8 @@
      */
     class ConnectionManager {
       constructor() {
-        this.connected = true;
+        this.connected = false;
+        this.everConnected = false;
         this.reconnectDelay = 1000;
         this.maxReconnectDelay = 30000;
         this.reconnectAttempts = 0;
@@ -2818,6 +2819,7 @@
       }
 
       show() {
+        if (!this.everConnected) return;
         this.connected = false;
         this.banner.classList.add('show');
         this.banner.classList.remove('connected');
@@ -2825,6 +2827,7 @@
 
       hide() {
         this.connected = true;
+        this.everConnected = true;
         this.banner.classList.remove('show');
         this.banner.classList.add('connected');
         this.banner.innerHTML = `
@@ -2900,13 +2903,79 @@
     }
 
     // ============================================
+    // DEMO MODE DATA
+    // ============================================
+    const DEMO_MODE = {
+      user: {
+        name: 'Sarah Mitchell',
+        email: 'sarah@example.com',
+        role: 'staff',
+      },
+      shifts: [
+        {
+          id: 'shift-1',
+          date: (() => {
+            const d = new Date();
+            d.setDate(d.getDate() + (1 - d.getDay())); // Monday
+            return d.toISOString().split('T')[0];
+          })(),
+          start_time: '10:00',
+          end_time: '18:00',
+          role: 'Bar',
+          venue: 'The Royal Oak',
+          conflicts: null,
+        },
+        {
+          id: 'shift-2',
+          date: (() => {
+            const d = new Date();
+            d.setDate(d.getDate() + (3 - d.getDay())); // Wednesday
+            return d.toISOString().split('T')[0];
+          })(),
+          start_time: '16:00',
+          end_time: '23:00',
+          role: 'Floor',
+          venue: 'The Royal Oak',
+          conflicts: null,
+        },
+        {
+          id: 'shift-3',
+          date: (() => {
+            const d = new Date();
+            d.setDate(d.getDate() + (5 - d.getDay())); // Friday
+            return d.toISOString().split('T')[0];
+          })(),
+          start_time: '17:00',
+          end_time: '01:00',
+          role: 'Bar',
+          venue: 'The Royal Oak',
+          conflicts: null,
+        },
+        {
+          id: 'shift-4',
+          date: (() => {
+            const d = new Date();
+            d.setDate(d.getDate() + (6 - d.getDay())); // Saturday
+            return d.toISOString().split('T')[0];
+          })(),
+          start_time: '11:00',
+          end_time: '19:00',
+          role: 'Bar',
+          venue: 'The Royal Oak',
+          conflicts: null,
+        },
+      ],
+    };
+
+    // ============================================
     // INITIALIZATION
     // ============================================
     async function init() {
       // Check if logged in
       const token = sessionStorage.getItem('access_token');
       if (!token) {
-        window.location.href = '/login';
+        // Load demo mode instead of redirecting
+        initDemoMode();
         return;
       }
 
@@ -2957,6 +3026,43 @@
       const day = d.getDay();
       const diff = d.getDate() - day;
       return new Date(d.setDate(diff));
+    }
+
+    function initDemoMode() {
+      // Set demo user
+      state.user = DEMO_MODE.user;
+      state.shifts = DEMO_MODE.shifts;
+      document.getElementById('userInitial').textContent = state.user.name.charAt(0).toUpperCase();
+
+      // Add demo badge to header
+      const headerRight = document.querySelector('.header-right');
+      if (headerRight) {
+        const demoBadge = document.createElement('div');
+        demoBadge.style.cssText = `
+          background: rgba(51, 102, 255, 0.1);
+          color: #3366FF;
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-size: 12px;
+          font-weight: 600;
+          margin-right: 12px;
+        `;
+        demoBadge.textContent = 'DEMO MODE';
+        headerRight.insertBefore(demoBadge, headerRight.firstChild);
+      }
+
+      // Initialize navigation
+      initNavigation();
+
+      // Set current week
+      state.currentWeekStart = getWeekStart(new Date());
+
+      // Render demo shifts directly
+      renderShifts();
+      renderPayEstimate();
+
+      // Hide login button
+      document.getElementById('logoutBtn').style.display = 'none';
     }
 
     function formatDate(date) {
@@ -3037,9 +3143,31 @@
         connectionManager.hide();
       } catch (e) {
         console.error('Failed to load shifts:', e);
-        connectionManager.show();
-        showToast('Failed to load shifts. Retrying...', 'error');
-        setTimeout(loadShifts, 5000);
+        // Use demo data as fallback
+        if (!state.shifts || state.shifts.length === 0) {
+          state.shifts = DEMO_MODE.shifts;
+          renderShifts();
+          // Add demo badge to shifts container if not already there
+          const shiftsContainer = document.getElementById('shiftsContent');
+          if (shiftsContainer && !shiftsContainer.querySelector('.demo-indicator')) {
+            const demoBadge = document.createElement('div');
+            demoBadge.className = 'demo-indicator';
+            demoBadge.style.cssText = `
+              background: rgba(51, 102, 255, 0.1);
+              border: 1px solid #3366FF;
+              color: #3366FF;
+              padding: 12px;
+              border-radius: 8px;
+              font-size: 12px;
+              font-weight: 600;
+              text-align: center;
+              margin-bottom: 16px;
+              margin-top: -24px;
+            `;
+            demoBadge.innerHTML = '<span style="vertical-align: middle;">🎭 Showing sample data</span>';
+            shiftsContainer.parentElement.insertBefore(demoBadge, shiftsContainer);
+          }
+        }
       }
     }
 
@@ -3257,12 +3385,32 @@
 
     function renderPayEstimate() {
       const container = document.getElementById('payContent');
-      if (!state.payData) {
-        container.innerHTML = '<div class="loading">Loading...</div>';
-        return;
-      }
 
-      const data = state.payData;
+      // Use demo data if no payData available
+      let data = state.payData;
+      if (!data) {
+        // Calculate from demo shifts
+        let totalHours = 0;
+        DEMO_MODE.shifts.forEach(shift => {
+          const [startH, startM] = shift.start_time.split(':').map(Number);
+          const [endH, endM] = shift.end_time.split(':').map(Number);
+          let hours = (endH + endM/60) - (startH + startM/60);
+          if (hours < 0) hours += 24; // Handle overnight shifts
+          totalHours += hours;
+        });
+
+        data = {
+          total_hours: totalHours,
+          base_rate: 26.50,
+          penalty_pay: totalHours > 30 ? totalHours * 1.5 : 0,
+          shift_breakdown: DEMO_MODE.shifts.map(shift => ({
+            date: shift.date,
+            start_time: shift.start_time,
+            end_time: shift.end_time,
+            total_pay: 212.00,
+          })),
+        };
+      }
       const totalHours = data.total_hours || 0;
       const baseRate = parseFloat(data.base_rate) || 0;
       const basePay = totalHours * baseRate;

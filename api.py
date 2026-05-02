@@ -1330,8 +1330,31 @@ async def api_docs():
 # Health & info
 # ============================================================================
 
-@app.get("/", response_model=HealthResponse)
+@app.get("/")
 async def root():
+    """Redirect root to login page."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/login")
+
+
+@app.get("/login", tags=["auth"])
+async def login_page():
+    """Login page — entry point for all users."""
+    try:
+        import pathlib
+        login_file = pathlib.Path(__file__).parent / "static" / "login.html"
+        if login_file.exists():
+            from fastapi.responses import FileResponse
+            return FileResponse(login_file, media_type="text/html")
+    except Exception:
+        pass
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse("<h1>RosterIQ Login</h1><p>Login page not found.</p>")
+
+
+@app.get("/api/status", response_model=HealthResponse)
+async def api_status():
+    """API status endpoint — returns system info as JSON."""
     return HealthResponse(
         status="ok",
         version=__version__,

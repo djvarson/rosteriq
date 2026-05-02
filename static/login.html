@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RosterIQ - AI-Powered Rostering</title>
+    <style>
+        :root {
+            --brand-blue: #4F46E5;
+            --brand-blue-hover: #4339CA;
+            --navy-dark: #1E293B;
+            --white: #FFFFFF;
+            --text-primary: #1F2937;
+            --text-secondary: #6B7280;
+            --border-color: #E5E7EB;
+            --error-red: #EF4444;
+            --success-green: #10B981;
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--white);
+            color: var(--text-primary);
+        }
+
+        .login-container {
+            display: grid;
+            grid-template-columns: 40% 60%;
+            height: 100vh;
+            min-height: 100vh;
+        }
+
+        /* Left Panel - Branding */
+        .left-panel {
+            background: linear-gradient(135deg, var(--navy-dark) 0%, #0F172A 100%);
+            color: var(--white);
+            padding: 60px 50px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .brand-section {
+            display: flex;
+            flex-direction: column;
+            gap: 40px;
+        }
+
+        .logo {
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .logo span {
+            color: var(--brand-blue);
+        }
+
+        .tagline {
+            font-size: 18px;
+            font-weight: 500;
+            line-height: 1.5;
+            opacity: 0.95;
+        }
+
+        .features {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            margin-top: 20px;
+        }
+
+        .feature {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            font-size: 15px;
+            line-height: 1.6;
+            opacity: 0.9;
+        }
+
+        .feature-icon {
+            font-size: 24px;
+            min-width: 28px;
+            display: flex;
+            align-items: center;
+        }
+
+        .feature-text {
+            flex: 1;
+        }
+
+        .footer-text {
+            font-size: 13px;
+            opacity: 0.7;
+            text-align: center;
+        }
+
+        /* Right Panel - Login Form */
+        .right-panel {
+            background: var(--white);
+            padding: 60px 50px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .form-container {
+            max-width: 420px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        .form-header {
+            margin-bottom: 40px;
+        }
+
+        .form-header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .form-header p {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            transition: var(--transition);
+            background: var(--white);
+            color: var(--text-primary);
+        }
+
+        input[type="email"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: var(--brand-blue);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        input[type="email"]::placeholder,
+        input[type="password"]::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .form-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            font-size: 13px;
+        }
+
+        .forgot-link {
+            color: var(--brand-blue);
+            text-decoration: none;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .forgot-link:hover {
+            color: var(--brand-blue-hover);
+            text-decoration: underline;
+        }
+
+        .remember-me {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        input[type="checkbox"] {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            accent-color: var(--brand-blue);
+        }
+
+        .button {
+            width: 100%;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .button-primary {
+            background: var(--brand-blue);
+            color: var(--white);
+            margin-bottom: 16px;
+        }
+
+        .button-primary:hover:not(:disabled) {
+            background: var(--brand-blue-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+        }
+
+        .button-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .button-secondary {
+            background: transparent;
+            color: var(--brand-blue);
+            border: 2px solid var(--brand-blue);
+        }
+
+        .button-secondary:hover {
+            background: rgba(79, 70, 229, 0.05);
+            transform: translateY(-1px);
+        }
+
+        .divider-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 28px 0;
+        }
+
+        .divider-line {
+            flex: 1;
+            height: 1px;
+            background: var(--border-color);
+        }
+
+        .divider-text {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .signup-prompt {
+            text-align: center;
+            margin-top: 32px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .signup-prompt a {
+            color: var(--brand-blue);
+            text-decoration: none;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+
+        .signup-prompt a:hover {
+            color: var(--brand-blue-hover);
+            text-decoration: underline;
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error-red);
+            padding: 12px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 20px;
+            border-left: 3px solid var(--error-red);
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        .success-message {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success-green);
+            padding: 12px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 20px;
+            border-left: 3px solid var(--success-green);
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .loading {
+            display: inline-block;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: dots 1.4s infinite;
+            margin-left: 4px;
+        }
+
+        .loading::after,
+        .loading::before {
+            content: '';
+            display: inline-block;
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: dots 1.4s infinite;
+        }
+
+        @keyframes dots {
+            0%, 20%, 50%, 80%, 100% {
+                opacity: 1;
+            }
+            40% {
+                opacity: 0.5;
+            }
+            60% {
+                opacity: 0.7;
+            }
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .login-container {
+                grid-template-columns: 1fr;
+                height: auto;
+                min-height: 100vh;
+            }
+
+            .left-panel {
+                padding: 40px 30px;
+                min-height: 300px;
+                justify-content: flex-start;
+            }
+
+            .brand-section {
+                gap: 30px;
+            }
+
+            .tagline {
+                font-size: 16px;
+            }
+
+            .features {
+                gap: 16px;
+                margin-top: 10px;
+            }
+
+            .feature {
+                font-size: 14px;
+            }
+
+            .right-panel {
+                padding: 40px 30px;
+                justify-content: flex-start;
+                min-height: auto;
+            }
+
+            .form-container {
+                margin-top: 20px;
+            }
+
+            .form-header h1 {
+                font-size: 24px;
+            }
+
+            .logo {
+                font-size: 28px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .left-panel {
+                padding: 30px 20px;
+            }
+
+            .right-panel {
+                padding: 30px 20px;
+            }
+
+            .form-header h1 {
+                font-size: 20px;
+            }
+
+            .tagline {
+                font-size: 14px;
+            }
+
+            .features {
+                gap: 12px;
+            }
+
+            .feature {
+                font-size: 13px;
+            }
+
+            .logo {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <!-- Left Panel - Branding -->
+        <div class="left-panel">
+            <div class="brand-section">
+                <div class="logo">
+                    Roster<span>IQ</span>
+                </div>
+                <div class="tagline">
+                    AI-powered rostering for Australian hospitality
+                </div>
+                <div class="features">
+                    <div class="feature">
+                        <div class="feature-icon">🤖</div>
+                        <div class="feature-text">AI roster optimisation with award compliance</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-icon">📊</div>
+                        <div class="feature-text">Real-time revenue vs labour tracking</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-icon">⚡</div>
+                        <div class="feature-text">Tanda & Xero integration</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-icon">🇦🇺</div>
+                        <div class="feature-text">Built for Australian Fair Work awards</div>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-text">
+                Trusted by hospitality venues across Australia
+            </div>
+        </div>
+
+        <!-- Right Panel - Login Form -->
+        <div class="right-panel">
+            <div class="form-container">
+                <div class="form-header">
+                    <h1>Welcome back</h1>
+                    <p>Sign in to your RosterIQ account</p>
+                </div>
+
+                <form id="loginForm">
+                    <div class="error-message" id="errorMessage"></div>
+                    <div class="success-message" id="successMessage"></div>
+
+                    <div class="form-group">
+                        <label for="email">Email</label>
+                        <input
+                            type="email"
+                            id="email"
+                            name="email"
+                            placeholder="you@example.com"
+                            required
+                            autocomplete="email"
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input
+                            type="password"
+                            id="password"
+                            name="password"
+                            placeholder="Enter your password"
+                            required
+                            autocomplete="current-password"
+                        >
+                    </div>
+
+                    <div class="form-footer">
+                        <label class="remember-me">
+                            <input type="checkbox" id="rememberMe" name="rememberMe">
+                            <span>Remember me</span>
+                        </label>
+                        <a href="#" class="forgot-link">Forgot password?</a>
+                    </div>
+
+                    <button type="submit" class="button button-primary" id="signInBtn">
+                        Sign In
+                    </button>
+                </form>
+
+                <div class="divider-section">
+                    <div class="divider-line"></div>
+                    <div class="divider-text">or</div>
+                    <div class="divider-line"></div>
+                </div>
+
+                <button type="button" class="button button-secondary" id="demoBtn">
+                    Try Demo
+                </button>
+
+                <div class="signup-prompt">
+                    Don't have an account? <a href="mailto:sales@rosteriq.com.au">Contact sales</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const loginForm = document.getElementById('loginForm');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const signInBtn = document.getElementById('signInBtn');
+        const demoBtn = document.getElementById('demoBtn');
+        const errorMessage = document.getElementById('errorMessage');
+        const successMessage = document.getElementById('successMessage');
+
+        // Handle login form submission
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Clear previous messages
+            errorMessage.classList.remove('show');
+            successMessage.classList.remove('show');
+
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+
+            // Validate inputs
+            if (!email || !password) {
+                showError('Please enter your email and password');
+                return;
+            }
+
+            // Disable button and show loading state
+            signInBtn.disabled = true;
+            const originalText = signInBtn.textContent;
+            signInBtn.textContent = 'Signing in...';
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        password: password,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.token) {
+                    // Store JWT token
+                    localStorage.setItem('jwt_token', data.token);
+
+                    // Show success message
+                    showSuccess('Login successful! Redirecting...');
+
+                    // Redirect based on role
+                    setTimeout(() => {
+                        const role = data.role || 'owner';
+                        if (role === 'staff') {
+                            window.location.href = '/staff';
+                        } else if (role === 'admin') {
+                            window.location.href = '/admin';
+                        } else {
+                            // Default to dashboard for owner/manager
+                            window.location.href = '/static/dashboard.html';
+                        }
+                    }, 500);
+                } else {
+                    // Handle error response
+                    const errorMsg = data.message || 'Invalid email or password';
+                    showError(errorMsg);
+                    signInBtn.disabled = false;
+                    signInBtn.textContent = originalText;
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showError('Connection error. Please try again.');
+                signInBtn.disabled = false;
+                signInBtn.textContent = originalText;
+            }
+        });
+
+        // Handle demo button click
+        demoBtn.addEventListener('click', () => {
+            window.location.href = '/static/dashboard.html?demo=true';
+        });
+
+        // Helper function to show error message
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('show');
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                errorMessage.classList.remove('show');
+            }, 5000);
+        }
+
+        // Helper function to show success message
+        function showSuccess(message) {
+            successMessage.textContent = message;
+            successMessage.classList.add('show');
+        }
+
+        // Clear error message when user starts typing
+        emailInput.addEventListener('input', () => {
+            if (errorMessage.classList.contains('show')) {
+                errorMessage.classList.remove('show');
+            }
+        });
+
+        passwordInput.addEventListener('input', () => {
+            if (errorMessage.classList.contains('show')) {
+                errorMessage.classList.remove('show');
+            }
+        });
+
+        // Handle "Forgot password?" link
+        document.querySelector('.forgot-link').addEventListener('click', (e) => {
+            e.preventDefault();
+            // For now, just show an alert or implement a modal
+            // In production, this would open a password reset flow
+            alert('Password reset functionality coming soon. Please contact support.');
+        });
+    </script>
+</body>
+</html>

@@ -11,7 +11,7 @@ import logging
 from typing import Optional, List
 from functools import wraps
 
-from fastapi import Depends, HTTPException, sttus, Request
+from fastapi import Depends, HTTPException, status, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from rosteriq.middleware.auth import UserContext, get_current_user, SKIP_AUTH_PATHS, WEBHOOK_PATHS
@@ -63,9 +63,11 @@ EXEMPT_PATHS = {
     "/api/auth/login",
     "/api/auth/refresh",
     "/api/auth/logout",
+    "/api/status",
     "/graphql",
     "/admin",
     "/staff",
+    "/login",
     "/sw.js",
     "/docs/api",
     "/favicon.ico",
