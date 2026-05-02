@@ -209,8 +209,16 @@ class MigrationRunner:
         try:
             sql_content = self._load_migration_sql(filepath)
             if not sql_content:
-                logger.warning(f"Migration {filename} is empty")
-                return False
+                logger.info(f"Migration {filename} is empty (comments only), marking as applied")
+                # Record empty migration as success - don't fail on comment-only files
+                with self._cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO migration_history (name, status)
+                        VALUES (%s, %s)
+                        ON CONFLICT (name) DO NOTHING
+                    """, (filename, 'success'))
+                self.conn.commit()
+                return True
 
             with self._cursor() as cur:
                 cur.execute(sql_content)
