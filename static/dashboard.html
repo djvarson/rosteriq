@@ -2052,7 +2052,7 @@
               <div>
                 <button class="btn btn-primary btn-small" id="btn-prev-week">← Previous</button>
                 <button class="btn btn-secondary btn-small" id="btn-next-week">Next →</button>
-                <button class="btn btn-primary btn-small" id="btn-roster-generate">Generate Roster</button>
+                <button class="btn btn-primary btn-small" id="btn-roster-generate" onclick="openModal('modal-generate-roster')">Generate Roster</button>
               </div>
             </div>
 
@@ -2075,45 +2075,45 @@
                     <td>Emma Thompson</td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
                     <td><span class="shift-cell shift-optimal">6-11pm</span></td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                   </tr>
                   <tr>
                     <td>James Wilson</td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                     <td><span class="shift-cell shift-optimal">6-11pm</span></td>
                   </tr>
                   <tr>
                     <td>Sarah Chen</td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
                     <td><span class="shift-cell shift-optimal">6-11pm</span></td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                   </tr>
                   <tr>
                     <td>Marcus Johnson</td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
                     <td><span class="shift-cell shift-optimal">6-11pm</span></td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                   </tr>
                   <tr>
                     <td>Lisa Brown</td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
                     <td><span class="shift-cell shift-optimal">9-5pm</span></td>
@@ -2125,7 +2125,7 @@
                     <td>David Miller</td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td style="background: #f0f0f0; color: #999;">Off</td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
                     <td><span class="shift-cell shift-optimal">5-11pm</span></td>
                     <td><span class="shift-cell shift-optimal">6-11pm</span></td>
@@ -3329,8 +3329,8 @@ const demoData = {
   },
 
   alerts: [
-    { type: 'warning', icon: '', title: 'Hot Day Forecast', desc: '38°C expected today, +12% demand', badge: 'Weather' },
-    { type: 'info', icon: '', title: 'AFL Game Nearby', desc: 'Local match 6-8pm, expect crowd', badge: 'Event' },
+    { type: 'warning', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>', title: 'Hot Day Forecast', desc: '38°C expected today, +12% demand', badge: 'Weather' },
+    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'AFL Game Nearby', desc: 'Local match 6-8pm, expect crowd', badge: 'Event' },
   ],
 
   roster_week: {
@@ -3837,6 +3837,103 @@ function loadDemoVenueData() {
   initRevenueLabourChart();
   populateDemoAlerts();
   populateDemoStaffList();
+  populateDemoOnShift();
+  populateDemoRoster();
+  populateDemoReportCharts();
+}
+
+function populateDemoOnShift() {
+  const staff = demoData.staff;
+  const kitchen = staff.filter(s => s.role === 'Kitchen').length;
+  const bar = staff.filter(s => s.role === 'Bar').length;
+  const floor = staff.filter(s => s.role === 'Floor').length;
+  const total = staff.length;
+
+  document.getElementById('headcount-now').textContent = total;
+  document.getElementById('kitchen-count').textContent = kitchen;
+  document.getElementById('bar-count').textContent = bar;
+  document.getElementById('floor-count').textContent = floor;
+
+  const capacity = Math.min((total / 10) * 100, 100);
+  document.getElementById('capacity-bar').style.width = capacity + '%';
+}
+
+function populateDemoRoster() {
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - now.getDay() + 1);
+  document.getElementById('roster-week-date').textContent = monday.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  const rosterData = demoData.roster_week.staff;
+  const tbody = document.getElementById('roster-body');
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const shifts = { 'shift-optimal': ['9-5pm', '5-11pm', '6-11pm', '10-5pm'], 'off': 'Off' };
+
+  tbody.innerHTML = rosterData.map((row, idx) => {
+    const cells = days.map(day => {
+      if (row[day] === 'off') {
+        return '<td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>';
+      }
+      const shiftTime = shifts['shift-optimal'][idx % shifts['shift-optimal'].length];
+      return '<td><span class="shift-cell shift-optimal">' + shiftTime + '</span></td>';
+    }).join('');
+    return '<tr><td>' + esc(row.name) + '</td>' + cells + '</tr>';
+  }).join('');
+
+  // Populate cost summary
+  const totalCost = 8420;
+  document.getElementById('roster-total-cost').textContent = totalCost.toLocaleString();
+  document.getElementById('roster-daily-cost').textContent = Math.round(totalCost / 7).toLocaleString();
+  document.getElementById('roster-variance').textContent = '-2.1%';
+  document.getElementById('roster-variance').style.color = 'var(--success)';
+}
+
+function populateDemoReportCharts() {
+  // Labour vs Revenue chart
+  const lrCtx = document.getElementById('labour-revenue-chart');
+  if (lrCtx) {
+    if (charts['labour-revenue']) charts['labour-revenue'].destroy();
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    charts['labour-revenue'] = new Chart(lrCtx, {
+      type: 'bar',
+      data: {
+        labels: days,
+        datasets: [
+          { label: 'Revenue', data: [3200, 3800, 4100, 3900, 5200, 6100, 4800], backgroundColor: 'rgba(59,130,246,0.7)', borderRadius: 4 },
+          { label: 'Labour Cost', data: [960, 1140, 1230, 1170, 1560, 1830, 1440], backgroundColor: 'rgba(239,68,68,0.7)', borderRadius: 4 },
+        ],
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } },
+    });
+  }
+
+  // Labour % chart
+  const lpCtx = document.getElementById('labour-pct-chart');
+  if (lpCtx) {
+    if (charts['labour-pct']) charts['labour-pct'].destroy();
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    charts['labour-pct'] = new Chart(lpCtx, {
+      type: 'line',
+      data: {
+        labels: days,
+        datasets: [{
+          label: 'Labour %',
+          data: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0],
+          borderColor: '#3B82F6',
+          backgroundColor: 'rgba(59,130,246,0.1)',
+          fill: true,
+          tension: 0.3,
+        }, {
+          label: 'Target Max (32%)',
+          data: [32, 32, 32, 32, 32, 32, 32],
+          borderColor: 'rgba(245,158,11,0.5)',
+          borderDash: [5, 5],
+          pointRadius: 0,
+        }],
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { min: 20, max: 40, ticks: { callback: v => v + '%' } } } },
+    });
+  }
 }
 
 function updateDashboardKPIs() {
@@ -3893,10 +3990,10 @@ function updateDemoDashboardKPIs() {
 
 function populateAlerts() {
   const alerts = [
-    { type: 'info', icon: '', title: 'High Demand Forecast', desc: 'Saturday evening expecting +18% covers', badge: 'Forecast' },
-    { type: 'warning', icon: '', title: 'Weather Alert', desc: 'Heavy rain expected 6-9pm', badge: 'Weather' },
-    { type: 'danger', icon: '⏰', title: 'Break Compliance', desc: 'Sarah needs break in next 30 mins', badge: 'Urgent' },
-    { type: 'info', icon: '', title: 'Event Nearby', desc: 'Concert at venue nearby: +15% expected', badge: 'Event' },
+    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>', title: 'High Demand Forecast', desc: 'Saturday evening expecting +18% covers', badge: 'Forecast' },
+    { type: 'warning', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>', title: 'Weather Alert', desc: 'Heavy rain expected 6-9pm', badge: 'Weather' },
+    { type: 'danger', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>', title: 'Break Compliance', desc: 'Sarah needs break in next 30 mins', badge: 'Urgent' },
+    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'Event Nearby', desc: 'Concert at venue nearby: +15% expected', badge: 'Event' },
   ];
 
   const container = document.getElementById('alerts-panel');
