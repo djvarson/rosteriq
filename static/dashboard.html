@@ -7,7 +7,7 @@
   <link rel="manifest" href="/static/manifest.json">
   <title>RosterIQ Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
   <style>
     :root {
       --dark-navy: #0B0F1A;
@@ -3835,13 +3835,13 @@ function loadDemoVenueData() {
 
   clearState('kpi-row');
   updateDemoDashboardKPIs();
-  initHourlyBreakdownChart(true);
-  initRevenueLabourChart();
+  try { initHourlyBreakdownChart(true); } catch(e) { console.warn('Chart init skipped:', e); }
+  try { initRevenueLabourChart(); } catch(e) { console.warn('Chart init skipped:', e); }
   populateDemoAlerts();
   populateDemoStaffList();
   populateDemoOnShift();
   populateDemoRoster();
-  populateDemoReportCharts();
+  try { populateDemoReportCharts(); } catch(e) { console.warn('Chart init skipped:', e); }
 }
 
 function populateDemoOnShift() {
@@ -4602,9 +4602,9 @@ function displayNotificationLog(auditData) {
 // ============================================================================
 // Initialize on page load
 loadVenues();
-initRevenueLabourChart();
-initLabourRevenueChart();
-initHourlyBreakdownChart(false);
+try { initRevenueLabourChart(); } catch(e) { console.warn('Chart init skipped:', e); }
+try { initLabourRevenueChart(); } catch(e) { console.warn('Chart init skipped:', e); }
+try { initHourlyBreakdownChart(false); } catch(e) { console.warn('Chart init skipped:', e); }
 loadNotificationStats();
 loadBackups();
 
