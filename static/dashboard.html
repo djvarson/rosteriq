@@ -7,7 +7,39 @@
   <link rel="manifest" href="/static/manifest.json">
   <title>RosterIQ Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script>
+    // Chart.js loader — self-hosted first, then CDN fallbacks
+    window._chartReady = false;
+    window._chartCallbacks = [];
+    window.whenChartReady = function(fn) {
+      if (window._chartReady) { fn(); return; }
+      window._chartCallbacks.push(fn);
+    };
+    function _onChartLoaded(src) {
+      if (window._chartReady) return;
+      window._chartReady = true;
+      Chart.defaults.color = '#94A3B8';
+      Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
+      Chart.defaults.plugins.legend.labels.color = '#94A3B8';
+      console.log('Chart.js loaded from: ' + src);
+      window._chartCallbacks.forEach(function(fn) { try { fn(); } catch(e) { console.warn('Chart callback error:', e); } });
+      window._chartCallbacks = [];
+    }
+    var _chartSources = [
+      '/static/vendor/chart.umd.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js',
+      'https://unpkg.com/chart.js@4.4.1/dist/chart.umd.js',
+      'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'
+    ];
+    (function tryNext(i) {
+      if (i >= _chartSources.length) { console.warn('All Chart.js sources failed'); return; }
+      var s = document.createElement('script');
+      s.src = _chartSources[i];
+      s.onload = function() { _onChartLoaded(_chartSources[i]); };
+      s.onerror = function() { tryNext(i + 1); };
+      document.head.appendChild(s);
+    })(0);
+  </script>
   <style>
     :root {
       --dark-navy: #0B0F1A;
@@ -1765,6 +1797,171 @@
           </div>
         </div>
 
+        <!-- DEMAND INTELLIGENCE PANEL -->
+        <div class="grid-1">
+          <div class="card" style="border-left: 3px solid var(--brand-blue);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+              <div>
+                <div class="chart-title" style="margin: 0;">Demand Intelligence</div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">AI composite score from all data feeds</div>
+              </div>
+              <div id="demand-score-badge" style="display: flex; align-items: center; gap: 10px;">
+                <div style="text-align: right;">
+                  <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Demand Score</div>
+                  <div id="demand-score-label" style="font-size: 12px; font-weight: 600; color: var(--danger);">--</div>
+                </div>
+                <div id="demand-score-value" style="font-size: 36px; font-weight: 800; color: var(--danger); line-height: 1;">--</div>
+              </div>
+            </div>
+
+            <!-- Score Breakdown Bar -->
+            <div id="demand-breakdown" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 16px;"></div>
+
+            <!-- AI Recommendation -->
+            <div id="demand-recommendation" style="padding: 12px 16px; background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); border-radius: 8px; margin-bottom: 16px;">
+              <div style="font-size: 11px; color: var(--brand-blue); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">AI Recommendation</div>
+              <div style="font-size: 13px; color: var(--text-primary); line-height: 1.5;" id="demand-rec-text">--</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Signal Cards Row 1: Weather + Foot Traffic + Reservations -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+          <!-- Weather -->
+          <div class="card" id="signal-weather">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div class="chart-title" style="margin: 0; font-size: 13px;">BOM Perth Weather</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Live</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 12px;">
+              <div style="font-size: 42px; font-weight: 700; color: var(--warning); line-height: 1;" id="weather-temp">--</div>
+              <div>
+                <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);" id="weather-condition">--</div>
+                <div style="font-size: 12px; color: var(--text-muted);" id="weather-detail">--</div>
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 11px;">
+              <div style="padding: 6px; background: var(--dark-bg); border-radius: 6px; text-align: center;">
+                <div style="color: var(--text-muted);">Wind</div>
+                <div style="color: var(--text-primary); font-weight: 600;" id="weather-wind">--</div>
+              </div>
+              <div style="padding: 6px; background: var(--dark-bg); border-radius: 6px; text-align: center;">
+                <div style="color: var(--text-muted);">UV</div>
+                <div style="color: var(--danger); font-weight: 600;" id="weather-uv">--</div>
+              </div>
+              <div style="padding: 6px; background: var(--dark-bg); border-radius: 6px; text-align: center;">
+                <div style="color: var(--text-muted);">Rain</div>
+                <div style="color: var(--success); font-weight: 600;" id="weather-rain">--</div>
+              </div>
+            </div>
+            <div style="margin-top: 10px; padding: 8px; background: rgba(245,158,11,0.08); border-radius: 6px; font-size: 11px; color: var(--text-secondary);" id="weather-impact">--</div>
+          </div>
+
+          <!-- Foot Traffic -->
+          <div class="card" id="signal-foot-traffic">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div class="chart-title" style="margin: 0; font-size: 13px;">Foot Traffic</div>
+              <div style="font-size: 11px; color: var(--text-muted);" id="ft-source">--</div>
+            </div>
+            <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px;">
+              <div style="font-size: 32px; font-weight: 700; color: var(--success); line-height: 1;" id="ft-current">--</div>
+              <div style="font-size: 14px; color: var(--text-muted);">/hr</div>
+            </div>
+            <div style="font-size: 12px; margin-bottom: 12px;" id="ft-change">--</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">Nearby zones</div>
+            <div id="ft-zones" style="display: flex; flex-direction: column; gap: 4px;"></div>
+            <div style="margin-top: 10px; padding: 6px 8px; background: var(--dark-bg); border-radius: 6px; font-size: 11px; color: var(--text-secondary);">
+              Peak expected: <strong id="ft-peak-time" style="color: var(--text-primary);">--</strong> (<span id="ft-peak-est">--</span>/hr)
+            </div>
+          </div>
+
+          <!-- Reservations Pipeline -->
+          <div class="card" id="signal-reservations">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div class="chart-title" style="margin: 0; font-size: 13px;">Reservations</div>
+              <div style="font-size: 11px; color: var(--text-muted);" id="res-source">--</div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div>
+                <div style="font-size: 11px; color: var(--text-muted);">Tonight booked</div>
+                <div style="font-size: 24px; font-weight: 700; color: var(--brand-blue);" id="res-total">--</div>
+              </div>
+              <div>
+                <div style="font-size: 11px; color: var(--text-muted);">Walk-in estimate</div>
+                <div style="font-size: 24px; font-weight: 700; color: var(--text-primary);" id="res-walkin">--</div>
+              </div>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Covers forecast</div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+              <div style="flex: 1; height: 8px; background: #334155; border-radius: 4px;">
+                <div id="res-covers-bar" style="height: 100%; background: var(--brand-blue); border-radius: 4px; transition: width 0.3s;"></div>
+              </div>
+              <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);" id="res-covers-total">--</div>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Large parties tonight</div>
+            <div id="res-parties" style="display: flex; flex-direction: column; gap: 4px;"></div>
+          </div>
+        </div>
+
+        <!-- Signal Cards Row 2: Events + Nearby Venues + Social/Historical -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+          <!-- Events & Sports -->
+          <div class="card" id="signal-events" style="grid-column: span 1;">
+            <div class="chart-title" style="margin-bottom: 12px; font-size: 13px;">Sports & Events</div>
+            <div id="events-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+          </div>
+
+          <!-- Nearby Venues -->
+          <div class="card" id="signal-nearby">
+            <div class="chart-title" style="margin-bottom: 12px; font-size: 13px;">Nearby Venues</div>
+            <div id="nearby-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+          </div>
+
+          <!-- Social + Historical + Transport + Penalties -->
+          <div class="card" id="signal-misc">
+            <div class="chart-title" style="margin-bottom: 12px; font-size: 13px;">Other Signals</div>
+
+            <!-- Social Buzz -->
+            <div style="margin-bottom: 12px;">
+              <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Social Media</div>
+              <div style="display: flex; align-items: baseline; gap: 6px;">
+                <span style="font-size: 18px; font-weight: 700; color: var(--brand-blue);" id="social-mentions">--</span>
+                <span style="font-size: 11px; color: var(--text-muted);">mentions today (avg <span id="social-avg">--</span>)</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;" id="social-tags">--</div>
+            </div>
+
+            <!-- Historical -->
+            <div style="margin-bottom: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
+              <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">vs Last Week / Last Year</div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                <div style="padding: 6px; background: var(--dark-bg); border-radius: 6px;">
+                  <div style="color: var(--text-muted); font-size: 10px;">Last Sat</div>
+                  <div style="color: var(--text-primary); font-weight: 600;" id="hist-lw-rev">--</div>
+                </div>
+                <div style="padding: 6px; background: var(--dark-bg); border-radius: 6px;">
+                  <div style="color: var(--text-muted); font-size: 10px;">YoY Growth</div>
+                  <div style="color: var(--success); font-weight: 600;" id="hist-yoy">--</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Penalty Rates -->
+            <div style="margin-bottom: 12px; padding-top: 10px; border-top: 1px solid var(--border);">
+              <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Penalty Rates</div>
+              <div style="font-size: 12px; color: var(--warning); font-weight: 600;" id="penalty-loading">--</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;" id="penalty-next">--</div>
+            </div>
+
+            <!-- Transport -->
+            <div style="padding-top: 10px; border-top: 1px solid var(--border);">
+              <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Transport</div>
+              <div style="font-size: 12px; color: var(--success);" id="transport-status">--</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;" id="transport-parking">--</div>
+            </div>
+          </div>
+        </div>
+
         <!-- Quick Actions -->
         <div class="grid-1">
           <div class="card">
@@ -2217,7 +2414,7 @@
               <div class="conflict-item info">
                 <div class="conflict-header">
                   <span></span>
-                  <span>Consider adding 1 staff member for expected AFL game crowd</span>
+                  <span>Consider calling in 2 extra floor staff for 7-11pm — derby day + night markets + 36C pushing beer garden demand</span>
                 </div>
               </div>
             </div>
@@ -2238,28 +2435,60 @@
           </div>
         </div>
 
-        <!-- Weather & Event Alerts -->
+        <!-- Demand Intelligence — On-Shift View -->
         <div class="grid-1">
-          <div class="card">
-            <div class="chart-title">Weather & Event Alerts</div>
-            <div id="weather-alerts">
-              <div class="alert-item">
-                <div class="alert-icon" style="background: rgba(245, 158, 11, 0.15);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></div>
-                <div class="alert-body">
-                  <div class="alert-title">Hot Day Forecast</div>
-                  <div class="alert-desc">38°C expected today, +12% demand expected</div>
-                  <span class="alert-badge badge-warning">Weather</span>
-                </div>
-              </div>
-              <div class="alert-item">
-                <div class="alert-icon" style="background: rgba(59, 130, 246, 0.15);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></div>
-                <div class="alert-body">
-                  <div class="alert-title">AFL Game Nearby</div>
-                  <div class="alert-desc">Local match 6-8pm, expect crowd surge</div>
-                  <span class="alert-badge badge-info">Event</span>
-                </div>
+          <div class="card" style="border-left: 3px solid var(--brand-blue);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div class="chart-title" style="margin: 0;">Live Demand Signals</div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; color: var(--text-muted);">Demand Score</span>
+                <span id="onshift-demand-score" style="font-size: 24px; font-weight: 800; color: var(--danger);">--</span>
               </div>
             </div>
+
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px;">
+              <!-- Weather mini -->
+              <div style="padding: 10px; background: var(--dark-bg); border-radius: 8px;">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Weather</div>
+                <div style="display: flex; align-items: baseline; gap: 4px;">
+                  <span id="os-weather-temp" style="font-size: 22px; font-weight: 700; color: var(--warning);">--</span>
+                  <span style="font-size: 11px; color: var(--text-muted);" id="os-weather-cond">--</span>
+                </div>
+              </div>
+              <!-- Foot traffic mini -->
+              <div style="padding: 10px; background: var(--dark-bg); border-radius: 8px;">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Foot Traffic</div>
+                <div style="display: flex; align-items: baseline; gap: 4px;">
+                  <span id="os-ft-count" style="font-size: 22px; font-weight: 700; color: var(--success);">--</span>
+                  <span style="font-size: 11px; color: var(--text-muted);">/hr</span>
+                </div>
+                <div style="font-size: 10px; margin-top: 2px;" id="os-ft-trend">--</div>
+              </div>
+              <!-- Reservations mini -->
+              <div style="padding: 10px; background: var(--dark-bg); border-radius: 8px;">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Reservations</div>
+                <div style="display: flex; align-items: baseline; gap: 4px;">
+                  <span id="os-res-count" style="font-size: 22px; font-weight: 700; color: var(--brand-blue);">--</span>
+                  <span style="font-size: 11px; color: var(--text-muted);">booked</span>
+                </div>
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;" id="os-res-walkin">--</div>
+              </div>
+              <!-- Events mini -->
+              <div style="padding: 10px; background: var(--dark-bg); border-radius: 8px;">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Events Nearby</div>
+                <div style="display: flex; align-items: baseline; gap: 4px;">
+                  <span id="os-event-count" style="font-size: 22px; font-weight: 700; color: var(--info);">--</span>
+                  <span style="font-size: 11px; color: var(--text-muted);">today</span>
+                </div>
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;" id="os-event-top">--</div>
+              </div>
+            </div>
+
+            <!-- Top events list -->
+            <div id="os-events-strip" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;"></div>
+
+            <!-- AI recommendation -->
+            <div style="padding: 10px 14px; background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.15); border-radius: 8px; font-size: 12px; color: var(--text-primary); line-height: 1.5;" id="os-demand-rec">--</div>
           </div>
         </div>
       </div>
@@ -2768,11 +2997,11 @@
               <div class="chart-title">General Settings</div>
               <div class="input-group">
                 <label>Venue Name</label>
-                <input type="text" id="setting-venue-name" placeholder="e.g., The Royal Oak">
+                <input type="text" id="setting-venue-name" placeholder="e.g., The Brass Monkey">
               </div>
               <div class="input-group">
                 <label>Location</label>
-                <input type="text" id="setting-location" placeholder="e.g., Fitzroy, VIC">
+                <input type="text" id="setting-location" placeholder="e.g., Northbridge, WA">
               </div>
               <div class="input-group">
                 <label>State (for Fair Work rules)</label>
@@ -3268,7 +3497,14 @@ let state = {
   wsConnected: false,
   baseUrl: '',  // API endpoints are at root, e.g., /venues not /api/venues
   authToken: localStorage.getItem('auth_token') || null,
+  isDemo: new URLSearchParams(window.location.search).has('demo'),
 };
+
+// Hide connection status in demo mode
+if (state.isDemo) {
+  var wsStatus = document.querySelector('.ws-status');
+  if (wsStatus) wsStatus.style.display = 'none';
+}
 
 // ============================================
 // DEMO DATA MODULE
@@ -3276,10 +3512,11 @@ let state = {
 const demoData = {
   venue: {
     id: 'demo-venue-001',
-    name: 'The Royal Oak',
-    location: 'Fitzroy, VIC',
-    revenue_forecast_today: 4850,
-    revenue_yesterday: 4200,
+    name: 'The Brass Monkey',
+    location: 'Northbridge, WA',
+    state: 'Western Australia',
+    revenue_forecast_today: 5240,
+    revenue_yesterday: 4680,
   },
 
   metrics: {
@@ -3331,9 +3568,129 @@ const demoData = {
   },
 
   alerts: [
-    { type: 'warning', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>', title: 'Hot Day Forecast', desc: '38°C expected today, +12% demand', badge: 'Weather' },
-    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'AFL Game Nearby', desc: 'Local match 6-8pm, expect crowd', badge: 'Event' },
+    { type: 'warning', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>', title: 'Hot Day Forecast', desc: '36C expected — BOM Perth says sunny, NW wind 15km/h', badge: 'Weather' },
+    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'Eagles vs Dockers — Optus Stadium', desc: 'Derby day 5:40pm, 60,000 capacity. Expect +35% post-match surge 8-10pm', badge: 'AFL' },
+    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>', title: 'Foot Traffic Spike', desc: 'Pedestrian sensors: Northbridge 2,400/hr (up 18% on last Sat)', badge: 'Traffic' },
+    { type: 'danger', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>', title: 'Break Compliance', desc: 'Marcus J needs break in next 25 mins (WA Award)', badge: 'Urgent' },
   ],
+
+  // Demand signals — all external data feeds
+  demand_signals: {
+    // BOM Perth weather
+    weather: {
+      source: 'BOM Perth',
+      current_temp: 36,
+      feels_like: 38,
+      condition: 'Sunny',
+      wind: 'NW 15 km/h',
+      humidity: 28,
+      uv_index: 11,
+      rain_chance: 0,
+      forecast_tonight: 'Clear, 22C min',
+      forecast_tomorrow: 'Partly cloudy, 31C',
+      impact_score: 82,
+      impact_label: 'High demand — hot day drives beer garden traffic',
+    },
+
+    // Foot traffic from pedestrian sensors / Google Popular Times
+    foot_traffic: {
+      source: 'City of Perth Pedestrian Sensors',
+      current_hourly: 2400,
+      avg_saturday: 2030,
+      pct_change: 18.2,
+      trend: 'rising',
+      peak_expected: '8:00 PM',
+      peak_estimate: 3200,
+      nearby_zones: [
+        { name: 'William St', count: 1850, trend: 'up' },
+        { name: 'James St', count: 2400, trend: 'up' },
+        { name: 'Lake St', count: 1320, trend: 'steady' },
+      ],
+    },
+
+    // Sports & major events
+    events: [
+      { type: 'AFL', name: 'Eagles vs Dockers — Western Derby', venue: 'Optus Stadium', time: '5:40 PM', capacity: 60000, distance_km: 4.2, impact: 'high', demand_uplift: 35, note: 'Post-match surge 8-10pm' },
+      { type: 'Cricket', name: 'Perth Scorchers vs Sydney Sixers', venue: 'Optus Stadium', time: 'Tomorrow 6:15 PM', capacity: 60000, distance_km: 4.2, impact: 'medium', demand_uplift: 15, note: 'BBL double-header weekend' },
+      { type: 'Festival', name: 'Northbridge Night Markets', venue: 'Piazza', time: '5:00-10:00 PM', capacity: null, distance_km: 0.2, impact: 'high', demand_uplift: 22, note: 'Weekly market — direct foot traffic spillover' },
+      { type: 'Concert', name: 'Tame Impala — Homecoming Show', venue: 'RAC Arena', time: 'Tomorrow 7:30 PM', capacity: 15300, distance_km: 1.8, impact: 'medium', demand_uplift: 12, note: 'Pre-show dining demand' },
+    ],
+
+    // Nearby venue / competitor activity
+    nearby_venues: [
+      { name: 'The Court Hotel', distance: '150m', status: 'Packed — hosting drag bingo', impact: 'overflow_likely' },
+      { name: 'Northbridge Brewing Co', distance: '200m', status: 'Running $10 pint promo', impact: 'price_competition' },
+      { name: 'The Bird', distance: '120m', status: 'Live band 8pm', impact: 'shared_crowd' },
+      { name: 'Ezra Pound', distance: '180m', status: 'Normal trade', impact: 'neutral' },
+      { name: 'Joe\'s Juice Bar', distance: '90m', status: 'Closed for reno', impact: 'redirected_traffic' },
+    ],
+
+    // Social media buzz
+    social_buzz: {
+      source: 'Instagram + Google Trends',
+      mentions_today: 47,
+      mentions_avg: 28,
+      sentiment: 'positive',
+      trending_tags: ['#perthfoodie', '#northbridgevibes', '#westerderby', '#perthweekend'],
+      recent_reviews: { google_rating: 4.4, recent_count: 12, trend: 'improving' },
+    },
+
+    // Reservations pipeline
+    reservations: {
+      source: 'NowBookIt',
+      tonight_total: 86,
+      tonight_seated: 42,
+      tonight_remaining: 44,
+      walk_in_estimate: 65,
+      peak_booking_time: '7:00 PM',
+      large_parties: [
+        { size: 12, time: '7:30 PM', name: 'Birthday' },
+        { size: 8, time: '8:00 PM', name: 'Corporate' },
+      ],
+      covers_forecast: 193,
+    },
+
+    // Public holidays & penalty rates
+    penalties: {
+      today_is_holiday: false,
+      next_holiday: { name: 'WA Day', date: '2 Jun 2026', days_away: 17 },
+      current_loading: '25% Saturday penalty',
+      est_penalty_cost: 355,
+      school_holidays: { active: false, next: 'WA Term 2 break — 4 Jul 2026' },
+    },
+
+    // Transport & disruptions
+    transport: {
+      train_status: 'Normal service — Joondalup & Mandurah lines running',
+      disruptions: [],
+      uber_surge: 1.2,
+      parking: '85% capacity — Roe St carpark',
+    },
+
+    // Historical pattern comparison
+    historical: {
+      same_day_last_week: { revenue: 4920, covers: 178, labour_pct: 29.1 },
+      same_day_last_year: { revenue: 4350, covers: 156, labour_pct: 31.2 },
+      yoy_growth: 20.5,
+      trend_4wk: [4350, 4620, 4800, 4920],
+    },
+
+    // Composite AI demand score
+    demand_score: {
+      overall: 87,
+      label: 'Very High',
+      color: '#EF4444',
+      breakdown: {
+        weather: 82,
+        events: 95,
+        foot_traffic: 78,
+        reservations: 74,
+        social: 68,
+        historical: 85,
+      },
+      recommendation: 'Staff up — derby day + hot weather + night markets. Consider calling in 2 extra floor staff for 7-11pm.',
+    },
+  },
 
   roster_week: {
     staff: [
@@ -3520,12 +3877,7 @@ document.querySelectorAll('.tab').forEach(tab => {
 // ============================================
 // CHART.JS SETUP
 // ============================================
-// Dark theme defaults
-Chart.defaults.color = '#94A3B8';
-Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
-Chart.defaults.plugins.legend.labels.color = '#94A3B8';
-Chart.defaults.scale.grid = { color: 'rgba(255,255,255,0.06)' };
-Chart.defaults.scale.ticks = { color: '#64748B' };
+// Dark theme defaults are set in the head fallback script
 
 let charts = {};
 
@@ -3766,6 +4118,13 @@ function initLabourRevenueChart() {
 // LOAD INITIAL DATA
 // ============================================
 async function loadVenues() {
+  // If ?demo=true in URL, go straight to demo mode — skip API
+  if (state.isDemo) {
+    console.log('Demo mode — loading demo data...');
+    loadDemoVenue();
+    return;
+  }
+
   try {
     const response = await fetchAPI('/venues');
     state.venues = response;
@@ -3789,9 +4148,11 @@ async function loadVenues() {
 function loadDemoVenue() {
   state.venues = [demoData.venue];
   state.currentVenue = demoData.venue.id;
+  state.isDemo = true;
   const select = document.getElementById('venue-select');
   select.innerHTML = `<option value="${esc(demoData.venue.id)}">${esc(demoData.venue.name)} (Demo)</option>`;
   select.value = state.currentVenue;
+  connectionManager.hide();
   loadDemoVenueData();
 }
 
@@ -3835,13 +4196,18 @@ function loadDemoVenueData() {
 
   clearState('kpi-row');
   updateDemoDashboardKPIs();
-  try { initHourlyBreakdownChart(true); } catch(e) { console.warn('Chart init skipped:', e); }
-  try { initRevenueLabourChart(); } catch(e) { console.warn('Chart init skipped:', e); }
   populateDemoAlerts();
   populateDemoStaffList();
   populateDemoOnShift();
   populateDemoRoster();
-  try { populateDemoReportCharts(); } catch(e) { console.warn('Chart init skipped:', e); }
+  populateDemoDemandSignals();
+  populateDemoOnShiftSignals();
+  // Defer chart init until Chart.js is available (CDN may be async)
+  whenChartReady(function() {
+    try { initHourlyBreakdownChart(true); } catch(e) { console.warn('Chart init skipped:', e); }
+    try { initRevenueLabourChart(); } catch(e) { console.warn('Chart init skipped:', e); }
+    try { populateDemoReportCharts(); } catch(e) { console.warn('Chart init skipped:', e); }
+  });
 }
 
 function populateDemoOnShift() {
@@ -4043,6 +4409,180 @@ function populateStaffList() {
       <span class="staff-status on-shift">On Shift</span>
     </div>
   `).join('');
+}
+
+function populateDemoDemandSignals() {
+  var ds = demoData.demand_signals;
+  if (!ds) return;
+
+  // Demand Score
+  var scoreEl = document.getElementById('demand-score-value');
+  if (scoreEl) { scoreEl.textContent = ds.demand_score.overall; scoreEl.style.color = ds.demand_score.color; }
+  var labelEl = document.getElementById('demand-score-label');
+  if (labelEl) { labelEl.textContent = ds.demand_score.label; labelEl.style.color = ds.demand_score.color; }
+
+  // Score breakdown
+  var bdEl = document.getElementById('demand-breakdown');
+  if (bdEl) {
+    var bd = ds.demand_score.breakdown;
+    var cats = [
+      { key: 'weather', label: 'Weather', color: '#F59E0B' },
+      { key: 'events', label: 'Events', color: '#3B82F6' },
+      { key: 'foot_traffic', label: 'Foot Traffic', color: '#10B981' },
+      { key: 'reservations', label: 'Reservations', color: '#8B5CF6' },
+      { key: 'social', label: 'Social', color: '#EC4899' },
+      { key: 'historical', label: 'Historical', color: '#6366F1' },
+    ];
+    bdEl.innerHTML = cats.map(function(c) {
+      var val = bd[c.key] || 0;
+      return '<div style="text-align:center;">' +
+        '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">' + c.label + '</div>' +
+        '<div style="height:6px;background:#334155;border-radius:3px;overflow:hidden;">' +
+        '<div style="height:100%;width:' + val + '%;background:' + c.color + ';border-radius:3px;"></div>' +
+        '</div>' +
+        '<div style="font-size:12px;font-weight:600;color:' + c.color + ';margin-top:3px;">' + val + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  // AI Recommendation
+  var recEl = document.getElementById('demand-rec-text');
+  if (recEl) recEl.textContent = ds.demand_score.recommendation;
+
+  // Weather card
+  var w = ds.weather;
+  var el;
+  el = document.getElementById('weather-temp'); if (el) el.textContent = w.current_temp + 'C';
+  el = document.getElementById('weather-condition'); if (el) el.textContent = w.condition;
+  el = document.getElementById('weather-detail'); if (el) el.textContent = 'Feels like ' + w.feels_like + 'C / ' + w.humidity + '% humidity';
+  el = document.getElementById('weather-wind'); if (el) el.textContent = w.wind;
+  el = document.getElementById('weather-uv'); if (el) el.textContent = w.uv_index + ' Extreme';
+  el = document.getElementById('weather-rain'); if (el) el.textContent = w.rain_chance + '%';
+  el = document.getElementById('weather-impact'); if (el) el.textContent = 'Impact: ' + w.impact_label;
+
+  // Foot traffic card
+  var ft = ds.foot_traffic;
+  el = document.getElementById('ft-current'); if (el) el.textContent = ft.current_hourly.toLocaleString();
+  el = document.getElementById('ft-source'); if (el) el.textContent = ft.source;
+  el = document.getElementById('ft-change'); if (el) {
+    var arrow = ft.pct_change > 0 ? '+' : '';
+    el.innerHTML = '<span style="color:var(--success);font-weight:600;">' + arrow + ft.pct_change + '%</span> <span style="color:var(--text-muted);">vs avg Saturday</span>';
+  }
+  el = document.getElementById('ft-peak-time'); if (el) el.textContent = ft.peak_expected;
+  el = document.getElementById('ft-peak-est'); if (el) el.textContent = ft.peak_estimate.toLocaleString();
+  var zonesEl = document.getElementById('ft-zones');
+  if (zonesEl) {
+    zonesEl.innerHTML = ft.nearby_zones.map(function(z) {
+      var trendIcon = z.trend === 'up' ? '<span style="color:var(--success);">+</span>' : '<span style="color:var(--text-muted);">=</span>';
+      return '<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid var(--border);">' +
+        '<span style="color:var(--text-secondary);">' + esc(z.name) + '</span>' +
+        '<span style="color:var(--text-primary);font-weight:600;">' + z.count.toLocaleString() + '/hr ' + trendIcon + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  // Reservations card
+  var res = ds.reservations;
+  el = document.getElementById('res-source'); if (el) el.textContent = res.source;
+  el = document.getElementById('res-total'); if (el) el.textContent = res.tonight_total;
+  el = document.getElementById('res-walkin'); if (el) el.textContent = '~' + res.walk_in_estimate + ' walk-ins est.';
+  el = document.getElementById('res-covers-total'); if (el) el.textContent = res.covers_forecast + ' covers';
+  el = document.getElementById('res-covers-bar'); if (el) el.style.width = Math.min((res.covers_forecast / 250) * 100, 100) + '%';
+  var partiesEl = document.getElementById('res-parties');
+  if (partiesEl) {
+    partiesEl.innerHTML = res.large_parties.map(function(p) {
+      return '<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 8px;background:var(--dark-bg);border-radius:4px;">' +
+        '<span style="color:var(--text-secondary);">' + esc(p.name) + ' (' + p.size + ' pax)</span>' +
+        '<span style="color:var(--text-primary);font-weight:600;">' + esc(p.time) + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  // Events & Sports
+  var eventsEl = document.getElementById('events-list');
+  if (eventsEl) {
+    var typeColors = { AFL: '#EF4444', Cricket: '#10B981', Festival: '#F59E0B', Concert: '#8B5CF6' };
+    eventsEl.innerHTML = ds.events.map(function(e) {
+      var col = typeColors[e.type] || '#3B82F6';
+      var impactBg = e.impact === 'high' ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)';
+      return '<div style="padding:10px;background:' + impactBg + ';border-radius:8px;border-left:3px solid ' + col + ';">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+        '<span style="font-size:12px;font-weight:600;color:var(--text-primary);">' + esc(e.name) + '</span>' +
+        '<span style="font-size:10px;padding:2px 8px;background:' + col + ';color:#fff;border-radius:10px;">' + esc(e.type) + '</span>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);">' + esc(e.venue) + ' (' + e.distance_km + 'km) &middot; ' + esc(e.time) + '</div>' +
+        '<div style="font-size:11px;color:var(--success);margin-top:4px;">+' + e.demand_uplift + '% demand &middot; ' + esc(e.note) + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  // Nearby venues
+  var nearbyEl = document.getElementById('nearby-list');
+  if (nearbyEl) {
+    var impactColors = { overflow_likely: 'var(--success)', price_competition: 'var(--warning)', shared_crowd: 'var(--info)', neutral: 'var(--text-muted)', redirected_traffic: 'var(--success)' };
+    var impactLabels = { overflow_likely: 'Overflow likely', price_competition: 'Price competition', shared_crowd: 'Shared crowd', neutral: 'Neutral', redirected_traffic: 'Redirected traffic' };
+    nearbyEl.innerHTML = ds.nearby_venues.map(function(v) {
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">' +
+        '<div>' +
+        '<span style="color:var(--text-primary);font-weight:500;">' + esc(v.name) + '</span>' +
+        '<span style="color:var(--text-muted);"> &middot; ' + esc(v.distance) + '</span>' +
+        '</div>' +
+        '<div style="text-align:right;">' +
+        '<div style="font-size:11px;color:var(--text-secondary);">' + esc(v.status) + '</div>' +
+        '<span style="font-size:10px;color:' + (impactColors[v.impact] || 'var(--text-muted)') + ';">' + (impactLabels[v.impact] || v.impact) + '</span>' +
+        '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  // Social / Historical / Penalties / Transport
+  el = document.getElementById('social-mentions'); if (el) el.textContent = ds.social_buzz.mentions_today;
+  el = document.getElementById('social-avg'); if (el) el.textContent = ds.social_buzz.mentions_avg;
+  el = document.getElementById('social-tags'); if (el) el.textContent = ds.social_buzz.trending_tags.join(' ');
+
+  el = document.getElementById('hist-lw-rev'); if (el) el.textContent = '$' + ds.historical.same_day_last_week.revenue.toLocaleString();
+  el = document.getElementById('hist-yoy'); if (el) el.textContent = '+' + ds.historical.yoy_growth + '%';
+
+  el = document.getElementById('penalty-loading'); if (el) el.textContent = ds.penalties.current_loading;
+  el = document.getElementById('penalty-next'); if (el) el.textContent = 'Next holiday: ' + ds.penalties.next_holiday.name + ' (' + ds.penalties.next_holiday.date + ', ' + ds.penalties.next_holiday.days_away + ' days)';
+
+  el = document.getElementById('transport-status'); if (el) el.textContent = ds.transport.train_status;
+  el = document.getElementById('transport-parking'); if (el) el.textContent = ds.transport.parking + ' | Uber surge: ' + ds.transport.uber_surge + 'x';
+}
+
+function populateDemoOnShiftSignals() {
+  var ds = demoData.demand_signals;
+  if (!ds) return;
+
+  var el;
+  el = document.getElementById('onshift-demand-score'); if (el) { el.textContent = ds.demand_score.overall; el.style.color = ds.demand_score.color; }
+  el = document.getElementById('os-weather-temp'); if (el) el.textContent = ds.weather.current_temp + 'C';
+  el = document.getElementById('os-weather-cond'); if (el) el.textContent = ds.weather.condition;
+  el = document.getElementById('os-ft-count'); if (el) el.textContent = ds.foot_traffic.current_hourly.toLocaleString();
+  el = document.getElementById('os-ft-trend'); if (el) {
+    el.innerHTML = '<span style="color:var(--success);">+' + ds.foot_traffic.pct_change + '%</span> vs avg';
+  }
+  el = document.getElementById('os-res-count'); if (el) el.textContent = ds.reservations.tonight_total;
+  el = document.getElementById('os-res-walkin'); if (el) el.textContent = '~' + ds.reservations.walk_in_estimate + ' walk-ins';
+  el = document.getElementById('os-event-count'); if (el) el.textContent = ds.events.filter(function(e) { return e.time.indexOf('Tomorrow') === -1; }).length;
+  el = document.getElementById('os-event-top'); if (el) el.textContent = ds.events[0] ? ds.events[0].name.substring(0, 30) : '--';
+
+  // Events strip
+  var stripEl = document.getElementById('os-events-strip');
+  if (stripEl) {
+    var typeColors = { AFL: '#EF4444', Cricket: '#10B981', Festival: '#F59E0B', Concert: '#8B5CF6' };
+    stripEl.innerHTML = ds.events.map(function(e) {
+      var col = typeColors[e.type] || '#3B82F6';
+      return '<div style="padding:4px 10px;background:rgba(255,255,255,0.04);border:1px solid ' + col + ';border-radius:16px;font-size:11px;">' +
+        '<span style="color:' + col + ';font-weight:600;">' + esc(e.type) + '</span> ' +
+        '<span style="color:var(--text-secondary);">' + esc(e.name.substring(0, 25)) + '</span> ' +
+        '<span style="color:var(--success);">+' + e.demand_uplift + '%</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  // AI rec
+  el = document.getElementById('os-demand-rec'); if (el) el.textContent = ds.demand_score.recommendation;
 }
 
 function populateDemoStaffList() {
@@ -4602,11 +5142,11 @@ function displayNotificationLog(auditData) {
 // ============================================================================
 // Initialize on page load
 loadVenues();
-try { initRevenueLabourChart(); } catch(e) { console.warn('Chart init skipped:', e); }
-try { initLabourRevenueChart(); } catch(e) { console.warn('Chart init skipped:', e); }
-try { initHourlyBreakdownChart(false); } catch(e) { console.warn('Chart init skipped:', e); }
-loadNotificationStats();
-loadBackups();
+// Charts are initialized inside loadVenueData() or loadDemoVenueData()
+if (!state.isDemo) {
+  loadNotificationStats();
+  loadBackups();
+}
 
 // Modal close on background click
 document.querySelectorAll('.modal').forEach(modal => {
@@ -4631,7 +5171,7 @@ let liveRevenueChart = null;
 let hourlySparklineChart = null;
 
 async function fetchAndUpdateLiveRevenue() {
-  if (!state.currentVenue) return;
+  if (!state.currentVenue || state.isDemo) return;
 
   try {
     // Fetch current live revenue
@@ -4796,7 +5336,7 @@ const maxReconnectDelay = 30000; // Cap at 30s
 let wsReconnectTimeout = null;
 
 function connectWebSocket() {
-  if (!state.currentVenue) {
+  if (!state.currentVenue || state.isDemo) {
     console.debug('No venue selected, skipping WS connection');
     return;
   }
