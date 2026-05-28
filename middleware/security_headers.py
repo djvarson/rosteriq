@@ -107,7 +107,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     # Base CSP directives (can be overridden per-environment)
     BASE_CSP_DIRECTIVES = {
         "default-src": "'self'",
-        "script-src": "'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
+        "script-src": "'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com",
         "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
         "img-src": "'self' data: blob:",
         "font-src": "'self' https://fonts.gstatic.com",

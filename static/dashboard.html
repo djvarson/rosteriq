@@ -3061,13 +3061,16 @@
                   <div style="color: var(--success); font-weight: 600; font-size: 12px;">✓ Connected</div>
                 </div>
               </div>
-              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="deputy-integration-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
                     <div style="font-weight: 600; color: var(--text-primary);">Deputy (Workforce Management)</div>
                     <div style="font-size: 12px; color: var(--text-muted);">Sync rosters, employees, and timesheets from Deputy</div>
                   </div>
-                  <button class="btn btn-secondary btn-small">Connect</button>
+                  <div id="deputy-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-primary btn-small" id="btn-deputy-connect" onclick="connectDeputy()">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-deputy-disconnect" onclick="disconnectDeputy()" style="display: none;">Disconnect</button>
+                  </div>
                 </div>
               </div>
               <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
@@ -4183,6 +4186,7 @@ async function loadVenueData() {
     populateAlerts();
     populateStaffList();
     connectionManager.hide();
+    checkDeputyStatus();
   } catch (error) {
     console.error('Failed to load venue data:', error);
     // Fallback to demo data
@@ -5156,6 +5160,76 @@ document.querySelectorAll('.modal').forEach(modal => {
     }
   });
 });
+
+// ============================================
+// Deputy Integration
+// ============================================
+
+async function connectDeputy() {
+  try {
+    const subdomain = prompt('Enter your Deputy subdomain (e.g. mycompany):');
+    if (!subdomain) return;
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/deputy/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+      body: JSON.stringify({ venue_id: venueId, subdomain: subdomain })
+    });
+    if (!resp.ok) throw new Error('Failed to start Deputy connection');
+    const data = await resp.json();
+    if (data.authorize_url) {
+      window.open(data.authorize_url, '_blank');
+      showToastNotification('Deputy', 'Complete authorization in the new tab', 'info');
+    }
+  } catch (err) {
+    console.error('Deputy connect error:', err);
+    showToastNotification('Connection Failed', 'Could not connect to Deputy', 'error');
+  }
+}
+
+async function disconnectDeputy() {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/deputy/uninstall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+      body: JSON.stringify({ venue_id: venueId })
+    });
+    if (!resp.ok) throw new Error('Failed to disconnect Deputy');
+    updateDeputyStatus(false);
+    showToastNotification('Deputy Disconnected', 'Deputy integration has been removed', 'success');
+  } catch (err) {
+    console.error('Deputy disconnect error:', err);
+    showToastNotification('Disconnect Failed', 'Could not disconnect Deputy', 'error');
+  }
+}
+
+function updateDeputyStatus(connected) {
+  const connectBtn = document.getElementById('btn-deputy-connect');
+  const disconnectBtn = document.getElementById('btn-deputy-disconnect');
+  if (connected) {
+    connectBtn.style.display = 'none';
+    disconnectBtn.style.display = 'inline-flex';
+  } else {
+    connectBtn.style.display = 'inline-flex';
+    disconnectBtn.style.display = 'none';
+  }
+}
+
+async function checkDeputyStatus() {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/deputy/status?venue_id=' + encodeURIComponent(venueId), {
+      headers: { 'Authorization': 'Bearer ' + state.token }
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      updateDeputyStatus(data.connected || false);
+    }
+  } catch (err) {
+    console.log('Deputy status check unavailable');
+  }
+}
 
 // ============================================
 // WebSocket Connection with Exponential Backoff

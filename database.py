@@ -1635,15 +1635,49 @@ class MemoryStore(BaseStore):
 class PostgresStore(BaseStore):
     """PostgreSQL-backed storage using psycopg2."""
 
-    def __init__(self, dsn: str):
+    def __init__(self, dsn: str, max_retries: int = 3, retry_delay: float = 2.0):
+        import time as _time
+
         try:
             import psycopg2
             import psycopg2.extras
-            self._conn = psycopg2.connect(dsn)
-            self._conn.autocommit = True
-            logger.info("Connected to PostgreSQL: %s", dsn.split("@")[-1])
         except ImportError:
             raise RuntimeError("psycopg2 not installed — run: pip install psycopg2-binary")
+
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                self._conn = psycopg2.connect(dsn)
+                self._conn.autocommit = True
+                logger.info("Connected to PostgreSQL: %s", dsn.split("@")[-1])
+                return  # success
+            except psycopg2.OperationalError as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(
+                        "Database connection attempt %d/%d failed: %s — retrying in %.1fs",
+                        attempt, max_retries, e, retry_delay,
+                    )
+                    _time.sleep(retry_delay)
+                else:
+                    logger.error(
+                        "Database connection failed after %d attempts: %s",
+                        max_retries, e,
+                    )
+
+        raise RuntimeError(
+            f"Could not connect to PostgreSQL after {max_retries} attempts. "
+            f"Last error: {last_error}. Check DATABASE_URL and ensure the database is running."
+        )
+
+    def close(self):
+        """Close the database connection."""
+        if hasattr(self, '_conn') and self._conn and not self._conn.closed:
+            try:
+                self._conn.close()
+                logger.info("PostgreSQL connection closed")
+            except Exception as e:
+                logger.warning("Error closing PostgreSQL connection: %s", e)
 
     def _cursor(self):
         import psycopg2.extras

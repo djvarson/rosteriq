@@ -319,14 +319,24 @@ if SecurityHeadersMiddleware:
     logger.info("Security headers middleware enabled")
 
 # Add CORS middleware (outermost — runs first)
+_cors_origins = os.environ.get("CORS_ORIGINS", "").split(",")
+_cors_origins = [o.strip() for o in _cors_origins if o.strip()]
+if not _cors_origins:
+    # Default: allow the Railway deployment URL and localhost for dev
+    _cors_origins = [
+        "https://rosteriq-production-6aaf.up.railway.app",
+        "https://app.rosteriq.com",
+        "http://localhost:8000",
+        "http://localhost:3000",
+    ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Tighten in production
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Version", "X-Tenant-ID", "X-Request-ID"],
 )
-logger.info("CORS middleware enabled")
+logger.info(f"CORS middleware enabled for origins: {_cors_origins}")
 
 # Request logging (optional, can be added to any level depending on needs)
 app.add_middleware(RequestLoggingMiddleware)
@@ -424,6 +434,16 @@ except ImportError:
     logger.warning("Tanda plugin routes unavailable")
 except Exception as e:
     logger.error(f"Failed to register Tanda plugin routes: {e}")
+
+# Deputy integration routes
+try:
+    from rosteriq.routes.deputy import router as deputy_router
+    app.include_router(deputy_router)
+    logger.info("Deputy integration routes registered")
+except ImportError:
+    logger.info("Deputy routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register Deputy routes: {e}")
 
 # Data feed configuration routes
 try:
@@ -1146,9 +1166,79 @@ async def log_routes():
     logger.info(f"RosterIQ started: {len(routes)} routes registered")
 
 
+def _validate_environment():
+    """Validate required environment variables at startup.
+
+    In production, missing critical vars are fatal (RuntimeError).
+    In development, missing vars produce warnings only.
+    """
+    env = os.environ.get("ENVIRONMENT", "development")
+    is_production = env == "production"
+
+    if is_production:
+        # DATABASE_URL is required in production
+        if not os.environ.get("DATABASE_URL"):
+            raise RuntimeError(
+                "FATAL: DATABASE_URL must be set in production. "
+                "Cannot start without a database connection."
+            )
+
+        # JWT_SECRET must be set and must not be a dev placeholder
+        jwt_secret = os.environ.get("JWT_SECRET", "")
+        if not jwt_secret:
+            raise RuntimeError(
+                "FATAL: JWT_SECRET must be set in production."
+            )
+        if jwt_secret.startswith("dev"):
+            raise RuntimeError(
+                "FATAL: JWT_SECRET must not start with 'dev' in production. "
+                "Use a strong, randomly generated secret."
+            )
+
+        # Warn about optional but recommended vars
+        if not os.environ.get("SENTRY_DSN"):
+            logger.warning(
+                "SENTRY_DSN is not set — error reporting will not be available"
+            )
+        if not os.environ.get("STRIPE_SECRET_KEY"):
+            logger.warning(
+                "STRIPE_SECRET_KEY is not set — billing features will be unavailable"
+            )
+
+        # Log integration configuration status
+        integrations = {
+            "Tanda": bool(os.environ.get("TANDA_API_KEY") or os.environ.get("TANDA_CLIENT_ID")),
+            "Deputy": bool(os.environ.get("DEPUTY_API_KEY") or os.environ.get("DEPUTY_CLIENT_ID")),
+            "Xero": bool(os.environ.get("XERO_CLIENT_ID")),
+        }
+        configured = [name for name, enabled in integrations.items() if enabled]
+        not_configured = [name for name, enabled in integrations.items() if not enabled]
+        if configured:
+            logger.info("Integrations configured: %s", ", ".join(configured))
+        if not_configured:
+            logger.info("Integrations not configured: %s", ", ".join(not_configured))
+    else:
+        # Development mode — warn but don't crash
+        if not os.environ.get("DATABASE_URL"):
+            logger.warning(
+                "Running in development mode with in-memory store"
+            )
+        if not os.environ.get("JWT_SECRET"):
+            logger.warning("JWT_SECRET is not set — using insecure default")
+        elif os.environ.get("JWT_SECRET", "").startswith("dev"):
+            logger.warning("JWT_SECRET starts with 'dev' — not safe for production")
+        if not os.environ.get("SENTRY_DSN"):
+            logger.warning("SENTRY_DSN is not set")
+        if not os.environ.get("STRIPE_SECRET_KEY"):
+            logger.warning("STRIPE_SECRET_KEY is not set")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Log startup banner with version, database type, port, and environment."""
+    # Validate environment variables
+    _validate_environment()
+
     # Validate configuration on startup
     try:
         config = get_app_config()
@@ -1277,6 +1367,36 @@ async def startup_event():
         logger.error(f"Failed to register security routes: {e}")
 
 
+@app.on_event("startup")
+async def cache_vendor_assets():
+    """Download and cache vendor JS libraries (Chart.js) for self-hosting."""
+    import pathlib
+    vendor_dir = pathlib.Path(__file__).parent / "static" / "vendor"
+    vendor_dir.mkdir(parents=True, exist_ok=True)
+    chart_path = vendor_dir / "chart.umd.js"
+    if chart_path.exists() and chart_path.stat().st_size > 100000:
+        logger.info("Chart.js already cached locally")
+        return
+    cdns = [
+        "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js",
+        "https://unpkg.com/chart.js@4.4.1/dist/chart.umd.js",
+        "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
+    ]
+    import urllib.request
+    for url in cdns:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "RosterIQ/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = resp.read()
+                if len(data) > 100000:
+                    chart_path.write_bytes(data)
+                    logger.info(f"Chart.js cached from {url} ({len(data)} bytes)")
+                    return
+        except Exception as e:
+            logger.warning(f"Failed to download Chart.js from {url}: {e}")
+    logger.error("Could not cache Chart.js from any CDN — charts may not render")
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on shutdown."""
@@ -1296,6 +1416,15 @@ async def shutdown_event():
             logger.info("Cache cleanup task stopped")
         except Exception as e:
             logger.warning(f"Error stopping cache cleanup task: {e}")
+
+    # Close database store connection
+    try:
+        from rosteriq.database import PostgresStore
+        if isinstance(_db, PostgresStore):
+            _db.close()
+            logger.info("Database store connection closed")
+    except Exception as e:
+        logger.warning(f"Error closing database store: {e}")
 
     # Close connection pool
     global _pool

@@ -256,7 +256,7 @@ def create_security_router(security_middleware: object) -> APIRouter:
 
         except Exception as e:
             logger.error(f"Error processing CSP report: {e}")
-            return {"status": "error", "detail": str(e)}
+            raise HTTPException(status_code=500, detail=str(e))
 
     @router.get("/csp-violations", response_model=CSPViolationsSummary)
     async def get_csp_violations(request: Request):

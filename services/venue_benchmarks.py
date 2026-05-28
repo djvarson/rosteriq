@@ -370,7 +370,8 @@ class VenueBenchmarkService:
                     venue_id, start_date, end_date
                 )
                 metrics[venue_id] = getattr(benchmark, metric, 0.0)
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to calculate benchmark for venue {venue_id}: {e}")
                 continue
 
         # Sort (higher is better for efficiency_score, lower is better for cost metrics)
@@ -421,7 +422,8 @@ class VenueBenchmarkService:
                     "cost_per_cover": float(b.cost_per_cover),
                     "casual_dependency": b.casual_dependency,
                 }
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to calculate benchmark for venue {v_id}: {e}")
                 continue
 
         comparisons = []
@@ -526,7 +528,8 @@ class VenueBenchmarkService:
                 benchmarks[venue_id] = self._calculate_venue_benchmark(
                     venue_id, start_date, end_date
                 )
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to calculate benchmark for venue {venue_id}: {e}")
                 continue
 
         if not benchmarks:

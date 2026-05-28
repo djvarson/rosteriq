@@ -147,13 +147,13 @@ async def process_webhook_event(
         )
     except ImportError:
         logger.error("Failed to import webhook services")
-        return {"error": "Webhook services not available"}
+        raise HTTPException(status_code=503, detail="Webhook services not available")
 
     # Verify signature if provided
     if webhook_secret and webhook_signature:
         if not verify_hmac_signature(raw_payload, webhook_signature, webhook_secret):
             logger.warning("Invalid webhook signature")
-            return {"error": "Invalid signature"}
+            raise HTTPException(status_code=401, detail="Invalid signature")
 
     # Extract payload
     event_type_str = payload_dict.get("event_type")
@@ -173,7 +173,7 @@ async def process_webhook_event(
         event_type = TandaEventType(event_type_str)
     except ValueError:
         logger.warning(f"Unknown event type: {event_type_str}")
-        return {"error": f"Unknown event type: {event_type_str}"}
+        raise HTTPException(status_code=400, detail=f"Unknown event type: {event_type_str}")
 
     # Create webhook payload
     try:
@@ -234,7 +234,7 @@ async def receive_webhook(
     }
     """
     if not (APIRouter and Request):
-        return {"error": "FastAPI not available"}
+        raise HTTPException(status_code=503, detail="FastAPI not available")
 
     # Get raw body for signature verification
     raw_payload = await request.body()
@@ -288,7 +288,7 @@ async def webhook_status() -> Dict[str, Any]:
     try:
         from rosteriq.services.tanda_webhook_manager import get_webhook_manager
     except ImportError:
-        return {"error": "Webhook manager not available"}
+        raise HTTPException(status_code=503, detail="Webhook manager not available")
 
     manager = get_webhook_manager()
     subscriptions = manager.get_all_subscriptions()

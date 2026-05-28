@@ -106,7 +106,7 @@ async def subscribe_webhook(request: SubscribeRequest) -> Dict[str, Any]:
         Subscription details with ID
     """
     if not (APIRouter and HTTPException):
-        return {"error": "FastAPI not available"}
+        raise HTTPException(status_code=503, detail="FastAPI not available")
 
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
@@ -166,7 +166,7 @@ async def list_subscriptions(venue_id: str) -> Dict[str, Any]:
         List of subscriptions
     """
     if not (APIRouter and HTTPException):
-        return {"error": "FastAPI not available"}
+        raise HTTPException(status_code=503, detail="FastAPI not available")
 
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
@@ -206,7 +206,7 @@ async def delete_subscription(subscription_id: str) -> Dict[str, Any]:
         Confirmation
     """
     if not (APIRouter and HTTPException):
-        return {"error": "FastAPI not available"}
+        raise HTTPException(status_code=503, detail="FastAPI not available")
 
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
@@ -259,7 +259,7 @@ async def update_subscription(
         Updated subscription
     """
     if not (APIRouter and HTTPException):
-        return {"error": "FastAPI not available"}
+        raise HTTPException(status_code=503, detail="FastAPI not available")
 
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
@@ -315,7 +315,7 @@ async def get_deliveries(
         List of delivery records
     """
     if not (APIRouter and HTTPException):
-        return {"error": "FastAPI not available"}
+        raise HTTPException(status_code=503, detail="FastAPI not available")
 
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
@@ -363,7 +363,7 @@ async def send_test_event(
         Queued message with delivery ID
     """
     if not (APIRouter and HTTPException and BackgroundTasks):
-        return {"error": "FastAPI not available"}
+        raise HTTPException(status_code=503, detail="FastAPI not available")
 
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service

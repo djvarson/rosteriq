@@ -243,7 +243,7 @@ async def get_employee_cost_projection(
     if venue_annual_payroll:
         try:
             venue_payroll = Decimal(venue_annual_payroll)
-        except:
+        except (ValueError, TypeError, ArithmeticError):
             raise HTTPException(status_code=400, detail="Invalid venue_annual_payroll")
 
     # Calculate projection
@@ -289,7 +289,7 @@ async def compare_employees(request: CompareEmployeesRequest) -> List[EmployeeCo
     if request.venue_annual_payroll:
         try:
             venue_payroll = Decimal(request.venue_annual_payroll)
-        except:
+        except (ValueError, TypeError, ArithmeticError):
             raise HTTPException(status_code=400, detail="Invalid venue_annual_payroll")
 
     # Compare
@@ -329,7 +329,7 @@ async def find_cheapest_employee(request: FindCheapestRequest) -> List[dict]:
     if request.venue_annual_payroll:
         try:
             venue_payroll = Decimal(request.venue_annual_payroll)
-        except:
+        except (ValueError, TypeError, ArithmeticError):
             raise HTTPException(status_code=400, detail="Invalid venue_annual_payroll")
 
     # Find cheapest
@@ -377,7 +377,7 @@ async def get_annual_cost_estimate(
     if venue_annual_payroll:
         try:
             venue_payroll = Decimal(venue_annual_payroll)
-        except:
+        except (ValueError, TypeError, ArithmeticError):
             raise HTTPException(status_code=400, detail="Invalid venue_annual_payroll")
 
     # Calculate
@@ -436,7 +436,7 @@ async def calculate_roster_labour_cost(
     if request.venue_annual_payroll:
         try:
             venue_payroll = Decimal(request.venue_annual_payroll)
-        except:
+        except (ValueError, TypeError, ArithmeticError):
             raise HTTPException(status_code=400, detail="Invalid venue_annual_payroll")
 
     # Calculate

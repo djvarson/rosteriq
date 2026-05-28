@@ -655,7 +655,7 @@ class XeroClient:
                     if values:
                         try:
                             return Decimal(str(values[0].get("Value", 0)))
-                        except:
+                        except (ValueError, TypeError, KeyError, IndexError):
                             return Decimal("0")
             return Decimal("0")
 
