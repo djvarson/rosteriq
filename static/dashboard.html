@@ -42,19 +42,20 @@
   </script>
   <style>
     :root {
-      --dark-navy: #0B0F1A;
-      --dark-bg: #111827;
-      --card-bg: #1F2937;
-      --light-bg: #0F172A;
-      --text-primary: #F1F5F9;
-      --text-secondary: #94A3B8;
-      --text-muted: #64748B;
-      --brand-blue: #3B82F6;
+      --dark-navy: #090C12;
+      --dark-bg: #0F1419;
+      --card-bg: #161B22;
+      --light-bg: #0D1117;
+      --text-primary: #E6EDF3;
+      --text-secondary: #8B949E;
+      --text-muted: #484F58;
+      --brand-blue: #F59E0B;
+      --brand-accent: #D97706;
       --success: #10B981;
       --warning: #F59E0B;
       --danger: #EF4444;
-      --info: #3B82F6;
-      --border: #1E293B;
+      --info: #F59E0B;
+      --border: #21262D;
     }
 
     * {
@@ -130,7 +131,7 @@
     }
 
     .sidebar-logo-text span {
-      color: var(--brand-blue);
+      color: #F59E0B;
     }
 
     .venue-selector {
@@ -162,9 +163,9 @@
 
     .venue-selector select:hover,
     .venue-selector select:focus {
-      border-color: var(--brand-blue);
+      border-color: #F59E0B;
       outline: none;
-      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
     }
 
     .ws-status {
@@ -242,8 +243,9 @@
     }
 
     .nav-item.active {
-      background: var(--brand-blue);
-      color: var(--text-primary);
+      background: rgba(245, 158, 11, 0.12);
+      color: #F59E0B;
+      border-left: 2px solid #F59E0B;
     }
 
     .nav-item-icon {
@@ -255,7 +257,8 @@
        TOP BAR
        ============================================ */
     .top-bar {
-      background: var(--dark-bg);
+      background: rgba(15, 20, 27, 0.85);
+      backdrop-filter: blur(8px);
       border-bottom: 1px solid var(--border);
       padding: 12px 24px;
       display: flex;
@@ -270,9 +273,9 @@
     }
 
     .top-bar-title {
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
     }
 
     .top-bar-right {
@@ -322,7 +325,8 @@
 
     .page-title {
       font-size: 20px;
-      font-weight: 700;
+      font-weight: 600;
+      letter-spacing: -0.3px;
       color: var(--text-primary);
       margin-bottom: 4px;
     }
@@ -330,6 +334,7 @@
     .page-subtitle {
       font-size: 13px;
       color: var(--text-muted);
+      display: none;
     }
 
     /* ============================================
@@ -338,27 +343,30 @@
     .card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
+      border-radius: 10px;
+      padding: 20px;
       transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     }
 
     .card:hover {
-      border-color: #334155;
+      border-color: rgba(245, 158, 11, 0.2);
     }
 
     .kpi-card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 16px;
+      border-radius: 10px;
+      padding: 18px 20px;
       display: flex;
       flex-direction: column;
       transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     }
 
     .kpi-card:hover {
-      border-color: #334155;
+      border-color: rgba(245, 158, 11, 0.3);
+      box-shadow: 0 2px 8px rgba(245, 158, 11, 0.06);
     }
 
     .kpi-label {
@@ -457,7 +465,7 @@
 
     .chart-title {
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 500;
       color: var(--text-secondary);
       text-transform: uppercase;
       letter-spacing: 0.3px;
@@ -503,8 +511,12 @@
       color: var(--text-primary);
     }
 
+    .roster-table tbody tr:nth-child(even) {
+      background: rgba(255,255,255,0.02);
+    }
+
     .roster-table tbody tr:hover {
-      background: rgba(255, 255, 255, 0.03);
+      background: rgba(245, 158, 11, 0.04);
     }
 
     .shift-cell {
@@ -590,7 +602,7 @@
     }
 
     .badge-info {
-      background: rgba(59, 130, 246, 0.1);
+      background: rgba(245, 158, 11, 0.1);
       color: var(--info);
     }
 
@@ -691,7 +703,7 @@
     .input-group textarea:focus {
       outline: none;
       border-color: var(--brand-blue);
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
     }
 
     /* ============================================
@@ -725,8 +737,12 @@
       font-size: 13px;
     }
 
+    .table tbody tr:nth-child(even) {
+      background: rgba(255,255,255,0.02);
+    }
+
     .table tbody tr:hover {
-      background: rgba(255, 255, 255, 0.03);
+      background: rgba(245, 158, 11, 0.04);
     }
 
     /* ============================================
@@ -995,7 +1011,7 @@
 
     .conflict-suggestion {
       padding: 6px 10px;
-      background: rgba(59, 130, 246, 0.1);
+      background: rgba(245, 158, 11, 0.1);
       color: var(--info);
       border-radius: 4px;
       font-size: 12px;
@@ -1101,7 +1117,7 @@
       }
 
       .top-bar-title {
-        font-size: 16px;
+        font-size: 12px;
       }
 
       /* Card adjustments */
@@ -1573,6 +1589,11 @@
     .toast.removing {
       animation: slideOut 0.3s ease-out forwards;
     }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #21262D; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #30363D; }
   </style>
 </head>
 <body>
@@ -1581,14 +1602,19 @@
   <!-- SIDEBAR -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-logo">
-      <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="16" cy="16" r="14" stroke="#3366FF" stroke-width="2"/>
-        <circle cx="16" cy="16" r="3" fill="#3366FF"/>
-        <line x1="16" y1="16" x2="16" y2="8" stroke="#3366FF" stroke-width="2" stroke-linecap="round"/>
-        <line x1="16" y1="16" x2="22" y2="12" stroke="#3366FF" stroke-width="2" stroke-linecap="round"/>
-        <circle cx="10" cy="8" r="2" fill="#10B981"/>
-        <circle cx="24" cy="10" r="2" fill="#F59E0B"/>
-        <circle cx="22" cy="24" r="2" fill="#3366FF"/>
+      <svg viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="14" cy="10" r="5" fill="none" stroke="#f59e0b" stroke-width="1.5"/>
+        <path d="M8 22 Q8 16 14 16 Q20 16 20 22" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="26" cy="12" r="4" fill="none" stroke="#d97706" stroke-width="1.2"/>
+        <path d="M21 22 Q21 18 26 18 Q31 18 31 22" fill="none" stroke="#d97706" stroke-width="1.2" stroke-linecap="round"/>
+        <circle cx="6" cy="14" r="3.5" fill="none" stroke="#d97706" stroke-width="1.0" opacity="0.6"/>
+        <path d="M1 24 Q1 20 6 20 Q11 20 11 24" fill="none" stroke="#d97706" stroke-width="1.0" stroke-linecap="round" opacity="0.6"/>
+        <rect x="0" y="29" width="32" height="1" rx="0.5" fill="#f59e0b" opacity="0.3"/>
+        <rect x="0" y="32" width="32" height="1" rx="0.5" fill="#f59e0b" opacity="0.2"/>
+        <rect x="0" y="35" width="32" height="1" rx="0.5" fill="#f59e0b" opacity="0.15"/>
+        <rect x="2" y="29" width="8" height="1" rx="0.5" fill="#f59e0b" opacity="0.8"/>
+        <rect x="14" y="32" width="10" height="1" rx="0.5" fill="#d97706" opacity="0.7"/>
+        <rect x="6" y="35" width="6" height="1" rx="0.5" fill="#f59e0b" opacity="0.6"/>
       </svg>
       <div class="sidebar-logo-text">Roster<span>IQ</span></div>
     </div>
@@ -1818,7 +1844,7 @@
             <div id="demand-breakdown" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 16px;"></div>
 
             <!-- AI Recommendation -->
-            <div id="demand-recommendation" style="padding: 12px 16px; background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); border-radius: 8px; margin-bottom: 16px;">
+            <div id="demand-recommendation" style="padding: 12px 16px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; margin-bottom: 16px;">
               <div style="font-size: 11px; color: var(--brand-blue); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">AI Recommendation</div>
               <div style="font-size: 13px; color: var(--text-primary); line-height: 1.5;" id="demand-rec-text">--</div>
             </div>
@@ -2067,7 +2093,7 @@
                 <div class="kpi-label">Warning</div>
                 <div style="font-size: 24px; font-weight: 700; color: var(--warning);" id="conflict-warning">0</div>
               </div>
-              <div style="padding: 12px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; text-align: center;">
+              <div style="padding: 12px; background: rgba(245, 158, 11, 0.1); border-radius: 8px; text-align: center;">
                 <div class="kpi-label">Info</div>
                 <div style="font-size: 24px; font-weight: 700; color: var(--info);" id="conflict-info">0</div>
               </div>
@@ -2488,7 +2514,7 @@
             <div id="os-events-strip" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;"></div>
 
             <!-- AI recommendation -->
-            <div style="padding: 10px 14px; background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.15); border-radius: 8px; font-size: 12px; color: var(--text-primary); line-height: 1.5;" id="os-demand-rec">--</div>
+            <div style="padding: 10px 14px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.15); border-radius: 8px; font-size: 12px; color: var(--text-primary); line-height: 1.5;" id="os-demand-rec">--</div>
           </div>
         </div>
       </div>
@@ -3572,7 +3598,7 @@ const demoData = {
 
   alerts: [
     { type: 'warning', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>', title: 'Hot Day Forecast', desc: '36C expected — BOM Perth says sunny, NW wind 15km/h', badge: 'Weather' },
-    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'Eagles vs Dockers — Optus Stadium', desc: 'Derby day 5:40pm, 60,000 capacity. Expect +35% post-match surge 8-10pm', badge: 'AFL' },
+    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'Eagles vs Dockers — Optus Stadium', desc: 'Derby day 5:40pm, 60,000 capacity. Expect +35% post-match surge 8-10pm', badge: 'AFL' },
     { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>', title: 'Foot Traffic Spike', desc: 'Pedestrian sensors: Northbridge 2,400/hr (up 18% on last Sat)', badge: 'Traffic' },
     { type: 'danger', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>', title: 'Break Compliance', desc: 'Marcus J needs break in next 25 mins (WA Award)', badge: 'Urgent' },
   ],
@@ -3708,11 +3734,11 @@ const demoData = {
 };
 
 const colors = {
-  primary: '#3366FF',
+  primary: '#F59E0B',
   success: '#10B981',
   warning: '#F59E0B',
   danger: '#EF4444',
-  info: '#3B82F6',
+  info: '#F59E0B',
   muted: '#A0AEC0',
 };
 
@@ -4271,7 +4297,7 @@ function populateDemoReportCharts() {
       data: {
         labels: days,
         datasets: [
-          { label: 'Revenue', data: [3200, 3800, 4100, 3900, 5200, 6100, 4800], backgroundColor: 'rgba(59,130,246,0.7)', borderRadius: 4 },
+          { label: 'Revenue', data: [3200, 3800, 4100, 3900, 5200, 6100, 4800], backgroundColor: 'rgba(245,158,11,0.7)', borderRadius: 4 },
           { label: 'Labour Cost', data: [960, 1140, 1230, 1170, 1560, 1830, 1440], backgroundColor: 'rgba(239,68,68,0.7)', borderRadius: 4 },
         ],
       },
@@ -4291,8 +4317,8 @@ function populateDemoReportCharts() {
         datasets: [{
           label: 'Labour %',
           data: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0],
-          borderColor: '#3B82F6',
-          backgroundColor: 'rgba(59,130,246,0.1)',
+          borderColor: '#F59E0B',
+          backgroundColor: 'rgba(245,158,11,0.1)',
           fill: true,
           tension: 0.3,
         }, {
@@ -4362,10 +4388,10 @@ function updateDemoDashboardKPIs() {
 
 function populateAlerts() {
   const alerts = [
-    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>', title: 'High Demand Forecast', desc: 'Saturday evening expecting +18% covers', badge: 'Forecast' },
+    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>', title: 'High Demand Forecast', desc: 'Saturday evening expecting +18% covers', badge: 'Forecast' },
     { type: 'warning', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>', title: 'Weather Alert', desc: 'Heavy rain expected 6-9pm', badge: 'Weather' },
     { type: 'danger', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>', title: 'Break Compliance', desc: 'Sarah needs break in next 30 mins', badge: 'Urgent' },
-    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'Event Nearby', desc: 'Concert at venue nearby: +15% expected', badge: 'Event' },
+    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'Event Nearby', desc: 'Concert at venue nearby: +15% expected', badge: 'Event' },
   ];
 
   const container = document.getElementById('alerts-panel');
@@ -4431,7 +4457,7 @@ function populateDemoDemandSignals() {
     var bd = ds.demand_score.breakdown;
     var cats = [
       { key: 'weather', label: 'Weather', color: '#F59E0B' },
-      { key: 'events', label: 'Events', color: '#3B82F6' },
+      { key: 'events', label: 'Events', color: '#F59E0B' },
       { key: 'foot_traffic', label: 'Foot Traffic', color: '#10B981' },
       { key: 'reservations', label: 'Reservations', color: '#8B5CF6' },
       { key: 'social', label: 'Social', color: '#EC4899' },
@@ -4507,8 +4533,8 @@ function populateDemoDemandSignals() {
   if (eventsEl) {
     var typeColors = { AFL: '#EF4444', Cricket: '#10B981', Festival: '#F59E0B', Concert: '#8B5CF6' };
     eventsEl.innerHTML = ds.events.map(function(e) {
-      var col = typeColors[e.type] || '#3B82F6';
-      var impactBg = e.impact === 'high' ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)';
+      var col = typeColors[e.type] || '#F59E0B';
+      var impactBg = e.impact === 'high' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)';
       return '<div style="padding:10px;background:' + impactBg + ';border-radius:8px;border-left:3px solid ' + col + ';">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
         '<span style="font-size:12px;font-weight:600;color:var(--text-primary);">' + esc(e.name) + '</span>' +
@@ -4576,7 +4602,7 @@ function populateDemoOnShiftSignals() {
   if (stripEl) {
     var typeColors = { AFL: '#EF4444', Cricket: '#10B981', Festival: '#F59E0B', Concert: '#8B5CF6' };
     stripEl.innerHTML = ds.events.map(function(e) {
-      var col = typeColors[e.type] || '#3B82F6';
+      var col = typeColors[e.type] || '#F59E0B';
       return '<div style="padding:4px 10px;background:rgba(255,255,255,0.04);border:1px solid ' + col + ';border-radius:16px;font-size:11px;">' +
         '<span style="color:' + col + ';font-weight:600;">' + esc(e.type) + '</span> ' +
         '<span style="color:var(--text-secondary);">' + esc(e.name.substring(0, 25)) + '</span> ' +
