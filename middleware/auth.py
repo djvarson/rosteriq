@@ -49,11 +49,19 @@ class UserContext:
 # Paths that don't require authentication
 SKIP_AUTH_PATHS = {
     "/health",
+    "/api/health",
+    "/api/ready",
+    "/api/metrics",
     "/docs",
     "/redoc",
     "/openapi.json",
     "/api/auth/register",
     "/api/auth/login",
+}
+
+SKIP_AUTH_PREFIXES = {
+    "/static/",
+    "/api/v1/costing/health",
 }
 
 # Paths that don't require auth but are webhook-related
@@ -74,6 +82,8 @@ async def get_current_user(
     # Skip auth for certain paths
     if request.url.path in SKIP_AUTH_PATHS or any(
         request.url.path.startswith(p) for p in WEBHOOK_PATHS
+    ) or any(
+        request.url.path.startswith(p) for p in SKIP_AUTH_PREFIXES
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
