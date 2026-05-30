@@ -54,8 +54,11 @@ class TenantContext:
 EXEMPT_PATHS = {
     "/",
     "/health",
+    "/api/health",
     "/ready",
+    "/api/ready",
     "/metrics",
+    "/api/metrics",
     "/docs",
     "/redoc",
     "/openapi.json",
