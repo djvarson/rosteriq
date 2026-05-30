@@ -2878,11 +2878,13 @@ async def dashboard_overview(venue_id: str):
         if d_forecasts:
             pred_covers = sum(f.predicted_covers for f in d_forecasts) / len(d_forecasts)
         else:
-            pred_covers = avg_covers + random.uniform(-10, 10)
+            pred_covers = avg_covers  # No forecast data; use today's average as default
         week_forecast.append({
             "date": d.isoformat(),
             "demand_level": _demand_classification(pred_covers, avg_covers),
             "predicted_covers": round(pred_covers, 1),
+            "confidence": "low" if not d_forecasts else "normal",
+            "data_source": "default_estimate" if not d_forecasts else "forecast",
         })
 
     # Roster summary for today
@@ -2900,8 +2902,6 @@ async def dashboard_overview(venue_id: str):
 
     # Demand outlook summary
     demand_level = _demand_classification(avg_covers, avg_covers)
-    bullish_pct = random.uniform(0.6, 0.95) if demand_level in ["busy", "very_busy", "extreme"] else random.uniform(0.2, 0.5)
-
     # Top 3 signals by strength
     top_signals = sorted(
         demo_signals,
@@ -2918,8 +2918,9 @@ async def dashboard_overview(venue_id: str):
         },
         "demand_outlook_today": {
             "classification": demand_level,
-            "bullish_percentage": round(bullish_pct * 100, 1),
-            "trend": "up" if bullish_pct > 0.5 else "down",
+            "bullish_percentage": None,
+            "trend": None,
+            "sentiment_available": False,
         },
         "active_signals": {
             "total": len(demo_signals),
@@ -2981,7 +2982,7 @@ async def dashboard_signals(
         "summary": {
             "total_signals": len(all_signals),
             "dominant_category": max(by_category.keys(), key=lambda k: len(by_category[k])) if by_category else None,
-            "overall_variance": round(random.uniform(0.05, 0.25), 3),
+            "overall_variance": 0.0,  # Unknown — no historical variance data available
         },
         "signals_by_category": dict(by_category),
     }
@@ -3018,17 +3019,19 @@ async def dashboard_demand_outlook(
             pred_covers = sum(f.predicted_covers for f in hour_forecasts) / len(hour_forecasts)
             confidence = sum(f.confidence for f in hour_forecasts) / len(hour_forecasts)
         else:
-            # Generate demo data
-            pred_covers = 20 + (hour % 8) * 10 + random.uniform(-5, 5)
-            confidence = random.uniform(0.65, 0.95)
+            # No forecast data for this hour — use deterministic default
+            pred_covers = 30.0  # Static default estimate
+            confidence = 0.0  # No real forecast confidence
 
         recommended_staff = max(1, int(pred_covers / DEFAULT_COVERS_PER_STAFF))
 
+        has_forecast = len(hour_forecasts) > 0
         hourly.append({
             "hour": hour,
             "predicted_covers": round(pred_covers, 1),
-            "confidence": round(confidence, 2),
-            "signals_contributing": random.randint(2, 5),
+            "confidence": round(confidence, 2) if has_forecast else "low",
+            "data_source": "forecast" if has_forecast else "default_estimate",
+            "signals_contributing": len(hour_forecasts) if has_forecast else 0,
             "recommended_staff": recommended_staff,
         })
 
@@ -3092,13 +3095,15 @@ async def dashboard_live_pulse(venue_id: str):
         f for f in _store["forecasts"]
         if f.venue_id == venue_id and f.date == today and f.hour == current_hour
     ]
-    if hour_forecasts:
+    has_forecast = len(hour_forecasts) > 0
+    if has_forecast:
         predicted_covers = sum(f.predicted_covers for f in hour_forecasts) / len(hour_forecasts)
     else:
-        predicted_covers = 30 + random.uniform(-10, 10)
+        predicted_covers = 30.0  # Static default when no forecast available
 
-    # Actual (mock for now)
-    actual_covers = predicted_covers + random.uniform(-8, 8)
+    # Actual covers must come from real POS/reservation data — never fake
+    actual_covers = None
+    actual_available = False
 
     # Current roster
     today_roster = None
@@ -3123,9 +3128,13 @@ async def dashboard_live_pulse(venue_id: str):
 
     recommended_staff = max(1, int(predicted_covers / DEFAULT_COVERS_PER_STAFF))
 
-    # Variance and breach
-    variance = abs(actual_covers - predicted_covers) / max(predicted_covers, 1) if predicted_covers > 0 else 0
-    breach = variance > 0.15
+    # Variance and breach — only computable with real actual data
+    if actual_available and actual_covers is not None:
+        variance = abs(actual_covers - predicted_covers) / max(predicted_covers, 1) if predicted_covers > 0 else 0
+        breach = variance > 0.15
+    else:
+        variance = None
+        breach = False
 
     # Next hour prediction
     next_hour = (current_hour + 1) % 24
@@ -3133,14 +3142,15 @@ async def dashboard_live_pulse(venue_id: str):
         f for f in _store["forecasts"]
         if f.venue_id == venue_id and f.date == today and f.hour == next_hour
     ]
-    if next_hour_forecasts:
+    has_next_forecast = len(next_hour_forecasts) > 0
+    if has_next_forecast:
         next_predicted = sum(f.predicted_covers for f in next_hour_forecasts) / len(next_hour_forecasts)
     else:
-        next_predicted = predicted_covers + random.uniform(-5, 5)
+        next_predicted = predicted_covers  # Carry forward current prediction as best estimate
 
-    # Alerts
+    # Alerts — only generate from real data
     alerts = []
-    if breach:
+    if actual_available and breach:
         if actual_covers < recommended_staff * DEFAULT_COVERS_PER_STAFF * 0.5:
             alerts.append("understaffed_warning")
         elif actual_covers > recommended_staff * DEFAULT_COVERS_PER_STAFF * 1.2:
@@ -3150,14 +3160,16 @@ async def dashboard_live_pulse(venue_id: str):
         "timestamp": now.isoformat(),
         "current_hour": current_hour,
         "current_metrics": {
-            "actual_covers": round(actual_covers, 1),
+            "actual_covers": round(actual_covers, 1) if actual_available else None,
+            "actual_available": actual_available,
             "predicted_covers": round(predicted_covers, 1),
-            "variance_score": round(variance, 3),
+            "data_source": "forecast" if has_forecast else "default_estimate",
+            "variance_score": round(variance, 3) if variance is not None else None,
             "on_duty_staff": on_duty,
             "recommended_staff": recommended_staff,
         },
         "threshold_breach": breach,
-        "threshold_breach_reason": "understaffed" if breach and actual_covers > predicted_covers else ("overstaffed" if breach else None),
+        "threshold_breach_reason": ("understaffed" if actual_available and breach and actual_covers > predicted_covers else ("overstaffed" if breach else None)) if actual_available else None,
         "active_recommendations": [
             {
                 "type": "call_in" if on_duty < recommended_staff else "send_home",
@@ -3168,6 +3180,7 @@ async def dashboard_live_pulse(venue_id: str):
         "next_hour_prediction": {
             "hour": next_hour,
             "predicted_covers": round(next_predicted, 1),
+            "data_source": "forecast" if has_next_forecast else "carry_forward",
             "recommended_staff": max(1, int(next_predicted / DEFAULT_COVERS_PER_STAFF)),
         },
         "active_alerts": alerts,
@@ -3195,14 +3208,19 @@ async def dashboard_week_ahead(venue_id: str):
             if f.venue_id == venue_id and f.date == d
         ]
 
-        if d_forecasts:
+        has_day_forecast = len(d_forecasts) > 0
+        if has_day_forecast:
             pred_covers = sum(f.predicted_covers for f in d_forecasts) / len(d_forecasts)
         else:
-            pred_covers = 45 + random.uniform(-15, 15)
+            pred_covers = 30.0  # Static default estimate when no forecast data
 
         demand_level = _demand_classification(pred_covers)
         day_type = get_day_type(d, State.vic)
-        peak_covers = pred_covers * random.uniform(1.1, 1.3)
+        # Peak covers: use actual forecast max if available, otherwise estimate at 1.2x average
+        if has_day_forecast:
+            peak_covers = max(f.predicted_covers for f in d_forecasts)
+        else:
+            peak_covers = pred_covers * 1.2  # Deterministic 20% above average estimate
 
         # Estimate labour cost
         recommended_shifts = max(2, int(pred_covers / DEFAULT_COVERS_PER_STAFF / 4))  # 4-hour shifts avg
@@ -3227,6 +3245,8 @@ async def dashboard_week_ahead(venue_id: str):
             "demand_level": demand_level,
             "predicted_peak_covers": round(peak_covers, 1),
             "predicted_average_covers": round(pred_covers, 1),
+            "confidence": "normal" if has_day_forecast else "low",
+            "data_source": "forecast" if has_day_forecast else "default_estimate",
             "key_signals": top_signals,
             "recommended_total_shifts": recommended_shifts,
             "estimated_labour_cost": round(estimated_cost, 2),
@@ -3235,8 +3255,23 @@ async def dashboard_week_ahead(venue_id: str):
 
     # Week totals
     week_cost = sum(d["estimated_labour_cost"] for d in week_data)
-    last_week = today - timedelta(days=7)
-    last_week_cost = week_cost * random.uniform(0.85, 1.15)
+    # Last week cost comparison — requires real historical data
+    # Check if we have last week's roster with actual cost
+    last_week_start = today - timedelta(days=7)
+    last_week_roster = None
+    for r in _store["rosters"].values():
+        if r.venue_id == venue_id and r.week_start == last_week_start:
+            last_week_roster = r
+            break
+
+    if last_week_roster and last_week_roster.total_cost:
+        last_week_cost = float(last_week_roster.total_cost)
+        comparison_available = True
+        week_on_week_change = round((week_cost - last_week_cost) / last_week_cost * 100, 1) if last_week_cost > 0 else 0
+    else:
+        last_week_cost = None
+        comparison_available = False
+        week_on_week_change = None
 
     return {
         "week_start": today.isoformat(),
@@ -3244,8 +3279,9 @@ async def dashboard_week_ahead(venue_id: str):
         "forecast_days": week_data,
         "week_summary": {
             "total_estimated_labour_cost": round(week_cost, 2),
-            "last_week_cost": round(last_week_cost, 2),
-            "week_on_week_change_percent": round((week_cost - last_week_cost) / last_week_cost * 100, 1) if last_week_cost > 0 else 0,
+            "last_week_cost": round(last_week_cost, 2) if last_week_cost is not None else None,
+            "comparison_available": comparison_available,
+            "week_on_week_change_percent": week_on_week_change,
         },
     }
 

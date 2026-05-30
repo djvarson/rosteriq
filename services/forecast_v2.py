@@ -55,6 +55,8 @@ class ForecastResult(NamedTuple):
     confidence_score: float              # 0-1, based on data availability
     model_version: str
     signals_used: list[SignalType]
+    confidence: str = "medium"           # "none", "low", "medium", "high"
+    warning: Optional[str] = None        # cold-start or data quality warning
 
 
 class WeatherForecast(NamedTuple):
@@ -505,7 +507,10 @@ class EnhancedForecaster:
         )
 
         # Confidence score
-        confidence = self._calculate_confidence_score()
+        confidence_score = self._calculate_confidence_score()
+
+        # Classify confidence level and generate warnings based on data availability
+        confidence_level, cold_start_warning = self._classify_confidence(confidence_score)
 
         components = {
             "base": base_pred,
@@ -525,9 +530,11 @@ class EnhancedForecaster:
             confidence_interval_80=interval_80,
             confidence_interval_95=interval_95,
             components=components,
-            confidence_score=confidence,
+            confidence_score=confidence_score,
             model_version="enhanced_v2",
             signals_used=[SignalType.historical, SignalType.weather, SignalType.events],
+            confidence=confidence_level,
+            warning=cold_start_warning,
         )
 
     def forecast_week(
@@ -587,14 +594,18 @@ class EnhancedForecaster:
             forecast = self.predict(target_date, hour, weather=weather)
             recommended = forecast.point_estimate / covers_per_staff
 
-            results.append({
+            result = {
                 "date": str(target_date),
                 "hour": hour,
                 "recommended_staff": round(recommended, 1),
                 "confidence": forecast.confidence_score,
+                "confidence_level": forecast.confidence,
                 "low": round(forecast.confidence_interval_80[0] / covers_per_staff, 1),
                 "high": round(forecast.confidence_interval_80[1] / covers_per_staff, 1),
-            })
+            }
+            if forecast.warning:
+                result["warning"] = forecast.warning
+            results.append(result)
 
         return results
 
@@ -764,3 +775,35 @@ class EnhancedForecaster:
         freshness = max(0.0, 1.0 - (days_since_train / 30))
 
         return (data_confidence * 0.7 + freshness * 0.3)
+
+    def _classify_confidence(self, confidence_score: float) -> tuple[str, Optional[str]]:
+        """
+        Classify confidence level and generate cold-start warnings.
+
+        Returns:
+            (confidence_level, warning_message) tuple.
+            confidence_level is one of "none", "low", "medium", "high".
+            warning_message is None when data is sufficient.
+        """
+        training_days = 0
+        if self.seasonal_components:
+            training_days = self.seasonal_components.training_days
+
+        cold_start_warning = (
+            "Insufficient historical data for accurate predictions. "
+            "Using venue baseline estimates."
+        )
+
+        if training_days < 7:
+            # Less than 1 week of data
+            return "none", cold_start_warning
+
+        if training_days < 28:
+            # 1-4 weeks of data
+            return "low", cold_start_warning
+
+        # 4+ weeks: evaluate MAPE to determine medium vs high
+        accuracy = self.evaluate_accuracy(period_days=min(training_days, 30))
+        if accuracy.sample_count > 0 and accuracy.mape < 0.15:
+            return "high", None
+        return "medium", None

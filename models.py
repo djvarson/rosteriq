@@ -158,6 +158,7 @@ class Employee(BaseModel):
 
     id: str
     tanda_id: Optional[str] = None
+    venue_id: Optional[str] = None
     name: str
     employment_type: EmploymentType
     award_level: AwardLevel

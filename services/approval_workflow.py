@@ -181,6 +181,9 @@ class ApprovalWorkflow:
 
     def _extract_roster_context(self, roster: Roster, venue_id: str) -> Dict[str, Any]:
         """Extract relevant metrics from roster for rule evaluation."""
+        from rosteriq.award_rules import validate_shift_compliance, get_penalty_multiplier, get_day_type
+        from rosteriq.models import State
+
         venue = self.db.get_venue(venue_id)
         if not venue:
             return {}
@@ -188,24 +191,76 @@ class ApprovalWorkflow:
         total_cost = roster.total_cost or Decimal("0")
         total_hours = roster.total_hours
 
-        # Calculate metrics (simplified)
-        compliance_score = 90.0  # Placeholder - would call compliance checker
-        labour_cost = total_cost
-        budget_target = Decimal("10000")  # Placeholder - from venue config
-        overtime_hours = 0  # Placeholder - would scan shifts
-        penalty_cost = Decimal("0")  # Placeholder - would aggregate shift penalties
-        understaffed_hours = 0  # Placeholder - would check demand vs supply
+        # Compliance: check each shift for violations
+        all_employees = {e.id: e for e in self.db.list_employees() if e.id}
+        total_shifts = len(roster.shifts)
+        compliant_shifts = 0
+        total_overtime_hours = 0.0
+        total_penalty_cost = Decimal("0")
 
-        return {
-            "compliance_score": compliance_score,
+        for shift in roster.shifts:
+            emp = all_employees.get(shift.employee_id)
+            if not emp:
+                continue
+
+            # Check compliance violations
+            violations = validate_shift_compliance(emp, shift)
+            if not violations:
+                compliant_shifts += 1
+
+            # Calculate overtime (standard day = 7.6 hours in AU)
+            if shift.net_hours > 7.6:
+                total_overtime_hours += shift.net_hours - 7.6
+
+            # Calculate penalty cost from award rules
+            try:
+                state = venue.state if hasattr(venue, 'state') else State.vic
+                day_type = get_day_type(shift.date, state)
+                multiplier = float(get_penalty_multiplier(
+                    employment_type=emp.employment_type,
+                    day_type=day_type,
+                    hour=shift.start_time.hour,
+                    overtime_hours=max(0, shift.net_hours - 7.6),
+                ))
+                if multiplier > 1.0:
+                    base_cost = emp.hourly_base_rate * Decimal(str(shift.net_hours))
+                    penalty_portion = base_cost * Decimal(str(multiplier - 1.0))
+                    total_penalty_cost += penalty_portion
+            except Exception:
+                logger.warning(f"Could not calculate penalty cost for shift {shift.id}")
+
+        # Compliance score as percentage of compliant shifts
+        compliance_score = (compliant_shifts / total_shifts * 100) if total_shifts > 0 else 100.0
+
+        labour_cost = total_cost
+
+        # Budget target from venue config if available, otherwise flag as default
+        budget_target = Decimal(str(venue.max_labour_pct * 100)) if hasattr(venue, 'max_labour_pct') else Decimal("10000")
+
+        # Understaffed hours would require demand data — set to 0 with warning if unavailable
+        understaffed_hours = 0  # Requires forecast data integration to compute
+
+        context = {
+            "compliance_score": round(compliance_score, 1),
             "labour_cost": labour_cost,
             "budget_target": budget_target,
-            "overtime_hours": overtime_hours,
-            "penalty_cost": penalty_cost,
+            "overtime_hours": round(total_overtime_hours, 1),
+            "penalty_cost": total_penalty_cost.quantize(Decimal("0.01")),
             "total_cost": total_cost,
             "total_hours": total_hours,
             "understaffed_hours": understaffed_hours,
         }
+
+        # Add warnings for values that could not be fully computed
+        warnings = []
+        if understaffed_hours == 0 and total_shifts > 0:
+            warnings.append("understaffed_hours requires forecast data — defaulting to 0")
+        if not hasattr(venue, 'max_labour_pct'):
+            warnings.append("budget_target using fallback — venue config missing max_labour_pct")
+        if warnings:
+            context["_warnings"] = warnings
+
+        return context
 
     def _evaluate_rules(self, context: Dict[str, Any]) -> tuple[List[str], List[str]]:
         """

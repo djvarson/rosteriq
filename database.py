@@ -1725,6 +1725,12 @@ class PostgresStore(BaseStore):
     # --- Employees ---
 
     def save_employee(self, emp):
+        venue_id = emp.venue_id
+        if venue_id is None:
+            logger.warning(
+                "Employee %s has no venue_id set, saving with venue_id=NULL",
+                emp.id,
+            )
         with self._cursor() as cur:
             cur.execute("""
                 INSERT INTO employees (id, venue_id, tanda_id, name, employment_type, award_level,
@@ -1736,7 +1742,7 @@ class PostgresStore(BaseStore):
                     availability=EXCLUDED.availability, max_hours_per_week=EXCLUDED.max_hours_per_week,
                     phone=EXCLUDED.phone, email=EXCLUDED.email, updated_at=now()
             """, (
-                emp.id, getattr(emp, 'venue_id', 'demo-venue'), emp.tanda_id, emp.name,
+                emp.id, venue_id, emp.tanda_id, emp.name,
                 emp.employment_type.value, emp.award_level.value,
                 float(emp.hourly_base_rate), emp.skills,
                 json.dumps(emp.availability), emp.max_hours_per_week,
@@ -1759,11 +1765,33 @@ class PostgresStore(BaseStore):
         avail = row["availability"]
         if isinstance(avail, str):
             avail = json.loads(avail)
+
+        # Derive state: prefer venue config, then employee row, then fallback
+        emp_state = None
+        venue_id = row.get("venue_id")
+        if venue_id:
+            venue = self.get_venue(venue_id)
+            if venue:
+                emp_state = venue.state
+        if emp_state is None and row.get("state"):
+            try:
+                emp_state = State(row["state"])
+            except ValueError:
+                emp_state = None
+        if emp_state is None:
+            logger.warning(
+                "Employee %s has no venue or state configured, defaulting to 'vic'",
+                row["id"],
+            )
+            emp_state = State("vic")
+
         return Employee(
-            id=row["id"], tanda_id=row.get("tanda_id"), name=row["name"],
+            id=row["id"], tanda_id=row.get("tanda_id"),
+            venue_id=venue_id,
+            name=row["name"],
             employment_type=EmploymentType(row["employment_type"]),
             award_level=AwardLevel(row["award_level"]),
-            state=State("vic"),  # Will derive from venue in production
+            state=emp_state,
             hourly_base_rate=Decimal(str(row["hourly_base_rate"])),
             phone=row.get("phone"), email=row.get("email"),
             skills=row.get("skills", []),
@@ -3731,15 +3759,26 @@ def get_db() -> BaseStore:
     """Get the database store (singleton). Uses PostgreSQL if DATABASE_URL is set."""
     global _instance
     if _instance is None:
+        allow_fallback = os.environ.get("ALLOW_MEMORY_FALLBACK", "").lower() == "true"
         if DATABASE_URL:
             try:
                 _instance = PostgresStore(DATABASE_URL)
                 logger.info("Using PostgreSQL store")
             except Exception as e:
-                logger.warning("PostgreSQL unavailable (%s), falling back to in-memory", e)
-                _instance = MemoryStore()
+                if allow_fallback:
+                    logger.warning(
+                        "PostgreSQL unavailable (%s), falling back to in-memory "
+                        "(ALLOW_MEMORY_FALLBACK=true)", e,
+                    )
+                    _instance = MemoryStore()
+                else:
+                    raise RuntimeError(
+                        "DATABASE_URL is configured but PostgreSQL connection failed. "
+                        "Refusing to fall back to MemoryStore in production. "
+                        f"Original error: {e}"
+                    ) from e
         else:
-            logger.info("No DATABASE_URL set — using in-memory store")
+            logger.warning("No DATABASE_URL set — using in-memory store (dev/demo only)")
             _instance = MemoryStore()
     return _instance
 

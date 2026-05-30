@@ -130,7 +130,7 @@ async def handle_roster_published(payload: WebhookPayload, ws_hub) -> Dict[str, 
     shifts = data.get("shifts", [])
     result["shifts_synced"] = len(shifts)
 
-    # Compare forecast vs actual (mock implementation)
+    # Compare forecast vs actual hours from Tanda payload
     variances = []
     for shift in shifts:
         shift_id = shift.get("id")
@@ -190,21 +190,38 @@ async def handle_shift_created(payload: WebhookPayload, ws_hub) -> Dict[str, Any
     hourly_rate = data.get("hourly_rate", 0)
     award_level = data.get("award_level", "minimum")
 
-    # Mock cost calculation with award rates
+    # Cost calculation using real award rules
     if start_time and end_time:
         try:
             from datetime import datetime as dt
+            from rosteriq.award_rules import get_penalty_multiplier, get_day_type
+            from rosteriq.models import EmploymentType, State
+
             start = dt.fromisoformat(start_time)
             end = dt.fromisoformat(end_time)
             hours = (end - start).total_seconds() / 3600
 
-            # Apply award multiplier (mock)
-            award_multiplier = {
-                "minimum": 1.0,
-                "level1": 1.15,
-                "level2": 1.3,
-                "level3": 1.5,
-            }.get(award_level, 1.0)
+            # Determine employment type from data, default to casual for AU hospitality
+            emp_type_str = data.get("employment_type", "casual")
+            try:
+                emp_type = EmploymentType(emp_type_str)
+            except ValueError:
+                emp_type = EmploymentType.casual
+
+            # Determine state from venue data, default to VIC
+            venue_state_str = data.get("state", "vic")
+            try:
+                state = State(venue_state_str)
+            except ValueError:
+                state = State.vic
+
+            day_type = get_day_type(start.date(), state)
+            award_multiplier = float(get_penalty_multiplier(
+                employment_type=emp_type,
+                day_type=day_type,
+                hour=start.hour,
+                overtime_hours=max(0, hours - 7.6),
+            ))
 
             cost = hours * hourly_rate * award_multiplier
             result["cost_aud"] = round(cost, 2)
