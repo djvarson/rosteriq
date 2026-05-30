@@ -276,6 +276,7 @@
       font-size: 13px;
       font-weight: 500;
       color: var(--text-secondary);
+      display: none;
     }
 
     .top-bar-right {
@@ -1740,7 +1741,7 @@
         </div>
 
         <!-- Staff on Shift Card -->
-        <div class="grid-1">
+        <div class="grid-1" style="max-width: 400px;">
           <div class="kpi-card">
             <div class="kpi-label">Staff On Shift</div>
             <div style="display: flex; align-items: baseline; gap: 8px;">
@@ -1779,8 +1780,8 @@
               <div class="kpi-label">Vs Forecast</div>
               <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
                 <div style="flex: 1;">
-                  <div class="progress-bar" style="height: 8px; background: #334155; border-radius: 4px;">
-                    <div id="variance-bar" class="progress-fill" style="width: 0%; background: var(--success); border-radius: 4px; transition: all 0.3s;"></div>
+                  <div class="progress-bar" style="height: 8px; background: rgba(245,158,11,0.15); border-radius: 4px;">
+                    <div id="variance-bar" class="progress-fill" style="width: 0%; background: #F59E0B; border-radius: 4px; transition: all 0.3s;"></div>
                   </div>
                 </div>
                 <div id="variance-label" style="font-weight: 600; color: var(--text-secondary); min-width: 60px; text-align: right;">
@@ -2194,7 +2195,7 @@
         <div class="grid-2">
           <div class="card">
             <div class="chart-title">Notification Dispatch</div>
-            <div style="height: 200px; margin-bottom: 16px;">
+            <div style="height: 140px; margin-bottom: 16px;">
               <canvas id="notification-channels-chart"></canvas>
             </div>
             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 12px;">
@@ -2725,8 +2726,8 @@
                       <td>James Wilson</td>
                       <td>RSG (Gaming)</td>
                       <td>22 Mar 2026</td>
-                      <td>65 days</td>
-                      <td><span class="alert-badge badge-warning">⚠ Expiring soon</span></td>
+                      <td>Overdue</td>
+                      <td><span class="alert-badge badge-danger">Expired</span></td>
                     </tr>
                     <tr>
                       <td>Sarah Chen</td>
@@ -3035,7 +3036,7 @@
                   <option value="vic">Victoria</option>
                   <option value="nsw">New South Wales</option>
                   <option value="qld">Queensland</option>
-                  <option value="wa">Western Australia</option>
+                  <option value="wa" selected>Western Australia</option>
                   <option value="sa">South Australia</option>
                   <option value="tas">Tasmania</option>
                   <option value="act">Australian Capital Territory</option>
@@ -3094,7 +3095,7 @@
                     <div style="font-size: 12px; color: var(--text-muted);">Sync rosters, employees, and timesheets from Deputy</div>
                   </div>
                   <div id="deputy-status" style="display: flex; align-items: center; gap: 8px;">
-                    <button class="btn btn-primary btn-small" id="btn-deputy-connect" onclick="connectDeputy()">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-deputy-connect" onclick="connectDeputy()">Connect</button>
                     <button class="btn btn-secondary btn-small" id="btn-deputy-disconnect" onclick="disconnectDeputy()" style="display: none;">Disconnect</button>
                   </div>
                 </div>
@@ -3233,7 +3234,7 @@
                   <tbody>
                     <tr>
                       <td>You</td>
-                      <td>owner@example.com</td>
+                      <td>dale@thebrassmonkey.com.au</td>
                       <td><span class="alert-badge badge-info">Owner</span></td>
                       <td>—</td>
                     </tr>
@@ -3953,8 +3954,8 @@ function initHourlyBreakdownChart(isDemo = false) {
         {
           label: 'Revenue',
           data: revenueData,
-          backgroundColor: '#4F46E5',
-          borderColor: '#3730A3',
+          backgroundColor: 'rgba(245,158,11,0.7)',
+          borderColor: '#F59E0B',
           borderWidth: 1,
           borderRadius: 4,
           order: 2,
@@ -3962,8 +3963,8 @@ function initHourlyBreakdownChart(isDemo = false) {
         {
           label: 'Forecast',
           data: forecastData,
-          backgroundColor: 'rgba(79, 70, 229, 0.2)',
-          borderColor: '#A5B4FC',
+          backgroundColor: 'rgba(217,119,6,0.3)',
+          borderColor: '#D97706',
           borderWidth: 1,
           borderRadius: 4,
           order: 2,
@@ -4232,6 +4233,35 @@ function loadDemoVenueData() {
   populateDemoRoster();
   populateDemoDemandSignals();
   populateDemoOnShiftSignals();
+
+  // Pre-fill Settings fields with demo data
+  var vnEl = document.getElementById('setting-venue-name');
+  if (vnEl) vnEl.value = 'The Brass Monkey';
+  var locEl = document.getElementById('setting-location');
+  if (locEl) locEl.value = 'Northbridge, WA';
+  var stEl = document.getElementById('setting-state');
+  if (stEl) stEl.value = 'wa';
+  var msEl = document.getElementById('setting-min-staff');
+  if (msEl) msEl.value = '2';
+  var cpsEl = document.getElementById('setting-covers-per-staff');
+  if (cpsEl) cpsEl.value = '8';
+
+  // Pre-fill Report date fields
+  var rsEl = document.getElementById('report-start-date');
+  if (rsEl) rsEl.value = '2026-05-01';
+  var reEl = document.getElementById('report-end-date');
+  if (reEl) reEl.value = '2026-05-30';
+
+  // Pre-fill Notification Dispatch stats for demo
+  var seEl = document.getElementById('stat-email');
+  if (seEl) seEl.textContent = '24';
+  var ssEl = document.getElementById('stat-sms');
+  if (ssEl) ssEl.textContent = '18';
+  var spEl = document.getElementById('stat-push');
+  if (spEl) spEl.textContent = '42';
+  var swEl = document.getElementById('stat-websocket');
+  if (swEl) swEl.textContent = '156';
+
   // Defer chart init until Chart.js is available (CDN may be async)
   whenChartReady(function() {
     try { initHourlyBreakdownChart(true); } catch(e) { console.warn('Chart init skipped:', e); }
