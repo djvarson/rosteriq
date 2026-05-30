@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -57,6 +59,52 @@ class BookingSnapshot:
 
 
 # ============================================================================
+# Rate limiter
+# ============================================================================
+
+
+class TokenBucketRateLimiter:
+    """
+    Simple token-bucket rate limiter for API calls.
+
+    Tracks request timestamps and enforces a maximum number of requests
+    per time window. Async-safe via asyncio.Lock.
+    """
+
+    def __init__(self, max_requests: int = 30, window_seconds: float = 60.0):
+        """
+        Args:
+            max_requests: Maximum requests allowed per window.
+            window_seconds: Window duration in seconds.
+        """
+        self._max_requests = max_requests
+        self._window_seconds = window_seconds
+        self._timestamps: list[float] = []
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        """
+        Wait until a request slot is available, then consume it.
+
+        Blocks if the rate limit is currently exceeded.
+        """
+        async with self._lock:
+            now = time.monotonic()
+            # Purge timestamps outside the window
+            cutoff = now - self._window_seconds
+            self._timestamps = [t for t in self._timestamps if t > cutoff]
+
+            if len(self._timestamps) >= self._max_requests:
+                # Wait until the oldest request exits the window
+                sleep_time = self._timestamps[0] - cutoff
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
+                self._timestamps = [t for t in self._timestamps if t > time.monotonic() - self._window_seconds]
+
+            self._timestamps.append(time.monotonic())
+
+
+# ============================================================================
 # Base Reservations Adapter
 # ============================================================================
 
@@ -94,6 +142,7 @@ class ReservationsAdapter(DataFeedAdapter):
         self.no_show_rate = no_show_rate
         self._http_client = http_client
         self._owns_client = http_client is None
+        self._rate_limiter = TokenBucketRateLimiter(max_requests=30, window_seconds=60.0)
 
     async def __aenter__(self) -> ReservationsAdapter:
         """Async context manager entry."""
@@ -111,6 +160,135 @@ class ReservationsAdapter(DataFeedAdapter):
             self._http_client = httpx.AsyncClient(timeout=30.0)
             self._owns_client = True
         return self._http_client
+
+    async def _rate_limited_get(
+        self,
+        url: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """
+        Perform an HTTP GET with rate limiting applied.
+
+        Args:
+            url: URL to fetch.
+            **kwargs: Extra arguments passed to httpx.AsyncClient.get().
+
+        Returns:
+            httpx.Response object.
+        """
+        await self._rate_limiter.acquire()
+        return await self.http_client.get(url, **kwargs)
+
+    async def validate_credentials(self, api_key: str) -> bool:
+        """
+        Validate that an API key is functional by making a lightweight call.
+
+        Subclasses should override this with a provider-specific lightweight
+        endpoint. The base implementation delegates to is_available() after
+        temporarily swapping the api_key.
+
+        Args:
+            api_key: The API key to validate.
+
+        Returns:
+            True if the key is accepted by the provider, False otherwise.
+        """
+        original_key = self.api_key
+        self.api_key = api_key
+        try:
+            return await self.is_available()
+        finally:
+            self.api_key = original_key
+
+    async def get_today(
+        self,
+        venue_id: str,
+    ) -> list[dict[str, Any]]:
+        """
+        Return today's reservations with hourly breakdown.
+
+        Convenience method wrapping fetch_signals for today only.
+        Returns a list of dicts with consistent keys:
+        date, hour, covers, party_sizes, no_shows.
+
+        Args:
+            venue_id: Provider-specific venue ID.
+
+        Returns:
+            List of hourly reservation summary dicts.
+        """
+        today = date.today()
+        location = Location(latitude=0, longitude=0)
+        signals = await self.fetch_signals(
+            location=location,
+            start_date=today,
+            end_date=today,
+            venue_id=venue_id,
+        )
+        return self._signals_to_dicts(signals)
+
+    async def get_forecast(
+        self,
+        venue_id: str,
+        days_ahead: int = 7,
+    ) -> list[dict[str, Any]]:
+        """
+        Return upcoming reservation forecast for the next N days.
+
+        Convenience method wrapping fetch_signals for a forward window.
+        Returns a list of dicts with consistent keys:
+        date, hour, covers, party_sizes, no_shows.
+
+        Args:
+            venue_id: Provider-specific venue ID.
+            days_ahead: Number of days to look ahead (default 7).
+
+        Returns:
+            List of daily reservation forecast dicts.
+        """
+        today = date.today()
+        end = today + timedelta(days=days_ahead)
+        location = Location(latitude=0, longitude=0)
+        signals = await self.fetch_signals(
+            location=location,
+            start_date=today,
+            end_date=end,
+            venue_id=venue_id,
+        )
+        return self._signals_to_dicts(signals)
+
+    @staticmethod
+    def _signals_to_dicts(signals: list[FeedSignal]) -> list[dict[str, Any]]:
+        """
+        Convert FeedSignal objects to the consistent dict format
+        used by routes: date, hour, covers, party_sizes, no_shows.
+
+        Args:
+            signals: List of FeedSignal objects.
+
+        Returns:
+            List of dicts with normalised keys.
+        """
+        results = []
+        for signal in signals:
+            snapshot = (signal.raw_data or {}).get("snapshot", {})
+            total_covers = snapshot.get("total_covers", 0)
+            total_bookings = snapshot.get("total_bookings", 0)
+            adjusted_covers = snapshot.get("no_show_adjusted_covers", 0)
+            no_shows = round(total_covers - adjusted_covers) if total_covers else 0
+
+            results.append({
+                "date": signal.signal_date.isoformat(),
+                "hour": signal.signal_hour,
+                "covers": total_covers,
+                "party_sizes": {
+                    "avg": round(snapshot.get("avg_party_size", 0), 1),
+                    "large": snapshot.get("large_parties", 0),
+                    "count": total_bookings,
+                },
+                "no_shows": no_shows,
+            })
+        return results
 
     def _calculate_confidence(self, target_date: date) -> float:
         """
@@ -307,10 +485,16 @@ class ResDiaryAdapter(ReservationsAdapter):
         }
 
         try:
-            response = await self.http_client.get(url, params=params)
+            response = await self._rate_limited_get(url, params=params)
             response.raise_for_status()
             data = response.json()
             return data.get("bookings", [])
+        except httpx.TimeoutException:
+            logger.warning(f"ResDiary API request timed out for venue {venue_id}")
+            return []
+        except httpx.HTTPStatusError as e:
+            logger.error(f"ResDiary API HTTP {e.response.status_code}: {e}")
+            return []
         except httpx.HTTPError as e:
             logger.error(f"ResDiary API error: {e}")
             return []
@@ -349,7 +533,7 @@ class ResDiaryAdapter(ReservationsAdapter):
             return False
 
         try:
-            response = await self.http_client.get(
+            response = await self._rate_limited_get(
                 f"{self.base_url}/health",
                 params={"api_token": self.api_key},
                 timeout=5.0,
@@ -357,6 +541,30 @@ class ResDiaryAdapter(ReservationsAdapter):
             return response.status_code == 200
         except Exception as e:
             logger.debug(f"ResDiary health check failed: {e}")
+            return False
+
+    async def validate_credentials(self, api_key: str) -> bool:
+        """
+        Validate a ResDiary API token by calling the venues list endpoint.
+
+        Args:
+            api_key: API token to validate.
+
+        Returns:
+            True if the token is accepted.
+        """
+        try:
+            response = await self._rate_limited_get(
+                f"{self.base_url}/venues",
+                params={"api_token": api_key},
+                timeout=10.0,
+            )
+            return response.status_code == 200
+        except httpx.TimeoutException:
+            logger.warning("ResDiary credential validation timed out")
+            return False
+        except httpx.HTTPError as e:
+            logger.warning(f"ResDiary credential validation failed: {e}")
             return False
 
 
@@ -460,9 +668,15 @@ class NowBookItAdapter(ReservationsAdapter):
         }
 
         try:
-            response = await self.http_client.get(url, params=params)
+            response = await self._rate_limited_get(url, params=params)
             response.raise_for_status()
             return response.json().get("bookings", [])
+        except httpx.TimeoutException:
+            logger.warning("Now Book It API request timed out")
+            return []
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Now Book It API HTTP {e.response.status_code}: {e}")
+            return []
         except httpx.HTTPError as e:
             logger.error(f"Now Book It API error: {e}")
             return []
@@ -511,7 +725,7 @@ class NowBookItAdapter(ReservationsAdapter):
             return False
 
         try:
-            response = await self.http_client.get(
+            response = await self._rate_limited_get(
                 f"{self.base_url}/health",
                 params={"api_key": self.api_key},
                 timeout=5.0,
@@ -519,6 +733,30 @@ class NowBookItAdapter(ReservationsAdapter):
             return response.status_code == 200
         except Exception as e:
             logger.debug(f"Now Book It health check failed: {e}")
+            return False
+
+    async def validate_credentials(self, api_key: str) -> bool:
+        """
+        Validate a Now Book It API key by hitting the account endpoint.
+
+        Args:
+            api_key: API key to validate.
+
+        Returns:
+            True if the API key is accepted.
+        """
+        try:
+            response = await self._rate_limited_get(
+                f"{self.base_url}/account",
+                params={"api_key": api_key},
+                timeout=10.0,
+            )
+            return response.status_code == 200
+        except httpx.TimeoutException:
+            logger.warning("Now Book It credential validation timed out")
+            return False
+        except httpx.HTTPError as e:
+            logger.warning(f"Now Book It credential validation failed: {e}")
             return False
 
 
@@ -621,9 +859,15 @@ class OpenTableAdapter(ReservationsAdapter):
         headers = {"Authorization": f"Bearer {self.api_key}"}
 
         try:
-            response = await self.http_client.get(url, params=params, headers=headers)
+            response = await self._rate_limited_get(url, params=params, headers=headers)
             response.raise_for_status()
             return response.json().get("reservations", [])
+        except httpx.TimeoutException:
+            logger.warning("OpenTable API request timed out")
+            return []
+        except httpx.HTTPStatusError as e:
+            logger.error(f"OpenTable API HTTP {e.response.status_code}: {e}")
+            return []
         except httpx.HTTPError as e:
             logger.error(f"OpenTable API error: {e}")
             return []
@@ -671,7 +915,7 @@ class OpenTableAdapter(ReservationsAdapter):
 
         try:
             headers = {"Authorization": f"Bearer {self.api_key}"}
-            response = await self.http_client.get(
+            response = await self._rate_limited_get(
                 f"{self.base_url}/health",
                 headers=headers,
                 timeout=5.0,
@@ -679,6 +923,31 @@ class OpenTableAdapter(ReservationsAdapter):
             return response.status_code == 200
         except Exception as e:
             logger.debug(f"OpenTable health check failed: {e}")
+            return False
+
+    async def validate_credentials(self, api_key: str) -> bool:
+        """
+        Validate an OpenTable Bearer token by calling the restaurant info endpoint.
+
+        Args:
+            api_key: Bearer token to validate.
+
+        Returns:
+            True if the token is accepted.
+        """
+        try:
+            headers = {"Authorization": f"Bearer {api_key}"}
+            response = await self._rate_limited_get(
+                f"{self.base_url}/restaurants/me",
+                headers=headers,
+                timeout=10.0,
+            )
+            return response.status_code == 200
+        except httpx.TimeoutException:
+            logger.warning("OpenTable credential validation timed out")
+            return False
+        except httpx.HTTPError as e:
+            logger.warning(f"OpenTable credential validation failed: {e}")
             return False
 
 
@@ -1144,10 +1413,16 @@ class BookitLiveAdapter(ReservationsAdapter):
         }
 
         try:
-            response = await self.http_client.get(url, params=params, headers=headers)
+            response = await self._rate_limited_get(url, params=params, headers=headers)
             response.raise_for_status()
             data = response.json()
             return data.get("bookings", data.get("data", []))
+        except httpx.TimeoutException:
+            logger.warning("BookitLive API request timed out")
+            return []
+        except httpx.HTTPStatusError as e:
+            logger.error(f"BookitLive API HTTP {e.response.status_code}: {e}")
+            return []
         except httpx.HTTPError as e:
             logger.error(f"BookitLive API error: {e}")
             return []
@@ -1223,7 +1498,7 @@ class BookitLiveAdapter(ReservationsAdapter):
             return False
 
         try:
-            response = await self.http_client.get(
+            response = await self._rate_limited_get(
                 f"{self.base_url}/health",
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=5.0,
@@ -1231,6 +1506,31 @@ class BookitLiveAdapter(ReservationsAdapter):
             return response.status_code == 200
         except Exception as e:
             logger.debug(f"BookitLive health check failed: {e}")
+            return False
+
+    async def validate_credentials(self, api_key: str) -> bool:
+        """
+        Validate a BookitLive Bearer token by calling the account endpoint.
+
+        Args:
+            api_key: Bearer token to validate.
+
+        Returns:
+            True if the token is accepted.
+        """
+        try:
+            headers = {"Authorization": f"Bearer {api_key}"}
+            response = await self._rate_limited_get(
+                f"{self.base_url}/account",
+                headers=headers,
+                timeout=10.0,
+            )
+            return response.status_code == 200
+        except httpx.TimeoutException:
+            logger.warning("BookitLive credential validation timed out")
+            return False
+        except httpx.HTTPError as e:
+            logger.warning(f"BookitLive credential validation failed: {e}")
             return False
 
 

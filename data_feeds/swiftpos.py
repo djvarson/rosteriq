@@ -16,7 +16,10 @@ Supports:
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import logging
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -33,6 +36,40 @@ from rosteriq.data_feeds.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Rate limiter
+# ============================================================================
+
+
+class SwiftPOSRateLimiter:
+    """
+    Sliding window rate limiter for SwiftPOS API.
+
+    SwiftPOS allows approximately 60 requests per 60-second window.
+    """
+
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.requests: list[float] = []
+
+    async def acquire(self) -> None:
+        """Wait if necessary to stay within rate limits."""
+        self._clean_old_requests()
+        if len(self.requests) >= self.max_requests:
+            oldest = self.requests[0]
+            wait_time = self.window_seconds - (time.time() - oldest)
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            self._clean_old_requests()
+        self.requests.append(time.time())
+
+    def _clean_old_requests(self) -> None:
+        """Remove request timestamps outside the current window."""
+        cutoff = time.time() - self.window_seconds
+        self.requests = [t for t in self.requests if t > cutoff]
 
 
 # ============================================================================
@@ -117,6 +154,7 @@ class SwiftPOSAdapter(DataFeedAdapter):
         self._token_expires_at: Optional[datetime] = None
         self._http_client = http_client
         self._owns_client = http_client is None
+        self._rate_limiter = SwiftPOSRateLimiter()
 
     async def __aenter__(self) -> SwiftPOSAdapter:
         """Async context manager entry."""
@@ -158,6 +196,8 @@ class SwiftPOSAdapter(DataFeedAdapter):
             "client_secret": self.client_secret,
         }
 
+        await self._rate_limiter.acquire()
+
         try:
             response = await self.http_client.post(url, data=data)
             response.raise_for_status()
@@ -166,6 +206,15 @@ class SwiftPOSAdapter(DataFeedAdapter):
             expires_in = token_data.get("expires_in", 3600)
             self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in - 60)
             return self._access_token
+        except httpx.ConnectError as e:
+            logger.error(f"SwiftPOS connection failed: {e}")
+            raise ValueError(f"Cannot connect to SwiftPOS: {e}")
+        except httpx.TimeoutException as e:
+            logger.error(f"SwiftPOS token request timed out: {e}")
+            raise ValueError(f"SwiftPOS token request timed out: {e}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"SwiftPOS OAuth2 token request returned {e.response.status_code}: {e}")
+            raise ValueError(f"Failed to obtain SwiftPOS access token: {e}")
         except httpx.HTTPError as e:
             logger.error(f"SwiftPOS OAuth2 token request failed: {e}")
             raise ValueError(f"Failed to obtain SwiftPOS access token: {e}")
@@ -264,11 +313,22 @@ class SwiftPOSAdapter(DataFeedAdapter):
         }
         headers = {"Authorization": f"Bearer {token}"}
 
+        await self._rate_limiter.acquire()
+
         try:
             response = await self.http_client.get(url, params=params, headers=headers)
             response.raise_for_status()
             data = response.json()
             return data.get("hourly", [])
+        except httpx.ConnectError as e:
+            logger.warning(f"SwiftPOS connection failed for {venue_id}: {e}")
+            return []
+        except httpx.TimeoutException as e:
+            logger.warning(f"SwiftPOS request timed out for {venue_id}: {e}")
+            return []
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"SwiftPOS API returned {e.response.status_code} for {venue_id}: {e}")
+            return []
         except httpx.HTTPError as e:
             logger.error(f"SwiftPOS API error for {venue_id}: {e}")
             return []
@@ -362,7 +422,7 @@ class SwiftPOSAdapter(DataFeedAdapter):
         return min(1.0, confidence)
 
     async def is_available(self) -> bool:
-        """Check if SwiftPOS API is reachable."""
+        """Check if SwiftPOS API is reachable with stored credentials."""
         if not self.client_id or not self.client_secret:
             return False
 
@@ -372,3 +432,133 @@ class SwiftPOSAdapter(DataFeedAdapter):
         except Exception as e:
             logger.debug(f"SwiftPOS health check failed: {e}")
             return False
+
+    async def validate_credentials(self) -> bool:
+        """
+        Validate that the provided OAuth credentials actually work.
+
+        Makes a lightweight API call to verify authentication beyond
+        just obtaining a token.
+
+        Returns:
+            True if credentials are valid and API is accessible.
+        """
+        if not self.client_id or not self.client_secret:
+            return False
+
+        try:
+            token = await self._get_access_token()
+            headers = {"Authorization": f"Bearer {token}"}
+            await self._rate_limiter.acquire()
+            response = await self.http_client.get(
+                f"{self.base_url}/me",
+                headers=headers,
+            )
+            response.raise_for_status()
+            return True
+        except httpx.ConnectError as e:
+            logger.warning(f"SwiftPOS credential validation connection failed: {e}")
+            return False
+        except httpx.TimeoutException as e:
+            logger.warning(f"SwiftPOS credential validation timed out: {e}")
+            return False
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"SwiftPOS credential validation returned {e.response.status_code}: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"SwiftPOS credential validation failed: {e}")
+            return False
+
+    async def refresh_token(self) -> str:
+        """
+        Force-refresh the OAuth2 access token.
+
+        SwiftPOS uses client_credentials flow, so this re-authenticates
+        with the client_id/client_secret pair.
+
+        Returns:
+            New access token string.
+
+        Raises:
+            ValueError: If re-authentication fails.
+        """
+        self._access_token = None
+        self._token_expires_at = None
+        return await self._get_access_token()
+
+    @staticmethod
+    def parse_csv(csv_content: str) -> list[dict]:
+        """
+        Parse a SwiftPOS CSV export into normalised records.
+
+        Expected columns: Date, Time, Department, Items Sold,
+        Gross Sales, Voids/Refunds.
+
+        Returns:
+            List of dicts with keys: date, hour, revenue, transactions,
+            department_breakdown.
+        """
+        reader = csv.DictReader(io.StringIO(csv_content))
+        if not reader.fieldnames:
+            return []
+
+        # Resolve column names (flexible matching)
+        from rosteriq.pos_import import (
+            SWIFTPOS_COLUMN_MAP,
+            _resolve_column,
+            _parse_date,
+            _parse_time,
+            _parse_float,
+            _parse_int,
+        )
+
+        header = list(reader.fieldnames)
+        date_col = _resolve_column(header, SWIFTPOS_COLUMN_MAP["date"])
+        time_col = _resolve_column(header, SWIFTPOS_COLUMN_MAP["time"])
+        revenue_col = _resolve_column(header, SWIFTPOS_COLUMN_MAP["revenue"])
+        items_col = _resolve_column(header, SWIFTPOS_COLUMN_MAP["items"])
+        dept_col = _resolve_column(header, SWIFTPOS_COLUMN_MAP.get("department", []))
+        voids_col = _resolve_column(header, SWIFTPOS_COLUMN_MAP.get("voids", []))
+
+        aggregated: dict[tuple, dict] = {}
+
+        for row_values in reader:
+            row = list(row_values.values())
+            if not row or all(c.strip() == "" for c in row):
+                continue
+
+            if date_col is None:
+                continue
+            row_date = _parse_date(row[date_col])
+            if row_date is None:
+                continue
+
+            hour = 12
+            if time_col is not None:
+                parsed_hour = _parse_time(row[time_col])
+                if parsed_hour is not None:
+                    hour = parsed_hour
+
+            revenue = _parse_float(row[revenue_col]) if revenue_col is not None else 0.0
+            items = _parse_int(row[items_col]) if items_col is not None else 0
+            dept = row[dept_col].strip() if dept_col is not None and dept_col < len(row) else "other"
+            void_amt = _parse_float(row[voids_col]) if voids_col is not None else 0.0
+
+            key = (row_date, hour)
+            if key not in aggregated:
+                aggregated[key] = {
+                    "date": row_date.isoformat(),
+                    "hour": hour,
+                    "revenue": 0.0,
+                    "transactions": 0,
+                    "department_breakdown": {},
+                }
+
+            aggregated[key]["revenue"] += revenue
+            aggregated[key]["transactions"] += 1
+
+            dept_lower = dept.lower()
+            breakdown = aggregated[key]["department_breakdown"]
+            breakdown[dept_lower] = breakdown.get(dept_lower, 0.0) + revenue
+
+        return sorted(aggregated.values(), key=lambda r: (r["date"], r["hour"]))

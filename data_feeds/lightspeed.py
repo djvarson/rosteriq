@@ -23,6 +23,8 @@ Authentication:
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -210,7 +212,20 @@ class LightspeedAdapter(DataFeedAdapter):
             self._access_token = token_data.get("access_token")
             expires_in = token_data.get("expires_in", 3600)
             self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in - 60)
+            # Update refresh token if a new one was issued
+            new_refresh = token_data.get("refresh_token")
+            if new_refresh:
+                self.refresh_token = new_refresh
             return self._access_token
+        except httpx.ConnectError as e:
+            logger.error(f"Lightspeed token refresh connection failed: {e}")
+            raise ValueError(f"Cannot connect to Lightspeed for token refresh: {e}")
+        except httpx.TimeoutException as e:
+            logger.error(f"Lightspeed token refresh timed out: {e}")
+            raise ValueError(f"Lightspeed token refresh timed out: {e}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Lightspeed token refresh returned {e.response.status_code}: {e}")
+            raise ValueError(f"Failed to refresh Lightspeed access token: {e}")
         except httpx.HTTPError as e:
             logger.error(f"Lightspeed token refresh failed: {e}")
             raise ValueError(f"Failed to refresh Lightspeed access token: {e}")
@@ -266,6 +281,15 @@ class LightspeedAdapter(DataFeedAdapter):
 
             response.raise_for_status()
             return response.json()
+        except httpx.ConnectError as e:
+            logger.warning(f"Lightspeed connection failed: {e}")
+            raise
+        except httpx.TimeoutException as e:
+            logger.warning(f"Lightspeed request timed out: {e}")
+            raise
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Lightspeed API returned {e.response.status_code}: {e}")
+            raise
         except httpx.HTTPError as e:
             logger.error(f"Lightspeed API error: {e}")
             raise
@@ -507,7 +531,7 @@ class LightspeedAdapter(DataFeedAdapter):
         return min(1.0, confidence)
 
     async def is_available(self) -> bool:
-        """Check if Lightspeed API is reachable."""
+        """Check if Lightspeed API is reachable with stored credentials."""
         if not self.client_id or not self.client_secret or not self.refresh_token:
             return False
 
@@ -517,6 +541,134 @@ class LightspeedAdapter(DataFeedAdapter):
         except Exception as e:
             logger.debug(f"Lightspeed health check failed: {e}")
             return False
+
+    async def validate_credentials(self) -> bool:
+        """
+        Validate that the provided OAuth credentials actually work.
+
+        Makes a lightweight API call (GET /Account.json) to verify the
+        token grants real access.
+
+        Returns:
+            True if credentials are valid and API is accessible.
+        """
+        if not self.client_id or not self.client_secret or not self.refresh_token:
+            return False
+
+        try:
+            token = await self._refresh_token_if_needed()
+            await self._wait_rate_limit()
+            headers = {"Authorization": f"Bearer {token}"}
+            response = await self.http_client.get(
+                f"{self.base_url}.json",
+                headers=headers,
+            )
+            response.raise_for_status()
+            return True
+        except httpx.ConnectError as e:
+            logger.warning(f"Lightspeed credential validation connection failed: {e}")
+            return False
+        except httpx.TimeoutException as e:
+            logger.warning(f"Lightspeed credential validation timed out: {e}")
+            return False
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Lightspeed credential validation returned {e.response.status_code}: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"Lightspeed credential validation failed: {e}")
+            return False
+
+    async def refresh_token(self) -> str:
+        """
+        Force-refresh the OAuth2 access token.
+
+        Clears the cached token and requests a new one using the
+        stored refresh_token.
+
+        Returns:
+            New access token string.
+
+        Raises:
+            ValueError: If token refresh fails.
+        """
+        self._access_token = None
+        self._token_expires_at = None
+        return await self._refresh_token_if_needed()
+
+    @staticmethod
+    def parse_csv(csv_content: str) -> list[dict]:
+        """
+        Parse a Lightspeed Restaurant CSV export into normalised records.
+
+        Expected columns: Date/Sale Date, Time/Sale Time, Total/Receipt Total,
+        Items, Category.
+
+        Returns:
+            List of dicts with keys: date, hour, revenue, transactions,
+            department_breakdown.
+        """
+        reader = csv.DictReader(io.StringIO(csv_content))
+        if not reader.fieldnames:
+            return []
+
+        from rosteriq.pos_import import (
+            LIGHTSPEED_RESTAURANT_COLUMN_MAP,
+            _resolve_column,
+            _parse_date,
+            _parse_time,
+            _parse_float,
+            _parse_int,
+        )
+
+        header = list(reader.fieldnames)
+        date_col = _resolve_column(header, LIGHTSPEED_RESTAURANT_COLUMN_MAP["date"])
+        time_col = _resolve_column(header, LIGHTSPEED_RESTAURANT_COLUMN_MAP["time"])
+        revenue_col = _resolve_column(header, LIGHTSPEED_RESTAURANT_COLUMN_MAP["revenue"])
+        items_col = _resolve_column(header, LIGHTSPEED_RESTAURANT_COLUMN_MAP["items"])
+        category_col = _resolve_column(header, LIGHTSPEED_RESTAURANT_COLUMN_MAP.get("category", []))
+
+        aggregated: dict[tuple, dict] = {}
+
+        for row_values in reader:
+            row = list(row_values.values())
+            if not row or all(c.strip() == "" for c in row):
+                continue
+
+            if date_col is None:
+                continue
+            row_date = _parse_date(row[date_col])
+            if row_date is None:
+                continue
+
+            hour = 12
+            if time_col is not None:
+                parsed_hour = _parse_time(row[time_col])
+                if parsed_hour is not None:
+                    hour = parsed_hour
+
+            revenue = _parse_float(row[revenue_col]) if revenue_col is not None else 0.0
+            category = row[category_col].strip().lower() if category_col is not None and category_col < len(row) else "other"
+
+            # Map category through the adapter's mapping
+            dept = LightspeedAdapter.CATEGORY_MAPPING.get(category, "other")
+
+            key = (row_date, hour)
+            if key not in aggregated:
+                aggregated[key] = {
+                    "date": row_date.isoformat(),
+                    "hour": hour,
+                    "revenue": 0.0,
+                    "transactions": 0,
+                    "department_breakdown": {},
+                }
+
+            aggregated[key]["revenue"] += revenue
+            aggregated[key]["transactions"] += 1
+
+            breakdown = aggregated[key]["department_breakdown"]
+            breakdown[dept] = breakdown.get(dept, 0.0) + revenue
+
+        return sorted(aggregated.values(), key=lambda r: (r["date"], r["hour"]))
 
     def _make_signal(
         self,

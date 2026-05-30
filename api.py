@@ -445,6 +445,36 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register Deputy routes: {e}")
 
+# HumanForce integration routes
+try:
+    from rosteriq.routes.humanforce import router as humanforce_router
+    app.include_router(humanforce_router)
+    logger.info("HumanForce integration routes registered")
+except ImportError:
+    logger.info("HumanForce routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register HumanForce routes: {e}")
+
+# POS system integration routes (SwiftPOS, Lightspeed, Kounta)
+try:
+    from rosteriq.routes.pos import router as pos_router
+    app.include_router(pos_router)
+    logger.info("POS integration routes registered")
+except ImportError:
+    logger.info("POS integration routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register POS integration routes: {e}")
+
+# Reservation/booking system integration routes (NowBookIt, ResDiary, OpenTable, BookitLive)
+try:
+    from rosteriq.routes.reservations import router as reservations_router
+    app.include_router(reservations_router)
+    logger.info("Reservation integration routes registered")
+except ImportError:
+    logger.info("Reservation routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register reservation routes: {e}")
+
 # Data feed configuration routes
 try:
     from rosteriq.routes.feed_config import router as feed_config_router

@@ -3070,13 +3070,16 @@
                   <div style="color: var(--success); font-weight: 600; font-size: 12px;">✓ Connected</div>
                 </div>
               </div>
-              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="swiftpos-integration-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
                     <div style="font-weight: 600; color: var(--text-primary);">SwiftPOS (POS System)</div>
                     <div style="font-size: 12px; color: var(--text-muted);">Track covers, revenue, and transaction data</div>
                   </div>
-                  <button class="btn btn-secondary btn-small">Connect</button>
+                  <div id="swiftpos-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-swiftpos-connect" onclick="connectPos('swiftpos')">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-swiftpos-disconnect" onclick="disconnectPos('swiftpos')" style="display: none;">Disconnect</button>
+                  </div>
                 </div>
               </div>
               <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
@@ -3100,31 +3103,64 @@
                   </div>
                 </div>
               </div>
-              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="humanforce-integration-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
                     <div style="font-weight: 600; color: var(--text-primary);">HumanForce (Workforce Management)</div>
                     <div style="font-size: 12px; color: var(--text-muted);">Import staff, shifts, and award data from HumanForce</div>
                   </div>
-                  <button class="btn btn-secondary btn-small">Connect</button>
+                  <div id="humanforce-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-humanforce-connect" onclick="connectHumanForce()">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-humanforce-disconnect" onclick="disconnectHumanForce()" style="display: none;">Disconnect</button>
+                  </div>
                 </div>
               </div>
-              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="nowbookit-integration-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
                     <div style="font-weight: 600; color: var(--text-primary);">NowBookIt (Reservations)</div>
                     <div style="font-size: 12px; color: var(--text-muted);">Sync reservation covers for demand forecasting</div>
                   </div>
-                  <button class="btn btn-secondary btn-small">Connect</button>
+                  <div id="nowbookit-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-nowbookit-connect" onclick="connectReservation('nowbookit')">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-nowbookit-disconnect" onclick="disconnectReservation('nowbookit')" style="display: none;">Disconnect</button>
+                  </div>
                 </div>
               </div>
-              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="resdiary-integration-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <div>
+                    <div style="font-weight: 600; color: var(--text-primary);">ResDiary (Reservations)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">AU/NZ reservation platform -- sync bookings and covers</div>
+                  </div>
+                  <div id="resdiary-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-resdiary-connect" onclick="connectReservation('resdiary')">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-resdiary-disconnect" onclick="disconnectReservation('resdiary')" style="display: none;">Disconnect</button>
+                  </div>
+                </div>
+              </div>
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="opentable-integration-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <div>
+                    <div style="font-weight: 600; color: var(--text-primary);">OpenTable (Reservations)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Global reservation platform -- import covers and party sizes</div>
+                  </div>
+                  <div id="opentable-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-opentable-connect" onclick="connectReservation('opentable')">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-opentable-disconnect" onclick="disconnectReservation('opentable')" style="display: none;">Disconnect</button>
+                  </div>
+                </div>
+              </div>
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="bookitlive-integration-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
                     <div style="font-weight: 600; color: var(--text-primary);">BookitLive (Reservations)</div>
                     <div style="font-size: 12px; color: var(--text-muted);">Import bookings and covers from BookitLive for demand signals</div>
                   </div>
-                  <button class="btn btn-secondary btn-small">Connect</button>
+                  <div id="bookitlive-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-bookitlive-connect" onclick="connectReservation('bookitlive')">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-bookitlive-disconnect" onclick="disconnectReservation('bookitlive')" style="display: none;">Disconnect</button>
+                  </div>
                 </div>
               </div>
               <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
@@ -3136,22 +3172,28 @@
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
-              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="lightspeed-integration-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
                     <div style="font-weight: 600; color: var(--text-primary);">Lightspeed (POS System)</div>
                     <div style="font-size: 12px; color: var(--text-muted);">Import sales data and transaction history</div>
                   </div>
-                  <button class="btn btn-secondary btn-small">Connect</button>
+                  <div id="lightspeed-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-lightspeed-connect" onclick="connectPos('lightspeed')">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-lightspeed-disconnect" onclick="disconnectPos('lightspeed')" style="display: none;">Disconnect</button>
+                  </div>
                 </div>
               </div>
-              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="kounta-integration-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
                     <div style="font-weight: 600; color: var(--text-primary);">Kounta (POS System)</div>
                     <div style="font-size: 12px; color: var(--text-muted);">Real-time sales and product mix data</div>
                   </div>
-                  <button class="btn btn-secondary btn-small">Connect</button>
+                  <div id="kounta-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-kounta-connect" onclick="connectPos('kounta')">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-kounta-disconnect" onclick="disconnectPos('kounta')" style="display: none;">Disconnect</button>
+                  </div>
                 </div>
               </div>
               <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
@@ -4214,6 +4256,7 @@ async function loadVenueData() {
     populateStaffList();
     connectionManager.hide();
     checkDeputyStatus();
+    checkHumanForceStatus();
   } catch (error) {
     console.error('Failed to load venue data:', error);
     // Fallback to demo data
@@ -5218,6 +5261,103 @@ document.querySelectorAll('.modal').forEach(modal => {
 });
 
 // ============================================
+// Reservation Provider Integration
+// ============================================
+
+const RESERVATION_PROVIDER_NAMES = {
+  nowbookit: 'NowBookIt',
+  resdiary: 'ResDiary',
+  opentable: 'OpenTable',
+  bookitlive: 'BookitLive'
+};
+
+async function connectReservation(provider) {
+  try {
+    const displayName = RESERVATION_PROVIDER_NAMES[provider] || provider;
+    const apiKey = prompt('Enter your ' + displayName + ' API key:');
+    if (!apiKey) return;
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const providerVenueId = prompt('Enter your ' + displayName + ' venue/restaurant ID (leave blank to use default):');
+    const body = { venue_id: venueId, api_key: apiKey };
+    if (providerVenueId) body.provider_venue_id = providerVenueId;
+    const resp = await fetch('/api/reservations/' + provider + '/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error('Failed to connect ' + displayName);
+    const data = await resp.json();
+    updateReservationStatus(provider, true);
+    showToastNotification(displayName + ' Connected', data.message || 'Connection successful', 'success');
+  } catch (err) {
+    console.error('Reservation connect error:', err);
+    const displayName = RESERVATION_PROVIDER_NAMES[provider] || provider;
+    showToastNotification('Connection Failed', 'Could not connect to ' + displayName, 'error');
+  }
+}
+
+async function disconnectReservation(provider) {
+  try {
+    const displayName = RESERVATION_PROVIDER_NAMES[provider] || provider;
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/reservations/' + provider + '/uninstall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+      body: JSON.stringify({ venue_id: venueId })
+    });
+    if (!resp.ok) throw new Error('Failed to disconnect ' + displayName);
+    updateReservationStatus(provider, false);
+    showToastNotification(displayName + ' Disconnected', displayName + ' integration has been removed', 'success');
+  } catch (err) {
+    console.error('Reservation disconnect error:', err);
+    const displayName = RESERVATION_PROVIDER_NAMES[provider] || provider;
+    showToastNotification('Disconnect Failed', 'Could not disconnect ' + displayName, 'error');
+  }
+}
+
+function updateReservationStatus(provider, connected) {
+  const connectBtn = document.getElementById('btn-' + provider + '-connect');
+  const disconnectBtn = document.getElementById('btn-' + provider + '-disconnect');
+  if (!connectBtn || !disconnectBtn) return;
+  if (connected) {
+    connectBtn.style.display = 'none';
+    disconnectBtn.style.display = 'inline-flex';
+  } else {
+    connectBtn.style.display = 'inline-flex';
+    disconnectBtn.style.display = 'none';
+  }
+}
+
+async function checkReservationStatus(provider) {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/reservations/' + provider + '/status?venue_id=' + encodeURIComponent(venueId), {
+      headers: { 'Authorization': 'Bearer ' + state.token }
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      updateReservationStatus(provider, data.connected || false);
+    }
+  } catch (err) {
+    console.log(provider + ' status check unavailable');
+  }
+}
+
+async function checkAllReservationStatuses() {
+  const providers = ['nowbookit', 'resdiary', 'opentable', 'bookitlive'];
+  for (const provider of providers) {
+    await checkReservationStatus(provider);
+  }
+}
+
+// Check reservation statuses on page load
+if (typeof window !== 'undefined') {
+  window.addEventListener('load', function() {
+    setTimeout(checkAllReservationStatuses, 1500);
+  });
+}
+
+// ============================================
 // Deputy Integration
 // ============================================
 
@@ -5285,6 +5425,183 @@ async function checkDeputyStatus() {
   } catch (err) {
     console.log('Deputy status check unavailable');
   }
+}
+
+// ============================================
+// HumanForce Integration
+// ============================================
+
+async function connectHumanForce() {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/humanforce/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+      body: JSON.stringify({ venue_id: venueId })
+    });
+    if (!resp.ok) throw new Error('Failed to start HumanForce connection');
+    const data = await resp.json();
+    if (data.authorize_url) {
+      window.open(data.authorize_url, '_blank');
+      showToastNotification('HumanForce', 'Complete authorization in the new tab', 'info');
+    }
+  } catch (err) {
+    console.error('HumanForce connect error:', err);
+    showToastNotification('Connection Failed', 'Could not connect to HumanForce', 'error');
+  }
+}
+
+async function disconnectHumanForce() {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/humanforce/uninstall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+      body: JSON.stringify({ venue_id: venueId })
+    });
+    if (!resp.ok) throw new Error('Failed to disconnect HumanForce');
+    updateHumanForceStatus(false);
+    showToastNotification('HumanForce Disconnected', 'HumanForce integration has been removed', 'success');
+  } catch (err) {
+    console.error('HumanForce disconnect error:', err);
+    showToastNotification('Disconnect Failed', 'Could not disconnect HumanForce', 'error');
+  }
+}
+
+function updateHumanForceStatus(connected) {
+  const connectBtn = document.getElementById('btn-humanforce-connect');
+  const disconnectBtn = document.getElementById('btn-humanforce-disconnect');
+  if (connected) {
+    connectBtn.style.display = 'none';
+    disconnectBtn.style.display = 'inline-flex';
+  } else {
+    connectBtn.style.display = 'inline-flex';
+    disconnectBtn.style.display = 'none';
+  }
+}
+
+async function checkHumanForceStatus() {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/humanforce/status?venue_id=' + encodeURIComponent(venueId), {
+      headers: { 'Authorization': 'Bearer ' + state.token }
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      updateHumanForceStatus(data.connected || false);
+    }
+  } catch (err) {
+    console.log('HumanForce status check unavailable');
+  }
+}
+
+// ============================================
+// POS Integration (SwiftPOS, Lightspeed, Kounta)
+// ============================================
+
+const POS_PROVIDER_NAMES = {
+  swiftpos: 'SwiftPOS',
+  lightspeed: 'Lightspeed',
+  kounta: 'Kounta'
+};
+
+async function connectPos(provider) {
+  try {
+    const displayName = POS_PROVIDER_NAMES[provider] || provider;
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    let credentials = {};
+
+    if (provider === 'kounta') {
+      const apiKey = prompt('Enter your ' + displayName + ' API key:');
+      if (!apiKey) return;
+      credentials = { api_key: apiKey };
+    } else {
+      const clientId = prompt('Enter your ' + displayName + ' Client ID:');
+      if (!clientId) return;
+      const clientSecret = prompt('Enter your ' + displayName + ' Client Secret:');
+      if (!clientSecret) return;
+      credentials = { client_id: clientId, client_secret: clientSecret };
+      if (provider === 'lightspeed') {
+        const refreshToken = prompt('Enter your Lightspeed refresh token (optional):');
+        if (refreshToken) credentials.refresh_token = refreshToken;
+      }
+    }
+
+    const resp = await fetch('/api/pos/' + provider + '/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+      body: JSON.stringify({ provider: provider, venue_id: venueId, ...credentials })
+    });
+    if (!resp.ok) throw new Error('Failed to connect ' + displayName);
+    const data = await resp.json();
+    updatePosStatus(provider, data.connected || data.status === 'active');
+    showToastNotification(displayName + ' Connected', data.message || 'Connection successful', 'success');
+  } catch (err) {
+    console.error('POS connect error:', err);
+    const displayName = POS_PROVIDER_NAMES[provider] || provider;
+    showToastNotification('Connection Failed', 'Could not connect to ' + displayName, 'error');
+  }
+}
+
+async function disconnectPos(provider) {
+  try {
+    const displayName = POS_PROVIDER_NAMES[provider] || provider;
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/pos/' + provider + '/uninstall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+      body: JSON.stringify({ provider: provider, venue_id: venueId })
+    });
+    if (!resp.ok) throw new Error('Failed to disconnect ' + displayName);
+    updatePosStatus(provider, false);
+    showToastNotification(displayName + ' Disconnected', displayName + ' integration has been removed', 'success');
+  } catch (err) {
+    console.error('POS disconnect error:', err);
+    const displayName = POS_PROVIDER_NAMES[provider] || provider;
+    showToastNotification('Disconnect Failed', 'Could not disconnect ' + displayName, 'error');
+  }
+}
+
+function updatePosStatus(provider, connected) {
+  const connectBtn = document.getElementById('btn-' + provider + '-connect');
+  const disconnectBtn = document.getElementById('btn-' + provider + '-disconnect');
+  if (!connectBtn || !disconnectBtn) return;
+  if (connected) {
+    connectBtn.style.display = 'none';
+    disconnectBtn.style.display = 'inline-flex';
+  } else {
+    connectBtn.style.display = 'inline-flex';
+    disconnectBtn.style.display = 'none';
+  }
+}
+
+async function checkPosStatus(provider) {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetch('/api/pos/' + provider + '/status?venue_id=' + encodeURIComponent(venueId), {
+      headers: { 'Authorization': 'Bearer ' + state.token }
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      updatePosStatus(provider, data.connected || false);
+    }
+  } catch (err) {
+    console.log(provider + ' POS status check unavailable');
+  }
+}
+
+async function checkAllPosStatuses() {
+  const providers = ['swiftpos', 'lightspeed', 'kounta'];
+  for (const provider of providers) {
+    await checkPosStatus(provider);
+  }
+}
+
+// Check POS statuses on page load
+if (typeof window !== 'undefined') {
+  window.addEventListener('load', function() {
+    setTimeout(checkAllPosStatuses, 1200);
+  });
 }
 
 // ============================================

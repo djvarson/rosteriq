@@ -102,6 +102,27 @@ AVAILABLE_FEEDS = {
             {"name": "location_id", "type": "string", "required": True},
         ],
     },
+    "lightspeed": {
+        "display_name": "POS (Lightspeed)",
+        "description": "Lightspeed Restaurant POS sales and transaction data",
+        "requires_api_key": True,
+        "default_poll_interval_minutes": 10,
+        "config_params": [
+            {"name": "client_id", "type": "string", "required": True},
+            {"name": "client_secret", "type": "password", "required": True},
+            {"name": "refresh_token", "type": "password", "required": False},
+        ],
+    },
+    "kounta": {
+        "display_name": "POS (Kounta)",
+        "description": "Kounta cloud POS sales, payments, and product mix data",
+        "requires_api_key": True,
+        "default_poll_interval_minutes": 10,
+        "config_params": [
+            {"name": "api_key", "type": "password", "required": True},
+            {"name": "company_id", "type": "string", "required": True},
+        ],
+    },
     "calendar": {
         "display_name": "Calendar Events",
         "description": "Private calendar events and bookings",

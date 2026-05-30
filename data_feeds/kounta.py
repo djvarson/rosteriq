@@ -22,6 +22,8 @@ Authentication:
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -236,6 +238,15 @@ class KountaAdapter(DataFeedAdapter):
             response = await self.http_client.request(method, url, params=params, headers=headers)
             response.raise_for_status()
             return response.json()
+        except httpx.ConnectError as e:
+            logger.warning(f"Kounta connection failed: {e}")
+            raise
+        except httpx.TimeoutException as e:
+            logger.warning(f"Kounta request timed out: {e}")
+            raise
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Kounta API returned {e.response.status_code}: {e}")
+            raise
         except httpx.HTTPError as e:
             logger.error(f"Kounta API error: {e}")
             raise
@@ -513,7 +524,7 @@ class KountaAdapter(DataFeedAdapter):
         return min(1.0, confidence)
 
     async def is_available(self) -> bool:
-        """Check if Kounta API is reachable."""
+        """Check if Kounta API is reachable with stored credentials."""
         if not self.api_key:
             return False
 
@@ -524,6 +535,108 @@ class KountaAdapter(DataFeedAdapter):
         except Exception as e:
             logger.debug(f"Kounta health check failed: {e}")
             return False
+
+    async def validate_credentials(self) -> bool:
+        """
+        Validate that the provided API key actually works.
+
+        Makes a lightweight API call (GET /me) to verify the key
+        grants real access.
+
+        Returns:
+            True if credentials are valid and API is accessible.
+        """
+        if not self.api_key:
+            return False
+
+        try:
+            await self._make_request("GET", "/me")
+            return True
+        except httpx.ConnectError as e:
+            logger.warning(f"Kounta credential validation connection failed: {e}")
+            return False
+        except httpx.TimeoutException as e:
+            logger.warning(f"Kounta credential validation timed out: {e}")
+            return False
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Kounta credential validation returned {e.response.status_code}: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"Kounta credential validation failed: {e}")
+            return False
+
+    @staticmethod
+    def parse_csv(csv_content: str) -> list[dict]:
+        """
+        Parse a Kounta CSV export into normalised records.
+
+        Expected columns: Date, Time, Total/Order Total, Items,
+        Payment Method.
+
+        Returns:
+            List of dicts with keys: date, hour, revenue, transactions,
+            department_breakdown.
+        """
+        reader = csv.DictReader(io.StringIO(csv_content))
+        if not reader.fieldnames:
+            return []
+
+        from rosteriq.pos_import import (
+            KOUNTA_COLUMN_MAP,
+            _resolve_column,
+            _parse_date,
+            _parse_time,
+            _parse_float,
+            _parse_int,
+        )
+
+        header = list(reader.fieldnames)
+        date_col = _resolve_column(header, KOUNTA_COLUMN_MAP["date"])
+        time_col = _resolve_column(header, KOUNTA_COLUMN_MAP["time"])
+        revenue_col = _resolve_column(header, KOUNTA_COLUMN_MAP["revenue"])
+        items_col = _resolve_column(header, KOUNTA_COLUMN_MAP["items"])
+        payment_col = _resolve_column(header, KOUNTA_COLUMN_MAP.get("payment", []))
+
+        aggregated: dict[tuple, dict] = {}
+
+        for row_values in reader:
+            row = list(row_values.values())
+            if not row or all(c.strip() == "" for c in row):
+                continue
+
+            if date_col is None:
+                continue
+            row_date = _parse_date(row[date_col])
+            if row_date is None:
+                continue
+
+            hour = 12
+            if time_col is not None:
+                parsed_hour = _parse_time(row[time_col])
+                if parsed_hour is not None:
+                    hour = parsed_hour
+
+            revenue = _parse_float(row[revenue_col]) if revenue_col is not None else 0.0
+            payment = row[payment_col].strip().lower() if payment_col is not None and payment_col < len(row) else "other"
+
+            key = (row_date, hour)
+            if key not in aggregated:
+                aggregated[key] = {
+                    "date": row_date.isoformat(),
+                    "hour": hour,
+                    "revenue": 0.0,
+                    "transactions": 0,
+                    "department_breakdown": {},
+                }
+
+            aggregated[key]["revenue"] += revenue
+            aggregated[key]["transactions"] += 1
+
+            # Track payment method in breakdown (useful for Kounta's cash/card split)
+            breakdown = aggregated[key]["department_breakdown"]
+            breakdown[payment] = breakdown.get(payment, 0.0) + revenue
+
+        return sorted(aggregated.values(), key=lambda r: (r["date"], r["hour"]))
 
     def _make_signal(
         self,
