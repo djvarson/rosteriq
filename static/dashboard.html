@@ -644,8 +644,8 @@
     }
 
     .btn-primary:hover {
-      background: #2952CC;
-      box-shadow: 0 4px 12px rgba(51, 102, 255, 0.3);
+      background: #D97706;
+      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
     }
 
     .btn-secondary {
@@ -899,7 +899,7 @@
     }
 
     .staff-item:hover {
-      background: #EDF2F7;
+      background: rgba(245, 158, 11, 0.08);
       border-color: var(--brand-blue);
     }
 
@@ -969,7 +969,7 @@
     }
 
     .conflict-item:hover {
-      background: #EDF2F7;
+      background: rgba(245, 158, 11, 0.08);
       border-color: var(--brand-blue);
     }
 
@@ -1407,7 +1407,7 @@
        LOADING SKELETONS
        ============================================ */
     .skeleton {
-      background: linear-gradient(90deg, #e0e0e0 25%, #d0d0d0 50%, #e0e0e0 75%);
+      background: linear-gradient(90deg, #1E242C 25%, #252C36 50%, #1E242C 75%);
       background-size: 200% 100%;
       animation: shimmer 1.5s infinite;
       border-radius: 4px;
@@ -1431,6 +1431,99 @@
     .skeleton-table-row {
       height: 40px;
       margin-bottom: 4px;
+    }
+
+    /* ============================================
+       COLLAPSIBLE SECTIONS
+       ============================================ */
+    .dash-section {
+      margin-bottom: 16px;
+    }
+
+    .dash-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px 8px 0 0;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+    }
+
+    .dash-section-header:hover {
+      background: rgba(245, 158, 11, 0.06);
+    }
+
+    .dash-section.collapsed .dash-section-header {
+      border-radius: 8px;
+    }
+
+    .dash-section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+
+    .dash-section-chevron {
+      width: 16px;
+      height: 16px;
+      color: var(--text-muted);
+      transition: transform 0.2s;
+    }
+
+    .dash-section.collapsed .dash-section-chevron {
+      transform: rotate(-90deg);
+    }
+
+    .dash-section-body {
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      padding: 16px;
+      background: transparent;
+      transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+      overflow: hidden;
+    }
+
+    .dash-section.collapsed .dash-section-body {
+      max-height: 0;
+      opacity: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      border: none;
+    }
+
+    .dash-section-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 10px;
+    }
+
+    .dash-section-badge.danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+    }
+
+    .dash-section-badge.warning {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+    }
+
+    .dash-section-badge.info {
+      background: rgba(59, 130, 246, 0.15);
+      color: var(--info);
     }
 
     /* ============================================
@@ -2205,6 +2298,22 @@
           <p class="page-subtitle">Real-time venue insights and rostering metrics</p>
         </div>
 
+        <!-- ALERTS SECTION (Top Priority) -->
+        <div class="dash-section" id="section-alerts" data-section="alerts">
+          <div class="dash-section-header" onclick="toggleSection('alerts')">
+            <div style="display:flex;align-items:center;">
+              <span class="dash-section-title">Active Alerts</span>
+              <span class="dash-section-badge danger" id="alerts-count-badge" style="display:none;">0</span>
+            </div>
+            <svg class="dash-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="dash-section-body">
+            <div id="alerts-panel-top" style="max-height: 300px; overflow-y: auto;">
+              <div style="text-align: center; padding: 20px; color: var(--text-muted);">No active alerts</div>
+            </div>
+          </div>
+        </div>
+
         <!-- KPI Cards -->
         <div class="grid-4">
           <div class="kpi-card">
@@ -2249,6 +2358,14 @@
             <div class="kpi-detail" id="staff-breakdown" style="margin-top: 8px;">—</div>
           </div>
         </div>
+
+        <!-- REVENUE & PERFORMANCE SECTION -->
+        <div class="dash-section" id="section-revenue" data-section="revenue">
+          <div class="dash-section-header" onclick="toggleSection('revenue')">
+            <span class="dash-section-title">Revenue & Performance</span>
+            <svg class="dash-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="dash-section-body">
 
         <!-- Live Revenue Card -->
         <div class="grid-2">
@@ -2309,18 +2426,24 @@
               <canvas id="revenue-labour-chart"></canvas>
             </div>
           </div>
-
-          <!-- Alerts Panel -->
-          <div class="card">
-            <div class="chart-title">Active Alerts</div>
-            <div id="alerts-panel" style="max-height: 350px; overflow-y: auto;">
-              <div class="loading">
-                <div class="spinner"></div>
-                <span>Loading alerts...</span>
-              </div>
+          <div class="chart-container">
+            <div class="chart-title">Labour % of Revenue</div>
+            <div class="chart-wrap">
+              <canvas id="labour-pct-trend-chart"></canvas>
             </div>
           </div>
         </div>
+
+          </div><!-- end dash-section-body revenue -->
+        </div><!-- end section-revenue -->
+
+        <!-- DEMAND INTELLIGENCE SECTION -->
+        <div class="dash-section" id="section-demand" data-section="demand">
+          <div class="dash-section-header" onclick="toggleSection('demand')">
+            <span class="dash-section-title">Demand Intelligence</span>
+            <svg class="dash-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="dash-section-body">
 
         <!-- DEMAND INTELLIGENCE PANEL -->
         <div class="grid-1">
@@ -2486,6 +2609,17 @@
             </div>
           </div>
         </div>
+
+          </div><!-- end dash-section-body demand -->
+        </div><!-- end section-demand -->
+
+        <!-- ACTIONS & TOOLS SECTION -->
+        <div class="dash-section" id="section-actions" data-section="actions">
+          <div class="dash-section-header" onclick="toggleSection('actions')">
+            <span class="dash-section-title">Actions & Tools</span>
+            <svg class="dash-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div class="dash-section-body">
 
         <!-- Quick Actions -->
         <div class="grid-1">
@@ -2759,6 +2893,10 @@
             </div>
           </div>
         </div>
+
+          </div><!-- end dash-section-body actions -->
+        </div><!-- end section-actions -->
+
       </div>
 
       <!-- ROSTER PAGE -->
@@ -4228,6 +4366,43 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ============================================
+// COLLAPSIBLE SECTIONS
+// ============================================
+
+/**
+ * Toggle dashboard section collapse state
+ */
+function toggleSection(sectionName) {
+  const section = document.getElementById('section-' + sectionName);
+  if (!section) return;
+  section.classList.toggle('collapsed');
+  // Persist state
+  try {
+    const states = JSON.parse(sessionStorage.getItem('riq-sections') || '{}');
+    states[sectionName] = section.classList.contains('collapsed');
+    sessionStorage.setItem('riq-sections', JSON.stringify(states));
+  } catch(e) {}
+}
+
+/**
+ * Restore section collapse states from session
+ */
+function restoreSectionStates() {
+  try {
+    const states = JSON.parse(sessionStorage.getItem('riq-sections') || '{}');
+    Object.keys(states).forEach(function(name) {
+      if (states[name]) {
+        const el = document.getElementById('section-' + name);
+        if (el) el.classList.add('collapsed');
+      }
+    });
+  } catch(e) {}
+}
+
+// Restore on load
+restoreSectionStates();
+
+// ============================================
 // UI STATE UTILITIES
 // ============================================
 
@@ -4994,6 +5169,63 @@ function initLabourPctChart() {
   });
 }
 
+// Labour % Trend Chart (Dashboard)
+function initLabourPctTrendChart() {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const data = [0.27, 0.29, 0.31, 0.28, 0.30, 0.33, 0.29];
+
+  createChart('labour-pct-trend-chart', {
+    type: 'line',
+    data: {
+      labels: days,
+      datasets: [
+        {
+          label: 'Labour %',
+          data: data,
+          borderColor: colors.primary,
+          backgroundColor: `${colors.primary}15`,
+          borderWidth: 2,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointBackgroundColor: colors.primary,
+        },
+        {
+          label: 'Target (30%)',
+          data: Array(7).fill(0.30),
+          borderColor: colors.success,
+          borderWidth: 2,
+          borderDash: [5, 5],
+          fill: false,
+          tension: 0,
+          pointRadius: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          labels: { boxWidth: 12, padding: 16, font: { size: 11 }, color: '#8B949E' },
+        },
+      },
+      scales: {
+        y: {
+          title: { display: true, text: 'Percentage', color: '#8B949E' },
+          ticks: { callback: function(v) { return (v * 100).toFixed(0) + '%'; }, color: '#8B949E' },
+          grid: { color: 'rgba(255,255,255,0.06)' },
+        },
+        x: {
+          ticks: { color: '#8B949E' },
+          grid: { color: 'rgba(255,255,255,0.06)' },
+        },
+      },
+    },
+  });
+}
+
 // Labour vs Revenue Report Chart
 function initLabourRevenueChart() {
   const days = Array.from({ length: 14 }, (_, i) => `Day ${i + 1}`);
@@ -5100,6 +5332,7 @@ async function loadVenueData() {
     clearState('kpi-row');
     updateDashboardKPIs();
     initRevenueLabourChart();
+    initLabourPctTrendChart();
     initHourlyBreakdownChart();
     populateAlerts();
     populateStaffList();
@@ -5158,6 +5391,7 @@ function loadDemoVenueData() {
   whenChartReady(function() {
     try { initHourlyBreakdownChart(true); } catch(e) { console.warn('Chart init skipped:', e); }
     try { initRevenueLabourChart(); } catch(e) { console.warn('Chart init skipped:', e); }
+    try { initLabourPctTrendChart(); } catch(e) { console.warn('Chart init skipped:', e); }
     try { populateDemoReportCharts(); } catch(e) { console.warn('Chart init skipped:', e); }
   });
 }
@@ -5316,32 +5550,38 @@ function populateAlerts() {
     { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'Event Nearby', desc: 'Concert at venue nearby: +15% expected', badge: 'Event' },
   ];
 
-  const container = document.getElementById('alerts-panel');
-  container.innerHTML = alerts.map(a => `
-    <div class="alert-item">
-      <div class="alert-icon">${a.icon}</div>
-      <div class="alert-body">
-        <div class="alert-title">${esc(a.title)}</div>
-        <div class="alert-desc">${esc(a.desc)}</div>
-        <span class="alert-badge badge-${esc(a.type)}">${esc(a.badge)}</span>
-      </div>
-    </div>
-  `).join('');
+  renderAlerts(alerts);
 }
 
 function populateDemoAlerts() {
-  const alerts = demoData.alerts;
-  const container = document.getElementById('alerts-panel');
-  container.innerHTML = alerts.map(a => `
-    <div class="alert-item">
-      <div class="alert-icon">${a.icon}</div>
-      <div class="alert-body">
-        <div class="alert-title">${esc(a.title)}</div>
-        <div class="alert-desc">${esc(a.desc)}</div>
-        <span class="alert-badge badge-${esc(a.type)}">${esc(a.badge)}</span>
+  renderAlerts(demoData.alerts || []);
+}
+
+function renderAlerts(alerts) {
+  const container = document.getElementById('alerts-panel-top');
+  if (!container) return;
+  const badge = document.getElementById('alerts-count-badge');
+  if (alerts.length > 0) {
+    container.innerHTML = alerts.map(a => `
+      <div class="alert-item">
+        <div class="alert-icon">${a.icon}</div>
+        <div class="alert-body">
+          <div class="alert-title">${esc(a.title)}</div>
+          <div class="alert-desc">${esc(a.desc)}</div>
+          <span class="alert-badge badge-${esc(a.type)}">${esc(a.badge)}</span>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+    if (badge) {
+      var urgentCount = alerts.filter(function(a){ return a.type === 'danger'; }).length;
+      badge.textContent = urgentCount || alerts.length;
+      badge.className = 'dash-section-badge ' + (urgentCount > 0 ? 'danger' : 'warning');
+      badge.style.display = 'inline-flex';
+    }
+  } else {
+    container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">No active alerts</div>';
+    if (badge) badge.style.display = 'none';
+  }
 }
 
 function populateStaffList() {
@@ -6043,7 +6283,7 @@ function displayNotificationStats(stats) {
             colors.warning,
             colors.primary,
           ],
-          borderColor: 'white',
+          borderColor: '#161B22',
           borderWidth: 2,
         }],
       },
@@ -6053,7 +6293,7 @@ function displayNotificationStats(stats) {
         plugins: {
           legend: {
             position: 'bottom',
-            labels: { padding: 16, font: { size: 12 } },
+            labels: { padding: 16, font: { size: 12 }, color: '#8B949E' },
           },
         },
       },
@@ -6571,7 +6811,7 @@ function updateHourlySparkline(hourlyData) {
       datasets: [{
         label: 'Revenue',
         data: revenues,
-        backgroundColor: 'rgba(51, 102, 255, 0.6)',
+        backgroundColor: 'rgba(245, 158, 11, 0.6)',
         borderColor: 'var(--brand-blue)',
         borderWidth: 1,
         borderRadius: 4,
