@@ -2971,6 +2971,9 @@
                 <button class="btn btn-secondary btn-small" onclick="exportRosterPDF()" title="Download PDF for printing">PDF</button>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterCSV()" title="Download CSV for Excel">CSV</button>
                 <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" title="Push roster to connected system" style="background:rgba(245,158,11,0.1); border-color:var(--brand-blue); color:var(--brand-blue);">Push to System</button>
+                <span style="display:inline-block; width:1px; height:20px; background:#2A3040; margin:0 8px; vertical-align:middle;"></span>
+                <button class="btn btn-secondary btn-small" onclick="exportDailyRunsheet()" title="Print today's shift runsheet">Runsheet</button>
+                <button class="btn btn-secondary btn-small" onclick="sendRosterToStaff()" id="btn-send-roster" title="Email/SMS roster to all staff" style="background:rgba(34,197,94,0.1); border-color:var(--success); color:var(--success);">Send to Staff</button>
               </div>
             </div>
 
@@ -3223,7 +3226,10 @@
           <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
               <div class="chart-title" style="margin: 0;">Staff Directory</div>
-              <button class="btn btn-primary btn-small" id="btn-add-staff">+ Add Staff</button>
+              <div>
+                <button class="btn btn-secondary btn-small" onclick="exportStaffContacts()" title="Download staff contact list">Export Contacts</button>
+                <button class="btn btn-primary btn-small" id="btn-add-staff">+ Add Staff</button>
+              </div>
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
@@ -7676,6 +7682,19 @@ function exportRosterPDF() {
   const fmt = d => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
   const weekLabel = fmt(monday) + ' - ' + fmt(sunday) + ', ' + sunday.getFullYear();
 
+  // Get labour cost from the Cost Summary panel
+  const totalCostEl = document.getElementById('roster-total-cost');
+  const dailyCostEl = document.getElementById('roster-daily-cost');
+  const varianceEl = document.getElementById('roster-variance');
+  const totalCost = totalCostEl ? '$' + totalCostEl.textContent : '-';
+  const dailyCost = dailyCostEl ? '$' + dailyCostEl.textContent : '-';
+  const variance = varianceEl ? varianceEl.textContent : '-';
+  const costHTML = '<div style="margin-top:12px; padding:10px 0; border-top:2px solid #F59E0B; display:flex; gap:32px; font-size:13px;">' +
+    '<div><strong>Total Labour Cost:</strong> ' + totalCost + '</div>' +
+    '<div><strong>Avg Daily:</strong> ' + dailyCost + '</div>' +
+    '<div><strong>Variance vs Budget:</strong> ' + variance + '</div>' +
+    '</div>';
+
   // Build print-friendly HTML
   const printHTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Roster - ${weekLabel}</title>
@@ -7708,6 +7727,7 @@ function exportRosterPDF() {
     ${data.map(row => '<tr><td class="name">' + row.name + '</td><td class="role">' + row.role + '</td>' + row.shifts.map(s => s === 'Off' ? '<td class="off">Off</td>' : '<td class="shift">' + s + '</td>').join('') + '</tr>').join('\n    ')}
   </tbody>
 </table>
+${costHTML}
 <div class="footer">Generated ${new Date().toLocaleDateString('en-AU')} by RosterIQ</div>
 </body></html>`;
 
@@ -7750,6 +7770,14 @@ function exportRosterCSV() {
     }
     csvRows.push(fields.join(','));
   });
+
+  // Add labour cost summary row
+  const csvTotalCostEl = document.getElementById('roster-total-cost');
+  const csvDailyCostEl = document.getElementById('roster-daily-cost');
+  const csvVarianceEl = document.getElementById('roster-variance');
+  csvRows.push('');
+  csvRows.push('"LABOUR COST SUMMARY","","","","","","","",""');
+  csvRows.push('"Total Weekly Cost","$' + (csvTotalCostEl ? csvTotalCostEl.textContent : '0') + '","Avg Daily","$' + (csvDailyCostEl ? csvDailyCostEl.textContent : '0') + '","Variance","' + (csvVarianceEl ? csvVarianceEl.textContent : '0%') + '","","",""');
 
   const csv = csvRows.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -7857,6 +7885,281 @@ async function pushToRosteringSystem() {
       btn.textContent = 'Push to System';
     }
   }
+}
+
+// ── Send Roster to Staff ────────────────────────────────────────────
+async function sendRosterToStaff() {
+  const btn = document.getElementById('btn-send-roster');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+
+  try {
+    const venueId = state.currentVenue;
+    if (!venueId) { showToast('No venue selected', 'error'); return; }
+
+    // Get the week date for context
+    const weekEl = document.getElementById('roster-week-date');
+    const weekLabel = weekEl ? weekEl.textContent : 'current week';
+
+    // Dispatch ROSTER_PUBLISHED notification to all staff
+    const result = await fetchAPI('/api/v1/notifications/dispatch', {
+      method: 'POST',
+      body: JSON.stringify({
+        event_type: 'ROSTER_PUBLISHED',
+        venue_id: venueId,
+        payload: {
+          week: weekLabel,
+          sent_by: 'manager',
+          message: 'Your roster for the week of ' + weekLabel + ' has been published.'
+        }
+      })
+    });
+
+    const sent = result.total_targets || 0;
+    showToast('Roster sent to ' + sent + ' staff member' + (sent !== 1 ? 's' : ''), 'success', 4000);
+  } catch (err) {
+    console.error('Send roster failed:', err);
+    showToast('Send failed: ' + (err.message || 'Unknown error'), 'error', 5000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send to Staff'; }
+  }
+}
+
+// ── Daily Runsheet PDF ──────────────────────────────────────────────
+function exportDailyRunsheet() {
+  const table = document.getElementById('roster-table');
+  if (!table) { showToast('No roster to export', 'error'); return; }
+
+  const rows = table.querySelectorAll('tbody tr');
+  if (!rows.length) { showToast('Roster is empty', 'error'); return; }
+
+  const today = new Date();
+  const dayIndex = today.getDay();
+  // Map: Sun=0,Mon=1...Sat=6 → table column: Mon=1,Tue=2...Sun=7
+  const colIndex = dayIndex === 0 ? 7 : dayIndex;
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const todayName = dayNames[dayIndex];
+  const todayFormatted = today.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  // Extract today's shifts
+  const todayShifts = [];
+  rows.forEach(row => {
+    const cells = row.querySelectorAll('td');
+    if (!cells.length) return;
+    const nameEl = cells[0].querySelector('strong');
+    const roleEl = cells[0].querySelector('span');
+    const name = nameEl ? nameEl.textContent.trim() : '';
+    const role = roleEl ? roleEl.textContent.trim() : '';
+
+    const dayCell = cells[colIndex];
+    if (!dayCell) return;
+    const shiftEl = dayCell.querySelector('.shift-cell');
+    if (shiftEl) {
+      const shiftTime = shiftEl.childNodes[0].textContent.trim();
+      const reasonEl = shiftEl.querySelector('.ai-reason');
+      const note = reasonEl ? reasonEl.textContent.trim() : '';
+      todayShifts.push({ name, role, shift: shiftTime, note });
+    }
+    // Skip staff who are Off today
+  });
+
+  if (!todayShifts.length) {
+    showToast('No shifts rostered for today', 'warning');
+    return;
+  }
+
+  // Sort by shift start time
+  todayShifts.sort((a, b) => {
+    const getHour = s => { const m = s.match(/^(\d+)/); return m ? parseInt(m[1]) : 0; };
+    return getHour(a.shift) - getHour(b.shift);
+  });
+
+  const printHTML = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Runsheet - ${todayName}</title>
+<style>
+  @page { size: portrait; margin: 15mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1a1a1a; }
+  .header { border-bottom: 3px solid #F59E0B; padding-bottom: 10px; margin-bottom: 16px; }
+  .header h1 { font-size: 22px; font-weight: 700; }
+  .header .date { font-size: 15px; color: #555; margin-top: 2px; }
+  .header .brand { font-size: 10px; color: #999; float: right; margin-top: -30px; }
+  .count { font-size: 13px; color: #666; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #0F1419; color: #fff; padding: 10px 12px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px; }
+  tr:nth-child(even) td { background: #f8f9fa; }
+  .name { font-weight: 600; font-size: 15px; }
+  .role { color: #888; font-size: 12px; }
+  .shift { font-weight: 600; font-size: 16px; color: #0F1419; }
+  .note { font-size: 11px; color: #F59E0B; font-style: italic; }
+  .footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #ddd; }
+  .footer .notes { font-size: 12px; color: #999; }
+  .notes-area { border: 1px dashed #ccc; border-radius: 6px; padding: 12px; min-height: 60px; margin-top: 8px; font-size: 11px; color: #bbb; }
+</style>
+</head><body>
+<div class="header">
+  <h1>Daily Runsheet</h1>
+  <div class="date">${todayFormatted}</div>
+  <div class="brand">RosterIQ</div>
+</div>
+<div class="count">${todayShifts.length} staff rostered today</div>
+<table>
+  <thead><tr><th>Start</th><th>Staff</th><th>Role</th><th>Notes</th></tr></thead>
+  <tbody>
+    ${todayShifts.map(s => '<tr><td class="shift">' + s.shift + '</td><td class="name">' + s.name + '</td><td class="role">' + s.role + '</td><td class="note">' + (s.note || '-') + '</td></tr>').join('\n    ')}
+  </tbody>
+</table>
+<div class="footer">
+  <div class="notes">Shift Notes</div>
+  <div class="notes-area">Write notes here...</div>
+</div>
+</body></html>`;
+
+  const win = window.open('', '_blank', 'width=700,height=900');
+  win.document.write(printHTML);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { win.print(); }, 400);
+  showToast('Runsheet print dialog opened', 'success');
+}
+
+// ── Week Navigation ─────────────────────────────────────────────────
+var rosterWeekOffset = 0;
+
+function getWeekMonday(offset) {
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (now.getDay() || 7) + 1 + (offset * 7));
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+function updateRosterWeekDisplay() {
+  const monday = getWeekMonday(rosterWeekOffset);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const fmt = d => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+  document.getElementById('roster-week-date').textContent =
+    fmt(monday) + ' - ' + fmt(sunday) + ', ' + sunday.getFullYear();
+
+  // Update prev/next button states
+  const prevBtn = document.getElementById('btn-prev-week');
+  const nextBtn = document.getElementById('btn-next-week');
+  if (prevBtn) prevBtn.style.opacity = rosterWeekOffset <= -4 ? '0.4' : '1';
+  if (nextBtn) nextBtn.style.opacity = rosterWeekOffset >= 4 ? '0.4' : '1';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  const prevBtn = document.getElementById('btn-prev-week');
+  const nextBtn = document.getElementById('btn-next-week');
+
+  if (prevBtn) {
+    prevBtn.addEventListener('click', function() {
+      if (rosterWeekOffset <= -4) return;
+      rosterWeekOffset--;
+      updateRosterWeekDisplay();
+      loadRosterForWeek();
+    });
+  }
+
+  if (nextBtn) {
+    nextBtn.addEventListener('click', function() {
+      if (rosterWeekOffset >= 4) return;
+      rosterWeekOffset++;
+      updateRosterWeekDisplay();
+      loadRosterForWeek();
+    });
+  }
+});
+
+async function loadRosterForWeek() {
+  const monday = getWeekMonday(rosterWeekOffset);
+  const dateStr = monday.toISOString().slice(0, 10);
+  const venueId = state.currentVenue;
+  if (!venueId) return;
+
+  try {
+    const roster = await fetchAPI('/api/rosters?venue_id=' + venueId + '&week_start=' + dateStr);
+    if (roster && roster.length > 0) {
+      renderRosterTable(roster[0]);
+    } else {
+      // No roster for this week — show empty state
+      const tbody = document.getElementById('roster-body');
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">No roster generated for this week. Click Generate Roster to create one.</td></tr>';
+    }
+  } catch (err) {
+    // Fallback: keep current display, just update week label
+    console.log('Could not load roster for week:', dateStr);
+  }
+}
+
+function renderRosterTable(roster) {
+  if (!roster || !roster.shifts) return;
+  const tbody = document.getElementById('roster-body');
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+  // Group shifts by employee
+  const staffMap = {};
+  roster.shifts.forEach(shift => {
+    const key = shift.employee_id || shift.employee_name;
+    if (!staffMap[key]) {
+      staffMap[key] = { name: shift.employee_name || key, role: shift.role || '', shifts: {} };
+    }
+    const day = new Date(shift.date).getDay();
+    const dayKey = days[day === 0 ? 6 : day - 1];
+    staffMap[key].shifts[dayKey] = shift.start_time + '-' + shift.end_time;
+  });
+
+  const staffList = Object.values(staffMap);
+  if (!staffList.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">No shifts in this roster.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = staffList.map(staff => {
+    const cells = days.map(d => {
+      if (staff.shifts[d]) {
+        return '<td><span class="shift-cell shift-optimal" draggable="true">' + staff.shifts[d] + '</span></td>';
+      }
+      return '<td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>';
+    }).join('');
+    return '<tr><td><strong>' + (typeof esc === 'function' ? esc(staff.name) : staff.name) + '</strong><br><span style="font-size:11px;color:var(--text-muted);">' + (typeof esc === 'function' ? esc(staff.role) : staff.role) + '</span></td>' + cells + '</tr>';
+  }).join('');
+}
+
+// ── Staff Contact Export ────────────────────────────────────────────
+function exportStaffContacts() {
+  const table = document.getElementById('staff-table');
+  if (!table) { showToast('Staff table not found', 'error'); return; }
+
+  const rows = table.querySelectorAll('tbody tr');
+  if (!rows.length) { showToast('No staff to export', 'error'); return; }
+
+  const headers = ['Name', 'Role', 'Award Level', 'Rate', 'Certifications', 'Availability'];
+  const csvRows = [headers.join(',')];
+
+  rows.forEach(row => {
+    const cells = row.querySelectorAll('td');
+    if (cells.length < 6) return;
+    const fields = [];
+    for (let i = 0; i < 6; i++) {
+      let val = cells[i].textContent.trim().replace(/\s+/g, ' ');
+      fields.push('"' + val.replace(/"/g, '""') + '"');
+    }
+    csvRows.push(fields.join(','));
+  });
+
+  const csv = csvRows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'staff_contacts_' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Staff contacts downloaded', 'success');
 }
 </script>
 
