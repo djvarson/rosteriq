@@ -668,9 +668,10 @@
                 const data = await response.json();
 
                 if (response.ok || response.status === 201) {
-                    // Store token if returned
-                    if (data.token) {
-                        localStorage.setItem('jwt_token', data.token);
+                    // Store token — API returns tokens nested under .tokens
+                    const token = data.token || (data.tokens && data.tokens.access_token);
+                    if (token) {
+                        localStorage.setItem('jwt_token', token);
                     }
 
                     // Store venue name for onboarding wizard

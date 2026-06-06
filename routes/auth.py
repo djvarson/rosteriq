@@ -76,18 +76,18 @@ async def register(
     # Update last login
     auth_service.update_last_login(user["id"])
 
-    # Send verification email asynchronously
-    verify_token = auth_service.create_email_verification_token(user["id"])
-    verification_url = f"https://app.example.com/verify-email?token={verify_token}"
-    notification_service = get_notification_service()
-    asyncio.create_task(
-        notification_service.send_email_verification(
-            email=user["email"],
-            name=user.get("name", "User"),
-            verification_token=verify_token,
-            verification_url=verification_url,
-        )
-    )
+    # Email verification disabled for pilot — enable with SendGrid when scaling
+    # verify_token = auth_service.create_email_verification_token(user["id"])
+    # verification_url = f"https://rosteriq-production-6aaf.up.railway.app/verify-email?token={verify_token}"
+    # notification_service = get_notification_service()
+    # asyncio.create_task(
+    #     notification_service.send_email_verification(
+    #         email=user["email"],
+    #         name=user.get("name", "User"),
+    #         verification_token=verify_token,
+    #         verification_url=verification_url,
+    #     )
+    # )
 
     return UserDetailResponse(
         user=UserResponse(
