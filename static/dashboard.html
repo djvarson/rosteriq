@@ -544,6 +544,57 @@
       color: var(--danger);
     }
 
+    /* Draggable shifts */
+    .shift-cell[draggable="true"] {
+      cursor: grab;
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+
+    .shift-cell[draggable="true"]:active {
+      cursor: grabbing;
+      transform: scale(1.05);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .roster-table td.drag-over {
+      background: rgba(245, 158, 11, 0.15) !important;
+      outline: 2px dashed var(--brand-blue);
+      outline-offset: -2px;
+    }
+
+    .shift-cell.dragging {
+      opacity: 0.4;
+    }
+
+    /* AI suggestion tooltip */
+    .ai-reason {
+      display: block;
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--text-muted);
+      margin-top: 3px;
+      line-height: 1.3;
+    }
+
+    .shift-cell.ai-suggested {
+      border: 1px dashed var(--brand-blue);
+      position: relative;
+    }
+
+    .shift-cell.ai-suggested::before {
+      content: 'AI';
+      position: absolute;
+      top: -6px;
+      right: -4px;
+      font-size: 8px;
+      font-weight: 700;
+      background: var(--brand-blue);
+      color: #000;
+      padding: 1px 4px;
+      border-radius: 3px;
+      line-height: 1;
+    }
+
     /* ============================================
        ALERTS & SIGNALS
        ============================================ */
@@ -2935,64 +2986,64 @@
                 </thead>
                 <tbody id="roster-body">
                   <tr>
-                    <td>Emma Thompson</td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">6-11pm</span></td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
+                    <td><strong>Emma Thompson</strong><br><span style="font-size:11px;color:var(--text-muted);">Floor (L3)</span></td>
+                    <td><span class="shift-cell shift-optimal ai-suggested" draggable="true">9-5pm<span class="ai-reason">Best for lunch peak</span></span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td><span class="shift-cell shift-warning" draggable="true">6-11pm<span class="ai-reason">Sat penalty 1.5x</span></span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
                   </tr>
                   <tr>
-                    <td>James Wilson</td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
-                    <td><span class="shift-cell shift-optimal">6-11pm</span></td>
+                    <td><strong>James Wilson</strong><br><span style="font-size:11px;color:var(--text-muted);">Bar (L2)</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td><span class="shift-cell shift-optimal ai-suggested" draggable="true">5-11pm<span class="ai-reason">High demand Fri</span></span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
+                    <td><span class="shift-cell shift-danger" draggable="true">6-11pm<span class="ai-reason">Sun penalty 1.75x</span></span></td>
                   </tr>
                   <tr>
-                    <td>Sarah Chen</td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">6-11pm</span></td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
+                    <td><strong>Sarah Chen</strong><br><span style="font-size:11px;color:var(--text-muted);">Kitchen (L3)</span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td><span class="shift-cell shift-optimal ai-suggested" draggable="true">6-11pm<span class="ai-reason">Covers forecast +18%</span></span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
                   </tr>
                   <tr>
-                    <td>Marcus Johnson</td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">6-11pm</span></td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
+                    <td><strong>Marcus Johnson</strong><br><span style="font-size:11px;color:var(--text-muted);">Floor (L2)</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td><span class="shift-cell shift-warning" draggable="true">6-11pm<span class="ai-reason">Sat penalty 1.5x</span></span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
                   </tr>
                   <tr>
-                    <td>Lisa Brown</td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">9-5pm</span></td>
-                    <td><span class="shift-cell shift-optimal">6-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">6-11pm</span></td>
+                    <td><strong>Lisa Brown</strong><br><span style="font-size:11px;color:var(--text-muted);">Bar (L3)</span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td><span class="shift-cell shift-optimal ai-suggested" draggable="true">9-5pm<span class="ai-reason">Avoids overtime</span></span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">9-5pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">6-11pm</span></td>
+                    <td><span class="shift-cell shift-warning" draggable="true">6-11pm<span class="ai-reason">Sun penalty 1.75x</span></span></td>
                   </tr>
                   <tr>
-                    <td>David Miller</td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">5-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">6-11pm</span></td>
-                    <td><span class="shift-cell shift-optimal">6-11pm</span></td>
+                    <td><strong>David Miller</strong><br><span style="font-size:11px;color:var(--text-muted);">Kitchen (L2)</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
+                    <td><span class="shift-cell shift-optimal" draggable="true">6-11pm</span></td>
+                    <td><span class="shift-cell shift-optimal ai-suggested" draggable="true">6-11pm<span class="ai-reason">Needed for close</span></span></td>
                   </tr>
                 </tbody>
               </table>
@@ -3287,7 +3338,10 @@
         <div class="tab-panel active" id="tab-break-compliance">
           <div class="grid-1">
             <div class="card">
-              <div class="chart-title">Break Entitlements & Compliance</div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div class="chart-title" style="margin:0;">Break Entitlements & Compliance</div>
+                <button class="btn btn-primary btn-small" onclick="autoFixBreaks()">Auto-Schedule Breaks</button>
+              </div>
               <div class="table-container">
                 <table class="table">
                   <thead>
@@ -3297,6 +3351,7 @@
                       <th>Required Break</th>
                       <th>Taken</th>
                       <th>Status</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody id="break-compliance-body">
@@ -3305,28 +3360,32 @@
                       <td>8 hours</td>
                       <td>30 mins</td>
                       <td>30 mins @ 1:00 PM</td>
-                      <td><span class="alert-badge badge-success">✓ Compliant</span></td>
+                      <td><span class="alert-badge badge-success">Compliant</span></td>
+                      <td>—</td>
                     </tr>
                     <tr>
                       <td>James Wilson</td>
                       <td>6 hours</td>
                       <td>20 mins</td>
                       <td>20 mins @ 8:00 PM</td>
-                      <td><span class="alert-badge badge-success">✓ Compliant</span></td>
+                      <td><span class="alert-badge badge-success">Compliant</span></td>
+                      <td>—</td>
                     </tr>
-                    <tr>
-                      <td>Sarah Chen</td>
+                    <tr style="background: rgba(245, 158, 11, 0.05);">
+                      <td><strong>Sarah Chen</strong></td>
                       <td>8 hours</td>
                       <td>30 mins</td>
                       <td>—</td>
-                      <td><span class="alert-badge badge-warning">⚠ Due soon</span></td>
+                      <td><span class="alert-badge badge-warning">Due soon</span></td>
+                      <td><button class="btn btn-primary btn-small" onclick="scheduleBreak(this, 'Sarah Chen', '3:30 PM')">Schedule Now</button></td>
                     </tr>
                     <tr>
                       <td>Marcus Johnson</td>
                       <td>6.5 hours</td>
                       <td>20 mins</td>
                       <td>20 mins @ 7:30 PM</td>
-                      <td><span class="alert-badge badge-success">✓ Compliant</span></td>
+                      <td><span class="alert-badge badge-success">Compliant</span></td>
+                      <td>—</td>
                     </tr>
                   </tbody>
                 </table>
@@ -3339,7 +3398,10 @@
         <div class="tab-panel" id="tab-certifications">
           <div class="grid-1">
             <div class="card">
-              <div class="chart-title">Certification Expiry Tracker</div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div class="chart-title" style="margin:0;">Certification Expiry Tracker</div>
+                <button class="btn btn-primary btn-small" onclick="sendRenewalReminders()">Send Renewal Reminders</button>
+              </div>
               <div class="table-container">
                 <table class="table">
                   <thead>
@@ -3349,6 +3411,7 @@
                       <th>Expiry Date</th>
                       <th>Days Until Expiry</th>
                       <th>Status</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody id="cert-body">
@@ -3357,14 +3420,16 @@
                       <td>RSA (Liquor)</td>
                       <td>15 Jun 2027</td>
                       <td>405 days</td>
-                      <td><span class="alert-badge badge-success">✓ Valid</span></td>
+                      <td><span class="alert-badge badge-success">Valid</span></td>
+                      <td>—</td>
                     </tr>
-                    <tr>
-                      <td>James Wilson</td>
+                    <tr style="background: rgba(239, 68, 68, 0.05);">
+                      <td><strong>James Wilson</strong></td>
                       <td>RSG (Gaming)</td>
                       <td>22 Mar 2026</td>
                       <td>Overdue</td>
                       <td><span class="alert-badge badge-danger">Expired</span></td>
+                      <td><button class="btn btn-primary btn-small" onclick="notifyRenewal(this, 'James Wilson', 'RSG')">Notify Staff</button></td>
                     </tr>
                     <tr>
                       <td>Sarah Chen</td>
@@ -4403,6 +4468,70 @@ function restoreSectionStates() {
 restoreSectionStates();
 
 // ============================================
+// ROSTER DRAG & DROP
+// ============================================
+
+(function() {
+  var dragSrc = null;
+
+  document.addEventListener('dragstart', function(e) {
+    var cell = e.target.closest('.shift-cell');
+    if (!cell) return;
+    dragSrc = cell;
+    cell.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', cell.innerHTML);
+  });
+
+  document.addEventListener('dragend', function(e) {
+    var cell = e.target.closest('.shift-cell');
+    if (cell) cell.classList.remove('dragging');
+    document.querySelectorAll('.drag-over').forEach(function(el) {
+      el.classList.remove('drag-over');
+    });
+    dragSrc = null;
+  });
+
+  document.addEventListener('dragover', function(e) {
+    var td = e.target.closest('#roster-body td');
+    if (!td || !dragSrc) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    td.classList.add('drag-over');
+  });
+
+  document.addEventListener('dragleave', function(e) {
+    var td = e.target.closest('#roster-body td');
+    if (td) td.classList.remove('drag-over');
+  });
+
+  document.addEventListener('drop', function(e) {
+    var td = e.target.closest('#roster-body td');
+    if (!td || !dragSrc) return;
+    e.preventDefault();
+    td.classList.remove('drag-over');
+
+    var srcTd = dragSrc.closest('td');
+    if (srcTd === td) return;
+
+    // Swap contents
+    var srcHtml = srcTd.innerHTML;
+    var destHtml = td.innerHTML;
+    srcTd.innerHTML = destHtml;
+    td.innerHTML = srcHtml;
+
+    // Re-init draggable on swapped cells
+    srcTd.querySelectorAll('.shift-cell').forEach(function(c) { c.setAttribute('draggable', 'true'); });
+    td.querySelectorAll('.shift-cell').forEach(function(c) { c.setAttribute('draggable', 'true'); });
+
+    // Show feedback
+    td.style.transition = 'background 0.3s';
+    td.style.background = 'rgba(245, 158, 11, 0.15)';
+    setTimeout(function() { td.style.background = ''; }, 600);
+  });
+})();
+
+// ============================================
 // UI STATE UTILITIES
 // ============================================
 
@@ -4438,6 +4567,29 @@ function showEmpty(containerId, message, icon = '—') {
     <div style="text-align: center; padding: 48px 24px; color: var(--text-secondary);">
       <div style="font-size: 48px; margin-bottom: 16px;">${icon}</div>
       <div style="font-size: 14px;">${escapeHtml(message)}</div>
+    </div>
+  `;
+}
+
+/**
+ * Show guided empty state with action button
+ */
+function showGuidedEmpty(containerId, opts) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  var iconSvg = opts.icon || '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
+  var title = opts.title || 'No data yet';
+  var desc = opts.desc || '';
+  var actionText = opts.action || '';
+  var actionFn = opts.onClick || '';
+
+  container.innerHTML = `
+    <div style="text-align: center; padding: 40px 24px;">
+      <div style="color: var(--text-muted); margin-bottom: 12px; opacity: 0.5;">${iconSvg}</div>
+      <div style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">${esc(title)}</div>
+      <div style="font-size: 13px; color: var(--text-muted); max-width: 320px; margin: 0 auto 16px; line-height: 1.5;">${esc(desc)}</div>
+      ${actionText ? '<button class="btn btn-primary btn-small" onclick="' + esc(actionFn) + '">' + esc(actionText) + '</button>' : ''}
     </div>
   `;
 }
@@ -6086,6 +6238,47 @@ document.getElementById('btn-conflict-autofix').addEventListener('click', async 
 });
 
 // ============================================================================
+// ============================================
+// COMPLIANCE ONE-CLICK ACTIONS
+// ============================================
+
+function scheduleBreak(btn, name, time) {
+  btn.disabled = true;
+  btn.textContent = 'Scheduling...';
+  setTimeout(function() {
+    var row = btn.closest('tr');
+    row.style.background = '';
+    row.querySelector('td:nth-child(4)').textContent = '30 mins @ ' + time;
+    row.querySelector('.alert-badge').className = 'alert-badge badge-success';
+    row.querySelector('.alert-badge').textContent = 'Compliant';
+    btn.closest('td').innerHTML = '<span style="color: var(--success); font-size: 12px; font-weight: 600;">Scheduled</span>';
+  }, 800);
+}
+
+function autoFixBreaks() {
+  document.querySelectorAll('#break-compliance-body .badge-warning').forEach(function(badge) {
+    var row = badge.closest('tr');
+    var btn = row.querySelector('button');
+    if (btn) btn.click();
+  });
+}
+
+function notifyRenewal(btn, name, cert) {
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  setTimeout(function() {
+    btn.closest('td').innerHTML = '<span style="color: var(--warning); font-size: 12px; font-weight: 600;">Notified</span>';
+  }, 800);
+}
+
+function sendRenewalReminders() {
+  document.querySelectorAll('#cert-body .badge-danger, #cert-body .badge-warning').forEach(function(badge) {
+    var row = badge.closest('tr');
+    var btn = row.querySelector('button');
+    if (btn && !btn.disabled) btn.click();
+  });
+}
+
 // BACKUP MANAGEMENT FUNCTIONS
 // ============================================================================
 async function loadBackups() {
