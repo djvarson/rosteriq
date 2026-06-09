@@ -475,6 +475,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register reservation routes: {e}")
 
+# Function Tracker event/function management routes
+try:
+    from rosteriq.routes.function_tracker import router as function_tracker_router
+    app.include_router(function_tracker_router)
+    logger.info("Function Tracker routes registered")
+except ImportError:
+    logger.info("Function Tracker routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register Function Tracker routes: {e}")
+
 # Data feed configuration routes
 try:
     from rosteriq.routes.feed_config import router as feed_config_router

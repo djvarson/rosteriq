@@ -3879,6 +3879,22 @@
                   </div>
                 </div>
               </div>
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="functiontracker-integration-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Function Tracker (Events)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Import weddings, conferences and function bookings for demand signals</div>
+                  </div>
+                  <div id="functiontracker-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-functiontracker-connect" onclick="connectFunctionTracker()">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-functiontracker-disconnect" onclick="disconnectFunctionTracker()" style="display: none;">Disconnect</button>
+                  </div>
+                </div>
+                <div id="functiontracker-events-preview" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+                  <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Upcoming Functions</div>
+                  <div id="functiontracker-events-list" style="font-size: 13px; color: var(--text-secondary);"></div>
+                </div>
+              </div>
               <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
@@ -6656,7 +6672,121 @@ async function checkAllReservationStatuses() {
 if (typeof window !== 'undefined') {
   window.addEventListener('load', function() {
     setTimeout(checkAllReservationStatuses, 1500);
+    setTimeout(checkFunctionTrackerStatus, 2000);
   });
+}
+
+// ============================================
+// Function Tracker Integration
+// ============================================
+
+async function connectFunctionTracker() {
+  try {
+    const apiKey = prompt('Enter your Function Tracker API key:');
+    if (!apiKey) return;
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const ftVenueId = prompt('Enter your Function Tracker venue ID (leave blank to use default):');
+    const body = { venue_id: venueId, api_key: apiKey };
+    if (ftVenueId) body.ft_venue_id = ftVenueId;
+    const resp = await fetchAPI('/api/function-tracker/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error('Failed to connect Function Tracker');
+    const data = await resp.json();
+    updateFunctionTrackerStatus(true);
+    showToastNotification('Function Tracker Connected', data.message || 'Connection successful', 'success');
+    loadUpcomingFunctions();
+  } catch (err) {
+    console.error('Function Tracker connect error:', err);
+    showToastNotification('Connection Failed', 'Could not connect to Function Tracker', 'error');
+  }
+}
+
+async function disconnectFunctionTracker() {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetchAPI('/api/function-tracker/uninstall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ venue_id: venueId })
+    });
+    if (!resp.ok) throw new Error('Failed to disconnect Function Tracker');
+    updateFunctionTrackerStatus(false);
+    showToastNotification('Function Tracker Disconnected', 'Function Tracker integration has been removed', 'success');
+  } catch (err) {
+    console.error('Function Tracker disconnect error:', err);
+    showToastNotification('Disconnect Failed', 'Could not disconnect Function Tracker', 'error');
+  }
+}
+
+function updateFunctionTrackerStatus(connected) {
+  const connectBtn = document.getElementById('btn-functiontracker-connect');
+  const disconnectBtn = document.getElementById('btn-functiontracker-disconnect');
+  const preview = document.getElementById('functiontracker-events-preview');
+  if (!connectBtn || !disconnectBtn) return;
+  if (connected) {
+    connectBtn.style.display = 'none';
+    disconnectBtn.style.display = 'inline-flex';
+    if (preview) preview.style.display = 'block';
+  } else {
+    connectBtn.style.display = 'inline-flex';
+    disconnectBtn.style.display = 'none';
+    if (preview) preview.style.display = 'none';
+  }
+}
+
+async function checkFunctionTrackerStatus() {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetchAPI('/api/function-tracker/status?venue_id=' + encodeURIComponent(venueId));
+    if (resp.ok) {
+      const data = await resp.json();
+      updateFunctionTrackerStatus(data.connected || false);
+      if (data.connected) loadUpcomingFunctions();
+    }
+  } catch (err) {
+    console.log('Function Tracker status check unavailable');
+  }
+}
+
+async function loadUpcomingFunctions() {
+  try {
+    const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const resp = await fetchAPI('/api/function-tracker/upcoming?venue_id=' + encodeURIComponent(venueId) + '&days=14');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const listEl = document.getElementById('functiontracker-events-list');
+    if (!listEl) return;
+    if (!data.events || data.events.length === 0) {
+      listEl.innerHTML = '<div style="color:var(--text-muted);font-style:italic;">No upcoming functions in the next 14 days</div>';
+      return;
+    }
+    let html = '';
+    data.events.slice(0, 5).forEach(function(event) {
+      const name = event.name || event.title || 'Unnamed Event';
+      const guests = event.guests || event.pax || event.attendees || '?';
+      const eventType = (event.event_type || event.type || 'event').replace(/_/g, ' ');
+      const eventDate = event.start_datetime || event.start_date || event.date || '';
+      let dateStr = '';
+      if (eventDate) {
+        try { dateStr = new Date(eventDate).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }); } catch(e) { dateStr = eventDate; }
+      }
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);">' +
+        '<div><span style="font-weight:500;color:var(--text-primary);">' + name + '</span>' +
+        '<span style="margin-left:8px;font-size:11px;color:var(--text-muted);text-transform:capitalize;">' + eventType + '</span></div>' +
+        '<div style="text-align:right;"><span style="color:var(--brand-blue);font-weight:600;">' + guests + ' guests</span>' +
+        (dateStr ? '<span style="margin-left:8px;font-size:11px;color:var(--text-muted);">' + dateStr + '</span>' : '') +
+        '</div></div>';
+    });
+    if (data.events.length > 5) {
+      html += '<div style="padding:6px 0;font-size:11px;color:var(--text-muted);text-align:center;">+ ' + (data.events.length - 5) + ' more functions</div>';
+    }
+    listEl.innerHTML = html;
+  } catch (err) {
+    console.log('Failed to load upcoming functions:', err);
+  }
 }
 
 // ============================================
