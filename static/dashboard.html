@@ -2215,6 +2215,25 @@
       border-color: #F59E0B;
     }
 
+    /* AI Chat Panel */
+    .ai-msg { padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; max-width: 90%; word-wrap: break-word; }
+    .ai-msg-user { background: var(--accent); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+    .ai-msg-assistant { background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border); align-self: flex-start; border-bottom-left-radius: 4px; }
+    .ai-msg-assistant strong { color: var(--accent); }
+    .ai-msg-thinking { background: transparent; color: var(--text-muted); font-style: italic; font-size: 13px; align-self: flex-start; padding: 8px 14px; }
+    .ai-quick-btn { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 6px 14px; cursor: pointer; color: var(--text-primary); font-size: 12px; transition: all 0.2s; }
+    .ai-quick-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .ai-action-btn { display: inline-block; margin-top: 8px; padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
+    .ai-action-btn:hover { filter: brightness(1.1); }
+    .ai-insight-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .ai-insight-card[data-severity="high"] { border-left: 3px solid #ef4444; }
+    .ai-insight-card[data-severity="medium"] { border-left: 3px solid #f59e0b; }
+    .ai-insight-card[data-severity="info"] { border-left: 3px solid var(--accent); }
+    .ai-insight-title { font-weight: 600; font-size: 13px; color: var(--text-primary); margin-bottom: 4px; }
+    .ai-insight-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+    .ai-insight-action { margin-top: 8px; }
+    .ai-tools-used { font-size: 11px; color: var(--text-muted); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+
     @media (max-width: 768px) {
       .onboarding-progress {
         padding: 16px;
@@ -2312,6 +2331,17 @@
     </div>
 
     <div class="sidebar-section">
+      <div class="sidebar-section-title">AI</div>
+      <div class="sidebar-nav">
+        <div class="nav-item" onclick="toggleAIChat()" style="cursor:pointer;" id="nav-ai-agent">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="currentColor"/><circle cx="14" cy="10" r="1" fill="currentColor"/><path d="M9 14h6"/></svg></span>
+          <span>AI Agent</span>
+          <span id="ai-agent-badge" style="display:none; background:var(--accent); color:#fff; font-size:10px; border-radius:10px; padding:1px 6px; margin-left:auto;">0</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
       <div class="sidebar-section-title">Other</div>
       <div class="sidebar-nav">
         <div class="nav-item" data-page="settings">
@@ -2325,6 +2355,37 @@
       </div>
     </div>
   </aside>
+
+  <!-- AI CHAT PANEL (slide-out) -->
+  <div id="ai-chat-panel" style="display:none; position:fixed; top:0; right:0; width:400px; height:100vh; background:var(--sidebar-bg); border-left:1px solid var(--border); z-index:1000; display:none; flex-direction:column;">
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border);">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="currentColor"/><circle cx="14" cy="10" r="1" fill="currentColor"/></svg>
+        <span style="font-weight:600; color:var(--text-primary); font-size:15px;">RosterIQ AI</span>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button onclick="clearAIChat()" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:12px; padding:4px 8px; border-radius:4px; border:1px solid var(--border);" title="New conversation">New Chat</button>
+        <button onclick="toggleAIChat()" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:18px; padding:4px;" title="Close">&times;</button>
+      </div>
+    </div>
+    <div id="ai-chat-messages" style="flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:12px;">
+      <div class="ai-welcome" style="text-align:center; padding:40px 20px; color:var(--text-muted);">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" style="margin-bottom:12px;"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="var(--accent)"/><circle cx="14" cy="10" r="1" fill="var(--accent)"/><path d="M9 14h6"/></svg>
+        <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px;">RosterIQ AI Agent</div>
+        <div style="font-size:13px; line-height:1.5;">Ask me anything about your venue — staffing, costs, compliance, forecasts. I can also generate rosters and send messages to your team.</div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:16px;">
+          <button onclick="aiQuickQuestion('Am I adequately staffed this week?')" class="ai-quick-btn">Staffing this week?</button>
+          <button onclick="aiQuickQuestion('What are my labour costs looking like?')" class="ai-quick-btn">Labour costs?</button>
+          <button onclick="aiQuickQuestion('Any compliance issues I should know about?')" class="ai-quick-btn">Compliance check</button>
+          <button onclick="aiQuickQuestion('Generate an optimised roster for next week')" class="ai-quick-btn">Generate roster</button>
+        </div>
+      </div>
+    </div>
+    <div style="padding:12px 20px; border-top:1px solid var(--border); display:flex; gap:8px;">
+      <input type="text" id="ai-chat-input" placeholder="Ask RosterIQ AI anything..." style="flex:1; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; color:var(--text-primary); font-size:14px; outline:none;" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendAIMessage();}">
+      <button onclick="sendAIMessage()" id="ai-send-btn" style="background:var(--accent); border:none; border-radius:8px; padding:10px 16px; cursor:pointer; color:#fff; font-weight:600; font-size:14px; white-space:nowrap;">Send</button>
+    </div>
+  </div>
 
   <!-- MAIN CONTENT -->
   <div class="main-content">
@@ -2366,6 +2427,19 @@
             <div id="alerts-panel-top" style="max-height: 300px; overflow-y: auto;">
               <div style="text-align: center; padding: 20px; color: var(--text-muted);">No active alerts</div>
             </div>
+          </div>
+        </div>
+
+        <!-- AI INSIGHT CARDS -->
+        <div id="ai-insights-container" style="display:none; margin-bottom: 20px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/></svg>
+              <span style="font-weight:600; font-size:14px; color:var(--text-primary);">AI Insights</span>
+            </div>
+            <button onclick="loadAIInsights()" style="background:none; border:1px solid var(--border); border-radius:6px; padding:4px 10px; cursor:pointer; color:var(--text-muted); font-size:12px;">Refresh</button>
+          </div>
+          <div id="ai-insights-cards" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px;">
           </div>
         </div>
 
@@ -8712,6 +8786,245 @@ function exportStaffContacts() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Staff contacts downloaded', 'success');
+}
+
+// ============================================
+// AI AGENT — Chat Panel + Insights
+// ============================================
+
+const aiState = {
+  conversationId: null,
+  history: [],
+  chatOpen: false,
+  insightsLoaded: false,
+};
+
+function toggleAIChat() {
+  const panel = document.getElementById('ai-chat-panel');
+  aiState.chatOpen = !aiState.chatOpen;
+  panel.style.display = aiState.chatOpen ? 'flex' : 'none';
+  if (aiState.chatOpen) {
+    document.getElementById('ai-chat-input').focus();
+    document.getElementById('nav-ai-agent').classList.add('active');
+  } else {
+    document.getElementById('nav-ai-agent').classList.remove('active');
+  }
+}
+
+function clearAIChat() {
+  aiState.conversationId = null;
+  aiState.history = [];
+  const container = document.getElementById('ai-chat-messages');
+  container.innerHTML = `
+    <div class="ai-welcome" style="text-align:center; padding:40px 20px; color:var(--text-muted);">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" style="margin-bottom:12px;"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="var(--accent)"/><circle cx="14" cy="10" r="1" fill="var(--accent)"/><path d="M9 14h6"/></svg>
+      <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px;">RosterIQ AI Agent</div>
+      <div style="font-size:13px; line-height:1.5;">Ask me anything about your venue — staffing, costs, compliance, forecasts. I can also generate rosters and send messages to your team.</div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:16px;">
+        <button onclick="aiQuickQuestion('Am I adequately staffed this week?')" class="ai-quick-btn">Staffing this week?</button>
+        <button onclick="aiQuickQuestion('What are my labour costs looking like?')" class="ai-quick-btn">Labour costs?</button>
+        <button onclick="aiQuickQuestion('Any compliance issues I should know about?')" class="ai-quick-btn">Compliance check</button>
+        <button onclick="aiQuickQuestion('Generate an optimised roster for next week')" class="ai-quick-btn">Generate roster</button>
+      </div>
+    </div>`;
+}
+
+function aiQuickQuestion(question) {
+  document.getElementById('ai-chat-input').value = question;
+  sendAIMessage();
+}
+
+function addAIChatMessage(role, content, extras) {
+  const container = document.getElementById('ai-chat-messages');
+  // Remove welcome on first message
+  const welcome = container.querySelector('.ai-welcome');
+  if (welcome) welcome.remove();
+
+  const div = document.createElement('div');
+  div.className = 'ai-msg ' + (role === 'user' ? 'ai-msg-user' : 'ai-msg-assistant');
+
+  // Simple markdown-ish rendering for assistant messages
+  if (role === 'assistant') {
+    let html = content
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/`(.*?)`/g, '<code style="background:rgba(255,255,255,0.1); padding:1px 4px; border-radius:3px;">$1</code>')
+      .replace(/\n/g, '<br>');
+    div.innerHTML = html;
+
+    // Add action buttons if any
+    if (extras?.actions?.length) {
+      for (const action of extras.actions) {
+        const btn = document.createElement('button');
+        btn.className = 'ai-action-btn';
+        btn.textContent = action.message?.replace(/^Ready to /, '').replace(/\. Click.*$/, '') || 'Execute';
+        btn.onclick = () => executeAIAction(action);
+        div.appendChild(btn);
+      }
+    }
+
+    // Show tools used
+    if (extras?.tool_calls?.length) {
+      const toolsDiv = document.createElement('div');
+      toolsDiv.className = 'ai-tools-used';
+      toolsDiv.textContent = 'Used: ' + extras.tool_calls.map(t => t.tool.replace(/_/g, ' ')).join(', ');
+      div.appendChild(toolsDiv);
+    }
+  } else {
+    div.textContent = content;
+  }
+
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendAIMessage() {
+  const input = document.getElementById('ai-chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.value = '';
+  addAIChatMessage('user', message);
+
+  // Show thinking indicator
+  const thinkingDiv = document.createElement('div');
+  thinkingDiv.className = 'ai-msg ai-msg-thinking';
+  thinkingDiv.id = 'ai-thinking';
+  thinkingDiv.innerHTML = '<span style="display:inline-block; animation: pulse 1.5s infinite;">Thinking...</span>';
+  document.getElementById('ai-chat-messages').appendChild(thinkingDiv);
+  document.getElementById('ai-chat-messages').scrollTop = 999999;
+
+  const sendBtn = document.getElementById('ai-send-btn');
+  sendBtn.disabled = true;
+  sendBtn.textContent = '...';
+
+  try {
+    const venueId = _getVenueId();
+    const data = await fetchAPI('/api/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue_id: venueId,
+        message: message,
+        conversation_id: aiState.conversationId,
+        history: aiState.history,
+      })
+    });
+
+    // Remove thinking indicator
+    const thinking = document.getElementById('ai-thinking');
+    if (thinking) thinking.remove();
+
+    aiState.conversationId = data.conversation_id;
+    aiState.history.push({ role: 'user', content: message });
+    aiState.history.push({ role: 'assistant', content: data.response });
+
+    addAIChatMessage('assistant', data.response, {
+      actions: data.actions,
+      tool_calls: data.tool_calls,
+    });
+  } catch (err) {
+    const thinking = document.getElementById('ai-thinking');
+    if (thinking) thinking.remove();
+    console.error('AI chat error:', err);
+
+    if (err.message?.includes('503') || err.message?.includes('not configured')) {
+      addAIChatMessage('assistant', 'The AI agent is not configured yet. Set the ANTHROPIC_API_KEY environment variable in Railway to enable it.');
+    } else {
+      addAIChatMessage('assistant', 'Sorry, I encountered an error: ' + (err.message || 'Unknown error') + '. Please try again.');
+    }
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send';
+  }
+}
+
+async function executeAIAction(action) {
+  try {
+    const venueId = _getVenueId();
+    const result = await fetchAPI('/api/ai/action', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue_id: venueId,
+        action_type: action.action_type,
+        params: action.params,
+      })
+    });
+    addAIChatMessage('assistant', result.message || 'Action completed.');
+    if (result.redirect) {
+      navigateTo(result.redirect);
+    }
+  } catch (err) {
+    addAIChatMessage('assistant', 'Action failed: ' + (err.message || 'Unknown error'));
+  }
+}
+
+// AI Insight Cards
+async function loadAIInsights() {
+  if (state.isDemo) return;
+  try {
+    const venueId = _getVenueId();
+    const data = await fetchAPI('/api/ai/insights?venue_id=' + encodeURIComponent(venueId));
+    if (!data.insights?.length) {
+      document.getElementById('ai-insights-container').style.display = 'none';
+      return;
+    }
+
+    const container = document.getElementById('ai-insights-cards');
+    container.innerHTML = '';
+    document.getElementById('ai-insights-container').style.display = 'block';
+
+    // Update badge
+    const badge = document.getElementById('ai-agent-badge');
+    const highCount = data.insights.filter(i => i.severity === 'high').length;
+    if (highCount > 0) {
+      badge.style.display = 'inline';
+      badge.textContent = highCount;
+    } else {
+      badge.style.display = 'none';
+    }
+
+    for (const insight of data.insights) {
+      const card = document.createElement('div');
+      card.className = 'ai-insight-card';
+      card.setAttribute('data-severity', insight.severity || 'info');
+
+      let actionHtml = '';
+      if (insight.action) {
+        if (insight.action.type === 'ask_ai') {
+          actionHtml = `<div class="ai-insight-action"><button class="ai-action-btn" onclick="toggleAIChat(); setTimeout(() => aiQuickQuestion('${insight.action.prompt.replace(/'/g, "\\'")}'), 300);">${insight.action.label}</button></div>`;
+        } else if (insight.action.type === 'generate_roster') {
+          actionHtml = `<div class="ai-insight-action"><button class="ai-action-btn" onclick="navigateTo('roster')">${insight.action.label}</button></div>`;
+        } else if (insight.action.type === 'open_integrations') {
+          actionHtml = `<div class="ai-insight-action"><button class="ai-action-btn" onclick="navigateTo('settings')">${insight.action.label}</button></div>`;
+        }
+      }
+
+      card.innerHTML = `
+        <div class="ai-insight-title">${insight.title}</div>
+        <div class="ai-insight-desc">${insight.description}</div>
+        ${actionHtml}
+      `;
+      container.appendChild(card);
+    }
+  } catch (err) {
+    console.log('AI insights unavailable:', err.message);
+  }
+}
+
+// Add a CSS pulse animation for the thinking indicator
+(function() {
+  const style = document.createElement('style');
+  style.textContent = '@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }';
+  document.head.appendChild(style);
+})();
+
+// Load insights when dashboard loads (after auth)
+if (typeof _originalInitDashboard === 'undefined') {
+  const _originalInitDashboard = typeof initDashboard === 'function' ? initDashboard : null;
+  // Hook into page load — load insights after a short delay
+  setTimeout(() => {
+    if (!state.isDemo) loadAIInsights();
+  }, 3000);
 }
 </script>
 

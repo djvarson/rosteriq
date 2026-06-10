@@ -953,6 +953,16 @@ except Exception as e:
     logger.error(f"Failed to register digest routes: {e}")
 
 
+# AI Agent routes (chat, insights, actions)
+try:
+    from rosteriq.routes.ai_agent import router as ai_agent_router
+    app.include_router(ai_agent_router)
+    logger.info("AI Agent routes registered at /api/ai/*")
+except ImportError:
+    logger.info("AI Agent routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register AI Agent routes: {e}")
+
 # GraphQL API with Strawberry
 try:
     from strawberry.fastapi import GraphQLRouter
