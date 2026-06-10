@@ -22,7 +22,7 @@ from rosteriq.database import get_db
 from rosteriq.ai_agent import (
     RosterIQAgent,
     generate_insights,
-    ANTHROPIC_API_KEY,
+    GEMINI_API_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,10 +88,10 @@ async def chat(body: ChatRequest) -> dict:
     to look up employees, shifts, costs, compliance, and more.
     It can also suggest actions (roster generation, shift changes, messaging).
     """
-    if not ANTHROPIC_API_KEY:
+    if not GEMINI_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail="AI agent not configured. Set ANTHROPIC_API_KEY environment variable.",
+            detail="AI agent not configured. Set GEMINI_API_KEY environment variable.",
         )
 
     # Build or restore conversation
@@ -226,7 +226,7 @@ async def execute_action(body: ActionRequest) -> dict:
 async def ai_status() -> dict:
     """Check if the AI agent is configured and available."""
     return {
-        "available": bool(ANTHROPIC_API_KEY),
-        "model": "claude-sonnet-4-20250514" if ANTHROPIC_API_KEY else None,
-        "capabilities": ["chat", "insights", "actions"] if ANTHROPIC_API_KEY else [],
+        "available": bool(GEMINI_API_KEY),
+        "model": "gemini-2.0-flash" if GEMINI_API_KEY else None,
+        "capabilities": ["chat", "insights", "actions"] if GEMINI_API_KEY else [],
     }

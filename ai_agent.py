@@ -6,8 +6,9 @@ Provides three capabilities:
 2. Insights — proactive alerts and suggestions surfaced on the dashboard
 3. Actions — execute roster operations on the manager's behalf
 
-Uses the Anthropic Claude API with tool-use to query venue data and
-take actions through RosterIQ's internal APIs.
+Uses the Google Gemini API with function-calling to query venue data
+and take actions through RosterIQ's internal APIs.
+Free tier: 15 RPM / 1M tokens per day with Gemini Flash.
 """
 
 import os
@@ -28,9 +29,9 @@ logger = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.environ.get("ROSTERIQ_AI_MODEL", "claude-sonnet-4-20250514")
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("ROSTERIQ_AI_MODEL", "gemini-2.0-flash")
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 MAX_CONTEXT_TOKENS = 8000  # rough budget for venue context
 
 # ---------------------------------------------------------------------------
@@ -62,165 +63,122 @@ don't ask the manager to go look things up when you can do it yourself.
 """
 
 # ---------------------------------------------------------------------------
-# Tool definitions for Claude tool-use
+# Tool definitions for Gemini function-calling
+# Gemini uses a different schema format from Anthropic:
+#   { functionDeclarations: [ { name, description, parameters: {type, properties, required} } ] }
 # ---------------------------------------------------------------------------
 
-AGENT_TOOLS = [
-    {
-        "name": "get_employees",
-        "description": "Get the list of employees for this venue. Returns names, roles, employment type, contact details, and certifications.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "active_only": {
-                    "type": "boolean",
-                    "description": "If true, only return active employees. Default true.",
-                    "default": True,
+GEMINI_TOOLS = [
+    {"functionDeclarations": [
+        {
+            "name": "get_employees",
+            "description": "Get the list of employees for this venue. Returns names, roles, employment type, contact details, and certifications.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "active_only": {"type": "BOOLEAN", "description": "If true, only return active employees. Default true."},
                 },
             },
-            "required": [],
         },
-    },
-    {
-        "name": "get_shifts",
-        "description": "Get rostered shifts for a date range. Returns shift times, assigned employees, roles, and costs.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "start_date": {
-                    "type": "string",
-                    "description": "Start date in YYYY-MM-DD format. Defaults to today.",
-                },
-                "end_date": {
-                    "type": "string",
-                    "description": "End date in YYYY-MM-DD format. Defaults to 7 days from start.",
+        {
+            "name": "get_shifts",
+            "description": "Get rostered shifts for a date range. Returns shift times, assigned employees, roles, and costs.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "start_date": {"type": "STRING", "description": "Start date in YYYY-MM-DD format. Defaults to today."},
+                    "end_date": {"type": "STRING", "description": "End date in YYYY-MM-DD format. Defaults to 7 days from start."},
                 },
             },
-            "required": [],
         },
-    },
-    {
-        "name": "get_labour_summary",
-        "description": "Get a labour cost summary for a date range — total hours, total cost, labour percentage, breakdown by day and role.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "start_date": {"type": "string", "description": "Start date YYYY-MM-DD"},
-                "end_date": {"type": "string", "description": "End date YYYY-MM-DD"},
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "get_compliance_issues",
-        "description": "Check for current compliance issues — break violations, overtime, expired certifications, award breaches.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "date_range_days": {
-                    "type": "integer",
-                    "description": "Number of days ahead to check. Default 7.",
-                    "default": 7,
+        {
+            "name": "get_labour_summary",
+            "description": "Get a labour cost summary for a date range — total hours, total cost, labour percentage, breakdown by day and role.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "start_date": {"type": "STRING", "description": "Start date YYYY-MM-DD"},
+                    "end_date": {"type": "STRING", "description": "End date YYYY-MM-DD"},
                 },
             },
-            "required": [],
         },
-    },
-    {
-        "name": "get_venue_stats",
-        "description": "Get key venue statistics — headcount, covers forecast, revenue trend, staffing level vs demand.",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "name": "get_upcoming_events",
-        "description": "Get upcoming events, reservations, and demand signals that affect staffing needs.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "days_ahead": {
-                    "type": "integer",
-                    "description": "How many days ahead to look. Default 7.",
-                    "default": 7,
+        {
+            "name": "get_compliance_issues",
+            "description": "Check for current compliance issues — break violations, overtime, expired certifications, award breaches.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "date_range_days": {"type": "INTEGER", "description": "Number of days ahead to check. Default 7."},
                 },
             },
-            "required": [],
         },
-    },
-    {
-        "name": "suggest_roster_changes",
-        "description": "Analyse the current roster and suggest improvements — understaffing, overstaffing, cost savings, compliance fixes.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "target_date": {
-                    "type": "string",
-                    "description": "Date to analyse in YYYY-MM-DD format. Defaults to today.",
+        {
+            "name": "get_venue_stats",
+            "description": "Get key venue statistics — headcount, covers forecast, revenue trend, staffing level vs demand.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
+        {
+            "name": "get_upcoming_events",
+            "description": "Get upcoming events, reservations, and demand signals that affect staffing needs.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "days_ahead": {"type": "INTEGER", "description": "How many days ahead to look. Default 7."},
                 },
             },
-            "required": [],
         },
-    },
-    {
-        "name": "generate_roster",
-        "description": "Generate an optimised roster for a date range using RosterIQ's AI engine. Returns the proposed roster with cost estimates.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "start_date": {"type": "string", "description": "Start date YYYY-MM-DD"},
-                "end_date": {"type": "string", "description": "End date YYYY-MM-DD"},
-                "budget_limit": {
-                    "type": "number",
-                    "description": "Optional daily labour budget cap in AUD",
+        {
+            "name": "suggest_roster_changes",
+            "description": "Analyse the current roster and suggest improvements — understaffing, overstaffing, cost savings, compliance fixes.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "target_date": {"type": "STRING", "description": "Date to analyse in YYYY-MM-DD format. Defaults to today."},
                 },
             },
-            "required": ["start_date", "end_date"],
         },
-    },
-    {
-        "name": "adjust_shift",
-        "description": "Modify an existing shift — change times, reassign employee, or cancel. Requires confirmation from the manager.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "shift_id": {"type": "string", "description": "The shift ID to modify"},
-                "action": {
-                    "type": "string",
-                    "enum": ["change_times", "reassign", "cancel"],
-                    "description": "What to do with the shift",
+        {
+            "name": "generate_roster",
+            "description": "Generate an optimised roster for a date range using RosterIQ's AI engine. Returns the proposed roster with cost estimates.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "start_date": {"type": "STRING", "description": "Start date YYYY-MM-DD"},
+                    "end_date": {"type": "STRING", "description": "End date YYYY-MM-DD"},
+                    "budget_limit": {"type": "NUMBER", "description": "Optional daily labour budget cap in AUD"},
                 },
-                "new_start": {"type": "string", "description": "New start time (HH:MM) for change_times"},
-                "new_end": {"type": "string", "description": "New end time (HH:MM) for change_times"},
-                "new_employee_id": {"type": "string", "description": "Employee ID for reassign"},
+                "required": ["start_date", "end_date"],
             },
-            "required": ["shift_id", "action"],
         },
-    },
-    {
-        "name": "send_staff_message",
-        "description": "Send a message to staff members — shift reminders, roster updates, or custom messages via SMS/email.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "recipient_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of employee IDs to message. Use 'all' for entire team.",
+        {
+            "name": "adjust_shift",
+            "description": "Modify an existing shift — change times, reassign employee, or cancel. Requires confirmation from the manager.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "shift_id": {"type": "STRING", "description": "The shift ID to modify"},
+                    "action": {"type": "STRING", "description": "What to do: change_times, reassign, or cancel"},
+                    "new_start": {"type": "STRING", "description": "New start time (HH:MM) for change_times"},
+                    "new_end": {"type": "STRING", "description": "New end time (HH:MM) for change_times"},
+                    "new_employee_id": {"type": "STRING", "description": "Employee ID for reassign"},
                 },
-                "message": {"type": "string", "description": "The message to send"},
-                "channel": {
-                    "type": "string",
-                    "enum": ["sms", "email", "both"],
-                    "description": "How to send. Default 'both'.",
-                    "default": "both",
-                },
+                "required": ["shift_id", "action"],
             },
-            "required": ["recipient_ids", "message"],
         },
-    },
+        {
+            "name": "send_staff_message",
+            "description": "Send a message to staff members — shift reminders, roster updates, or custom messages via SMS/email.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "recipient_ids": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "List of employee IDs to message. Use 'all' for entire team."},
+                    "message": {"type": "STRING", "description": "The message to send"},
+                    "channel": {"type": "STRING", "description": "How to send: sms, email, or both. Default both."},
+                },
+                "required": ["recipient_ids", "message"],
+            },
+        },
+    ]}
 ]
 
 
@@ -566,7 +524,8 @@ class AgentContext:
 
 class RosterIQAgent:
     """
-    Stateless agent that processes a single conversation turn.
+    Stateless agent that processes a single conversation turn using
+    Google Gemini with function-calling.
 
     Each call to `chat()` takes the full message history and returns
     the assistant's response (possibly after multiple tool-use rounds).
@@ -574,12 +533,28 @@ class RosterIQAgent:
 
     def __init__(self, venue_id: str, user_id: Optional[str] = None):
         self.context = AgentContext(venue_id, user_id)
-        if not ANTHROPIC_API_KEY:
-            raise ValueError("ANTHROPIC_API_KEY not configured")
+        if not GEMINI_API_KEY:
+            raise ValueError("GEMINI_API_KEY not configured. Get a free key at https://ai.google.dev")
+
+    def _convert_messages_to_gemini(self, messages: list[dict]) -> list[dict]:
+        """Convert simple {role, content} messages to Gemini's format."""
+        gemini_contents = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            # Gemini uses "user" and "model" (not "assistant")
+            gemini_role = "model" if role == "assistant" else "user"
+            if isinstance(content, str):
+                gemini_contents.append({
+                    "role": gemini_role,
+                    "parts": [{"text": content}],
+                })
+            # Skip non-string content (tool results are handled separately)
+        return gemini_contents
 
     async def chat(self, messages: list[dict], max_tool_rounds: int = 5) -> dict:
         """
-        Send messages to Claude with tools, handle tool calls, return final response.
+        Send messages to Gemini with tools, handle function calls, return final response.
 
         Returns:
             {
@@ -590,97 +565,111 @@ class RosterIQAgent:
         """
         actions = []
         tool_calls_log = []
-        current_messages = list(messages)
+        gemini_contents = self._convert_messages_to_gemini(messages)
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             for round_num in range(max_tool_rounds):
-                # Call Claude
-                response = await self._call_claude(client, current_messages)
+                response = await self._call_gemini(client, gemini_contents)
 
                 if "error" in response:
-                    return {"response": f"I'm having trouble connecting to my AI backend: {response['error']}", "actions": [], "tool_calls": []}
+                    return {"response": f"I'm having trouble connecting to the AI: {response['error']}", "actions": [], "tool_calls": []}
 
-                # Extract content blocks
-                content = response.get("content", [])
-                stop_reason = response.get("stop_reason", "end_turn")
+                # Parse Gemini response
+                candidates = response.get("candidates", [])
+                if not candidates:
+                    return {"response": "No response from AI. Please try again.", "actions": [], "tool_calls": []}
 
-                # If no tool use, we're done
-                if stop_reason != "tool_use":
-                    text = self._extract_text(content)
+                content = candidates[0].get("content", {})
+                parts = content.get("parts", [])
+
+                # Check if there are function calls
+                function_calls = [p for p in parts if "functionCall" in p]
+
+                if not function_calls:
+                    # No function calls — extract text and return
+                    text = self._extract_text_gemini(parts)
                     return {"response": text, "actions": actions, "tool_calls": tool_calls_log}
 
-                # Process tool calls
-                assistant_content = content
-                tool_results = []
+                # Process function calls
+                # Add the model's response to conversation
+                gemini_contents.append({"role": "model", "parts": parts})
 
-                for block in content:
-                    if block.get("type") == "tool_use":
-                        tool_name = block["name"]
-                        tool_input = block.get("input", {})
-                        tool_id = block["id"]
+                # Execute each function call and build response parts
+                function_response_parts = []
+                for fc_part in function_calls:
+                    fc = fc_part["functionCall"]
+                    tool_name = fc["name"]
+                    tool_args = fc.get("args", {})
 
-                        logger.info(f"AI Agent tool call: {tool_name}({json.dumps(tool_input)[:200]})")
-                        tool_calls_log.append({"tool": tool_name, "input": tool_input})
+                    logger.info(f"AI Agent tool call: {tool_name}({json.dumps(tool_args)[:200]})")
+                    tool_calls_log.append({"tool": tool_name, "input": tool_args})
 
-                        # Execute the tool
-                        result_str = await self.context.execute_tool(tool_name, tool_input)
-                        result_data = json.loads(result_str)
+                    # Execute the tool
+                    result_str = await self.context.execute_tool(tool_name, tool_args)
+                    result_data = json.loads(result_str)
 
-                        # Collect any actions
-                        if result_data.get("action_required"):
-                            actions.append(result_data)
+                    # Collect any actions
+                    if result_data.get("action_required"):
+                        actions.append(result_data)
 
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_id,
-                            "content": result_str,
-                        })
+                    function_response_parts.append({
+                        "functionResponse": {
+                            "name": tool_name,
+                            "response": result_data,
+                        }
+                    })
 
-                # Add assistant message + tool results to continue the loop
-                current_messages.append({"role": "assistant", "content": assistant_content})
-                current_messages.append({"role": "user", "content": tool_results})
+                # Add function responses as a user turn
+                gemini_contents.append({"role": "user", "parts": function_response_parts})
 
         # If we exhausted rounds, return what we have
         return {"response": "I've gathered the information but hit my processing limit. Let me know if you need more detail.", "actions": actions, "tool_calls": tool_calls_log}
 
-    async def _call_claude(self, client: httpx.AsyncClient, messages: list[dict]) -> dict:
-        """Make a single API call to Claude."""
+    async def _call_gemini(self, client: httpx.AsyncClient, contents: list[dict]) -> dict:
+        """Make a single API call to Gemini."""
+        url = GEMINI_API_URL.format(model=GEMINI_MODEL) + f"?key={GEMINI_API_KEY}"
         try:
             resp = await client.post(
-                ANTHROPIC_API_URL,
-                headers={
-                    "x-api-key": ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
+                url,
+                headers={"content-type": "application/json"},
                 json={
-                    "model": ANTHROPIC_MODEL,
-                    "max_tokens": 2048,
-                    "system": SYSTEM_PROMPT,
-                    "tools": AGENT_TOOLS,
-                    "messages": messages,
+                    "contents": contents,
+                    "tools": GEMINI_TOOLS,
+                    "systemInstruction": {
+                        "parts": [{"text": SYSTEM_PROMPT}],
+                    },
+                    "generationConfig": {
+                        "maxOutputTokens": 2048,
+                        "temperature": 0.7,
+                    },
                 },
             )
             if resp.status_code != 200:
                 error_body = resp.text[:500]
-                logger.error(f"Claude API error {resp.status_code}: {error_body}")
-                return {"error": f"API returned {resp.status_code}"}
+                logger.error(f"Gemini API error {resp.status_code}: {error_body}")
+                # Parse error message if possible
+                try:
+                    err_json = resp.json()
+                    err_msg = err_json.get("error", {}).get("message", f"API returned {resp.status_code}")
+                except Exception:
+                    err_msg = f"API returned {resp.status_code}"
+                return {"error": err_msg}
             return resp.json()
         except httpx.TimeoutException:
-            logger.error("Claude API timeout")
+            logger.error("Gemini API timeout")
             return {"error": "Request timed out"}
         except Exception as e:
-            logger.error(f"Claude API error: {e}")
+            logger.error(f"Gemini API error: {e}")
             return {"error": str(e)}
 
     @staticmethod
-    def _extract_text(content: list[dict]) -> str:
-        """Extract text from Claude's content blocks."""
-        parts = []
-        for block in content:
-            if block.get("type") == "text":
-                parts.append(block["text"])
-        return "\n".join(parts) if parts else "I've processed your request."
+    def _extract_text_gemini(parts: list[dict]) -> str:
+        """Extract text from Gemini's response parts."""
+        texts = []
+        for part in parts:
+            if "text" in part:
+                texts.append(part["text"])
+        return "\n".join(texts) if texts else "I've processed your request."
 
 
 # ---------------------------------------------------------------------------

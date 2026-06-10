@@ -8928,7 +8928,7 @@ async function sendAIMessage() {
     console.error('AI chat error:', err);
 
     if (err.message?.includes('503') || err.message?.includes('not configured')) {
-      addAIChatMessage('assistant', 'The AI agent is not configured yet. Set the ANTHROPIC_API_KEY environment variable in Railway to enable it.');
+      addAIChatMessage('assistant', 'The AI agent is not configured yet. Set the GEMINI_API_KEY environment variable in Railway to enable it.');
     } else {
       addAIChatMessage('assistant', 'Sorry, I encountered an error: ' + (err.message || 'Unknown error') + '. Please try again.');
     }
