@@ -61,8 +61,22 @@ class InstallRequest(BaseModel):
 class InstallTokenRequest(BaseModel):
     """Direct permanent-token install — no OAuth app registration needed."""
     venue_id: str = Field(..., description="RosterIQ venue to connect")
-    subdomain: str = Field(..., description="Deputy instance subdomain (e.g. 'mycompany')")
-    access_token: str = Field(..., description="Permanent access token from Deputy")
+    subdomain: str = Field(..., min_length=1, max_length=100, description="Deputy instance subdomain (e.g. 'mycompany')")
+    access_token: str = Field(..., min_length=10, description="Permanent access token from Deputy")
+
+    def model_post_init(self, __context) -> None:
+        """Validate subdomain format."""
+        import re
+        cleaned = self.subdomain.strip().lower()
+        # Remove trailing .au.deputy.com if user pasted full URL
+        cleaned = re.sub(r'\.au\.deputy\.com.*$', '', cleaned)
+        cleaned = re.sub(r'^https?://', '', cleaned)
+        if not re.match(r'^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$', cleaned):
+            raise ValueError(
+                f"Invalid Deputy subdomain: '{self.subdomain}'. "
+                "Use just the subdomain part (e.g. 'mycompany'), not the full URL."
+            )
+        object.__setattr__(self, 'subdomain', cleaned)
 
 
 class UninstallRequest(BaseModel):
@@ -103,6 +117,29 @@ def _get_oauth() -> DeputyOAuth:
     )
 
 
+def _make_token_refresh_callback(org_key: str):
+    """Create a callback that persists refreshed tokens to the DB.
+
+    The adapter calls this with the full DeputyCredentials object after a token refresh.
+    """
+    def on_token_refresh(credentials: DeputyCredentials):
+        try:
+            db = get_db()
+            install = db.get_plugin_install(org_key)
+            if install and install.get("tokens"):
+                install["tokens"]["access_token"] = credentials.access_token
+                if credentials.refresh_token:
+                    install["tokens"]["refresh_token"] = credentials.refresh_token
+                if credentials.token_expires_at:
+                    install["tokens"]["token_expires_at"] = credentials.token_expires_at.isoformat()
+                install["updated_at"] = datetime.utcnow()
+                db.save_plugin_install(install)
+                logger.info(f"Persisted refreshed Deputy token for {org_key}")
+        except Exception as e:
+            logger.error(f"Failed to persist refreshed Deputy token for {org_key}: {e}")
+    return on_token_refresh
+
+
 def _build_credentials(install: dict) -> DeputyCredentials:
     """Reconstruct DeputyCredentials from a stored plugin_install record."""
     tokens = install.get("tokens", {})
@@ -124,6 +161,16 @@ def _build_credentials(install: dict) -> DeputyCredentials:
             if tokens.get("token_expires_at")
             else None
         ),
+    )
+
+
+def _build_adapter(install: dict) -> DeputyAdapter:
+    """Build a DeputyAdapter with credentials and token-refresh callback wired up."""
+    credentials = _build_credentials(install)
+    org_key = install.get("organisation_id", "")
+    return DeputyAdapter(
+        credentials,
+        on_token_refresh=_make_token_refresh_callback(org_key),
     )
 
 
@@ -208,18 +255,27 @@ async def install_token(body: InstallTokenRequest) -> dict:
         token_expires_at=None,
     )
 
-    # Verify the connection works
-    connected = False
-    deputy_user = "unknown"
+    # Verify the connection works — MUST succeed or we reject the install
     try:
         async with DeputyAdapter(credentials) as adapter:
             me = await adapter.get_me()
-            connected = True
             deputy_user = me.get("Name", me.get("DisplayName", "unknown"))
+    except DeputyAPIError as e:
+        logger.error(f"Deputy token verification failed for venue {body.venue_id}: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail=f"Token verification failed: could not connect to Deputy. "
+                   f"Please check your subdomain and access token. Error: {e}",
+        )
     except Exception as e:
-        logger.warning(f"Deputy token verification failed for venue {body.venue_id}: {e}")
+        logger.error(f"Deputy token verification failed for venue {body.venue_id}: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Connection to Deputy failed unexpectedly. "
+                   f"Please check your subdomain and try again.",
+        )
 
-    # Save the install record
+    # Verification passed — save the install record
     install_record = {
         "organisation_id": org_key,
         "venue_id": body.venue_id,
@@ -238,57 +294,67 @@ async def install_token(body: InstallTokenRequest) -> dict:
 
     logger.info(
         f"Deputy connected via permanent token for venue {body.venue_id} "
-        f"({body.subdomain}, verified: {connected})"
+        f"({body.subdomain}, user: {deputy_user})"
     )
 
     # Auto-sync employees and shifts on connect
     synced_employees = 0
     synced_shifts = 0
-    if connected:
-        try:
-            async with DeputyAdapter(credentials) as adapter:
-                # Pull employees
-                employees = await adapter.get_employees(active_only=True)
-                synced_employees = len(employees)
+    employee_errors = 0
+    shift_errors = 0
+    try:
+        on_refresh = _make_token_refresh_callback(org_key)
+        async with DeputyAdapter(credentials, on_token_refresh=on_refresh) as adapter:
+            # Pull employees
+            employees = await adapter.get_employees(active_only=True)
+            synced_employees = len(employees)
 
-                # Store employees in database
-                for emp in employees:
-                    try:
-                        emp.venue_id = body.venue_id
-                        db.save_employee(emp)
-                    except Exception:
-                        pass
+            # Store employees in database
+            for emp in employees:
+                try:
+                    emp.venue_id = body.venue_id
+                    db.save_employee(emp)
+                except Exception as e:
+                    employee_errors += 1
+                    logger.warning(
+                        f"Failed to save employee {getattr(emp, 'external_id', '?')} "
+                        f"for venue {body.venue_id}: {e}"
+                    )
 
-                # Pull current shifts (next 14 days)
-                today = date.today()
-                shifts = await adapter.get_shifts(
-                    start_date=today,
-                    end_date=today + timedelta(days=14),
-                )
-                synced_shifts = len(shifts)
-
-                # Store shifts in database
-                for shift in shifts:
-                    try:
-                        db.save_shift(shift)
-                    except Exception:
-                        pass
-
-            logger.info(
-                f"Auto-synced {synced_employees} employees and {synced_shifts} shifts "
-                f"from Deputy for venue {body.venue_id}"
+            # Pull current shifts (next 14 days)
+            today = date.today()
+            shifts = await adapter.get_shifts(
+                start_date=today,
+                end_date=today + timedelta(days=14),
             )
-        except Exception as e:
-            logger.warning(f"Deputy auto-sync failed for venue {body.venue_id}: {e}")
+            synced_shifts = len(shifts)
+
+            # Store shifts in database
+            for shift in shifts:
+                try:
+                    db.save_shift(shift)
+                except Exception as e:
+                    shift_errors += 1
+                    logger.warning(
+                        f"Failed to save shift {getattr(shift, 'external_id', '?')} "
+                        f"for venue {body.venue_id}: {e}"
+                    )
+
+        logger.info(
+            f"Auto-synced {synced_employees} employees ({employee_errors} errors) and "
+            f"{synced_shifts} shifts ({shift_errors} errors) from Deputy for venue {body.venue_id}"
+        )
+    except Exception as e:
+        logger.warning(f"Deputy auto-sync failed for venue {body.venue_id}: {e}")
 
     return {
         "status": "success",
         "venue_id": body.venue_id,
         "deputy_subdomain": body.subdomain,
         "deputy_user": deputy_user,
-        "connectivity_verified": connected,
         "synced_employees": synced_employees,
         "synced_shifts": synced_shifts,
+        "sync_errors": employee_errors + shift_errors,
         "message": "Deputy connected successfully via permanent token.",
     }
 
@@ -401,11 +467,13 @@ async def uninstall(body: UninstallRequest) -> dict:
 @router.get("/status")
 async def get_status(
     venue_id: str = Query(..., description="RosterIQ venue ID"),
+    verify: bool = Query(False, description="If true, test the connection live against Deputy API"),
 ) -> dict:
     """
     Check whether a venue has an active Deputy connection.
 
     Returns connection status and metadata (subdomain, token expiry).
+    With ?verify=true, also makes a live API call to confirm the token still works.
     """
     db = get_db()
     install = db.get_plugin_install(_org_key(venue_id))
@@ -418,7 +486,7 @@ async def get_status(
         }
 
     tokens = install.get("tokens", {})
-    return {
+    result = {
         "connected": install.get("status") == "active",
         "venue_id": venue_id,
         "status": install.get("status", "unknown"),
@@ -427,6 +495,24 @@ async def get_status(
         "installed_at": install.get("installed_at"),
         "updated_at": install.get("updated_at"),
     }
+
+    # Live verification — actually hit the Deputy API
+    if verify and result["connected"]:
+        try:
+            async with _build_adapter(install) as adapter:
+                me = await adapter.get_me()
+                result["live_verified"] = True
+                result["deputy_user"] = me.get("Name", me.get("DisplayName", "unknown"))
+        except DeputyAPIError as e:
+            result["live_verified"] = False
+            result["live_error"] = str(e)
+            logger.warning(f"Deputy live verification failed for venue {venue_id}: {e}")
+        except Exception as e:
+            result["live_verified"] = False
+            result["live_error"] = f"Unexpected error: {e}"
+            logger.warning(f"Deputy live verification failed for venue {venue_id}: {e}")
+
+    return result
 
 
 # ============================================================================
@@ -437,23 +523,43 @@ async def get_status(
 @router.post("/sync/employees")
 async def sync_employees(body: SyncEmployeesRequest) -> dict:
     """
-    Pull employees from Deputy and return them as RosterIQ Employee models.
+    Pull employees from Deputy, persist to DB, and return them.
     """
     install = _get_install_or_404(body.venue_id)
-    credentials = _build_credentials(install)
+    db = get_db()
 
     try:
-        async with DeputyAdapter(credentials) as adapter:
+        async with _build_adapter(install) as adapter:
             employees = await adapter.get_employees(active_only=body.active_only)
     except DeputyAPIError as e:
         logger.error(f"Deputy employee sync failed for venue {body.venue_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Deputy API error: {e}")
 
-    logger.info(f"Synced {len(employees)} employees from Deputy for venue {body.venue_id}")
+    # Persist to database
+    saved = 0
+    errors = 0
+    for emp in employees:
+        try:
+            emp.venue_id = body.venue_id
+            db.save_employee(emp)
+            saved += 1
+        except Exception as e:
+            errors += 1
+            logger.warning(
+                f"Failed to save employee {getattr(emp, 'external_id', '?')} "
+                f"for venue {body.venue_id}: {e}"
+            )
+
+    logger.info(
+        f"Synced {len(employees)} employees from Deputy for venue {body.venue_id} "
+        f"(saved: {saved}, errors: {errors})"
+    )
     return {
         "status": "success",
         "venue_id": body.venue_id,
         "count": len(employees),
+        "saved": saved,
+        "errors": errors,
         "employees": [emp.dict() for emp in employees],
     }
 
@@ -466,13 +572,13 @@ async def sync_employees(body: SyncEmployeesRequest) -> dict:
 @router.post("/sync/shifts")
 async def sync_shifts(body: SyncShiftsRequest) -> dict:
     """
-    Pull shifts from Deputy for a date range.
+    Pull shifts from Deputy for a date range, persist to DB, and return them.
     """
     install = _get_install_or_404(body.venue_id)
-    credentials = _build_credentials(install)
+    db = get_db()
 
     try:
-        async with DeputyAdapter(credentials) as adapter:
+        async with _build_adapter(install) as adapter:
             shifts = await adapter.get_shifts(
                 start_date=body.start_date,
                 end_date=body.end_date,
@@ -482,9 +588,23 @@ async def sync_shifts(body: SyncShiftsRequest) -> dict:
         logger.error(f"Deputy shift sync failed for venue {body.venue_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Deputy API error: {e}")
 
+    # Persist to database
+    saved = 0
+    errors = 0
+    for shift in shifts:
+        try:
+            db.save_shift(shift)
+            saved += 1
+        except Exception as e:
+            errors += 1
+            logger.warning(
+                f"Failed to save shift {getattr(shift, 'external_id', '?')} "
+                f"for venue {body.venue_id}: {e}"
+            )
+
     logger.info(
         f"Synced {len(shifts)} shifts from Deputy for venue {body.venue_id} "
-        f"({body.start_date} to {body.end_date})"
+        f"({body.start_date} to {body.end_date}, saved: {saved}, errors: {errors})"
     )
     return {
         "status": "success",
@@ -492,6 +612,8 @@ async def sync_shifts(body: SyncShiftsRequest) -> dict:
         "start_date": body.start_date.isoformat(),
         "end_date": body.end_date.isoformat(),
         "count": len(shifts),
+        "saved": saved,
+        "errors": errors,
         "shifts": [shift.dict() for shift in shifts],
     }
 
@@ -507,10 +629,9 @@ async def push_roster(body: PushRosterRequest) -> dict:
     Push a roster back to Deputy (publish shifts for a date range).
     """
     install = _get_install_or_404(body.venue_id)
-    credentials = _build_credentials(install)
 
     try:
-        async with DeputyAdapter(credentials) as adapter:
+        async with _build_adapter(install) as adapter:
             result = await adapter.publish_roster(
                 start_date=body.start_date,
                 end_date=body.end_date,
@@ -561,10 +682,9 @@ async def get_timesheets(
         )
 
     install = _get_install_or_404(venue_id)
-    credentials = _build_credentials(install)
 
     try:
-        async with DeputyAdapter(credentials) as adapter:
+        async with _build_adapter(install) as adapter:
             timesheets = await adapter.get_timesheets(
                 start_date=start_dt,
                 end_date=end_dt,
@@ -601,10 +721,9 @@ async def get_locations(
     Get all locations (companies/sites) from the connected Deputy account.
     """
     install = _get_install_or_404(venue_id)
-    credentials = _build_credentials(install)
 
     try:
-        async with DeputyAdapter(credentials) as adapter:
+        async with _build_adapter(install) as adapter:
             locations = await adapter.get_locations()
     except DeputyAPIError as e:
         logger.error(f"Deputy locations fetch failed for venue {venue_id}: {e}")

@@ -118,7 +118,20 @@ class DeputyCredentials:
         self.client_secret = client_secret
         self.access_token = access_token
         self.refresh_token = refresh_token
-        self.token_expires_at = token_expires_at or (datetime.now() + timedelta(hours=24))
+        # Permanent tokens never expire — use far-future sentinel
+        if token_expires_at is not None:
+            self.token_expires_at = token_expires_at
+        elif refresh_token:
+            # OAuth token with refresh — default 24h until we know better
+            self.token_expires_at = datetime.now() + timedelta(hours=24)
+        else:
+            # Permanent token — never expires
+            self.token_expires_at = datetime(2099, 12, 31)
+
+    @property
+    def is_permanent(self) -> bool:
+        """True if this is a permanent token (no refresh available)."""
+        return not self.refresh_token or self.client_id == "permanent_token"
 
     @property
     def base_url(self) -> str:
@@ -126,6 +139,8 @@ class DeputyCredentials:
 
     @property
     def is_expired(self) -> bool:
+        if self.is_permanent:
+            return False  # Permanent tokens don't expire
         return datetime.now() >= self.token_expires_at
 
 
@@ -189,6 +204,12 @@ class DeputyOAuth:
         )
 
 
+# Transient HTTP status codes that should trigger a retry
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 1.0  # seconds — 1s, 2s, 4s
+
+
 class DeputyAdapter:
     """
     Async adapter for the Deputy workforce management API.
@@ -199,11 +220,17 @@ class DeputyAdapter:
     - Deputy Location/Area → venue/department context
     """
 
-    def __init__(self, credentials: DeputyCredentials, state: State = State.vic):
+    def __init__(
+        self,
+        credentials: DeputyCredentials,
+        state: State = State.vic,
+        on_token_refresh=None,
+    ):
         self.credentials = credentials
         self.state = state
         self._client: Optional[httpx.AsyncClient] = None
         self._rate_limiter = DeputyRateLimiter()
+        self._on_token_refresh = on_token_refresh  # callback(credentials) to persist new tokens
 
     async def __aenter__(self):
         self._client = httpx.AsyncClient(
@@ -213,7 +240,7 @@ class DeputyAdapter:
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
-            timeout=30.0,
+            timeout=httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0),
         )
         return self
 
@@ -228,69 +255,163 @@ class DeputyAdapter:
         data: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None,
     ) -> Any:
-        """Make an authenticated request to the Deputy API with rate limiting."""
+        """Make an authenticated request to the Deputy API with rate limiting and retry."""
         await self._rate_limiter.acquire()
 
         if self.credentials.is_expired:
             await self._refresh_token()
 
-        try:
-            response = await self._client.request(
-                method=method,
-                url=path,
-                json=data,
-                params=params,
+        last_error = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = await self._client.request(
+                    method=method,
+                    url=path,
+                    json=data,
+                    params=params,
+                )
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout,
+                    httpx.PoolTimeout, httpx.ConnectTimeout) as e:
+                last_error = e
+                if attempt < _MAX_RETRIES:
+                    wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                    logger.warning(
+                        f"Deputy request to {path} failed (attempt {attempt + 1}/"
+                        f"{_MAX_RETRIES + 1}): {e}. Retrying in {wait:.1f}s..."
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                raise DeputyAPIError(APIError(
+                    status_code=0,
+                    message=f"Deputy unreachable after {_MAX_RETRIES + 1} attempts: {e}",
+                    detail={"error": str(e), "path": path, "attempts": _MAX_RETRIES + 1},
+                ))
+            except httpx.HTTPError as e:
+                raise DeputyAPIError(APIError(
+                    status_code=0,
+                    message=f"HTTP error: {str(e)}",
+                    detail={"error": str(e)},
+                ))
+
+            # Handle 401 — token expired mid-request
+            if response.status_code == 401 and not self.credentials.is_permanent:
+                try:
+                    await self._refresh_token()
+                    response = await self._client.request(
+                        method=method, url=path, json=data, params=params,
+                    )
+                except DeputyAPIError:
+                    raise DeputyAPIError(APIError(
+                        status_code=401,
+                        message="Deputy authentication failed — token expired and refresh failed. Please reconnect.",
+                        detail={"path": path},
+                    ))
+            elif response.status_code == 401 and self.credentials.is_permanent:
+                raise DeputyAPIError(APIError(
+                    status_code=401,
+                    message="Deputy authentication failed — permanent token rejected. Generate a new token from Deputy admin.",
+                    detail={"path": path},
+                ))
+
+            # Retry on transient server errors
+            if response.status_code in _RETRYABLE_STATUSES and attempt < _MAX_RETRIES:
+                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                # For 429, respect Retry-After header if present
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    if retry_after and retry_after.isdigit():
+                        wait = max(wait, int(retry_after))
+                logger.warning(
+                    f"Deputy {response.status_code} on {path} (attempt {attempt + 1}/"
+                    f"{_MAX_RETRIES + 1}). Retrying in {wait:.1f}s..."
+                )
+                await asyncio.sleep(wait)
+                continue
+
+            if response.status_code >= 400:
+                raise DeputyAPIError(APIError(
+                    status_code=response.status_code,
+                    message=f"Deputy API error: {response.text}",
+                    detail={"response": response.text, "path": path},
+                ))
+
+            return response.json()
+
+        # Should not reach here, but safety net
+        raise DeputyAPIError(APIError(
+            status_code=0,
+            message=f"Deputy request to {path} failed after all retries",
+            detail={"last_error": str(last_error)},
+        ))
+
+    async def _request_paginated(
+        self,
+        path: str,
+        data: Dict[str, Any],
+        page_size: int = 500,
+        max_pages: int = 20,
+    ) -> List[Any]:
+        """
+        Make a paginated QUERY request, fetching all pages.
+        Deputy QUERY endpoints support 'start' + 'max' for pagination.
+        """
+        all_results = []
+        for page in range(max_pages):
+            page_data = {**data, "start": page * page_size, "max": page_size}
+            results = await self._request("POST", path, data=page_data)
+
+            if not isinstance(results, list):
+                # Single-object response or error
+                return [results] if results else []
+
+            all_results.extend(results)
+
+            # If we got fewer than page_size, we've reached the end
+            if len(results) < page_size:
+                break
+        else:
+            logger.warning(
+                f"Deputy pagination hit max_pages ({max_pages}) for {path} — "
+                f"some records may be missing. Total fetched: {len(all_results)}"
             )
-        except httpx.HTTPError as e:
-            raise DeputyAPIError(APIError(
-                status_code=0,
-                message=f"HTTP error: {str(e)}",
-                detail={"error": str(e)},
-            ))
 
-        if response.status_code == 401:
-            # Token expired mid-request, refresh and retry
-            await self._refresh_token()
-            response = await self._client.request(
-                method=method,
-                url=path,
-                json=data,
-                params=params,
-            )
-
-        if response.status_code >= 400:
-            raise DeputyAPIError(APIError(
-                status_code=response.status_code,
-                message=f"Deputy API error: {response.text}",
-                detail={"response": response.text, "path": path},
-            ))
-
-        return response.json()
+        return all_results
 
     async def _refresh_token(self) -> None:
         """Refresh the OAuth2 access token."""
+        if self.credentials.is_permanent:
+            logger.debug("Permanent token — skipping refresh")
+            return
+
         if not self.credentials.refresh_token:
             raise DeputyAPIError(APIError(
                 status_code=401,
-                message="No refresh token available",
+                message="No refresh token available — please reconnect Deputy.",
                 detail={},
             ))
 
-        async with httpx.AsyncClient(timeout=30.0) as refresh_client:
-            response = await refresh_client.post(
-                DeputyOAuth.TOKEN_URL,
-                data={
-                    "client_id": self.credentials.client_id,
-                    "client_secret": self.credentials.client_secret,
-                    "refresh_token": self.credentials.refresh_token,
-                    "grant_type": "refresh_token",
-                },
-            )
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as refresh_client:
+                response = await refresh_client.post(
+                    DeputyOAuth.TOKEN_URL,
+                    data={
+                        "client_id": self.credentials.client_id,
+                        "client_secret": self.credentials.client_secret,
+                        "refresh_token": self.credentials.refresh_token,
+                        "grant_type": "refresh_token",
+                    },
+                )
+        except httpx.HTTPError as e:
+            raise DeputyAPIError(APIError(
+                status_code=0,
+                message=f"Token refresh request failed: {e}",
+                detail={"error": str(e)},
+            ))
 
         if response.status_code != 200:
             raise DeputyAPIError(APIError(
                 status_code=response.status_code,
-                message="Token refresh failed",
+                message="Token refresh failed — please reconnect Deputy.",
                 detail={"response": response.text},
             ))
 
@@ -306,24 +427,36 @@ class DeputyAdapter:
         self._client.headers["Authorization"] = f"Bearer {self.credentials.access_token}"
         logger.info("Deputy access token refreshed successfully")
 
+        # Persist refreshed tokens if a callback was provided
+        if self._on_token_refresh:
+            try:
+                self._on_token_refresh(self.credentials)
+            except Exception as e:
+                logger.warning(f"Failed to persist refreshed Deputy token: {e}")
+
     # ── Employee Methods ─────────────────────────────────────────────
 
     async def get_employees(self, active_only: bool = True) -> List[Employee]:
         """Fetch all employees from Deputy and map to RosterIQ Employee model."""
         search_filter = {"Active": 1} if active_only else {}
-        data = await self._request(
-            "POST",
+        data = await self._request_paginated(
             "/resource/Employee/QUERY",
             data={
                 "search": search_filter,
                 "sort": {"LastName": "asc"},
-                "max": 500,
             },
         )
 
         employees = []
+        failed = 0
         for emp in data:
-            employees.append(self._map_employee(emp))
+            try:
+                employees.append(self._map_employee(emp))
+            except Exception as e:
+                failed += 1
+                logger.warning(f"Failed to map Deputy employee {emp.get('Id', '?')}: {e}")
+        if failed:
+            logger.warning(f"Skipped {failed}/{len(data)} employees due to mapping errors")
         return employees
 
     async def get_employee(self, employee_id: int) -> Employee:
@@ -389,29 +522,44 @@ class DeputyAdapter:
         if location_id:
             search_filter["OperationalUnit"] = location_id
 
-        data = await self._request(
-            "POST",
+        data = await self._request_paginated(
             "/resource/Roster/QUERY",
             data={
                 "search": search_filter,
                 "sort": {"StartTime": "asc"},
-                "max": 500,
             },
         )
 
         shifts = []
+        failed = 0
         for roster_item in data:
-            shifts.append(self._map_shift(roster_item))
+            try:
+                shifts.append(self._map_shift(roster_item))
+            except Exception as e:
+                failed += 1
+                logger.warning(f"Failed to map Deputy shift {roster_item.get('Id', '?')}: {e}")
+        if failed:
+            logger.warning(f"Skipped {failed}/{len(data)} shifts due to mapping errors")
         return shifts
 
     def _map_shift(self, data: Dict[str, Any]) -> Shift:
         """Map a Deputy roster item to RosterIQ Shift model."""
-        start_time = datetime.fromisoformat(
-            data.get("StartTime", datetime.now().isoformat())
-        )
-        end_time = datetime.fromisoformat(
-            data.get("EndTime", (datetime.now() + timedelta(hours=4)).isoformat())
-        )
+        raw_start = data.get("StartTime")
+        raw_end = data.get("EndTime")
+
+        # Deputy may return timestamps as epoch integers or ISO strings
+        def _parse_dt(val, fallback_label: str) -> datetime:
+            if isinstance(val, (int, float)) and val > 0:
+                return datetime.fromtimestamp(val)
+            if isinstance(val, str) and val:
+                try:
+                    return datetime.fromisoformat(val)
+                except ValueError:
+                    logger.warning(f"Unparseable Deputy {fallback_label}: {val!r}")
+            raise ValueError(f"Missing or invalid {fallback_label} in Deputy shift {data.get('Id', '?')}")
+
+        start_time = _parse_dt(raw_start, "StartTime")
+        end_time = _parse_dt(raw_end, "EndTime")
 
         status = _DEPUTY_STATUS_MAP.get(
             data.get("ConfirmStatus", 0), ShiftStatus.scheduled

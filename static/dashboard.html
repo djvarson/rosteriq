@@ -3818,9 +3818,15 @@
                     <div style="font-size: 12px; color: var(--text-muted);">Sync rosters, employees, and timesheets from Deputy</div>
                   </div>
                   <div id="deputy-status" style="display: flex; align-items: center; gap: 8px;">
+                    <span id="deputy-health-dot" style="display:none; width:8px; height:8px; border-radius:50%; background:var(--text-muted);" title="Connection status"></span>
                     <button class="btn btn-secondary btn-small" id="btn-deputy-connect" onclick="connectDeputy()">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-deputy-sync" onclick="syncDeputyData()" style="display: none;">Sync Now</button>
                     <button class="btn btn-secondary btn-small" id="btn-deputy-disconnect" onclick="disconnectDeputy()" style="display: none;">Disconnect</button>
                   </div>
+                </div>
+                <div id="deputy-status-detail" style="display:none; font-size:12px; color:var(--text-muted); margin-top:4px;">
+                  <span id="deputy-subdomain-label"></span>
+                  <span id="deputy-last-sync" style="margin-left:12px;"></span>
                 </div>
               </div>
               <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="humanforce-integration-card">
@@ -6980,76 +6986,161 @@ async function loadUpcomingFunctions() {
 // Deputy Integration
 // ============================================
 
+function _getVenueId() {
+  if (typeof state.currentVenue === 'object' && state.currentVenue?.id)
+    return state.currentVenue.id;
+  if (typeof state.currentVenue === 'string' && state.currentVenue !== 'demo-venue-001')
+    return state.currentVenue;
+  return state.venueId || 'default';
+}
+
 async function connectDeputy() {
   try {
     const subdomain = prompt('Enter your Deputy subdomain (e.g. mycompany):');
     if (!subdomain) return;
-    const token = prompt('Enter your Deputy permanent access token:\n\nGenerate one at:\nhttps://' + subdomain + '.au.deputy.com/exec/devapp/oauth_clients');
+    const token = prompt('Enter your Deputy permanent access token:\n\nGenerate one at:\nhttps://' + subdomain.trim() + '.au.deputy.com/exec/devapp/oauth_clients');
     if (!token) return;
-    // Use the real venue ID if available, otherwise use a stable default
-    const venueId = (typeof state.currentVenue === 'object' && state.currentVenue?.id)
-      ? state.currentVenue.id
-      : (typeof state.currentVenue === 'string' && state.currentVenue !== 'demo-venue-001')
-        ? state.currentVenue
-        : 'default';
-    // fetchAPI returns parsed data directly, throws on error
+    const venueId = _getVenueId();
+    const connectBtn = document.getElementById('btn-deputy-connect');
+    connectBtn.textContent = 'Connecting...';
+    connectBtn.disabled = true;
     const data = await fetchAPI('/api/deputy/install-token', {
       method: 'POST',
-      body: JSON.stringify({ venue_id: venueId, subdomain: subdomain, access_token: token })
+      body: JSON.stringify({ venue_id: venueId, subdomain: subdomain.trim(), access_token: token.trim() })
     });
-    updateDeputyStatus(true);
+    updateDeputyStatus(true, data);
     const syncMsg = data.synced_employees
       ? `Synced ${data.synced_employees} staff and ${data.synced_shifts} shifts.`
       : '';
-    showToastNotification('Deputy Connected', 'User: ' + (data.deputy_user || 'unknown') + '. ' + syncMsg, 'success');
-    // Reload dashboard with real data instead of demo
+    const errMsg = data.sync_errors ? ` (${data.sync_errors} records had errors)` : '';
+    showToastNotification('Deputy Connected', 'User: ' + (data.deputy_user || 'unknown') + '. ' + syncMsg + errMsg, 'success');
     state.isDemo = false;
     state.currentVenue = venueId;
     await loadRealVenueData(venueId);
   } catch (err) {
     console.error('Deputy connect error:', err);
-    showToastNotification('Connection Failed', err.message || 'Could not connect to Deputy', 'error');
+    const msg = err.message || 'Could not connect to Deputy';
+    const hint = msg.includes('subdomain') ? ' Check the subdomain is correct (just the name, not the full URL).'
+               : msg.includes('token') || msg.includes('401') ? ' Check your access token is still valid in Deputy admin.'
+               : '';
+    showToastNotification('Connection Failed', msg + hint, 'error');
+  } finally {
+    const connectBtn = document.getElementById('btn-deputy-connect');
+    connectBtn.textContent = 'Connect';
+    connectBtn.disabled = false;
   }
 }
 
 async function disconnectDeputy() {
+  if (!confirm('Disconnect Deputy? You can reconnect later.')) return;
   try {
-    const venueId = state.currentVenue?.id || state.venueId || 'default';
-    const resp = await fetch('/api/deputy/uninstall', {
+    const venueId = _getVenueId();
+    await fetchAPI('/api/deputy/uninstall', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
       body: JSON.stringify({ venue_id: venueId })
     });
-    if (!resp.ok) throw new Error('Failed to disconnect Deputy');
     updateDeputyStatus(false);
     showToastNotification('Deputy Disconnected', 'Deputy integration has been removed', 'success');
   } catch (err) {
     console.error('Deputy disconnect error:', err);
-    showToastNotification('Disconnect Failed', 'Could not disconnect Deputy', 'error');
+    showToastNotification('Disconnect Failed', err.message || 'Could not disconnect Deputy', 'error');
   }
 }
 
-function updateDeputyStatus(connected) {
+async function syncDeputyData() {
+  const syncBtn = document.getElementById('btn-deputy-sync');
+  syncBtn.textContent = 'Syncing...';
+  syncBtn.disabled = true;
+  try {
+    const venueId = _getVenueId();
+    const [empResult, shiftResult] = await Promise.allSettled([
+      fetchAPI('/api/deputy/sync/employees', {
+        method: 'POST',
+        body: JSON.stringify({ venue_id: venueId, active_only: true })
+      }),
+      fetchAPI('/api/deputy/sync/shifts', {
+        method: 'POST',
+        body: JSON.stringify({
+          venue_id: venueId,
+          start_date: new Date().toISOString().slice(0, 10),
+          end_date: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)
+        })
+      })
+    ]);
+    const empCount = empResult.status === 'fulfilled' ? empResult.value.count : 0;
+    const shiftCount = shiftResult.status === 'fulfilled' ? shiftResult.value.count : 0;
+    const errors = [];
+    if (empResult.status === 'rejected') errors.push('employees: ' + empResult.reason.message);
+    if (shiftResult.status === 'rejected') errors.push('shifts: ' + shiftResult.reason.message);
+    if (empResult.status === 'fulfilled' && empResult.value.errors) errors.push(empResult.value.errors + ' employee save errors');
+    if (shiftResult.status === 'fulfilled' && shiftResult.value.errors) errors.push(shiftResult.value.errors + ' shift save errors');
+
+    const detail = `${empCount} employees, ${shiftCount} shifts synced.`;
+    if (errors.length) {
+      showToastNotification('Sync Partial', detail + ' Issues: ' + errors.join('; '), 'warning');
+    } else {
+      showToastNotification('Sync Complete', detail, 'success');
+    }
+    document.getElementById('deputy-last-sync').textContent = 'Last sync: just now';
+    await loadRealVenueData(venueId);
+  } catch (err) {
+    console.error('Deputy sync error:', err);
+    showToastNotification('Sync Failed', err.message || 'Could not sync data from Deputy', 'error');
+  } finally {
+    syncBtn.textContent = 'Sync Now';
+    syncBtn.disabled = false;
+  }
+}
+
+function updateDeputyStatus(connected, data) {
   const connectBtn = document.getElementById('btn-deputy-connect');
+  const syncBtn = document.getElementById('btn-deputy-sync');
   const disconnectBtn = document.getElementById('btn-deputy-disconnect');
+  const healthDot = document.getElementById('deputy-health-dot');
+  const detailRow = document.getElementById('deputy-status-detail');
   if (connected) {
     connectBtn.style.display = 'none';
+    syncBtn.style.display = 'inline-flex';
     disconnectBtn.style.display = 'inline-flex';
+    healthDot.style.display = 'inline-block';
+    healthDot.style.background = 'var(--success)';
+    healthDot.title = 'Connected';
+    detailRow.style.display = 'block';
+    if (data?.deputy_subdomain) {
+      document.getElementById('deputy-subdomain-label').textContent = data.deputy_subdomain + '.au.deputy.com';
+    }
+    if (data?.updated_at) {
+      document.getElementById('deputy-last-sync').textContent = 'Last sync: ' + new Date(data.updated_at).toLocaleString();
+    }
   } else {
     connectBtn.style.display = 'inline-flex';
+    syncBtn.style.display = 'none';
     disconnectBtn.style.display = 'none';
+    healthDot.style.display = 'none';
+    detailRow.style.display = 'none';
   }
 }
 
 async function checkDeputyStatus() {
   try {
-    const venueId = state.currentVenue?.id || state.venueId || 'default';
-    const resp = await fetch('/api/deputy/status?venue_id=' + encodeURIComponent(venueId), {
+    const venueId = _getVenueId();
+    const resp = await fetch(state.baseUrl + '/api/deputy/status?venue_id=' + encodeURIComponent(venueId) + '&verify=true', {
       headers: { 'Authorization': 'Bearer ' + state.token }
     });
     if (resp.ok) {
       const data = await resp.json();
-      updateDeputyStatus(data.connected || false);
+      updateDeputyStatus(data.connected || false, data);
+      // Show health dot colour based on live verification
+      if (data.connected) {
+        const dot = document.getElementById('deputy-health-dot');
+        if (data.live_verified === true) {
+          dot.style.background = 'var(--success)';
+          dot.title = 'Connected — verified live';
+        } else if (data.live_verified === false) {
+          dot.style.background = '#e67e22';
+          dot.title = 'Saved but live check failed: ' + (data.live_error || 'unknown');
+        }
+      }
     }
   } catch (err) {
     console.log('Deputy status check unavailable');
