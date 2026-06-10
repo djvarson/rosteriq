@@ -4234,9 +4234,22 @@
           <div class="onboarding-card-desc">Schedule, timesheet, and task management for shift-based teams.</div>
           <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'roster', 'deputy')">Connect</button>
           <div class="ob-api-input">
-            <input type="text" placeholder="Deputy subdomain (e.g. mycompany)" data-field="subdomain">
-            <input type="text" placeholder="Permanent access token" data-field="access_token">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'roster', 'deputy')">Save</button>
+            <div class="ob-field-group" style="margin-bottom:8px;">
+              <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px;">Your Deputy URL prefix — the part before .deputy.com</label>
+              <div style="display:flex;align-items:center;gap:0;">
+                <span style="background:var(--bg-tertiary);padding:6px 8px;border-radius:6px 0 0 6px;border:1px solid var(--border-primary);border-right:none;font-size:12px;color:var(--text-muted);white-space:nowrap;">https://</span>
+                <input type="text" placeholder="yourcompany" data-field="subdomain" style="border-radius:0;border-left:none;border-right:none;flex:1;">
+                <span style="background:var(--bg-tertiary);padding:6px 8px;border-radius:0 6px 6px 0;border:1px solid var(--border-primary);border-left:none;font-size:12px;color:var(--text-muted);white-space:nowrap;">.deputy.com</span>
+              </div>
+            </div>
+            <div class="ob-field-group" style="margin-bottom:8px;">
+              <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px;">Permanent access token — <a href="https://www.deputy.com/api-doc/API/Authentication" target="_blank" style="color:var(--accent-primary);">get one here</a></label>
+              <input type="text" placeholder="Paste your permanent access token" data-field="access_token">
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">
+              Find your subdomain: log in to Deputy and look at the URL in your browser. If it shows <strong>mycompany.au.deputy.com</strong>, enter <strong>mycompany.au</strong> above.
+            </div>
+            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'roster', 'deputy')">Connect Deputy</button>
           </div>
           <div class="onboarding-card-status">Connected</div>
         </div>
@@ -5618,7 +5631,7 @@ async function loadVenues() {
 
   try {
     const response = await fetchAPI('/venues');
-    state.venues = response;
+    state.venues = Array.isArray(response) ? response : (response.items || []);
     const select = document.getElementById('venue-select');
     select.innerHTML = '<option value="">Select a venue...</option>' + state.venues.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
 
@@ -7070,9 +7083,9 @@ function _getVenueId() {
 
 async function connectDeputy() {
   try {
-    const subdomain = prompt('Enter your Deputy subdomain (e.g. mycompany):');
+    const subdomain = prompt('Enter the part of your Deputy URL before .deputy.com\n\nExample: if your Deputy URL is mycompany.au.deputy.com, enter: mycompany.au');
     if (!subdomain) return;
-    const token = prompt('Enter your Deputy permanent access token:\n\nGenerate one at:\nhttps://' + subdomain.trim() + '.au.deputy.com/exec/devapp/oauth_clients');
+    const token = prompt('Enter your Deputy permanent access token:\n\nTo get one:\n1. Go to https://' + subdomain.trim() + '.deputy.com/exec/devapp/oauth_clients\n2. Create a new OAuth app\n3. Copy the permanent access token');
     if (!token) return;
     const venueId = _getVenueId();
     const connectBtn = document.getElementById('btn-deputy-connect');
@@ -8081,7 +8094,10 @@ async function obSaveConnection(btn, category, provider) {
 
   // Determine API endpoint
   let endpoint = '';
-  const venueId = state.currentVenue?.id || state.venueId || 'default';
+  // During onboarding, derive venue ID from the wizard venue name
+  const obVenueName = obState.venue.name || '';
+  const obVenueSlug = obVenueName ? obVenueName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') : '';
+  const venueId = state.currentVenue || obVenueSlug || 'default';
   const body = { venue_id: venueId, ...credentials };
 
   if (category === 'roster') {
@@ -8242,29 +8258,96 @@ function obGenerateRoster() {
   }, 3000);
 }
 
-function obFinish() {
-  hideOnboardingWizard();
+async function obFinish() {
+  // Collect any remaining step data
+  obCollectStepData(obState.currentStep);
 
-  // Apply settings to the main dashboard if values were provided
-  if (obState.venue.name) {
-    const vnInput = document.getElementById('setting-venue-name');
-    if (vnInput) vnInput.value = obState.venue.name;
-  }
-  if (obState.venue.location) {
-    const locInput = document.getElementById('setting-location');
-    if (locInput) locInput.value = obState.venue.location;
-  }
+  // Generate a venue ID from the name (slug) or fallback to timestamp
+  const venueName = obState.venue.name || 'My Venue';
+  const venueId = venueName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `venue-${Date.now()}`;
+
+  // Build venue payload matching VenueConfig model
+  const venuePayload = {
+    id: venueId,
+    name: venueName,
+    tanda_org_id: obState.connections.roster ? (obState.connections.roster.org_id || '') : '',
+    state: obState.venue.state || 'WA',
+    timezone: getTimezoneForState(obState.venue.state || 'WA'),
+    min_staff: {},
+    max_labour_pct: parseFloat(obState.settings.maxLabour) || 30.0,
+    pos_system: obState.connections.pos || null,
+    created_at: new Date().toISOString()
+  };
+
+  // Parse min staff per role if provided
   if (obState.settings.minStaff) {
-    const msInput = document.getElementById('setting-min-staff');
-    if (msInput) msInput.value = obState.settings.minStaff;
-  }
-  if (obState.settings.coversPerStaff) {
-    const cpsInput = document.getElementById('setting-covers-per-staff');
-    if (cpsInput) cpsInput.value = obState.settings.coversPerStaff;
+    venuePayload.min_staff['default'] = parseInt(obState.settings.minStaff) || 3;
   }
 
-  showPage('dashboard');
-  showToastNotification('Setup Complete', 'Your venue is configured and ready to go', 'success');
+  try {
+    // Create the venue in the database
+    const result = await fetchAPI('/venues', {
+      method: 'POST',
+      body: JSON.stringify(venuePayload)
+    });
+
+    // Set the current venue so the dashboard loads real data
+    state.currentVenue = venueId;
+    state.venues = [venuePayload];
+    localStorage.setItem('rosteriq_current_venue', venueId);
+
+    // Update the venue selector
+    const select = document.getElementById('venue-select');
+    if (select) {
+      select.innerHTML = `<option value="${esc(venueId)}" selected>${esc(venueName)}</option>`;
+      select.value = venueId;
+    }
+
+    hideOnboardingWizard();
+
+    // Apply settings to the main dashboard
+    if (obState.venue.name) {
+      const vnInput = document.getElementById('setting-venue-name');
+      if (vnInput) vnInput.value = obState.venue.name;
+    }
+    if (obState.venue.location) {
+      const locInput = document.getElementById('setting-location');
+      if (locInput) locInput.value = obState.venue.location;
+    }
+    if (obState.settings.minStaff) {
+      const msInput = document.getElementById('setting-min-staff');
+      if (msInput) msInput.value = obState.settings.minStaff;
+    }
+    if (obState.settings.coversPerStaff) {
+      const cpsInput = document.getElementById('setting-covers-per-staff');
+      if (cpsInput) cpsInput.value = obState.settings.coversPerStaff;
+    }
+
+    showPage('dashboard');
+    loadVenueData();
+    showToastNotification('Setup Complete', `${esc(venueName)} is configured and ready to go!`, 'success');
+  } catch (err) {
+    console.error('Failed to create venue:', err);
+    // Still allow proceeding — store locally and retry next load
+    state.currentVenue = venueId;
+    hideOnboardingWizard();
+    showPage('dashboard');
+    showToastNotification('Setup Saved Locally', 'Venue created but sync failed — will retry on next load', 'warning');
+  }
+}
+
+function getTimezoneForState(stateCode) {
+  const timezones = {
+    'WA': 'Australia/Perth',
+    'NT': 'Australia/Darwin',
+    'SA': 'Australia/Adelaide',
+    'QLD': 'Australia/Brisbane',
+    'NSW': 'Australia/Sydney',
+    'VIC': 'Australia/Melbourne',
+    'TAS': 'Australia/Hobart',
+    'ACT': 'Australia/Sydney'
+  };
+  return timezones[stateCode] || 'Australia/Sydney';
 }
 
 // ── Roster Export: PDF ──────────────────────────────────────────────

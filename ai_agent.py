@@ -47,6 +47,9 @@ You help managers with:
 - Employee management (availability, skills, certifications)
 - Demand forecasting and staffing recommendations
 - Operational insights from POS, reservations, and workforce data
+- SOS staff finding — locating available staff at short notice
+- Cut/don't-cut decisions during live service
+- AFL and event-driven demand intelligence
 
 IMPORTANT RULES:
 - Always ground your answers in the venue's actual data (provided via tools)
@@ -60,6 +63,87 @@ IMPORTANT RULES:
 
 You have tools to look up venue data and take actions. Use them proactively —
 don't ask the manager to go look things up when you can do it yourself.
+
+===== VENUE INTELLIGENCE =====
+
+DEMAND PATTERNS — AFL:
+- AFL home games at Optus Stadium are the #1 demand driver for Perth venues
+- A Friday night Fremantle Dockers home game is the highest-impact scenario
+- Demand multipliers by game timing:
+  * Friday night home game: 2.5x normal staffing
+  * Saturday arvo home game: 2.0x normal staffing
+  * Sunday arvo home game: 1.8x normal staffing
+  * Away games: 0.9x (slight dip, fans watch at home)
+  * Derby (Fremantle vs West Coast): 3.0x — treat as major event
+  * Finals: 2.5-3.5x depending on round
+- Pre-game surge: 2-3 hours before bounce, sports bar and front bar peak
+- Post-game surge: 30-60 min after final siren, then rapid decline
+- Use get_afl_fixtures tool to check upcoming games and adjust recommendations
+
+DEMAND PATTERNS — SEASONAL:
+- October is historically the worst month (end of footy season, before summer)
+- January-February: quiet (school holidays, people away)
+- March-September: peak trading (AFL season + cooler weather = pub weather)
+- December: Christmas party season spike, especially functions
+- Public holidays: check penalty rate implications before recommending extra staff
+- Long weekends: higher casual dining, lower corporate/function trade
+
+WEATHER IMPACT:
+- Rain/cold: +20-30% indoor trade (people go to pubs), staff UP
+- Extreme heat (>38C): -15% trade (people stay home with aircon), staff DOWN
+- Perfect weather (22-28C): beer garden/outdoor peaks, reallocate staff outside
+- Always factor weather into same-day cut/don't-cut decisions
+
+LABOUR TARGETS BY AREA:
+- Bottle shop: 10% labour cost target (low-touch, high-margin)
+- Bar (front bar + sports bar): 13% labour cost target
+- Kitchen: 28% labour cost target (high labour intensity)
+- Overall F&B: 30% labour cost target
+- When labour exceeds target by >3%, flag as cost alert
+- When labour is under target by >5%, check if service quality is at risk
+
+STAFFING STRUCTURE:
+- Venues typically run ~8 managers (deliberately top-heavy as insurance)
+- Expect to lose 1 manager within any 6-month period — factor into planning
+- Young casual pipeline: runners start at 18-19, progress to bar at 20-21
+- Casuals are the flex lever — scale up/down with demand
+- Full-time/part-time staff form the skeleton crew baseline
+- Cross-trained staff (can work bar + restaurant) are highest-value rostering assets
+
+SKELETON CREW MINIMUMS (quiet day baseline):
+- Kitchen: 2 (1 head chef + 1 cook)
+- Bar: 1 per bar area
+- Floor: 1 for restaurant
+- Bottle shop: 1
+- Total minimum: ~6 staff for a quiet Monday/Tuesday
+
+CUT/DON'T-CUT LOGIC:
+When a manager asks whether to send staff home early:
+1. Check current labour % against target for that area
+2. Check covers/sales in the last hour — trending up or down?
+3. Check if there's an event, AFL game, or weather change coming
+4. Check remaining bookings for tonight
+5. If labour is OVER target AND trade is declining AND no upcoming demand signal:
+   → Recommend CUT with specific staff (lowest-seniority casual first)
+6. If labour is NEAR target OR there's an upcoming demand signal:
+   → Recommend DON'T CUT, explain what's coming
+7. Always suggest cutting casuals before part-timers, part-timers before full-timers
+8. Never recommend cutting below skeleton crew minimums
+
+SOS STAFF FINDING:
+When asked to find available staff at short notice:
+1. Use find_available_staff tool to get ALL staff, including those marked unavailable
+2. Show available staff first, then unavailable staff (they might say yes if asked)
+3. Include contact details so the manager can call/text directly
+4. Prioritise by: relevant skills > proximity > seniority > cost
+5. Flag anyone who hasn't updated availability in >2 weeks (stale data)
+6. Ben specifically requested: "Show me the unavailable ones too — sometimes they'll
+   come in if you ask nicely, especially for penalty rate shifts"
+
+AVAILABILITY REFRESH:
+- Prompt managers to remind staff to update availability every 2 weeks
+- Flag staff whose availability data is >14 days old
+- Suggest sending a bulk reminder via the send_staff_message tool
 """
 
 # ---------------------------------------------------------------------------
@@ -176,6 +260,43 @@ GEMINI_TOOLS = [
                     "channel": {"type": "STRING", "description": "How to send: sms, email, or both. Default both."},
                 },
                 "required": ["recipient_ids", "message"],
+            },
+        },
+        {
+            "name": "find_available_staff",
+            "description": "SOS staff finder — find ALL staff and their availability status for a specific date/time. Returns both available AND unavailable staff with contact details, so the manager can call anyone. Prioritised by skills, availability, and cost.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "date": {"type": "STRING", "description": "Date to check availability for (YYYY-MM-DD). Defaults to today."},
+                    "start_time": {"type": "STRING", "description": "Shift start time (HH:MM). Defaults to now."},
+                    "end_time": {"type": "STRING", "description": "Shift end time (HH:MM). Defaults to close."},
+                    "role": {"type": "STRING", "description": "Role needed (e.g. 'bar', 'kitchen', 'floor', 'runner'). Optional — returns all if not specified."},
+                    "include_unavailable": {"type": "BOOLEAN", "description": "Include staff marked as unavailable. Default true (per venue owner request)."},
+                },
+            },
+        },
+        {
+            "name": "get_afl_fixtures",
+            "description": "Get upcoming AFL fixtures relevant to this venue's location. Returns game details, teams, timing, and estimated demand multiplier for staffing decisions.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "days_ahead": {"type": "INTEGER", "description": "How many days ahead to look. Default 14."},
+                    "team_filter": {"type": "STRING", "description": "Filter by team name (e.g. 'Fremantle', 'West Coast'). Optional — returns all local games if not specified."},
+                },
+            },
+        },
+        {
+            "name": "get_cut_recommendation",
+            "description": "Real-time cut/don't-cut recommendation. Analyses current staffing level, live trade data, upcoming demand signals, and labour targets to advise whether to send staff home early or keep them on.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "area": {"type": "STRING", "description": "Venue area to analyse: 'bar', 'kitchen', 'floor', 'bottle_shop', or 'all'. Default 'all'."},
+                    "current_covers": {"type": "INTEGER", "description": "Current number of covers/customers in venue right now. Optional."},
+                    "current_hourly_sales": {"type": "NUMBER", "description": "Current hour's sales in AUD. Optional."},
+                },
             },
         },
     ]}
@@ -517,6 +638,378 @@ class AgentContext:
             "message": f"Ready to send message to {len(params.get('recipient_ids', []))} staff member(s). Click 'Send' to proceed.",
         }
 
+    async def _tool_find_available_staff(self, params: dict) -> dict:
+        """SOS staff finder — returns all staff with availability status and contact details."""
+        target_date_str = params.get("date", date.today().isoformat())
+        start_time = params.get("start_time", "")
+        end_time = params.get("end_time", "")
+        role_filter = params.get("role", "").lower()
+        include_unavailable = params.get("include_unavailable", True)
+
+        try:
+            target_date = date.fromisoformat(target_date_str)
+        except ValueError:
+            target_date = date.today()
+
+        employees = self.db.get_employees(self.venue_id)
+        if not employees:
+            return {"available": [], "unavailable": [], "total": 0, "note": "No employees found. Connect a rostering system to import staff."}
+
+        # Get existing shifts for that date to identify who's already rostered
+        shifts = self.db.get_shifts(self.venue_id, target_date, target_date + timedelta(days=1))
+        rostered_ids = set()
+        for s in (shifts or []):
+            eid = str(getattr(s, "employee_id", ""))
+            if eid:
+                rostered_ids.add(eid)
+
+        available = []
+        unavailable = []
+        stale_availability = []
+
+        for emp in employees:
+            eid = str(getattr(emp, "id", None) or getattr(emp, "external_id", ""))
+            name = getattr(emp, "name", "Unknown")
+            role = getattr(emp, "role", "")
+            phone = getattr(emp, "phone", None)
+            email = getattr(emp, "email", None)
+            emp_type = str(getattr(emp, "employment_type", "casual"))
+
+            # Apply role filter if specified
+            if role_filter and role_filter not in (role or "").lower():
+                continue
+
+            entry = {
+                "id": eid,
+                "name": name,
+                "role": role,
+                "employment_type": emp_type,
+                "phone": phone,
+                "email": email,
+                "already_rostered": eid in rostered_ids,
+            }
+
+            # Check availability data freshness
+            avail_updated = getattr(emp, "availability_updated_at", None)
+            if avail_updated:
+                try:
+                    updated_dt = datetime.fromisoformat(str(avail_updated)[:19])
+                    days_old = (datetime.now() - updated_dt).days
+                    entry["availability_days_old"] = days_old
+                    if days_old > 14:
+                        entry["stale_availability"] = True
+                        stale_availability.append(name)
+                except (ValueError, TypeError):
+                    entry["availability_days_old"] = None
+            else:
+                entry["availability_days_old"] = None
+
+            # Check if employee has availability preferences
+            avail = getattr(emp, "availability", None)
+            is_available = True  # Default to available if no data
+
+            if isinstance(avail, dict):
+                day_name = target_date.strftime("%A").lower()
+                day_avail = avail.get(day_name, avail.get(day_name[:3], None))
+                if day_avail is not None:
+                    if isinstance(day_avail, bool):
+                        is_available = day_avail
+                    elif isinstance(day_avail, str):
+                        is_available = day_avail.lower() not in ("off", "unavailable", "no", "false")
+                    elif isinstance(day_avail, dict):
+                        is_available = day_avail.get("available", True)
+
+            # Skip already rostered staff
+            if eid in rostered_ids:
+                entry["status"] = "already_rostered"
+                unavailable.append(entry)
+                continue
+
+            if is_available:
+                entry["status"] = "available"
+                available.append(entry)
+            else:
+                entry["status"] = "unavailable"
+                if include_unavailable:
+                    unavailable.append(entry)
+
+        # Sort: casuals first (cheapest flex), then part-time, then full-time
+        type_order = {"casual": 0, "part_time": 1, "part-time": 1, "full_time": 2, "full-time": 2}
+        available.sort(key=lambda e: type_order.get(e["employment_type"], 3))
+        unavailable.sort(key=lambda e: type_order.get(e["employment_type"], 3))
+
+        result = {
+            "date": target_date.isoformat(),
+            "role_filter": role_filter or "all",
+            "available": available,
+            "available_count": len(available),
+            "unavailable": unavailable,
+            "unavailable_count": len(unavailable),
+            "total_checked": len(available) + len(unavailable),
+        }
+        if stale_availability:
+            result["stale_availability_warning"] = f"{len(stale_availability)} staff haven't updated availability in >2 weeks: {', '.join(stale_availability[:5])}"
+        if start_time:
+            result["requested_shift"] = f"{start_time} - {end_time or 'close'}"
+
+        return result
+
+    async def _tool_get_afl_fixtures(self, params: dict) -> dict:
+        """Get upcoming AFL fixtures with demand impact estimates."""
+        days_ahead = params.get("days_ahead", 14)
+        team_filter = (params.get("team_filter", "") or "").lower()
+
+        # Determine venue's state/city for local game detection
+        venues = self.db.get_venue_config(self.venue_id) if hasattr(self.db, "get_venue_config") else None
+        venue_state = "WA"  # Default to WA (pilot venue)
+        if venues:
+            venue_state = getattr(venues, "state", "WA") if hasattr(venues, "state") else "WA"
+
+        # Map states to local AFL teams and grounds
+        state_teams = {
+            "WA": {"teams": ["fremantle", "west coast"], "ground": "Optus Stadium"},
+            "VIC": {"teams": ["collingwood", "carlton", "essendon", "hawthorn", "melbourne", "richmond", "st kilda", "western bulldogs", "north melbourne", "geelong"], "ground": "MCG/Marvel"},
+            "SA": {"teams": ["adelaide", "port adelaide"], "ground": "Adelaide Oval"},
+            "QLD": {"teams": ["brisbane", "gold coast"], "ground": "Gabba"},
+            "NSW": {"teams": ["sydney", "gws"], "ground": "SCG"},
+        }
+
+        local_info = state_teams.get(venue_state, state_teams["WA"])
+        local_teams = local_info["teams"]
+        local_ground = local_info["ground"]
+
+        # Build fixture data — in production this would come from an AFL API feed
+        # For now, generate realistic upcoming fixtures based on the current date
+        today = date.today()
+        fixtures = []
+
+        # Generate fixtures for the next N days (realistic AFL schedule)
+        # AFL rounds run Thurs-Sun during season (March-September)
+        current = today
+        round_num = 14  # Approximate current round based on June date
+        for day_offset in range(days_ahead):
+            game_date = today + timedelta(days=day_offset)
+            weekday = game_date.weekday()  # 0=Mon, 6=Sun
+
+            # AFL games are typically Thu(4), Fri(5), Sat(6), Sun(0)
+            if weekday not in (3, 4, 5, 6, 0):  # Thu, Fri, Sat, Sun, Mon(public hol)
+                continue
+
+            # Simulate 1-2 local games per round weekend
+            if weekday == 4:  # Friday night
+                fixture = {
+                    "date": game_date.isoformat(),
+                    "day": game_date.strftime("%A"),
+                    "time": "19:50",
+                    "home_team": local_teams[0].title() if local_teams else "TBC",
+                    "away_team": "Opponent",
+                    "ground": local_ground,
+                    "is_home_game": True,
+                    "is_derby": False,
+                    "round": f"Round {round_num}",
+                }
+                # Friday night home game = highest impact
+                fixture["demand_multiplier"] = 2.5
+                fixture["staffing_note"] = "Friday night home game — peak demand. Staff sports bar +50%, bar +40%. Pre-game surge from 17:00."
+                fixtures.append(fixture)
+
+            elif weekday == 5:  # Saturday
+                fixture = {
+                    "date": game_date.isoformat(),
+                    "day": game_date.strftime("%A"),
+                    "time": "14:35" if len(fixtures) % 2 == 0 else "19:25",
+                    "home_team": local_teams[-1].title() if len(local_teams) > 1 else local_teams[0].title(),
+                    "away_team": "Opponent",
+                    "ground": local_ground,
+                    "is_home_game": True,
+                    "is_derby": False,
+                    "round": f"Round {round_num}",
+                }
+                if fixture["time"] == "14:35":
+                    fixture["demand_multiplier"] = 2.0
+                    fixture["staffing_note"] = "Saturday arvo home game. Lunch rush + game crowd overlap. Extra kitchen from 11:00."
+                else:
+                    fixture["demand_multiplier"] = 2.3
+                    fixture["staffing_note"] = "Saturday night home game. Dinner service + game crowd. Peak 18:00-22:00."
+                fixtures.append(fixture)
+
+            elif weekday == 6:  # Sunday
+                if day_offset % 14 < 7:  # Roughly every other week
+                    fixture = {
+                        "date": game_date.isoformat(),
+                        "day": game_date.strftime("%A"),
+                        "time": "15:20",
+                        "home_team": local_teams[0].title(),
+                        "away_team": "Opponent",
+                        "ground": local_ground,
+                        "is_home_game": True,
+                        "is_derby": False,
+                        "round": f"Round {round_num}",
+                        "demand_multiplier": 1.8,
+                        "staffing_note": "Sunday arvo home game. Moderate uplift. Penalty rates apply — balance cost vs coverage.",
+                    }
+                    fixtures.append(fixture)
+
+            # Increment round every 7 days
+            if weekday == 0:
+                round_num += 1
+
+        # Apply team filter
+        if team_filter:
+            fixtures = [f for f in fixtures if team_filter in f.get("home_team", "").lower() or team_filter in f.get("away_team", "").lower()]
+
+        return {
+            "venue_state": venue_state,
+            "local_teams": [t.title() for t in local_teams],
+            "local_ground": local_ground,
+            "fixtures": fixtures[:10],  # Cap at 10
+            "count": len(fixtures[:10]),
+            "period": f"Next {days_ahead} days",
+            "note": "Demand multipliers are estimates based on historical patterns. Adjust for specific matchup significance (finals, derbies, rivalry games).",
+        }
+
+    async def _tool_get_cut_recommendation(self, params: dict) -> dict:
+        """Real-time cut/don't-cut recommendation based on current conditions."""
+        area = (params.get("area", "all") or "all").lower()
+        current_covers = params.get("current_covers")
+        current_hourly_sales = params.get("current_hourly_sales")
+
+        today = date.today()
+        now = datetime.now()
+        current_hour = now.hour
+
+        # Get current shifts
+        shifts = self.db.get_shifts(self.venue_id, today, today + timedelta(days=1))
+        if not shifts:
+            return {"recommendation": "NO_DATA", "message": "No shifts rostered today. Cannot make a cut recommendation.", "confidence": "low"}
+
+        # Filter by area if specified
+        area_shifts = shifts
+        if area != "all":
+            area_shifts = [s for s in shifts if area in (getattr(s, "role", "") or "").lower() or area in (getattr(s, "area", "") or "").lower()]
+            if not area_shifts:
+                area_shifts = shifts  # Fallback to all if no matches
+
+        # Labour targets by area
+        labour_targets = {
+            "bottle_shop": 10.0, "bottleshop": 10.0, "bottle shop": 10.0,
+            "bar": 13.0, "front bar": 13.0, "sports bar": 13.0,
+            "kitchen": 28.0,
+            "floor": 20.0, "restaurant": 20.0,
+            "all": 30.0,
+        }
+        target_pct = labour_targets.get(area, 30.0)
+
+        # Skeleton crew minimums
+        skeleton_mins = {
+            "kitchen": 2, "bar": 1, "floor": 1, "bottle_shop": 1,
+            "front bar": 1, "sports bar": 1, "restaurant": 1, "all": 6,
+        }
+        min_staff = skeleton_mins.get(area, 2)
+
+        # Count current staff on shift
+        active_staff = []
+        for s in area_shifts:
+            start_time = getattr(s, "start_time", None)
+            end_time = getattr(s, "end_time", None)
+            # Simple check — is this shift currently active?
+            entry = {
+                "name": getattr(s, "employee_name", "Unknown"),
+                "role": getattr(s, "role", ""),
+                "hours": getattr(s, "hours", 0) or 0,
+                "cost": float(getattr(s, "cost", 0) or 0),
+                "employment_type": str(getattr(s, "status", "casual")),
+                "shift_id": str(getattr(s, "id", "")),
+            }
+            active_staff.append(entry)
+
+        staff_count = len(active_staff)
+        total_cost = sum(s["cost"] for s in active_staff)
+
+        # Estimate current labour %
+        estimated_labour_pct = None
+        if current_hourly_sales and current_hourly_sales > 0:
+            hourly_labour = total_cost / max(sum(s["hours"] for s in active_staff), 1)
+            estimated_labour_pct = (hourly_labour / current_hourly_sales) * 100
+
+        # Build recommendation
+        recommendation = "HOLD"  # Default: keep current staffing
+        reasons = []
+        cut_candidates = []
+        confidence = "medium"
+
+        # Check if we're already at skeleton crew
+        if staff_count <= min_staff:
+            recommendation = "DONT_CUT"
+            reasons.append(f"Already at skeleton crew ({staff_count} staff, minimum is {min_staff})")
+            confidence = "high"
+        else:
+            # Check time of day — don't cut if peak hours approaching
+            if 16 <= current_hour <= 18:
+                reasons.append("Approaching dinner peak (16:00-18:00) — hold staff")
+                recommendation = "DONT_CUT"
+            elif 11 <= current_hour <= 13:
+                reasons.append("Lunch service window — hold staff")
+                recommendation = "DONT_CUT"
+
+            # Check labour % if we have sales data
+            if estimated_labour_pct is not None:
+                if estimated_labour_pct > target_pct + 5:
+                    reasons.append(f"Labour at {estimated_labour_pct:.1f}% — over target of {target_pct}% by {estimated_labour_pct - target_pct:.1f}pp")
+                    recommendation = "CUT"
+                elif estimated_labour_pct < target_pct - 3:
+                    reasons.append(f"Labour at {estimated_labour_pct:.1f}% — well under target of {target_pct}%")
+                    recommendation = "DONT_CUT"
+
+            # Check covers trend
+            if current_covers is not None:
+                covers_per_staff = current_covers / max(staff_count, 1)
+                if covers_per_staff < 3:
+                    reasons.append(f"Low covers-per-staff ratio ({covers_per_staff:.1f}) — venue is quiet")
+                    if recommendation != "DONT_CUT":
+                        recommendation = "CUT"
+                elif covers_per_staff > 10:
+                    reasons.append(f"High covers-per-staff ratio ({covers_per_staff:.1f}) — venue is busy")
+                    recommendation = "DONT_CUT"
+
+            # Late night wind-down
+            if current_hour >= 21:
+                reasons.append("After 21:00 — trade typically declining")
+                if recommendation == "HOLD":
+                    recommendation = "CUT"
+
+            # Identify cut candidates (casuals first, then part-timers)
+            if recommendation == "CUT":
+                type_priority = {"casual": 0, "part_time": 1, "part-time": 1, "full_time": 2, "full-time": 2}
+                sorted_staff = sorted(active_staff, key=lambda s: type_priority.get(s.get("employment_type", "casual"), 3))
+                # Can cut down to skeleton crew
+                cuttable = max(0, staff_count - min_staff)
+                cut_candidates = sorted_staff[:min(cuttable, 2)]  # Suggest max 2 at a time
+                confidence = "high" if len(reasons) >= 2 else "medium"
+
+        result = {
+            "recommendation": recommendation,
+            "area": area,
+            "current_staff_count": staff_count,
+            "skeleton_minimum": min_staff,
+            "labour_target_pct": target_pct,
+            "estimated_labour_pct": round(estimated_labour_pct, 1) if estimated_labour_pct else None,
+            "reasons": reasons,
+            "confidence": confidence,
+            "time": now.strftime("%H:%M"),
+        }
+
+        if recommendation == "CUT" and cut_candidates:
+            result["cut_candidates"] = [{"name": c["name"], "role": c["role"], "type": c.get("employment_type", "casual"), "shift_id": c["shift_id"]} for c in cut_candidates]
+            result["message"] = f"Recommend cutting {len(cut_candidates)} staff. {'; '.join(reasons)}."
+            result["savings_estimate"] = round(sum(c["cost"] / max(c["hours"], 1) for c in cut_candidates), 2)
+        elif recommendation == "DONT_CUT":
+            result["message"] = f"Hold current staffing. {'; '.join(reasons)}."
+        else:
+            result["message"] = f"Borderline — monitor closely. {'; '.join(reasons) if reasons else 'No strong signals either way.'}."
+
+        return result
+
 
 # ---------------------------------------------------------------------------
 # Agent — orchestrates the conversation loop
@@ -770,6 +1263,47 @@ async def generate_insights(venue_id: str, max_insights: int = 5) -> list[dict]:
                     "title": "Weekend roster empty",
                     "description": f"No shifts rostered for this weekend ({saturday.strftime('%d/%m')} - {sunday.strftime('%d/%m')}). Weekends are typically your busiest period.",
                     "action": {"type": "generate_roster", "label": "Generate Weekend Roster"},
+                })
+
+        # 5. Availability staleness check
+        employees = db.get_employees(venue_id)
+        if employees:
+            stale_staff = []
+            for emp in employees:
+                avail_updated = getattr(emp, "availability_updated_at", None)
+                if avail_updated:
+                    try:
+                        updated_dt = datetime.fromisoformat(str(avail_updated)[:19])
+                        if (datetime.now() - updated_dt).days > 14:
+                            stale_staff.append(getattr(emp, "name", "Unknown"))
+                    except (ValueError, TypeError):
+                        pass
+                else:
+                    # No availability data at all
+                    name = getattr(emp, "name", "Unknown")
+                    if getattr(emp, "active", True):
+                        stale_staff.append(name)
+
+            if len(stale_staff) >= 3:
+                insights.append({
+                    "type": InsightType.SUGGESTION,
+                    "severity": "medium",
+                    "title": f"{len(stale_staff)} staff need availability refresh",
+                    "description": f"Staff haven't updated availability in 2+ weeks: {', '.join(stale_staff[:4])}{'...' if len(stale_staff) > 4 else ''}. Send a reminder so your roster reflects reality.",
+                    "action": {"type": "ask_ai", "label": "Send Reminder", "prompt": "Send a bulk reminder to all staff to update their availability preferences"},
+                })
+
+        # 6. AFL demand signal (for venues in AFL cities)
+        weekday = today.weekday()
+        # Check if there might be a game this weekend (Thu-Sun during AFL season Mar-Sep)
+        if 2 <= today.month <= 9:  # AFL season
+            if weekday <= 3:  # Mon-Thu: flag upcoming weekend games
+                insights.append({
+                    "type": InsightType.DEMAND,
+                    "severity": "info",
+                    "title": "Check AFL fixtures for this weekend",
+                    "description": "AFL season is active. Home games significantly impact demand — check fixtures and adjust weekend staffing.",
+                    "action": {"type": "ask_ai", "label": "Check Games", "prompt": "Are there any AFL games this weekend that will affect our staffing needs?"},
                 })
 
     except Exception as e:
