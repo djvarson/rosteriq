@@ -4068,7 +4068,7 @@
     <div class="onboarding-progress-line"></div>
     <div class="onboarding-progress-step" data-ob-step="5">
       <div class="onboarding-progress-dot">5</div>
-      <span>Xero</span>
+      <span>Accounting</span>
     </div>
     <div class="onboarding-progress-line"></div>
     <div class="onboarding-progress-step" data-ob-step="6">
@@ -4150,7 +4150,8 @@
           <div class="onboarding-card-desc">Schedule, timesheet, and task management for shift-based teams.</div>
           <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'roster', 'deputy')">Connect</button>
           <div class="ob-api-input">
-            <input type="text" placeholder="Enter API token" data-field="api_key">
+            <input type="text" placeholder="Deputy subdomain (e.g. mycompany)" data-field="subdomain">
+            <input type="text" placeholder="Permanent access token" data-field="access_token">
             <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'roster', 'deputy')">Save</button>
           </div>
           <div class="onboarding-card-status">Connected</div>
@@ -4265,22 +4266,36 @@
       <span class="onboarding-skip" onclick="obNextStep()">Skip for now</span>
     </div>
 
-    <!-- Step 5: Connect Xero -->
+    <!-- Step 5: Connect Accounting -->
     <div class="onboarding-step" data-ob-page="5">
-      <div class="onboarding-step-title">Connect Xero</div>
+      <div class="onboarding-step-title">Connect Accounting</div>
       <div class="onboarding-step-subtitle">Link your accounting platform for accurate labour cost tracking.</div>
-      <div style="max-width: 400px; margin: 0 auto;">
+      <div class="onboarding-cards" style="max-width: 500px; margin: 0 auto;">
+        <div class="onboarding-card" id="ob-myob-card">
+          <div style="margin-bottom: 8px;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6D28D9" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
+          </div>
+          <div class="onboarding-card-name">MYOB</div>
+          <div class="onboarding-card-desc">Sync employees, timesheets and payroll data with MYOB AccountRight/Business</div>
+          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'accounting', 'myob')">Connect</button>
+          <div class="ob-api-input">
+            <input type="text" placeholder="MYOB API Key" data-field="api_key">
+            <input type="text" placeholder="MYOB API Secret" data-field="api_secret">
+            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'accounting', 'myob')">Save</button>
+          </div>
+          <div class="onboarding-card-status">Connected</div>
+        </div>
         <div class="onboarding-card" id="ob-xero-card">
           <div style="margin-bottom: 8px;">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 8l8 8M16 8l-8 8"/></svg>
           </div>
           <div class="onboarding-card-name">Xero</div>
           <div class="onboarding-card-desc">Sync revenue data and wage costs for accurate labour % tracking</div>
-          <button class="btn btn-primary btn-small" onclick="obToggleConnect(this, 'xero', 'xero')" style="background: #F59E0B; color: #000;">Connect Xero</button>
+          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'accounting', 'xero')">Connect</button>
           <div class="ob-api-input">
             <input type="text" placeholder="Enter Xero Client ID" data-field="client_id">
             <input type="text" placeholder="Enter Xero Client Secret" data-field="client_secret">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'xero', 'xero')">Save</button>
+            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'accounting', 'xero')">Save</button>
           </div>
           <div class="onboarding-card-status">Connected</div>
         </div>
@@ -7709,7 +7724,7 @@ const obState = {
     roster: null,
     pos: null,
     booking: null,
-    xero: null
+    accounting: null
   },
   importRange: '12m',
   venue: {},
@@ -7849,28 +7864,35 @@ async function obSaveConnection(btn, category, provider) {
 
   if (category === 'roster') {
     if (provider === 'tanda') endpoint = '/api/tanda/install';
-    else if (provider === 'deputy') endpoint = '/api/deputy/install';
+    else if (provider === 'deputy') {
+      endpoint = '/api/deputy/install-token';
+      // credentials already has subdomain + access_token from data-fields
+    }
     else if (provider === 'humanforce') endpoint = '/api/humanforce/install';
   } else if (category === 'pos') {
     endpoint = `/api/pos/${provider}/install`;
     body.provider = provider;
   } else if (category === 'booking') {
     endpoint = `/api/reservations/${provider}/install`;
-  } else if (category === 'xero') {
-    endpoint = '/api/xero/install';
+  } else if (category === 'accounting') {
+    if (provider === 'myob') endpoint = '/api/myob/install-token';
+    else if (provider === 'xero') endpoint = '/api/xero/install';
   }
 
   try {
     btn.textContent = 'Connecting...';
     btn.disabled = true;
 
-    if (endpoint && !state.isDemo) {
-      const resp = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (state.authToken || state.token || '') },
-        body: JSON.stringify(body)
-      });
-      if (!resp.ok) throw new Error('Connection failed');
+    if (!endpoint) throw new Error('Unknown integration provider');
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (state.authToken || state.token || '') },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.detail || 'Connection failed (' + resp.status + ')');
     }
 
     // Mark as connected
@@ -7880,10 +7902,17 @@ async function obSaveConnection(btn, category, provider) {
     if (connectBtn) connectBtn.style.display = 'none';
 
     obState.connections[category] = provider;
+
+    // Update main app state — no longer demo mode
+    state.isDemo = false;
+    if (category === 'roster') {
+      updateDeputyStatus && updateDeputyStatus(provider === 'deputy');
+    }
+
     showToastNotification(provider.charAt(0).toUpperCase() + provider.slice(1) + ' Connected', 'Integration configured successfully', 'success');
   } catch (err) {
     console.error('Onboarding connect error:', err);
-    showToastNotification('Connection Failed', 'Could not connect. Check your credentials and try again.', 'error');
+    showToastNotification('Connection Failed', err.message || 'Could not connect. Check your credentials and try again.', 'error');
     btn.textContent = 'Save';
     btn.disabled = false;
   }
@@ -7925,7 +7954,7 @@ function obBuildImportSummary() {
     roster: 'Rostering',
     pos: 'POS',
     booking: 'Bookings',
-    xero: 'Accounting'
+    accounting: 'Accounting'
   };
 
   let html = '<div style="margin-bottom: 16px; font-size: 13px; color: var(--text-secondary);">Connected sources that will be imported:</div>';
@@ -7958,7 +7987,7 @@ function obBuildFinalSummary() {
     <div class="ob-summary-row"><span class="ob-summary-label">Rostering Platform</span>${connLabel(s.connections.roster)}</div>
     <div class="ob-summary-row"><span class="ob-summary-label">POS System</span>${connLabel(s.connections.pos)}</div>
     <div class="ob-summary-row"><span class="ob-summary-label">Booking System</span>${connLabel(s.connections.booking)}</div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Xero</span>${connLabel(s.connections.xero)}</div>
+    <div class="ob-summary-row"><span class="ob-summary-label">Accounting</span>${connLabel(s.connections.accounting)}</div>
     <div class="ob-summary-row"><span class="ob-summary-label">Historical Import</span><span class="ob-summary-value">${rangeLabels[s.importRange] || 'Not set'}</span></div>
     <div class="ob-summary-row"><span class="ob-summary-label">Min Staff</span><span class="ob-summary-value">${s.settings.minStaff || '2'}</span></div>
     <div class="ob-summary-row"><span class="ob-summary-label">Covers/Staff</span><span class="ob-summary-value">${s.settings.coversPerStaff || '8'}</span></div>
