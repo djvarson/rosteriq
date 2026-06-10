@@ -58,6 +58,13 @@ class InstallRequest(BaseModel):
     scope: str = Field(default="longlife_refresh_token", description="OAuth scope")
 
 
+class InstallTokenRequest(BaseModel):
+    """Direct permanent-token install — no OAuth app registration needed."""
+    venue_id: str = Field(..., description="RosterIQ venue to connect")
+    subdomain: str = Field(..., description="Deputy instance subdomain (e.g. 'mycompany')")
+    access_token: str = Field(..., description="Permanent access token from Deputy")
+
+
 class UninstallRequest(BaseModel):
     venue_id: str = Field(..., description="RosterIQ venue to disconnect")
 
@@ -104,10 +111,12 @@ def _build_credentials(install: dict) -> DeputyCredentials:
             status_code=401,
             detail="Deputy credentials missing or incomplete. Please re-install.",
         )
+    # Permanent tokens don't need client_id/secret for refresh
+    is_permanent = tokens.get("token_type") == "permanent"
     return DeputyCredentials(
         subdomain=tokens["subdomain"],
-        client_id=DEPUTY_CLIENT_ID,
-        client_secret=DEPUTY_CLIENT_SECRET,
+        client_id=DEPUTY_CLIENT_ID if not is_permanent else "permanent_token",
+        client_secret=DEPUTY_CLIENT_SECRET if not is_permanent else "",
         access_token=tokens["access_token"],
         refresh_token=tokens.get("refresh_token", ""),
         token_expires_at=(
@@ -167,6 +176,77 @@ async def install(body: InstallRequest) -> dict:
         "authorize_url": authorize_url,
         "venue_id": body.venue_id,
         "message": "Redirect the venue owner to authorize_url to complete installation.",
+    }
+
+
+# ============================================================================
+# Direct Token Install (permanent token — no OAuth app needed)
+# ============================================================================
+
+
+@router.post("/install-token")
+async def install_token(body: InstallTokenRequest) -> dict:
+    """
+    Connect Deputy using a permanent access token.
+
+    The venue owner generates this from their Deputy admin panel at:
+    https://{subdomain}.{geo}.deputy.com/exec/devapp/oauth_clients
+
+    No DEPUTY_CLIENT_ID or DEPUTY_CLIENT_SECRET required — the token
+    is self-contained and long-lived.
+    """
+    db = get_db()
+    org_key = _org_key(body.venue_id)
+
+    # Build credentials from the permanent token
+    credentials = DeputyCredentials(
+        subdomain=body.subdomain,
+        client_id="permanent_token",
+        client_secret="",
+        access_token=body.access_token,
+        refresh_token="",
+        token_expires_at=None,
+    )
+
+    # Verify the connection works
+    connected = False
+    deputy_user = "unknown"
+    try:
+        async with DeputyAdapter(credentials) as adapter:
+            me = await adapter.get_me()
+            connected = True
+            deputy_user = me.get("Name", me.get("DisplayName", "unknown"))
+    except Exception as e:
+        logger.warning(f"Deputy token verification failed for venue {body.venue_id}: {e}")
+
+    # Save the install record
+    install_record = {
+        "organisation_id": org_key,
+        "venue_id": body.venue_id,
+        "provider": "deputy",
+        "status": "active",
+        "tokens": {
+            "subdomain": body.subdomain,
+            "access_token": body.access_token,
+            "refresh_token": "",
+            "token_type": "permanent",
+        },
+        "installed_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    }
+    db.save_plugin_install(install_record)
+
+    logger.info(
+        f"Deputy connected via permanent token for venue {body.venue_id} "
+        f"({body.subdomain}, verified: {connected})"
+    )
+    return {
+        "status": "success",
+        "venue_id": body.venue_id,
+        "deputy_subdomain": body.subdomain,
+        "deputy_user": deputy_user,
+        "connectivity_verified": connected,
+        "message": "Deputy connected successfully via permanent token.",
     }
 
 

@@ -6797,21 +6797,24 @@ async function connectDeputy() {
   try {
     const subdomain = prompt('Enter your Deputy subdomain (e.g. mycompany):');
     if (!subdomain) return;
+    const token = prompt('Enter your Deputy permanent access token:\n\nGenerate one at:\nhttps://' + subdomain + '.au.deputy.com/exec/devapp/oauth_clients');
+    if (!token) return;
     const venueId = state.currentVenue?.id || state.venueId || 'default';
-    const resp = await fetch('/api/deputy/install', {
+    const resp = await fetchAPI('/api/deputy/install-token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
-      body: JSON.stringify({ venue_id: venueId, subdomain: subdomain })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ venue_id: venueId, subdomain: subdomain, access_token: token })
     });
-    if (!resp.ok) throw new Error('Failed to start Deputy connection');
-    const data = await resp.json();
-    if (data.authorize_url) {
-      window.open(data.authorize_url, '_blank');
-      showToastNotification('Deputy', 'Complete authorization in the new tab', 'info');
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to connect Deputy');
     }
+    const data = await resp.json();
+    updateDeputyStatus(true);
+    showToastNotification('Deputy Connected', 'Staff and roster data is now available. User: ' + (data.deputy_user || ''), 'success');
   } catch (err) {
     console.error('Deputy connect error:', err);
-    showToastNotification('Connection Failed', 'Could not connect to Deputy', 'error');
+    showToastNotification('Connection Failed', err.message || 'Could not connect to Deputy', 'error');
   }
 }
 
