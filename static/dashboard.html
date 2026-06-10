@@ -2318,6 +2318,10 @@
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
           <span>Settings</span>
         </div>
+        <div class="nav-item" onclick="handleLogout()" style="cursor:pointer; margin-top: 8px;">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+          <span>Sign Out</span>
+        </div>
       </div>
     </div>
   </aside>
@@ -4804,14 +4808,36 @@ let state = {
   ws: null,
   wsConnected: false,
   baseUrl: '',  // API endpoints are at root, e.g., /venues not /api/venues
-  authToken: localStorage.getItem('auth_token') || null,
+  authToken: localStorage.getItem('jwt_token') || localStorage.getItem('auth_token') || null,
   isDemo: new URLSearchParams(window.location.search).has('demo'),
 };
+// Alias so both state.authToken and state.token work everywhere
+state.token = state.authToken;
 
-// Hide connection status in demo mode
+// Auth gate — if not demo mode and no token, redirect to login
+if (!state.isDemo && !state.authToken) {
+  window.location.href = '/static/login.html';
+}
+
+// Hide connection status in demo mode + show demo banner
 if (state.isDemo) {
   var wsStatus = document.querySelector('.ws-status');
   if (wsStatus) wsStatus.style.display = 'none';
+  // Add demo banner
+  var demoBanner = document.createElement('div');
+  demoBanner.id = 'demo-banner';
+  demoBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:linear-gradient(90deg,#F59E0B,#D97706);color:#000;text-align:center;padding:6px 16px;font-size:13px;font-weight:600;letter-spacing:0.5px;';
+  demoBanner.innerHTML = 'DEMO MODE — Sample data only. <a href="/static/login.html" style="color:#000;text-decoration:underline;margin-left:8px;">Sign in</a> or <a href="/static/register.html" style="color:#000;text-decoration:underline;">Create an account</a> to connect your real systems.';
+  document.body.prepend(demoBanner);
+  // Shift main content down
+  var mainWrap = document.querySelector('.main-wrapper') || document.querySelector('.dashboard-wrapper');
+  if (mainWrap) mainWrap.style.marginTop = '32px';
+  // Hide wizard + sign-out buttons in demo (not a real session)
+  var wizardBtn = document.querySelector('.btn-setup-wizard');
+  if (wizardBtn) wizardBtn.style.display = 'none';
+  // Change sidebar sign-out to "Sign In"
+  var signOutNav = document.querySelector('.nav-item[onclick="handleLogout()"]');
+  if (signOutNav) signOutNav.style.display = 'none';
 }
 
 // ============================================
@@ -5025,6 +5051,16 @@ const colors = {
   info: '#F59E0B',
   muted: '#A0AEC0',
 };
+
+// ============================================
+// AUTH UTILITIES
+// ============================================
+function handleLogout() {
+  localStorage.removeItem('jwt_token');
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('pending_venue_name');
+  window.location.href = '/static/login.html';
+}
 
 // ============================================
 // UTILITIES
@@ -5510,13 +5546,29 @@ async function loadVenues() {
       state.currentVenue = state.venues[0].id;
       select.value = state.currentVenue;
       loadVenueData();
+    } else {
+      // New user with no venues — show onboarding wizard, NOT demo data
+      console.log('No venues found — launching onboarding wizard');
+      const pendingName = localStorage.getItem('pending_venue_name');
+      if (pendingName) {
+        const obName = document.getElementById('ob-venue-name');
+        if (obName) obName.value = pendingName;
+        localStorage.removeItem('pending_venue_name');
+      }
+      showOnboardingWizard();
     }
     connectionManager.hide();
   } catch (error) {
     console.error('Failed to load venues:', error);
-    // Fallback to demo data
-    console.log('Using demo data...');
-    loadDemoVenue();
+    if (state.isDemo) {
+      // Only fall back to demo data if explicitly in demo mode
+      console.log('Demo mode — loading demo data...');
+      loadDemoVenue();
+    } else {
+      // Logged-in user but API failed — show onboarding wizard
+      console.log('API unavailable — launching onboarding wizard');
+      showOnboardingWizard();
+    }
   }
 }
 
@@ -5564,9 +5616,14 @@ async function loadVenueData() {
     checkHumanForceStatus();
   } catch (error) {
     console.error('Failed to load venue data:', error);
-    // Fallback to demo data
-    console.log('Using demo venue data...');
-    loadDemoVenueData();
+    if (state.isDemo) {
+      console.log('Demo mode — using demo venue data...');
+      loadDemoVenueData();
+    } else {
+      // Show error state for logged-in users, don't silently switch to demo
+      clearState('kpi-row');
+      showToastNotification('Data Load Error', 'Could not load venue data. Please check your connections.', 'warning');
+    }
   }
 }
 
