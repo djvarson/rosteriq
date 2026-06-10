@@ -455,6 +455,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register HumanForce routes: {e}")
 
+# MYOB accounting/payroll integration routes
+try:
+    from rosteriq.routes.myob import router as myob_router
+    app.include_router(myob_router)
+    logger.info("MYOB integration routes registered")
+except ImportError:
+    logger.info("MYOB routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register MYOB routes: {e}")
+
 # POS system integration routes (SwiftPOS, Lightspeed, Kounta)
 try:
     from rosteriq.routes.pos import router as pos_router

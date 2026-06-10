@@ -3904,6 +3904,25 @@
                   <button class="btn btn-secondary btn-small">Connect</button>
                 </div>
               </div>
+              <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="myob-integration-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <div>
+                    <div style="font-weight: 600; color: var(--text-primary);">MYOB (Accounting &amp; Payroll)</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">Sync employees, push timesheets, payroll categories</div>
+                  </div>
+                  <div id="myob-status" style="display: flex; align-items: center; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" id="btn-myob-connect" onclick="connectMYOB()">Connect</button>
+                    <button class="btn btn-secondary btn-small" id="btn-myob-disconnect" onclick="disconnectMYOB()" style="display: none;">Disconnect</button>
+                  </div>
+                </div>
+                <div id="myob-sync-controls" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+                  <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-secondary btn-small" onclick="syncMYOBEmployees()">Sync Employees</button>
+                    <button class="btn btn-secondary btn-small" onclick="syncMYOBTimesheets()">Sync Timesheets</button>
+                    <button class="btn btn-secondary btn-small" onclick="pushMYOBTimesheets()">Push Timesheets</button>
+                  </div>
+                </div>
+              </div>
               <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);" id="lightspeed-integration-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                   <div>
@@ -5526,6 +5545,7 @@ async function loadVenueData() {
     populateStaffList();
     connectionManager.hide();
     checkDeputyStatus();
+    checkMYOBStatus();
     checkHumanForceStatus();
   } catch (error) {
     console.error('Failed to load venue data:', error);
@@ -6962,6 +6982,126 @@ async function checkDeputyStatus() {
   } catch (err) {
     console.log('Deputy status check unavailable');
   }
+}
+
+// ============================================
+// MYOB Integration
+// ============================================
+
+async function connectMYOB() {
+  try {
+    const apiKey = prompt('Enter your MYOB API Key:\n\nGet one at https://developer.myob.com/');
+    if (!apiKey) return;
+    const apiSecret = prompt('Enter your MYOB API Secret:');
+    if (!apiSecret) return;
+    const accessToken = prompt('Enter your MYOB Access Token (from OAuth flow):\n\nLeave blank if you need to set up OAuth first.');
+    const companyFileId = prompt('Enter your MYOB Company File ID (optional):') || '';
+    const venueId = (typeof state.currentVenue === 'object' && state.currentVenue?.id)
+      ? state.currentVenue.id
+      : (typeof state.currentVenue === 'string' && state.currentVenue !== 'demo-venue-001')
+        ? state.currentVenue
+        : 'default';
+    const data = await fetchAPI('/api/myob/install-token', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue_id: venueId,
+        api_key: apiKey,
+        api_secret: apiSecret,
+        access_token: accessToken || '',
+        company_file_id: companyFileId,
+      })
+    });
+    updateMYOBStatus(true);
+    var syncMsg = data.synced_employees ? 'Synced ' + data.synced_employees + ' employees. ' : '';
+    showToastNotification('MYOB Connected', syncMsg + 'Company: ' + (data.company_name || 'unknown'), 'success');
+    if (data.synced_employees > 0) {
+      state.isDemo = false;
+      state.currentVenue = venueId;
+      await loadRealVenueData(venueId);
+    }
+  } catch (err) {
+    console.error('MYOB connect error:', err);
+    showToastNotification('Connection Failed', err.message || 'Could not connect to MYOB', 'error');
+  }
+}
+
+async function disconnectMYOB() {
+  try {
+    const venueId = (typeof state.currentVenue === 'object' && state.currentVenue?.id) ? state.currentVenue.id : (state.currentVenue || 'default');
+    await fetchAPI('/api/myob/uninstall', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: venueId })
+    });
+    updateMYOBStatus(false);
+    showToastNotification('MYOB Disconnected', 'MYOB integration removed', 'success');
+  } catch (err) {
+    console.error('MYOB disconnect error:', err);
+    showToastNotification('Disconnect Failed', err.message || 'Could not disconnect MYOB', 'error');
+  }
+}
+
+function updateMYOBStatus(connected) {
+  var connectBtn = document.getElementById('btn-myob-connect');
+  var disconnectBtn = document.getElementById('btn-myob-disconnect');
+  var syncControls = document.getElementById('myob-sync-controls');
+  if (connected) {
+    if (connectBtn) connectBtn.style.display = 'none';
+    if (disconnectBtn) disconnectBtn.style.display = 'inline-flex';
+    if (syncControls) syncControls.style.display = 'block';
+  } else {
+    if (connectBtn) connectBtn.style.display = 'inline-flex';
+    if (disconnectBtn) disconnectBtn.style.display = 'none';
+    if (syncControls) syncControls.style.display = 'none';
+  }
+}
+
+async function checkMYOBStatus() {
+  try {
+    var venueId = (typeof state.currentVenue === 'object' && state.currentVenue?.id) ? state.currentVenue.id : (state.currentVenue || 'default');
+    var resp = await fetch('/api/myob/status?venue_id=' + encodeURIComponent(venueId), {
+      headers: { 'Authorization': 'Bearer ' + (state.authToken || state.token || '') }
+    });
+    if (resp.ok) {
+      var data = await resp.json();
+      updateMYOBStatus(data.connected || false);
+    }
+  } catch (err) {
+    console.log('MYOB status check unavailable');
+  }
+}
+
+async function syncMYOBEmployees() {
+  try {
+    var venueId = (typeof state.currentVenue === 'object' && state.currentVenue?.id) ? state.currentVenue.id : (state.currentVenue || 'default');
+    showToastNotification('Syncing...', 'Pulling employees from MYOB', 'info');
+    var data = await fetchAPI('/api/myob/sync/employees', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: venueId, active_only: true })
+    });
+    showToastNotification('Employees Synced', data.saved + ' employees imported from MYOB', 'success');
+    if (data.saved > 0) await loadRealVenueData(venueId);
+  } catch (err) {
+    showToastNotification('Sync Failed', err.message || 'Could not sync employees', 'error');
+  }
+}
+
+async function syncMYOBTimesheets() {
+  try {
+    var venueId = (typeof state.currentVenue === 'object' && state.currentVenue?.id) ? state.currentVenue.id : (state.currentVenue || 'default');
+    var today = new Date().toISOString().split('T')[0];
+    var twoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+    var data = await fetchAPI('/api/myob/sync/timesheets', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: venueId, start_date: today, end_date: twoWeeks })
+    });
+    showToastNotification('Timesheets Synced', data.count + ' timesheet records pulled from MYOB', 'success');
+  } catch (err) {
+    showToastNotification('Sync Failed', err.message || 'Could not sync timesheets', 'error');
+  }
+}
+
+async function pushMYOBTimesheets() {
+  showToastNotification('Push Timesheets', 'Select an employee and date range from the roster to push to MYOB', 'info');
 }
 
 // ============================================
