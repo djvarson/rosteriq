@@ -621,16 +621,28 @@
 
                 const data = await response.json();
 
-                if (response.ok && data.token) {
+                // API returns TokenPair: { access_token, refresh_token, token_type, expires_in }
+                const token = data.access_token || data.token;
+
+                if (response.ok && token) {
                     // Store JWT token
-                    localStorage.setItem('jwt_token', data.token);
+                    localStorage.setItem('jwt_token', token);
+                    if (data.refresh_token) {
+                        localStorage.setItem('jwt_refresh_token', data.refresh_token);
+                    }
 
                     // Show success message
                     showSuccess('Login successful! Redirecting...');
 
+                    // Decode role from JWT payload to decide redirect
+                    let role = 'owner';
+                    try {
+                        const payload = JSON.parse(atob(token.split('.')[1]));
+                        role = payload.role || 'owner';
+                    } catch (e) { /* fallback to owner */ }
+
                     // Redirect based on role
                     setTimeout(() => {
-                        const role = data.role || 'owner';
                         if (role === 'staff') {
                             window.location.href = '/staff';
                         } else if (role === 'admin') {
@@ -642,7 +654,7 @@
                     }, 500);
                 } else {
                     // Handle error response
-                    const errorMsg = data.message || 'Invalid email or password';
+                    const errorMsg = data.detail || data.message || 'Invalid email or password';
                     showError(errorMsg);
                     signInBtn.disabled = false;
                     signInBtn.textContent = originalText;

@@ -668,10 +668,14 @@
                 const data = await response.json();
 
                 if (response.ok || response.status === 201) {
-                    // Store token — API returns tokens nested under .tokens
-                    const token = data.token || (data.tokens && data.tokens.access_token);
+                    // Store token — API returns { user: {...}, tokens: { access_token, refresh_token } }
+                    const token = data.access_token || (data.tokens && data.tokens.access_token) || data.token;
                     if (token) {
                         localStorage.setItem('jwt_token', token);
+                    }
+                    const refreshToken = data.refresh_token || (data.tokens && data.tokens.refresh_token);
+                    if (refreshToken) {
+                        localStorage.setItem('jwt_refresh_token', refreshToken);
                     }
 
                     // Store venue name for onboarding wizard

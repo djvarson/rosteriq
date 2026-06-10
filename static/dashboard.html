@@ -5150,8 +5150,11 @@ const colors = {
 // ============================================
 function handleLogout() {
   localStorage.removeItem('jwt_token');
+  localStorage.removeItem('jwt_refresh_token');
   localStorage.removeItem('auth_token');
   localStorage.removeItem('pending_venue_name');
+  localStorage.removeItem('rosteriq_onboarded');
+  localStorage.removeItem('rosteriq_current_venue');
   window.location.href = '/static/login.html';
 }
 
@@ -5636,7 +5639,10 @@ async function loadVenues() {
     select.innerHTML = '<option value="">Select a venue...</option>' + state.venues.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
 
     if (state.venues.length > 0) {
-      state.currentVenue = state.venues[0].id;
+      // Restore previously selected venue, or default to first
+      const savedVenue = localStorage.getItem('rosteriq_current_venue');
+      const matchedVenue = savedVenue && state.venues.find(v => v.id === savedVenue);
+      state.currentVenue = matchedVenue ? savedVenue : state.venues[0].id;
       select.value = state.currentVenue;
       loadVenueData();
     } else {
