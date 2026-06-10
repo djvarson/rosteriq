@@ -5584,6 +5584,101 @@ function loadDemoVenueData() {
   });
 }
 
+// Load real data after Deputy connect (replaces demo data)
+async function loadRealVenueData(venueId) {
+  try {
+    // Fetch employees synced from Deputy
+    const employees = await fetchAPI('/employees?venue_id=' + encodeURIComponent(venueId));
+    if (employees && employees.length > 0) {
+      state.employees = employees;
+      state.isDemo = false;
+      // Update venue selector
+      const select = document.getElementById('venue-select');
+      select.innerHTML = '<option value="' + esc(venueId) + '">' + esc(venueId) + ' (Live)</option>';
+      select.value = venueId;
+
+      // Re-render staff list with real data
+      populateRealStaffList(employees);
+      // Re-render roster with real shifts
+      try {
+        const shifts = await fetchAPI('/api/deputy/sync/shifts', {
+          method: 'POST',
+          body: JSON.stringify({
+            venue_id: venueId,
+            start_date: new Date().toISOString().split('T')[0],
+            end_date: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
+          })
+        });
+        if (shifts && shifts.shifts) {
+          populateRealRoster(employees, shifts.shifts);
+        }
+      } catch (e) { console.warn('Shift sync for roster view:', e); }
+
+      // Update KPI with real staff count
+      var el = document.getElementById('kpi-staff');
+      if (el) el.textContent = employees.length;
+
+      showToastNotification('Data Loaded', employees.length + ' staff members from Deputy', 'success');
+    } else {
+      console.warn('No employees returned from API');
+    }
+  } catch (err) {
+    console.error('Failed to load real venue data:', err);
+  }
+}
+
+function populateRealStaffList(employees) {
+  var staffList = document.getElementById('staff-list-body');
+  if (!staffList) return;
+  staffList.innerHTML = employees.map(function(emp) {
+    var role = emp.skills && emp.skills.length > 0 ? emp.skills[0] : (emp.role || 'General');
+    var type = emp.employment_type || 'casual';
+    var rate = emp.hourly_base_rate || '—';
+    return '<tr>' +
+      '<td>' + esc(emp.name) + '</td>' +
+      '<td>' + esc(role) + '</td>' +
+      '<td><span class="badge">' + esc(type) + '</span></td>' +
+      '<td>$' + rate + '/hr</td>' +
+      '<td><span class="status-badge status-active">Active</span></td>' +
+      '</tr>';
+  }).join('');
+}
+
+function populateRealRoster(employees, shifts) {
+  var tbody = document.getElementById('roster-body');
+  if (!tbody) return;
+  var now = new Date();
+  var monday = new Date(now);
+  monday.setDate(now.getDate() - now.getDay() + 1);
+  var dateEl = document.getElementById('roster-week-date');
+  if (dateEl) dateEl.textContent = monday.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  // Group shifts by employee
+  var shiftsByEmp = {};
+  shifts.forEach(function(s) {
+    var empId = s.employee_id;
+    if (!shiftsByEmp[empId]) shiftsByEmp[empId] = {};
+    var d = new Date(s.date || s.shift_date);
+    var dayIdx = d.getDay() === 0 ? 6 : d.getDay() - 1; // 0=Mon, 6=Sun
+    shiftsByEmp[empId][dayIdx] = (s.start_time || '').substring(0,5) + '-' + (s.end_time || '').substring(0,5);
+  });
+
+  var rows = employees.slice(0, 20).map(function(emp) {
+    var empShifts = shiftsByEmp[emp.id] || {};
+    var cells = '';
+    for (var d = 0; d < 7; d++) {
+      if (empShifts[d]) {
+        cells += '<td><span class="shift-cell shift-optimal">' + empShifts[d] + '</span></td>';
+      } else {
+        cells += '<td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>';
+      }
+    }
+    return '<tr><td>' + esc(emp.name) + '</td>' + cells + '</tr>';
+  }).join('');
+
+  tbody.innerHTML = rows;
+}
+
 function populateDemoOnShift() {
   const staff = demoData.staff;
   const kitchen = staff.filter(s => s.role === 'Kitchen').length;
@@ -6799,19 +6894,26 @@ async function connectDeputy() {
     if (!subdomain) return;
     const token = prompt('Enter your Deputy permanent access token:\n\nGenerate one at:\nhttps://' + subdomain + '.au.deputy.com/exec/devapp/oauth_clients');
     if (!token) return;
-    const venueId = state.currentVenue?.id || state.venueId || 'default';
-    const resp = await fetchAPI('/api/deputy/install-token', {
+    // Use the real venue ID if available, otherwise use a stable default
+    const venueId = (typeof state.currentVenue === 'object' && state.currentVenue?.id)
+      ? state.currentVenue.id
+      : (typeof state.currentVenue === 'string' && state.currentVenue !== 'demo-venue-001')
+        ? state.currentVenue
+        : 'default';
+    // fetchAPI returns parsed data directly, throws on error
+    const data = await fetchAPI('/api/deputy/install-token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ venue_id: venueId, subdomain: subdomain, access_token: token })
     });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to connect Deputy');
-    }
-    const data = await resp.json();
     updateDeputyStatus(true);
-    showToastNotification('Deputy Connected', 'Staff and roster data is now available. User: ' + (data.deputy_user || ''), 'success');
+    const syncMsg = data.synced_employees
+      ? `Synced ${data.synced_employees} staff and ${data.synced_shifts} shifts.`
+      : '';
+    showToastNotification('Deputy Connected', 'User: ' + (data.deputy_user || 'unknown') + '. ' + syncMsg, 'success');
+    // Reload dashboard with real data instead of demo
+    state.isDemo = false;
+    state.currentVenue = venueId;
+    await loadRealVenueData(venueId);
   } catch (err) {
     console.error('Deputy connect error:', err);
     showToastNotification('Connection Failed', err.message || 'Could not connect to Deputy', 'error');

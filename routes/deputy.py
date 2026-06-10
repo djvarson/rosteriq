@@ -18,7 +18,7 @@ Routes:
 
 import os
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -240,12 +240,55 @@ async def install_token(body: InstallTokenRequest) -> dict:
         f"Deputy connected via permanent token for venue {body.venue_id} "
         f"({body.subdomain}, verified: {connected})"
     )
+
+    # Auto-sync employees and shifts on connect
+    synced_employees = 0
+    synced_shifts = 0
+    if connected:
+        try:
+            async with DeputyAdapter(credentials) as adapter:
+                # Pull employees
+                employees = await adapter.get_employees(active_only=True)
+                synced_employees = len(employees)
+
+                # Store employees in database
+                for emp in employees:
+                    try:
+                        emp.venue_id = body.venue_id
+                        db.save_employee(emp)
+                    except Exception:
+                        pass
+
+                # Pull current shifts (next 14 days)
+                today = date.today()
+                shifts = await adapter.get_shifts(
+                    start_date=today,
+                    end_date=today + timedelta(days=14),
+                )
+                synced_shifts = len(shifts)
+
+                # Store shifts in database
+                for shift in shifts:
+                    try:
+                        db.save_shift(shift)
+                    except Exception:
+                        pass
+
+            logger.info(
+                f"Auto-synced {synced_employees} employees and {synced_shifts} shifts "
+                f"from Deputy for venue {body.venue_id}"
+            )
+        except Exception as e:
+            logger.warning(f"Deputy auto-sync failed for venue {body.venue_id}: {e}")
+
     return {
         "status": "success",
         "venue_id": body.venue_id,
         "deputy_subdomain": body.subdomain,
         "deputy_user": deputy_user,
         "connectivity_verified": connected,
+        "synced_employees": synced_employees,
+        "synced_shifts": synced_shifts,
         "message": "Deputy connected successfully via permanent token.",
     }
 
