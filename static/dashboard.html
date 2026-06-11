@@ -2287,7 +2287,7 @@
       </select>
     </div>
 
-    <div class="ws-status">
+    <div class="ws-status" style="display:none;">
       <div class="status-dot" id="ws-dot"></div>
       <span id="ws-text">Connecting...</span>
     </div>
@@ -5688,27 +5688,31 @@ async function loadVenueData() {
   showLoading('kpi-row', 'card', 5);
 
   try {
-    const [employees, rosters, forecasts] = await Promise.all([
+    const [empResp, rosterResp, forecastResp] = await Promise.all([
       fetchAPI('/employees'),
       fetchAPI('/rosters'),
       fetchAPI(`/forecasts?venue_id=${state.currentVenue}`),
     ]);
 
-    if (!employees || !rosters || !forecasts) {
-      throw new Error('One or more data sources failed');
-    }
-
-    state.employees = employees;
-    state.rosters = rosters.filter(r => r.venue_id === state.currentVenue);
-    state.forecasts = forecasts;
+    // Extract .items from paginated responses (API returns {items:[], total, limit, offset})
+    state.employees = Array.isArray(empResp) ? empResp : (empResp.items || []);
+    const allRosters = Array.isArray(rosterResp) ? rosterResp : (rosterResp.items || []);
+    state.rosters = allRosters.filter(r => r.venue_id === state.currentVenue);
+    state.forecasts = Array.isArray(forecastResp) ? forecastResp : (forecastResp.items || []);
 
     clearState('kpi-row');
-    updateDashboardKPIs();
-    initRevenueLabourChart();
-    initLabourPctTrendChart();
-    initHourlyBreakdownChart();
-    populateAlerts();
-    populateStaffList();
+
+    // If venue has no data yet, show empty states instead of stale hardcoded content
+    if (state.employees.length === 0 && state.rosters.length === 0) {
+      showEmptyVenueStates();
+    } else {
+      updateDashboardKPIs();
+      initRevenueLabourChart();
+      initLabourPctTrendChart();
+      initHourlyBreakdownChart();
+      populateAlerts();
+      populateStaffList();
+    }
     connectionManager.hide();
     checkDeputyStatus();
     checkMYOBStatus();
@@ -5719,11 +5723,48 @@ async function loadVenueData() {
       console.log('Demo mode — using demo venue data...');
       loadDemoVenueData();
     } else {
-      // Show error state for logged-in users, don't silently switch to demo
+      // Show empty states for logged-in users, don't silently switch to demo
       clearState('kpi-row');
-      showToastNotification('Data Load Error', 'Could not load venue data. Please check your connections.', 'warning');
+      showEmptyVenueStates();
     }
   }
+}
+
+function showEmptyVenueStates() {
+  const emptyMsg = `<div style="text-align:center;padding:40px 20px;color:var(--text-muted);">
+    <div style="font-size:28px;margin-bottom:12px;opacity:0.4;">--</div>
+    <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:6px;">No data yet</div>
+    <div style="font-size:13px;">Connect your rostering platform and POS to import staff and sales data.</div>
+    <button class="btn btn-primary" onclick="showOnboardingWizard()" style="margin-top:16px;background:#F59E0B;color:#000;padding:8px 20px;font-size:13px;">Open Setup Wizard</button>
+  </div>`;
+
+  // Clear all hardcoded demo data from table bodies
+  const tableBodies = ['roster-body', 'staff-body', 'break-compliance-body', 'cert-body', 'award-body', 'consecutive-body', 'report-body'];
+  tableBodies.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = `<tr><td colspan="8">${emptyMsg}</td></tr>`;
+  });
+
+  // Clear on-shift page demo content
+  const onShiftTables = document.querySelectorAll('#page-on-shift table tbody');
+  onShiftTables.forEach(tb => {
+    tb.innerHTML = `<tr><td colspan="6">${emptyMsg}</td></tr>`;
+  });
+
+  // Clear KPI cards
+  const kpiRow = document.getElementById('kpi-row');
+  if (kpiRow) {
+    kpiRow.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Connect your systems to see live KPIs</div>`;
+  }
+
+  // Clear chart containers
+  ['revenue-labour-chart', 'labour-pct-chart', 'hourly-chart'].forEach(id => {
+    const canvas = document.getElementById(id);
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  });
 }
 
 function loadDemoVenueData() {
@@ -7718,8 +7759,14 @@ let wsReconnectTimeout = null;
 function connectWebSocket() {
   if (!state.currentVenue || state.isDemo) {
     console.debug('No venue selected, skipping WS connection');
+    var wsStatus = document.querySelector('.ws-status');
+    if (wsStatus) wsStatus.style.display = 'none';
     return;
   }
+
+  // Show WS status now that we're actually trying to connect
+  var wsStatusEl = document.querySelector('.ws-status');
+  if (wsStatusEl) wsStatusEl.style.display = '';
 
   // Construct WS URL with JWT token
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
