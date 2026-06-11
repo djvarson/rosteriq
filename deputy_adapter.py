@@ -162,19 +162,32 @@ class DeputyOAuth:
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
 
-    def get_authorize_url(self, scope: str = "longlife_refresh_token") -> str:
-        """Build the URL to redirect the venue owner to for Deputy authorization."""
+    def get_authorize_url(self, scope: str = "longlife_refresh_token", state: str = "") -> str:
+        """Build the URL to redirect the venue owner to for Deputy authorization.
+
+        Args:
+            scope: OAuth scope (default: longlife_refresh_token for long-lived tokens)
+            state: Opaque state string passed through the OAuth flow (carries venue_id etc.)
+        """
         import urllib.parse
-        params = urllib.parse.urlencode({
+        params = {
             "client_id": self.client_id,
             "redirect_uri": self.redirect_uri,
             "response_type": "code",
             "scope": scope,
-        })
-        return f"{self.AUTHORIZE_URL}?{params}"
+        }
+        if state:
+            params["state"] = state
+        return f"{self.AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
 
-    async def exchange_code(self, code: str, subdomain: str) -> DeputyCredentials:
-        """Exchange an authorization code for access and refresh tokens."""
+    async def exchange_code(self, code: str, subdomain: str = "") -> DeputyCredentials:
+        """Exchange an authorization code for access and refresh tokens.
+
+        Args:
+            code: Authorization code from Deputy callback.
+            subdomain: Deputy subdomain. If empty, auto-detected from the
+                       ``endpoint`` field in the token response.
+        """
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(self.TOKEN_URL, data={
                 "client_id": self.client_id,
@@ -192,6 +205,26 @@ class DeputyOAuth:
             ))
 
         data = response.json()
+
+        # Auto-detect subdomain from the endpoint field if not provided
+        if not subdomain and data.get("endpoint"):
+            import re
+            endpoint = data["endpoint"].rstrip("/")
+            # e.g. "https://mycompany.au.deputy.com" → "mycompany"
+            m = re.match(r'https?://([^.]+)', endpoint)
+            if m:
+                subdomain = m.group(1)
+            else:
+                subdomain = endpoint
+
+        if not subdomain:
+            raise DeputyAPIError(APIError(
+                status_code=0,
+                message="Could not determine Deputy subdomain from token response. "
+                        "Please reconnect and provide your subdomain.",
+                detail={"response_keys": list(data.keys())},
+            ))
+
         return DeputyCredentials(
             subdomain=subdomain,
             client_id=self.client_id,

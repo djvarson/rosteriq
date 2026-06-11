@@ -4232,25 +4232,7 @@
         <div class="onboarding-card" id="ob-roster-deputy">
           <div class="onboarding-card-name">Deputy</div>
           <div class="onboarding-card-desc">Schedule, timesheet, and task management for shift-based teams.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'roster', 'deputy')">Connect</button>
-          <div class="ob-api-input">
-            <div class="ob-field-group" style="margin-bottom:8px;">
-              <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px;">Your Deputy URL prefix — the part before .deputy.com</label>
-              <div style="display:flex;align-items:center;gap:0;">
-                <span style="background:var(--bg-tertiary);padding:6px 8px;border-radius:6px 0 0 6px;border:1px solid var(--border-primary);border-right:none;font-size:12px;color:var(--text-muted);white-space:nowrap;">https://</span>
-                <input type="text" placeholder="yourcompany" data-field="subdomain" style="border-radius:0;border-left:none;border-right:none;flex:1;">
-                <span style="background:var(--bg-tertiary);padding:6px 8px;border-radius:0 6px 6px 0;border:1px solid var(--border-primary);border-left:none;font-size:12px;color:var(--text-muted);white-space:nowrap;">.deputy.com</span>
-              </div>
-            </div>
-            <div class="ob-field-group" style="margin-bottom:8px;">
-              <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px;">Permanent access token — <a href="https://www.deputy.com/api-doc/API/Authentication" target="_blank" style="color:var(--accent-primary);">get one here</a></label>
-              <input type="text" placeholder="Paste your permanent access token" data-field="access_token">
-            </div>
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">
-              Find your subdomain: log in to Deputy and look at the URL in your browser. If it shows <strong>mycompany.au.deputy.com</strong>, enter <strong>mycompany.au</strong> above.
-            </div>
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'roster', 'deputy')">Connect Deputy</button>
-          </div>
+          <button class="btn btn-secondary btn-small" onclick="obConnectDeputyOAuth(this)" id="ob-deputy-connect-btn">Connect with Deputy</button>
           <div class="onboarding-card-status">Connected</div>
         </div>
         <div class="onboarding-card" id="ob-roster-humanforce">
@@ -6890,6 +6872,8 @@ function displayNotificationLog(auditData) {
 // ============================================================================
 // Initialize on page load
 loadVenues();
+// Check if returning from Deputy OAuth redirect
+checkDeputyOAuthReturn();
 // Charts are initialized inside loadVenueData() or loadDemoVenueData()
 if (!state.isDemo) {
   loadNotificationStats();
@@ -7129,39 +7113,67 @@ function _getVenueId() {
 }
 
 async function connectDeputy() {
+  // One-click OAuth flow — redirect to Deputy login
   try {
-    const subdomain = prompt('Enter the part of your Deputy URL before .deputy.com\n\nExample: if your Deputy URL is mycompany.au.deputy.com, enter: mycompany.au');
-    if (!subdomain) return;
-    const token = prompt('Enter your Deputy permanent access token:\n\nTo get one:\n1. Go to https://' + subdomain.trim() + '.deputy.com/exec/devapp/oauth_clients\n2. Create a new OAuth app\n3. Copy the permanent access token');
-    if (!token) return;
     const venueId = _getVenueId();
     const connectBtn = document.getElementById('btn-deputy-connect');
-    connectBtn.textContent = 'Connecting...';
+    connectBtn.textContent = 'Redirecting...';
     connectBtn.disabled = true;
-    const data = await fetchAPI('/api/deputy/install-token', {
+    const data = await fetchAPI('/api/deputy/install', {
       method: 'POST',
-      body: JSON.stringify({ venue_id: venueId, subdomain: subdomain.trim(), access_token: token.trim() })
+      body: JSON.stringify({ venue_id: venueId })
     });
-    updateDeputyStatus(true, data);
-    const syncMsg = data.synced_employees
-      ? `Synced ${data.synced_employees} staff and ${data.synced_shifts} shifts.`
-      : '';
-    const errMsg = data.sync_errors ? ` (${data.sync_errors} records had errors)` : '';
-    showToastNotification('Deputy Connected', 'User: ' + (data.deputy_user || 'unknown') + '. ' + syncMsg + errMsg, 'success');
-    state.isDemo = false;
-    state.currentVenue = venueId;
-    await loadRealVenueData(venueId);
+    if (data.authorize_url) {
+      window.location.href = data.authorize_url;
+    } else {
+      throw new Error('No authorize URL returned');
+    }
   } catch (err) {
     console.error('Deputy connect error:', err);
-    const msg = err.message || 'Could not connect to Deputy';
-    const hint = msg.includes('subdomain') ? ' Check the subdomain is correct (just the name, not the full URL).'
-               : msg.includes('token') || msg.includes('401') ? ' Check your access token is still valid in Deputy admin.'
-               : '';
-    showToastNotification('Connection Failed', msg + hint, 'error');
-  } finally {
+    showToastNotification('Connection Failed', err.message || 'Could not start Deputy connection', 'error');
     const connectBtn = document.getElementById('btn-deputy-connect');
-    connectBtn.textContent = 'Connect';
-    connectBtn.disabled = false;
+    if (connectBtn) {
+      connectBtn.textContent = 'Connect';
+      connectBtn.disabled = false;
+    }
+  }
+}
+
+// OAuth connect for onboarding wizard
+async function obConnectDeputyOAuth(btn) {
+  try {
+    const obVenueName = obState.venue.name || '';
+    const obVenueSlug = obVenueName ? obVenueName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') : '';
+    const venueId = state.currentVenue || obVenueSlug || 'default';
+    btn.textContent = 'Redirecting to Deputy...';
+    btn.disabled = true;
+    const data = await fetchAPI('/api/deputy/install', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: venueId })
+    });
+    if (data.authorize_url) {
+      window.location.href = data.authorize_url;
+    } else {
+      throw new Error('No authorize URL returned');
+    }
+  } catch (err) {
+    console.error('Deputy OAuth error:', err);
+    showToastNotification('Connection Failed', err.message || 'Could not start Deputy connection. Check that DEPUTY_CLIENT_ID is configured.', 'error');
+    btn.textContent = 'Connect with Deputy';
+    btn.disabled = false;
+  }
+}
+
+// Check for deputy_connected param on page load (after OAuth redirect)
+function checkDeputyOAuthReturn() {
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('deputy_connected') === '1') {
+    showToastNotification('Deputy Connected', 'Your Deputy account is now linked. Staff and shifts have been synced.', 'success');
+    // Clean URL
+    var cleanUrl = window.location.pathname + window.location.hash;
+    window.history.replaceState({}, '', cleanUrl);
+    // Refresh Deputy status
+    setTimeout(function() { checkDeputyStatus(); }, 500);
   }
 }
 
@@ -8156,8 +8168,8 @@ async function obSaveConnection(btn, category, provider) {
   if (category === 'roster') {
     if (provider === 'tanda') endpoint = '/api/tanda/install';
     else if (provider === 'deputy') {
-      endpoint = '/api/deputy/install-token';
-      // credentials already has subdomain + access_token from data-fields
+      // Deputy uses OAuth flow — handled by obConnectDeputyOAuth(), not this function
+      return;
     }
     else if (provider === 'humanforce') endpoint = '/api/humanforce/install';
   } else if (category === 'pos') {

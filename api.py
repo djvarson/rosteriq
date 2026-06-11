@@ -437,8 +437,11 @@ except Exception as e:
 
 # Deputy integration routes
 try:
-    from rosteriq.routes.deputy import router as deputy_router
+    from rosteriq.routes.deputy import router as deputy_router, oauth_callback as _deputy_oauth_callback
     app.include_router(deputy_router)
+    # Also mount callback at /deputy/callback (without /api prefix) to match
+    # the redirect URI registered with Deputy's OAuth client
+    app.get("/deputy/callback", include_in_schema=False)(_deputy_oauth_callback)
     logger.info("Deputy integration routes registered")
 except ImportError:
     logger.info("Deputy routes not available — skipping")

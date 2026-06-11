@@ -17,11 +17,14 @@ Routes:
 """
 
 import os
+import json
+import base64
 import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
@@ -40,11 +43,31 @@ router = APIRouter(prefix="/api/deputy", tags=["deputy"])
 DEPUTY_CLIENT_ID = os.environ.get("DEPUTY_CLIENT_ID", "")
 DEPUTY_CLIENT_SECRET = os.environ.get("DEPUTY_CLIENT_SECRET", "")
 DEPUTY_REDIRECT_URI = os.environ.get(
-    "DEPUTY_REDIRECT_URI", "https://api.rosteriq.com.au/api/deputy/callback"
+    "DEPUTY_REDIRECT_URI", "https://rosteriq-production-6aaf.up.railway.app/deputy/callback"
 )
 
 # Key prefix to distinguish Deputy installs from Tanda in plugin_installs table
 DEPUTY_ORG_PREFIX = "deputy_"
+
+
+# ============================================================================
+# OAuth State Helpers (encode venue_id into the OAuth state parameter)
+# ============================================================================
+
+
+def _encode_state(venue_id: str) -> str:
+    """Encode venue_id into a base64 OAuth state string."""
+    payload = json.dumps({"venue_id": venue_id})
+    return base64.urlsafe_b64encode(payload.encode()).decode()
+
+
+def _decode_state(state: str) -> dict:
+    """Decode the OAuth state string back to a dict with venue_id."""
+    try:
+        payload = base64.urlsafe_b64decode(state.encode()).decode()
+        return json.loads(payload)
+    except Exception:
+        return {}
 
 
 # ============================================================================
@@ -54,7 +77,7 @@ DEPUTY_ORG_PREFIX = "deputy_"
 
 class InstallRequest(BaseModel):
     venue_id: str = Field(..., description="RosterIQ venue to connect")
-    subdomain: str = Field(..., description="Deputy instance subdomain (e.g. 'mycompany')")
+    subdomain: str = Field(default="", description="Deputy instance subdomain (auto-detected via OAuth)")
     scope: str = Field(default="longlife_refresh_token", description="OAuth scope")
 
 
@@ -202,22 +225,25 @@ async def install(body: InstallRequest) -> dict:
     Start the Deputy OAuth install flow.
 
     Returns the authorize URL to redirect the venue owner to.
+    The venue_id is encoded into the OAuth ``state`` parameter so it
+    survives the redirect through Deputy and back to our callback.
     """
     oauth = _get_oauth()
-    authorize_url = oauth.get_authorize_url(scope=body.scope)
+    state = _encode_state(body.venue_id)
+    authorize_url = oauth.get_authorize_url(scope=body.scope, state=state)
 
-    # Persist a pending install so the callback can find the venue/subdomain
+    # Persist a pending install so the callback can find the venue
     db = get_db()
     db.save_plugin_install({
         "organisation_id": _org_key(body.venue_id),
         "venue_id": body.venue_id,
         "status": "pending",
-        "tokens": {"subdomain": body.subdomain},
+        "tokens": {"subdomain": body.subdomain} if body.subdomain else {},
         "installed_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     })
 
-    logger.info(f"Deputy install initiated for venue {body.venue_id} ({body.subdomain})")
+    logger.info(f"Deputy OAuth install initiated for venue {body.venue_id}")
     return {
         "status": "pending",
         "authorize_url": authorize_url,
@@ -364,33 +390,75 @@ async def install_token(body: InstallTokenRequest) -> dict:
 # ============================================================================
 
 
+def _callback_html(success: bool, message: str, detail: str = "") -> HTMLResponse:
+    """Return an HTML page for the OAuth callback that shows status and redirects to dashboard."""
+    status_color = "#22c55e" if success else "#ef4444"
+    status_icon = "&#10003;" if success else "&#10007;"
+    status_text = "Connected" if success else "Connection Failed"
+    redirect_js = "setTimeout(function(){ window.location.href = '/static/dashboard.html?deputy_connected=1'; }, 2000);" if success else ""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RosterIQ — Deputy {status_text}</title>
+<style>
+  body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#0f172a; font-family:-apple-system,system-ui,sans-serif; color:#e2e8f0; }}
+  .card {{ background:#1e293b; border-radius:16px; padding:48px; text-align:center; max-width:420px;
+           box-shadow:0 25px 50px rgba(0,0,0,0.4); }}
+  .icon {{ font-size:48px; color:{status_color}; margin-bottom:16px; }}
+  h1 {{ font-size:24px; margin:0 0 8px; color:#f8fafc; }}
+  .msg {{ font-size:14px; color:#94a3b8; line-height:1.6; margin:0 0 24px; }}
+  .detail {{ font-size:12px; color:#64748b; }}
+  .spinner {{ display:inline-block; width:16px; height:16px; border:2px solid #334155;
+              border-top-color:#f59e0b; border-radius:50%; animation:spin .8s linear infinite;
+              vertical-align:middle; margin-right:8px; }}
+  @keyframes spin {{ to {{ transform:rotate(360deg); }} }}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">{status_icon}</div>
+  <h1>Deputy {status_text}</h1>
+  <p class="msg">{message}</p>
+  {"<p class='detail'><span class='spinner'></span>Redirecting to dashboard...</p>" if success else f"<p class='detail'>{detail}</p>"}
+</div>
+<script>{redirect_js}</script>
+</body></html>"""
+    return HTMLResponse(content=html, status_code=200 if success else 400)
+
+
 @router.get("/callback")
 async def oauth_callback(
     code: str = Query(..., description="Authorization code from Deputy"),
-    venue_id: str = Query(..., description="RosterIQ venue ID"),
-) -> dict:
+    state: str = Query("", description="OAuth state parameter carrying venue_id"),
+):
     """
     OAuth callback endpoint.
 
-    Deputy redirects here with ?code=...&venue_id=... after the owner authorises.
-    Exchanges the code for tokens and saves credentials.
+    Deputy redirects the user's browser here with ``?code=...&state=...``
+    after the owner authorises. Exchanges the code for tokens, saves
+    credentials, and returns an HTML page that redirects to the dashboard.
     """
+    # Decode venue_id from state parameter
+    state_data = _decode_state(state)
+    venue_id = state_data.get("venue_id", "")
+
+    if not venue_id:
+        logger.error(f"Deputy callback missing venue_id in state: {state!r}")
+        return _callback_html(False, "Missing venue information.", "The OAuth state parameter was invalid or missing. Please try connecting again from the dashboard.")
+
     db = get_db()
     org_key = _org_key(venue_id)
     install = db.get_plugin_install(org_key)
 
     if not install:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No pending install found for venue {venue_id}. Call /install first.",
-        )
+        logger.error(f"No pending install found for venue {venue_id}")
+        return _callback_html(False, "No pending connection found.", "Please start the connection again from the dashboard Integrations page.")
 
-    subdomain = install.get("tokens", {}).get("subdomain")
-    if not subdomain:
-        raise HTTPException(
-            status_code=400,
-            detail="Subdomain missing from pending install record",
-        )
+    # Subdomain may have been provided upfront, or will be auto-detected from token response
+    subdomain = install.get("tokens", {}).get("subdomain", "")
 
     oauth = _get_oauth()
 
@@ -398,7 +466,7 @@ async def oauth_callback(
         credentials = await oauth.exchange_code(code, subdomain)
     except DeputyAPIError as e:
         logger.error(f"Deputy token exchange failed for venue {venue_id}: {e}")
-        raise HTTPException(status_code=401, detail="OAuth token exchange failed")
+        return _callback_html(False, "Token exchange failed.", "Deputy rejected the authorization code. Please try connecting again.")
 
     # Verify the connection works
     try:
@@ -406,30 +474,54 @@ async def oauth_callback(
             me = await adapter.get_me()
     except DeputyAPIError as e:
         logger.error(f"Deputy connectivity check failed for venue {venue_id}: {e}")
-        raise HTTPException(
-            status_code=502,
-            detail="Token obtained but Deputy API connectivity check failed",
-        )
+        return _callback_html(False, "Connection verification failed.", "Got a token from Deputy but couldn't verify the connection. Please try again.")
 
-    # Save the full credentials
+    # Save the full credentials — use the subdomain from credentials (may have been auto-detected)
+    resolved_subdomain = credentials.subdomain
     install["status"] = "active"
+    install["provider"] = "deputy"
     install["tokens"] = {
-        "subdomain": subdomain,
+        "subdomain": resolved_subdomain,
         "access_token": credentials.access_token,
         "refresh_token": credentials.refresh_token,
-        "token_expires_at": credentials.token_expires_at.isoformat(),
+        "token_expires_at": credentials.token_expires_at.isoformat() if credentials.token_expires_at else None,
     }
     install["updated_at"] = datetime.utcnow()
     db.save_plugin_install(install)
 
-    logger.info(f"Deputy OAuth complete for venue {venue_id} ({subdomain})")
-    return {
-        "status": "success",
-        "venue_id": venue_id,
-        "deputy_subdomain": subdomain,
-        "deputy_user": me.get("Name", "unknown"),
-        "message": "Deputy connected successfully.",
-    }
+    deputy_user = me.get("Name", me.get("DisplayName", "unknown"))
+    logger.info(f"Deputy OAuth complete for venue {venue_id} ({resolved_subdomain}, user: {deputy_user})")
+
+    # Auto-sync employees and shifts
+    synced_employees = 0
+    synced_shifts = 0
+    try:
+        on_refresh = _make_token_refresh_callback(org_key)
+        async with DeputyAdapter(credentials, on_token_refresh=on_refresh) as adapter:
+            employees = await adapter.get_employees(active_only=True)
+            synced_employees = len(employees)
+            for emp in employees:
+                try:
+                    emp.venue_id = venue_id
+                    db.save_employee(emp)
+                except Exception as e:
+                    logger.warning(f"Failed to save employee: {e}")
+
+            today = date.today()
+            shifts = await adapter.get_shifts(start_date=today, end_date=today + timedelta(days=14))
+            synced_shifts = len(shifts)
+            for shift in shifts:
+                try:
+                    db.save_shift(shift)
+                except Exception as e:
+                    logger.warning(f"Failed to save shift: {e}")
+
+        logger.info(f"Auto-synced {synced_employees} employees, {synced_shifts} shifts for venue {venue_id}")
+    except Exception as e:
+        logger.warning(f"Deputy auto-sync failed for venue {venue_id}: {e}")
+
+    sync_msg = f"Synced {synced_employees} staff members and {synced_shifts} shifts." if synced_employees else "Connected as " + deputy_user + "."
+    return _callback_html(True, sync_msg)
 
 
 # ============================================================================
