@@ -112,11 +112,9 @@ async def chat(body: ChatRequest) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        logger.error(f"AI agent error for venue {body.venue_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="AI agent encountered an error. Please try again.",
-        )
+        logger.error(f"AI agent error for venue {body.venue_id}: {e}", exc_info=True)
+        detail = str(e) if str(e) else "AI agent encountered an error. Please try again."
+        raise HTTPException(status_code=500, detail=detail)
 
     # Save conversation with the assistant's response
     messages.append({"role": "assistant", "content": result["response"]})
