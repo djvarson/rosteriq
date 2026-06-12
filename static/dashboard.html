@@ -89,7 +89,9 @@
       left: 0;
       top: 0;
       z-index: 1000;
-      transition: transform 0.3s ease;
+      transition: transform 0.3s ease, top 0.3s ease;
+      display: flex;
+      flex-direction: column;
     }
 
     .sidebar.collapsed {
@@ -135,7 +137,7 @@
     }
 
     .venue-selector {
-      padding: 8px 16px;
+      padding: 8px 12px 8px 8px;
       margin-bottom: 12px;
     }
 
@@ -1357,6 +1359,12 @@
         outline: 2px solid var(--brand-blue);
         outline-offset: 2px;
       }
+
+      /* AI Agent page — stack columns on mobile */
+      #page-ai-agent > div:last-child {
+        grid-template-columns: 1fr !important;
+        height: auto !important;
+      }
     }
 
     /* ============================================
@@ -2333,7 +2341,7 @@
     <div class="sidebar-section">
       <div class="sidebar-section-title">AI</div>
       <div class="sidebar-nav">
-        <div class="nav-item" onclick="toggleAIChat()" style="cursor:pointer;" id="nav-ai-agent">
+        <div class="nav-item" data-page="ai-agent" id="nav-ai-agent">
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="currentColor"/><circle cx="14" cy="10" r="1" fill="currentColor"/><path d="M9 14h6"/></svg></span>
           <span>AI Agent</span>
           <span id="ai-agent-badge" style="display:none; background:var(--accent); color:#fff; font-size:10px; border-radius:10px; padding:1px 6px; margin-left:auto;">0</span>
@@ -2341,14 +2349,13 @@
       </div>
     </div>
 
-    <div class="sidebar-section">
-      <div class="sidebar-section-title">Other</div>
+    <div class="sidebar-section" style="margin-top:auto; padding-bottom:12px;">
       <div class="sidebar-nav">
         <div class="nav-item" data-page="settings">
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
           <span>Settings</span>
         </div>
-        <div class="nav-item" onclick="handleLogout()" style="cursor:pointer; margin-top: 8px;">
+        <div class="nav-item" onclick="handleLogout()" style="cursor:pointer; margin-top: 4px;">
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
           <span>Sign Out</span>
         </div>
@@ -2356,36 +2363,7 @@
     </div>
   </aside>
 
-  <!-- AI CHAT PANEL (slide-out) -->
-  <div id="ai-chat-panel" style="display:none; position:fixed; top:0; right:0; width:400px; height:100vh; background:var(--sidebar-bg); border-left:1px solid var(--border); z-index:1000; display:none; flex-direction:column;">
-    <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border);">
-      <div style="display:flex; align-items:center; gap:10px;">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="currentColor"/><circle cx="14" cy="10" r="1" fill="currentColor"/></svg>
-        <span style="font-weight:600; color:var(--text-primary); font-size:15px;">RosterIQ AI</span>
-      </div>
-      <div style="display:flex; gap:8px;">
-        <button onclick="clearAIChat()" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:12px; padding:4px 8px; border-radius:4px; border:1px solid var(--border);" title="New conversation">New Chat</button>
-        <button onclick="toggleAIChat()" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:18px; padding:4px;" title="Close">&times;</button>
-      </div>
-    </div>
-    <div id="ai-chat-messages" style="flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:12px;">
-      <div class="ai-welcome" style="text-align:center; padding:40px 20px; color:var(--text-muted);">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" style="margin-bottom:12px;"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="var(--accent)"/><circle cx="14" cy="10" r="1" fill="var(--accent)"/><path d="M9 14h6"/></svg>
-        <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px;">RosterIQ AI Agent</div>
-        <div style="font-size:13px; line-height:1.5;">Ask me anything about your venue — staffing, costs, compliance, forecasts. I can also generate rosters and send messages to your team.</div>
-        <div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:16px;">
-          <button onclick="aiQuickQuestion('Am I adequately staffed this week?')" class="ai-quick-btn">Staffing this week?</button>
-          <button onclick="aiQuickQuestion('What are my labour costs looking like?')" class="ai-quick-btn">Labour costs?</button>
-          <button onclick="aiQuickQuestion('Any compliance issues I should know about?')" class="ai-quick-btn">Compliance check</button>
-          <button onclick="aiQuickQuestion('Generate an optimised roster for next week')" class="ai-quick-btn">Generate roster</button>
-        </div>
-      </div>
-    </div>
-    <div style="padding:12px 20px; border-top:1px solid var(--border); display:flex; gap:8px;">
-      <input type="text" id="ai-chat-input" placeholder="Ask RosterIQ AI anything..." style="flex:1; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; color:var(--text-primary); font-size:14px; outline:none;" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendAIMessage();}">
-      <button onclick="sendAIMessage()" id="ai-send-btn" style="background:var(--accent); border:none; border-radius:8px; padding:10px 16px; cursor:pointer; color:#fff; font-weight:600; font-size:14px; white-space:nowrap;">Send</button>
-    </div>
-  </div>
+  <!-- AI CHAT PANEL (removed — now integrated as page-ai-agent below) -->
 
   <!-- MAIN CONTENT -->
   <div class="main-content">
@@ -4122,6 +4100,100 @@
           </div>
         </div>
       </div>
+
+      <!-- AI AGENT PAGE -->
+      <div class="page" id="page-ai-agent" data-page="ai-agent" style="display: none;">
+        <div class="page-header">
+          <h1 class="page-title">AI Agent</h1>
+          <p class="page-subtitle">Ask questions, get insights, and automate tasks with AI</p>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 360px; gap:20px; height:calc(100vh - 180px); min-height:500px;">
+          <!-- Chat Column -->
+          <div style="display:flex; flex-direction:column; background:var(--card-bg); border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+            <!-- Chat Header -->
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--border); background:rgba(14,165,233,0.05);">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <div style="width:36px; height:36px; border-radius:10px; background:linear-gradient(135deg, var(--accent), #0284c7); display:flex; align-items:center; justify-content:center;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#fff"/><circle cx="14" cy="10" r="1" fill="#fff"/></svg>
+                </div>
+                <div>
+                  <div style="font-weight:600; color:var(--text-primary); font-size:15px;">RosterIQ AI</div>
+                  <div style="font-size:11px; color:var(--text-muted);">Powered by Gemini</div>
+                </div>
+              </div>
+              <button onclick="clearAIChat()" style="background:var(--card-bg); border:1px solid var(--border); cursor:pointer; color:var(--text-muted); font-size:12px; padding:6px 12px; border-radius:6px; transition:all 0.2s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'" title="New conversation">New Chat</button>
+            </div>
+
+            <!-- Chat Messages -->
+            <div id="ai-chat-messages" style="flex:1; overflow-y:auto; padding:20px 24px; display:flex; flex-direction:column; gap:14px;">
+              <div class="ai-welcome" style="text-align:center; padding:60px 40px; color:var(--text-muted);">
+                <div style="width:64px; height:64px; border-radius:16px; background:linear-gradient(135deg, var(--accent), #0284c7); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#fff"/><circle cx="14" cy="10" r="1" fill="#fff"/><path d="M9 14h6"/></svg>
+                </div>
+                <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px; font-size:16px;">How can I help?</div>
+                <div style="font-size:13px; line-height:1.6; max-width:400px; margin:0 auto;">Ask me about staffing levels, labour costs, compliance, forecasting, or get me to generate an optimised roster.</div>
+              </div>
+            </div>
+
+            <!-- Chat Input -->
+            <div style="padding:16px 20px; border-top:1px solid var(--border); display:flex; gap:10px; background:rgba(0,0,0,0.1);">
+              <input type="text" id="ai-chat-input" placeholder="Ask RosterIQ AI anything..." style="flex:1; background:var(--sidebar-bg); border:1px solid var(--border); border-radius:10px; padding:12px 16px; color:var(--text-primary); font-size:14px; outline:none; transition:border-color 0.2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendAIMessage();}">
+              <button onclick="sendAIMessage()" id="ai-send-btn" style="background:linear-gradient(135deg, var(--accent), #0284c7); border:none; border-radius:10px; padding:12px 20px; cursor:pointer; color:#fff; font-weight:600; font-size:14px; white-space:nowrap; transition:opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Send</button>
+            </div>
+          </div>
+
+          <!-- Right Sidebar — Quick Actions + Insights -->
+          <div style="display:flex; flex-direction:column; gap:16px; overflow-y:auto;">
+            <!-- Quick Questions -->
+            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px;">
+              <div style="font-weight:600; font-size:13px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px;">Quick Questions</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <button onclick="aiQuickQuestion('Am I adequately staffed this week?')" class="ai-quick-btn" style="text-align:left; width:100%; padding:10px 14px; border-radius:8px;">Staffing this week?</button>
+                <button onclick="aiQuickQuestion('What are my labour costs looking like?')" class="ai-quick-btn" style="text-align:left; width:100%; padding:10px 14px; border-radius:8px;">Labour costs?</button>
+                <button onclick="aiQuickQuestion('Any compliance issues I should know about?')" class="ai-quick-btn" style="text-align:left; width:100%; padding:10px 14px; border-radius:8px;">Compliance check</button>
+                <button onclick="aiQuickQuestion('Generate an optimised roster for next week')" class="ai-quick-btn" style="text-align:left; width:100%; padding:10px 14px; border-radius:8px;">Generate roster</button>
+                <button onclick="aiQuickQuestion('Who can I call in for a shift today?')" class="ai-quick-btn" style="text-align:left; width:100%; padding:10px 14px; border-radius:8px;">SOS — find available staff</button>
+                <button onclick="aiQuickQuestion('Show me a weekly summary')" class="ai-quick-btn" style="text-align:left; width:100%; padding:10px 14px; border-radius:8px;">Weekly summary</button>
+              </div>
+            </div>
+
+            <!-- AI Insights -->
+            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px;" id="ai-page-insights">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+                <div style="font-weight:600; font-size:13px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">AI Insights</div>
+                <button onclick="loadAIInsights()" style="background:none; border:1px solid var(--border); border-radius:6px; padding:3px 8px; cursor:pointer; color:var(--text-muted); font-size:11px; transition:all 0.2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">Refresh</button>
+              </div>
+              <div id="ai-page-insights-cards" style="display:flex; flex-direction:column; gap:10px;">
+                <div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">Insights load automatically</div>
+              </div>
+            </div>
+
+            <!-- Capabilities -->
+            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px;">
+              <div style="font-weight:600; font-size:13px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px;">What I Can Do</div>
+              <div style="display:flex; flex-direction:column; gap:10px; font-size:13px; color:var(--text-secondary);">
+                <div style="display:flex; align-items:flex-start; gap:8px;">
+                  <span style="color:var(--accent); font-size:16px; line-height:1;">&#9679;</span>
+                  <span>Analyse staffing levels and labour costs in real time</span>
+                </div>
+                <div style="display:flex; align-items:flex-start; gap:8px;">
+                  <span style="color:#22c55e; font-size:16px; line-height:1;">&#9679;</span>
+                  <span>Generate optimised rosters based on demand</span>
+                </div>
+                <div style="display:flex; align-items:flex-start; gap:8px;">
+                  <span style="color:#f59e0b; font-size:16px; line-height:1;">&#9679;</span>
+                  <span>Flag compliance risks and award breaches</span>
+                </div>
+                <div style="display:flex; align-items:flex-start; gap:8px;">
+                  <span style="color:#ef4444; font-size:16px; line-height:1;">&#9679;</span>
+                  <span>Find available staff for emergency cover</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -4904,7 +4976,9 @@ if (state.isDemo) {
   demoBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:linear-gradient(90deg,#F59E0B,#D97706);color:#000;text-align:center;padding:6px 16px;font-size:13px;font-weight:600;letter-spacing:0.5px;';
   demoBanner.innerHTML = 'DEMO MODE — Sample data only. <a href="/static/login.html" style="color:#000;text-decoration:underline;margin-left:8px;">Sign in</a> or <a href="/static/register.html" style="color:#000;text-decoration:underline;">Create an account</a> to connect your real systems.';
   document.body.prepend(demoBanner);
-  // Shift main content down
+  // Shift everything down so banner doesn't cover logo/content
+  var sidebar = document.querySelector('.sidebar');
+  if (sidebar) sidebar.style.top = '32px';
   var mainWrap = document.querySelector('.main-wrapper') || document.querySelector('.dashboard-wrapper');
   if (mainWrap) mainWrap.style.marginTop = '32px';
   // Hide wizard + sign-out buttons in demo (not a real session)
@@ -5235,10 +5309,19 @@ function showPage(pageId) {
   document.getElementById(`page-${pageId}`).style.display = 'block';
 
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.querySelector(`[data-page="${pageId}"]`).classList.add('active');
+  const navItem = document.querySelector(`[data-page="${pageId}"]`);
+  if (navItem) navItem.classList.add('active');
 
   state.currentPage = pageId;
   updatePageTitle(pageId);
+
+  // Focus chat input when navigating to AI Agent page
+  if (pageId === 'ai-agent') {
+    setTimeout(() => {
+      const input = document.getElementById('ai-chat-input');
+      if (input) input.focus();
+    }, 100);
+  }
 }
 
 function updatePageTitle(pageId) {
@@ -5249,6 +5332,7 @@ function updatePageTitle(pageId) {
     staff: 'Staff Management',
     compliance: 'Compliance',
     reports: 'Reports',
+    'ai-agent': 'AI Agent',
     settings: 'Settings',
   };
   document.getElementById('page-title').textContent = titles[pageId] || 'Dashboard';
@@ -8948,15 +9032,12 @@ const aiState = {
 };
 
 function toggleAIChat() {
-  const panel = document.getElementById('ai-chat-panel');
-  aiState.chatOpen = !aiState.chatOpen;
-  panel.style.display = aiState.chatOpen ? 'flex' : 'none';
-  if (aiState.chatOpen) {
-    document.getElementById('ai-chat-input').focus();
-    document.getElementById('nav-ai-agent').classList.add('active');
-  } else {
-    document.getElementById('nav-ai-agent').classList.remove('active');
-  }
+  // Navigate to the AI Agent page instead of toggling overlay
+  showPage('ai-agent');
+  setTimeout(() => {
+    const input = document.getElementById('ai-chat-input');
+    if (input) input.focus();
+  }, 100);
 }
 
 function clearAIChat() {
@@ -8964,16 +9045,12 @@ function clearAIChat() {
   aiState.history = [];
   const container = document.getElementById('ai-chat-messages');
   container.innerHTML = `
-    <div class="ai-welcome" style="text-align:center; padding:40px 20px; color:var(--text-muted);">
-      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" style="margin-bottom:12px;"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="var(--accent)"/><circle cx="14" cy="10" r="1" fill="var(--accent)"/><path d="M9 14h6"/></svg>
-      <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px;">RosterIQ AI Agent</div>
-      <div style="font-size:13px; line-height:1.5;">Ask me anything about your venue — staffing, costs, compliance, forecasts. I can also generate rosters and send messages to your team.</div>
-      <div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:16px;">
-        <button onclick="aiQuickQuestion('Am I adequately staffed this week?')" class="ai-quick-btn">Staffing this week?</button>
-        <button onclick="aiQuickQuestion('What are my labour costs looking like?')" class="ai-quick-btn">Labour costs?</button>
-        <button onclick="aiQuickQuestion('Any compliance issues I should know about?')" class="ai-quick-btn">Compliance check</button>
-        <button onclick="aiQuickQuestion('Generate an optimised roster for next week')" class="ai-quick-btn">Generate roster</button>
+    <div class="ai-welcome" style="text-align:center; padding:60px 40px; color:var(--text-muted);">
+      <div style="width:64px; height:64px; border-radius:16px; background:linear-gradient(135deg, var(--accent), #0284c7); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#fff"/><circle cx="14" cy="10" r="1" fill="#fff"/><path d="M9 14h6"/></svg>
       </div>
+      <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px; font-size:16px;">How can I help?</div>
+      <div style="font-size:13px; line-height:1.6; max-width:400px; margin:0 auto;">Ask me about staffing levels, labour costs, compliance, forecasting, or get me to generate an optimised roster.</div>
     </div>`;
 }
 
@@ -9139,7 +9216,7 @@ async function loadAIInsights() {
       let actionHtml = '';
       if (insight.action) {
         if (insight.action.type === 'ask_ai') {
-          actionHtml = `<div class="ai-insight-action"><button class="ai-action-btn" onclick="toggleAIChat(); setTimeout(() => aiQuickQuestion('${insight.action.prompt.replace(/'/g, "\\'")}'), 300);">${insight.action.label}</button></div>`;
+          actionHtml = `<div class="ai-insight-action"><button class="ai-action-btn" onclick="showPage('ai-agent'); setTimeout(() => aiQuickQuestion('${insight.action.prompt.replace(/'/g, "\\'")}'), 300);">${insight.action.label}</button></div>`;
         } else if (insight.action.type === 'generate_roster') {
           actionHtml = `<div class="ai-insight-action"><button class="ai-action-btn" onclick="navigateTo('roster')">${insight.action.label}</button></div>`;
         } else if (insight.action.type === 'open_integrations') {
