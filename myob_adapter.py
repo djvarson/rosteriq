@@ -40,6 +40,12 @@ from rosteriq.models import (
 
 logger = logging.getLogger(__name__)
 
+# Transient HTTP status codes that should trigger a retry with backoff.
+# 429 is handled separately (Retry-After), so it is intentionally excluded here.
+_RETRYABLE_STATUSES = {500, 502, 503, 504}
+MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 1.0  # seconds — 1s, 2s, 4s
+
 
 class MYOBAPIError(Exception):
     """Exception raised for MYOB API errors."""
@@ -217,11 +223,57 @@ class MYOBAdapter:
     - MYOB Payroll Categories → wage rates
     """
 
-    def __init__(self, credentials: MYOBCredentials, state: State = State.wa):
+    def __init__(
+        self,
+        credentials: MYOBCredentials,
+        state: State = State.wa,
+        on_token_refresh=None,
+    ):
         self.credentials = credentials
         self.state = state
         self._client: Optional[httpx.AsyncClient] = None
         self._rate_limiter = MYOBRateLimiter()
+        self._on_token_refresh = on_token_refresh  # callback(credentials) to persist new tokens
+
+    async def _ensure_valid_token(self) -> None:
+        """Refresh the access token if it has expired (proactive refresh)."""
+        if self.credentials.is_expired and self.credentials.refresh_token:
+            await self._refresh_token()
+
+    async def _refresh_token(self) -> None:
+        """Refresh the MYOB OAuth2 access token and update the client + credentials."""
+        if not self.credentials.refresh_token:
+            raise MYOBAPIError(APIError(
+                status_code=401,
+                message="No MYOB refresh token available — please reconnect MYOB.",
+                detail={},
+            ))
+
+        oauth = MYOBOAuth(
+            api_key=self.credentials.api_key,
+            api_secret=self.credentials.api_secret,
+            redirect_uri="",
+        )
+        data = await oauth.refresh_access_token(self.credentials.refresh_token)
+
+        self.credentials.access_token = data["access_token"]
+        if data.get("refresh_token"):
+            self.credentials.refresh_token = data["refresh_token"]
+        # MYOB access tokens are short-lived (~20 min); default if absent.
+        expires_in = int(data.get("expires_in", 1200))
+        self.credentials.token_expires_at = datetime.now() + timedelta(seconds=expires_in)
+
+        # Update the live client's auth header so in-flight clients pick it up.
+        if self._client is not None:
+            self._client.headers["Authorization"] = f"Bearer {self.credentials.access_token}"
+        logger.info("MYOB access token refreshed successfully")
+
+        # Persist refreshed tokens if a callback was provided.
+        if self._on_token_refresh:
+            try:
+                self._on_token_refresh(self.credentials)
+            except Exception as e:
+                logger.warning(f"Failed to persist refreshed MYOB token: {e}")
 
     async def __aenter__(self):
         headers = {
@@ -253,44 +305,87 @@ class MYOBAdapter:
         self,
         method: str,
         url: str,
+        _retry_on_auth: bool = True,
         **kwargs,
     ) -> Any:
-        """Make a rate-limited request to the MYOB API."""
-        await self._rate_limiter.acquire()
+        """Make a rate-limited request to the MYOB API with retry + backoff."""
+        # Proactively refresh an expired token before spending a request.
+        await self._ensure_valid_token()
 
-        try:
-            response = await self._client.request(method, url, **kwargs)
-        except httpx.TimeoutException:
-            raise MYOBAPIError(APIError(
-                status_code=408,
-                message="MYOB API request timed out",
-                detail={"url": url},
-            ))
+        for attempt in range(MAX_RETRIES + 1):
+            await self._rate_limiter.acquire()
 
-        if response.status_code == 401:
-            raise MYOBAPIError(APIError(
-                status_code=401,
-                message="MYOB authentication failed — token may be expired",
-                detail={"url": url},
-            ))
+            try:
+                response = await self._client.request(method, url, **kwargs)
+            except (httpx.TimeoutException, httpx.ConnectError,
+                    httpx.ReadError, httpx.WriteError, httpx.PoolTimeout) as e:
+                # Transient network/timeout error — retry with exponential backoff.
+                if attempt < MAX_RETRIES:
+                    wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                    logger.warning(
+                        f"MYOB request to {url} failed (attempt {attempt + 1}/"
+                        f"{MAX_RETRIES + 1}): {e}. Retrying in {wait:.1f}s..."
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                raise MYOBAPIError(APIError(
+                    status_code=408,
+                    message=f"MYOB API request failed after {MAX_RETRIES + 1} attempts: {e}",
+                    detail={"url": url, "error": str(e), "attempts": MAX_RETRIES + 1},
+                ))
 
-        if response.status_code == 429:
-            retry_after = int(response.headers.get("Retry-After", "60"))
-            await asyncio.sleep(retry_after)
-            return await self._request(method, url, **kwargs)
+            if response.status_code == 401:
+                # The token may have expired server-side before token_expires_at.
+                # Refresh once and retry before surfacing an auth error.
+                if _retry_on_auth and self.credentials.refresh_token:
+                    try:
+                        await self._refresh_token()
+                    except MYOBAPIError:
+                        pass
+                    else:
+                        return await self._request(
+                            method, url, _retry_on_auth=False, **kwargs
+                        )
+                raise MYOBAPIError(APIError(
+                    status_code=401,
+                    message="MYOB authentication failed — token may be expired",
+                    detail={"url": url},
+                ))
 
-        if response.status_code >= 400:
-            error_body = response.text
-            raise MYOBAPIError(APIError(
-                status_code=response.status_code,
-                message=f"MYOB API error: {error_body}",
-                detail={"url": url, "response": error_body},
-            ))
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", "60"))
+                await asyncio.sleep(retry_after)
+                return await self._request(method, url, **kwargs)
 
-        if response.status_code == 204:
-            return {}
+            # Retry transient 5xx server errors with exponential backoff.
+            if response.status_code in _RETRYABLE_STATUSES and attempt < MAX_RETRIES:
+                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    f"MYOB {response.status_code} on {url} (attempt {attempt + 1}/"
+                    f"{MAX_RETRIES + 1}). Retrying in {wait:.1f}s..."
+                )
+                await asyncio.sleep(wait)
+                continue
 
-        return response.json()
+            if response.status_code >= 400:
+                error_body = response.text
+                raise MYOBAPIError(APIError(
+                    status_code=response.status_code,
+                    message=f"MYOB API error: {error_body}",
+                    detail={"url": url, "response": error_body},
+                ))
+
+            if response.status_code == 204:
+                return {}
+
+            return response.json()
+
+        # Safety net — exhausted retries on a retryable 5xx without returning.
+        raise MYOBAPIError(APIError(
+            status_code=503,
+            message=f"MYOB API request to {url} failed after {MAX_RETRIES + 1} attempts",
+            detail={"url": url, "attempts": MAX_RETRIES + 1},
+        ))
 
     async def _get(self, url: str, **kwargs) -> Any:
         return await self._request("GET", url, **kwargs)

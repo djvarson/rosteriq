@@ -482,12 +482,17 @@ class Query:
         if not roster:
             return []
 
+        # Venue config is required for staffing-requirement checks.
+        venue = db.get_venue(roster.venue_id)
+        if not venue:
+            return []
+
         try:
-            # Get employee data for context
-            employees = db.get_employees_dict()
+            # Employees as a list (detect_conflicts expects a list, not a dict)
+            employees = db.list_employees()
 
             # Detect conflicts
-            conflicts = detect_conflicts(roster, employees)
+            conflicts = detect_conflicts(roster, venue, employees)
 
             # Convert to GraphQL type
             return [

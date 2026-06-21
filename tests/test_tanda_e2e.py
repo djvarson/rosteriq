@@ -22,6 +22,7 @@ import hmac
 import hashlib
 import asyncio
 from datetime import datetime, timedelta, date, time
+from decimal import Decimal
 from typing import Dict, Any, Optional, List
 from uuid import uuid4
 
@@ -117,37 +118,41 @@ class TestHelper:
         db = MemoryStore()
 
         if with_seed_data:
-            # Add default venue
+            now = datetime.utcnow()
+            # Add default venue. VenueConfig (models.py) fields: id, name,
+            # tanda_org_id, state, timezone, min_staff (Dict[str,int]),
+            # max_labour_pct, pos_system, created_at. There is no address/
+            # suburb/postcode/phone/email on VenueConfig.
             venue = VenueConfig(
                 id=TestHelper.TEST_VENUE_ID,
                 name="Test Venue",
-                address="123 Test St",
-                suburb="Melbourne",
-                state=State.VIC,
-                postcode="3000",
-                phone="0312345678",
-                email="venue@test.local",
+                tanda_org_id="org-test-001",
+                state=State.vic,
+                min_staff={"floor": 1},
+                max_labour_pct=30.0,
+                created_at=now,
             )
             db.save_venue(venue)
 
-            # Add seed employees
+            # Add seed employees. Employee (models.py) required fields: id,
+            # name, employment_type, award_level, state, hourly_base_rate,
+            # created_at, updated_at. Enums are lowercase
+            # (EmploymentType.full_time, AwardLevel.level_1). There is no
+            # date_of_birth/address/suburb/postcode/is_active/hire_date/
+            # hourly_rate field.
             for i in range(1, 4):
                 emp = Employee(
                     id=f"emp-{i}",
                     name=f"Employee {i}",
                     email=f"emp{i}@test.local",
                     phone=f"041234567{i}",
-                    date_of_birth=date(1990, 1, i),
-                    address="Test Address",
-                    suburb="Melbourne",
-                    state=State.VIC,
-                    postcode="3000",
-                    employment_type=EmploymentType.FULL_TIME,
-                    hourly_rate=25.0 + i,
-                    award_level=AwardLevel.MINIMUM,
+                    state=State.vic,
+                    employment_type=EmploymentType.full_time,
+                    hourly_base_rate=Decimal(str(25.0 + i)),
+                    award_level=AwardLevel.level_1,
                     venue_id=TestHelper.TEST_VENUE_ID,
-                    is_active=True,
-                    hire_date=date.today(),
+                    created_at=now,
+                    updated_at=now,
                 )
                 db.save_employee(emp)
 

@@ -74,7 +74,7 @@ class TestShiftCostBreakdown:
 
     def test_saturday_full_time(self):
         emp = make_employee()
-        shift = make_shift(date=date(2026, 4, 4))  # Saturday
+        shift = make_shift(date=date(2026, 4, 11))  # Saturday (2026-04-04 is Easter Sat, a VIC public holiday)
         breakdown = calculate_shift_cost_breakdown(emp, shift, State.vic)
 
         assert breakdown.base_cost == Decimal("225.00")
@@ -95,7 +95,7 @@ class TestShiftCostBreakdown:
 
     def test_casual_sunday(self):
         emp = make_employee(employment_type=EmploymentType.casual)
-        shift = make_shift(date=date(2026, 4, 5))  # Sunday
+        shift = make_shift(date=date(2026, 4, 12))  # Sunday (non-holiday)
         breakdown = calculate_shift_cost_breakdown(emp, shift, State.vic)
 
         assert breakdown.base_cost == Decimal("225.00")
@@ -109,7 +109,7 @@ class TestShiftCostBreakdown:
 
     def test_total_equals_components(self):
         emp = make_employee(employment_type=EmploymentType.casual)
-        shift = make_shift(date=date(2026, 4, 5))  # Sunday
+        shift = make_shift(date=date(2026, 4, 12))  # Sunday (non-holiday)
         breakdown = calculate_shift_cost_breakdown(emp, shift, State.vic)
 
         expected_total = (
@@ -123,8 +123,8 @@ class TestShiftCostBreakdown:
         shift = make_shift(date=date(2026, 12, 25))  # Christmas
         breakdown = calculate_shift_cost_breakdown(emp, shift, State.vic)
 
-        # PH FT = 2.5x, penalty = 1.5 * $225 = $337.50
-        assert breakdown.penalty_cost == Decimal("337.50")
+        # PH FT = 2.25x (225%), penalty = (2.25-1) * $225 = $281.25
+        assert breakdown.penalty_cost == Decimal("281.25")
 
 
 # ============================================================================

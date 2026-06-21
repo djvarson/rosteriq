@@ -132,11 +132,19 @@ class SeasonalDecomposer:
             month_sums[dt.month].append(covers)
             hour_sums[hour].append(covers)
 
-        # Calculate averages
-        overall_avg = mean(
-            sum(v) / len(v) for v in [dow_sums, month_sums, hour_sums]
-            if v
-        ) or 50.0
+        # Overall mean covers across every observation — used as the baseline
+        # to normalise the seasonal factors so each comes out around 1.0.
+        #
+        # NOTE: the previous expression iterated over the {key: [covers]} dicts
+        # themselves, so `sum(v)` summed the dict KEYS (weekday/month/hour
+        # indices) and `len(v)` counted distinct keys. That produced a tiny,
+        # meaningless baseline (~6-8) instead of the true cover mean (~60),
+        # which inflated every seasonal factor by ~10x and made point estimates
+        # explode into the millions.
+        all_covers = [
+            float(p.get("covers", 0)) for p in recent_data
+        ]
+        overall_avg = (mean(all_covers) if all_covers else 0.0) or 50.0
 
         day_of_week = {}
         for dow in range(7):
@@ -575,7 +583,10 @@ class EnhancedForecaster:
     def forecast_staffing_needs(
         self,
         target_date: date,
-        covers_per_staff: float = 20.0,
+        # Keep in step with roster_optimiser.DEFAULT_COVERS_PER_STAFF (15.0):
+        # the forecast→staffing ratio must match the optimiser, else recommended
+        # vs rostered headcount disagree by ~25%.
+        covers_per_staff: float = 15.0,
         weather: Optional[WeatherForecast] = None,
     ) -> list[dict]:
         """
@@ -696,15 +707,27 @@ class EnhancedForecaster:
     # ======================================================================
 
     def _heuristic_predict(self, target_date: date, hour: int) -> float:
-        """Fallback heuristic prediction when no base forecaster."""
+        """
+        Fallback baseline prediction when no base forecaster is configured.
+
+        This returns a seasonally-NEUTRAL demand level (the overall average
+        covers across the training data). The day-of-week, hour-of-day, month
+        and trend seasonal factors are applied once by ``predict`` on top of
+        this baseline — so they must NOT be applied here as well, otherwise the
+        seasonal signal is double-counted and point estimates drift well above
+        the range the historical residuals were measured against.
+        """
         if not self.seasonal_components:
             self.retrain()
 
-        # Use 50 covers as default base
-        base = 50.0
-        dow_factor = self.seasonal_components.day_of_week.get(target_date.weekday(), 1.0)
-        hour_factor = self.seasonal_components.hour_of_day.get(hour, 0.5)
-        return base * dow_factor * hour_factor
+        if self.historical_data:
+            covers = [float(p.get("covers", 0)) for p in self.historical_data]
+            covers = [c for c in covers if c >= 0]
+            if covers:
+                return mean(covers)
+
+        # No history at all — fall back to a neutral default.
+        return 50.0
 
     def _calculate_confidence_intervals(
         self,
@@ -712,9 +735,27 @@ class EnhancedForecaster:
         seasonal_pred: float,
     ) -> tuple[tuple[float, float], tuple[float, float]]:
         """
-        Calculate confidence intervals via bootstrap.
+        Calculate confidence intervals as a multiplicative band around the
+        point estimate, derived from the model's RELATIVE error distribution.
 
-        Returns ((low_80, high_80), (low_95, high_95))
+        Returns ((low_80, high_80), (low_95, high_95)).
+
+        The key invariant is ``lower <= point_estimate <= upper`` for both
+        bands, and the 95% band is at least as wide as the 80% band. To get
+        that, the residuals must be relative errors of *comparable* predictions:
+        for each recent history row we compute that row's OWN seasonal
+        expectation and take ``residual = (actual - expected) / expected``.
+        Because each row is compared against the prediction for its OWN
+        day-of-week / hour-of-day, the residuals describe how far reality
+        typically lands above or below the model — a scale-free quantity we can
+        re-apply to *any* point estimate via ``point_estimate * (1 + r)``.
+
+        Previously the code compared every raw history row (all hours/days
+        mixed) against the single current ``seasonal_pred``, so the residuals
+        captured the spread of the whole history rather than the model error.
+        The resulting bounds were a fixed cover count (e.g. high_80==80 for
+        every hour) decoupled from the point estimate, frequently leaving the
+        point estimate outside its own interval.
         """
         if not self.historical_data:
             # No data: use ±25% and ±50%
@@ -723,37 +764,71 @@ class EnhancedForecaster:
                 (max(0.0, point_estimate * 0.5), point_estimate * 1.5),
             )
 
-        # Bootstrap from historical residuals
+        # Relative residuals of comparable predictions: compare each recent row
+        # against the seasonal expectation FOR THAT row's day/hour. The seasonal
+        # factors are normalised around the overall mean cover count, so the
+        # expectation for a row is overall_avg * dow * month * hour. Recompute
+        # overall_avg the same way the decomposer does (mean covers, default 50).
+        sc = self.seasonal_components
+        _covers = [
+            c for c in (float(p.get("covers", 0)) for p in self.historical_data)
+            if c >= 0
+        ]
+        overall_avg = (mean(_covers) if _covers else 0.0) or 50.0
         residuals = []
         for point in self.historical_data[-100:]:  # Last 100 data points
             actual = float(point.get("covers", 0))
-            predicted = seasonal_pred  # Use seasonal prediction as baseline
-            if actual > 0 and predicted > 0:
-                residual = (actual - predicted) / predicted
-                residuals.append(residual)
+            dt = point.get("date")
+            hour = int(point.get("hour", 0))
+            if actual <= 0 or dt is None or sc is None:
+                continue
+
+            dow_factor = sc.day_of_week.get(dt.weekday(), 1.0)
+            month_factor = sc.month_of_year.get(dt.month, 1.0)
+            hour_factor = sc.hour_of_day.get(hour, 0.5)
+            expected = overall_avg * dow_factor * month_factor * hour_factor
+            if expected <= 0:
+                continue
+
+            residual = (actual - expected) / expected
+            residuals.append(residual)
 
         if not residuals or len(residuals) < 10:
-            # Fallback: use ±25% and ±50%
+            # Fallback: use ±25% and ±50% (already correctly ordered).
             return (
                 (max(0.0, point_estimate * 0.75), point_estimate * 1.25),
                 (max(0.0, point_estimate * 0.5), point_estimate * 1.5),
             )
 
-        # Calculate percentiles
+        # Percentile bounds of the relative-error distribution. The 80% band
+        # spans the 10th–90th percentiles; the 95% band spans the wider
+        # 2.5th–97.5th percentiles.
+        n = len(residuals)
         residuals.sort()
-        idx_10 = int(len(residuals) * 0.10)
-        idx_25 = int(len(residuals) * 0.25)
-        idx_75 = int(len(residuals) * 0.75)
-        idx_90 = int(len(residuals) * 0.90)
+        idx_2_5 = int(n * 0.025)
+        idx_10 = int(n * 0.10)
+        idx_90 = min(n - 1, int(n * 0.90))
+        idx_97_5 = min(n - 1, int(n * 0.975))
 
-        low_80 = point_estimate * (1 + residuals[idx_10])
-        high_80 = point_estimate * (1 + residuals[idx_90])
-        low_95 = point_estimate * (1 + residuals[idx_25])
-        high_95 = point_estimate * (1 + residuals[idx_75])
+        r_2_5 = residuals[idx_2_5]
+        r_10 = residuals[idx_10]
+        r_90 = residuals[idx_90]
+        r_97_5 = residuals[idx_97_5]
+
+        # Enforce the band always brackets the point estimate. The lower
+        # percentile must not push the band above the point (r <= 0) and the
+        # upper percentile must not pull it below (r >= 0); a perfectly
+        # unbiased model already satisfies this, but clamp to be safe so the
+        # ``lower <= point <= upper`` invariant cannot be violated by sampling
+        # noise. The 95% band is then guaranteed at least as wide as the 80%.
+        low_80 = point_estimate * (1 + min(0.0, r_10))
+        high_80 = point_estimate * (1 + max(0.0, r_90))
+        low_95 = point_estimate * (1 + min(0.0, r_2_5, r_10))
+        high_95 = point_estimate * (1 + max(0.0, r_97_5, r_90))
 
         return (
-            (max(0.0, low_80), high_80),
-            (max(0.0, low_95), high_95),
+            (max(0.0, low_80), max(point_estimate, high_80)),
+            (max(0.0, low_95), max(point_estimate, high_95)),
         )
 
     def _calculate_confidence_score(self) -> float:

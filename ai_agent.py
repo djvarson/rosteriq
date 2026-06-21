@@ -13,6 +13,7 @@ Free tier: 15 RPM / 1M tokens per day with Gemini Flash.
 
 import os
 import json
+import asyncio
 import logging
 from datetime import date, datetime, timedelta
 from typing import Optional, AsyncGenerator
@@ -33,6 +34,13 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("ROSTERIQ_AI_MODEL", "gemini-2.0-flash")
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 MAX_CONTEXT_TOKENS = 8000  # rough budget for venue context
+
+# Rate-limit / transient-error retry tuning.
+# Gemini free tier is 15 RPM, so 429s are expected under light bursts.
+GEMINI_MAX_RETRIES = 3          # number of retries AFTER the first attempt
+GEMINI_BACKOFF_BASE = 1.0       # seconds; exponential: 1s, 2s, 4s ...
+GEMINI_BACKOFF_CAP = 8.0        # seconds; max single backoff
+RATE_LIMIT_MESSAGE = "AI service rate-limited, try again shortly."
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -1119,41 +1127,89 @@ class RosterIQAgent:
         return {"response": "I've gathered the information but hit my processing limit. Let me know if you need more detail.", "actions": actions, "tool_calls": tool_calls_log}
 
     async def _call_gemini(self, client: httpx.AsyncClient, contents: list[dict]) -> dict:
-        """Make a single API call to Gemini."""
+        """Make a single logical API call to Gemini.
+
+        Retries transient rate-limit (HTTP 429) and service-unavailable
+        (HTTP 503) responses with exponential backoff, honouring the
+        Retry-After header when present. On exhaustion, returns a clear
+        rate-limit message rather than the raw upstream error.
+        """
         url = GEMINI_API_URL.format(model=GEMINI_MODEL) + f"?key={GEMINI_API_KEY}"
-        try:
-            resp = await client.post(
-                url,
-                headers={"content-type": "application/json"},
-                json={
-                    "contents": contents,
-                    "tools": GEMINI_TOOLS,
-                    "systemInstruction": {
-                        "parts": [{"text": SYSTEM_PROMPT}],
-                    },
-                    "generationConfig": {
-                        "maxOutputTokens": 2048,
-                        "temperature": 0.7,
-                    },
-                },
-            )
-            if resp.status_code != 200:
-                error_body = resp.text[:500]
-                logger.error(f"Gemini API error {resp.status_code}: {error_body}")
-                # Parse error message if possible
-                try:
-                    err_json = resp.json()
-                    err_msg = err_json.get("error", {}).get("message", f"API returned {resp.status_code}")
-                except Exception:
-                    err_msg = f"API returned {resp.status_code}"
-                return {"error": err_msg}
-            return resp.json()
-        except httpx.TimeoutException:
-            logger.error("Gemini API timeout")
-            return {"error": "Request timed out"}
-        except Exception as e:
-            logger.error(f"Gemini API error: {e}")
-            return {"error": str(e)}
+        payload = {
+            "contents": contents,
+            "tools": GEMINI_TOOLS,
+            "systemInstruction": {
+                "parts": [{"text": SYSTEM_PROMPT}],
+            },
+            "generationConfig": {
+                "maxOutputTokens": 2048,
+                "temperature": 0.7,
+            },
+        }
+
+        last_retryable_status = None
+        for attempt in range(GEMINI_MAX_RETRIES + 1):
+            try:
+                resp = await client.post(
+                    url,
+                    headers={"content-type": "application/json"},
+                    json=payload,
+                )
+            except httpx.TimeoutException:
+                logger.error("Gemini API timeout")
+                return {"error": "Request timed out"}
+            except Exception as e:
+                logger.error(f"Gemini API error: {e}")
+                return {"error": str(e)}
+
+            if resp.status_code == 200:
+                return resp.json()
+
+            # Transient errors worth retrying: 429 (rate limit) and 503 (unavailable).
+            if resp.status_code in (429, 503):
+                last_retryable_status = resp.status_code
+                if attempt < GEMINI_MAX_RETRIES:
+                    delay = self._retry_delay_seconds(resp, attempt)
+                    logger.warning(
+                        f"Gemini API {resp.status_code} (attempt {attempt + 1}/"
+                        f"{GEMINI_MAX_RETRIES + 1}) — backing off {delay:.1f}s"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                # Retries exhausted — surface a friendly, actionable message.
+                logger.error(
+                    f"Gemini API {resp.status_code} after {GEMINI_MAX_RETRIES + 1} attempts: "
+                    f"{resp.text[:500]}"
+                )
+                return {"error": RATE_LIMIT_MESSAGE}
+
+            # Non-retryable error — preserve existing behaviour.
+            error_body = resp.text[:500]
+            logger.error(f"Gemini API error {resp.status_code}: {error_body}")
+            try:
+                err_json = resp.json()
+                err_msg = err_json.get("error", {}).get("message", f"API returned {resp.status_code}")
+            except Exception:
+                err_msg = f"API returned {resp.status_code}"
+            return {"error": err_msg}
+
+        # Defensive fallback (loop always returns above).
+        if last_retryable_status is not None:
+            return {"error": RATE_LIMIT_MESSAGE}
+        return {"error": "Request failed"}
+
+    @staticmethod
+    def _retry_delay_seconds(resp: "httpx.Response", attempt: int) -> float:
+        """Compute backoff delay, honouring Retry-After if the server sent it."""
+        retry_after = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
+        if retry_after:
+            try:
+                # Retry-After may be an integer number of seconds.
+                return min(float(retry_after), GEMINI_BACKOFF_CAP)
+            except (ValueError, TypeError):
+                pass
+        # Exponential backoff with cap: base * 2**attempt.
+        return min(GEMINI_BACKOFF_BASE * (2 ** attempt), GEMINI_BACKOFF_CAP)
 
     @staticmethod
     def _extract_text_gemini(parts: list[dict]) -> str:

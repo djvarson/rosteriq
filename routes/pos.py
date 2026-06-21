@@ -283,12 +283,72 @@ async def get_status(
 # ============================================================================
 
 
+def _persist_pos_actuals(db, venue_id: str, provider: str, signals: list) -> int:
+    """
+    Persist synced POS sales into revenue_actuals as observed hourly actuals so
+    they feed the forecast-accuracy engine (which grades forecasts against real
+    POS covers/transactions). Groups hourly signals by date into the
+    hourly_breakdown the accuracy service reads. Returns the number of days saved.
+    """
+    by_date: dict = {}
+    for s in signals:
+        snap = (s.raw_data or {}).get("snapshot", {}) if getattr(s, "raw_data", None) else {}
+        if not getattr(s, "signal_date", None):
+            continue
+        day = s.signal_date.isoformat()
+        entry = by_date.setdefault(day, {"daily_total": 0.0, "hourly_breakdown": [], "source": provider})
+        revenue = float(snap.get("total_revenue", 0.0) or 0.0)
+        entry["daily_total"] += revenue
+        entry["hourly_breakdown"].append({
+            "hour": s.signal_hour,
+            "revenue": revenue,
+            "covers": float(snap.get("total_covers", 0.0) or 0.0),
+            "transactions": int(snap.get("transactions", 0) or 0),
+            "items": int(snap.get("total_items", 0) or 0),
+        })
+    saved = 0
+    for day, payload in by_date.items():
+        try:
+            _save_day_actual_merged(db, venue_id, day, payload)
+            saved += 1
+        except Exception as e:  # pragma: no cover - best effort, never block the sync
+            logger.warning(f"Failed to persist POS actuals for {venue_id} {day}: {e}")
+    return saved
+
+
+def _save_day_actual_merged(db, venue_id: str, day: str, payload: dict) -> None:
+    """
+    Persist a day's actuals by MERGING hourly_breakdown into any existing record for
+    that day (incoming wins per-hour), rather than overwriting it. revenue_actuals is
+    keyed (venue_id, date) and save_revenue_actual replaces the row, so a CSV import
+    for a day already API-synced (or a second POS source) would otherwise clobber the
+    day's actuals — silent loss feeding forecast accuracy.
+    """
+    try:
+        existing = db.list_revenue_actuals(venue_id, day, day)
+    except Exception:
+        existing = []
+    if existing:
+        by_hour = {h.get("hour"): h for h in (existing[0].get("hourly_breakdown") or [])}
+        for h in payload.get("hourly_breakdown", []):
+            by_hour[h.get("hour")] = h  # incoming overrides that hour, keeps the rest
+        merged = list(by_hour.values())
+        payload = {
+            **payload,
+            "hourly_breakdown": merged,
+            "daily_total": sum(float(h.get("revenue", 0) or 0) for h in merged),
+        }
+    db.save_revenue_actual(venue_id, day, payload)
+
+
 @router.post("/{provider}/sync/sales")
 async def sync_sales(provider: PosProvider, body: PosSyncRequest) -> dict:
     """
     Pull sales data from a POS provider for a date range.
 
-    Returns demand signals generated from the sales data.
+    Returns demand signals generated from the sales data, and persists the hourly
+    sales as observed actuals (revenue_actuals) so forecasts can be graded against
+    real takings.
     """
     install = _get_install_or_404(provider, body.venue_id)
     adapter = _build_adapter(provider, install)
@@ -314,11 +374,14 @@ async def sync_sales(provider: PosProvider, body: PosSyncRequest) -> dict:
             detail=f"{provider.value} API error: {e}",
         )
 
+    days_saved = _persist_pos_actuals(get_db(), body.venue_id, provider.value, signals)
+
     logger.info(
         f"Synced {len(signals)} sales signals from {provider.value} for venue {body.venue_id} "
-        f"({body.start_date} to {body.end_date})"
+        f"({body.start_date} to {body.end_date}); persisted {days_saved} day(s) of actuals"
     )
     return {
+        "actuals_days_saved": days_saved,
         "status": "success",
         "provider": provider.value,
         "venue_id": body.venue_id,
@@ -483,9 +546,33 @@ async def import_csv(provider: PosProvider, body: PosCsvImportRequest) -> dict:
             detail=f"Failed to save imported data: {e}",
         )
 
+    # Also persist as observed actuals (revenue_actuals) so the imported sales
+    # feed forecast accuracy — previously CSV imports only landed in feed_config
+    # and never reached the accuracy/variance engine.
+    actuals_by_date: dict = {}
+    for rec in records:
+        day = rec.get("date")
+        if not day:
+            continue
+        entry = actuals_by_date.setdefault(day, {"daily_total": 0.0, "hourly_breakdown": [], "source": f"{provider.value}_csv"})
+        entry["daily_total"] += rec["revenue"]
+        entry["hourly_breakdown"].append({
+            "hour": rec["hour"],
+            "revenue": rec["revenue"],
+            "transactions": rec["transactions"],
+            "items": rec["items"],
+        })
+    actuals_days_saved = 0
+    for day, payload in actuals_by_date.items():
+        try:
+            _save_day_actual_merged(db, body.venue_id, day, payload)
+            actuals_days_saved += 1
+        except Exception as e:  # pragma: no cover - best effort
+            logger.warning(f"Failed to persist CSV actuals for {body.venue_id} {day}: {e}")
+
     logger.info(
         f"Imported {len(records)} CSV records for {provider.value} "
-        f"at venue {body.venue_id}"
+        f"at venue {body.venue_id}; persisted {actuals_days_saved} day(s) of actuals"
     )
     return {
         "status": "success",

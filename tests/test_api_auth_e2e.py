@@ -25,24 +25,10 @@ import json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
-from fastapi.testclient import TestClient
 
-from rosteriq.api import app
-from rosteriq.database import reset_db
-
-
-@pytest.fixture(autouse=True)
-def reset_database():
-    """Reset the global database before and after each test."""
-    reset_db()
-    yield
-    reset_db()
-
-
-@pytest.fixture
-def client():
-    """Create a TestClient for the FastAPI app."""
-    return TestClient(app)
+# The `client` fixture (unauthenticated TestClient) and the autouse database
+# reset / auth-service rebind / rate-limiter disabling are all provided by
+# tests/conftest.py.
 
 
 # ============================================================================
@@ -138,7 +124,8 @@ class TestUserRegistration:
 
         assert response.status_code == 409
         data = response.json()
-        assert "already exists" in data["detail"].lower()
+        # App wraps errors as {"error": {"code", "message", "status"}}.
+        assert "already exists" in data["error"]["message"].lower()
 
     def test_register_missing_fields(self, client):
         """POST /api/auth/register returns 422 for missing fields."""
@@ -219,7 +206,8 @@ class TestUserLogin:
 
         assert response.status_code == 401
         data = response.json()
-        assert "invalid" in data["detail"].lower()
+        # App wraps errors as {"error": {"code", "message", "status"}}.
+        assert "invalid" in data["error"]["message"].lower()
 
     def test_login_invalid_password(self, client):
         """POST /api/auth/login returns 401 for wrong password."""
@@ -424,7 +412,8 @@ class TestProtectedEndpoints:
 
         assert response.status_code == 401
         data = response.json()
-        assert "detail" in data
+        # App wraps errors as {"error": {"code", "message", "status"}}.
+        assert "error" in data
 
     def test_protected_endpoint_with_valid_token(self, client):
         """Protected endpoints work with valid token."""

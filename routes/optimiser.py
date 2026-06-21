@@ -187,7 +187,7 @@ async def get_venue(
     Raises:
         HTTPException if not found or not authorized
     """
-    venue = db.query(VenueConfig).filter(VenueConfig.id == venue_id).first()
+    venue = db.get_venue(venue_id)
     if not venue:
         raise HTTPException(status_code=404, detail="Venue not found")
 
@@ -260,20 +260,18 @@ async def optimise_roster(
         job.status = OptimisationJobStatus.RUNNING
 
         # Fetch employees for venue
-        employees: List[Employee] = db.query(Employee).filter(
-            Employee.venue_id == request.venue_id
-        ).all()
+        employees: List[Employee] = [
+            e for e in db.list_employees() if e.venue_id == request.venue_id
+        ]
 
         if not employees:
             raise ValueError("No employees found for venue")
 
         # Fetch forecasts for week
         week_end = request.week_start + __import__('datetime').timedelta(days=6)
-        forecasts: List[DemandForecast] = db.query(DemandForecast).filter(
-            DemandForecast.venue_id == request.venue_id,
-            DemandForecast.date >= request.week_start,
-            DemandForecast.date <= week_end,
-        ).all()
+        forecasts: List[DemandForecast] = db.get_forecasts(
+            request.venue_id, request.week_start, week_end
+        )
 
         if not forecasts:
             raise ValueError("No demand forecasts found for week")
@@ -438,7 +436,7 @@ async def get_roster(
     Raises:
         HTTPException if roster not found
     """
-    roster = db.query(Roster).filter(Roster.id == roster_id).first()
+    roster = db.get_roster(roster_id)
     if not roster:
         raise HTTPException(status_code=404, detail="Roster not found")
 
@@ -478,8 +476,8 @@ async def compare_rosters(
     Raises:
         HTTPException if rosters not found
     """
-    original = db.query(Roster).filter(Roster.id == original_roster_id).first()
-    optimised = db.query(Roster).filter(Roster.id == optimised_roster_id).first()
+    original = db.get_roster(original_roster_id)
+    optimised = db.get_roster(optimised_roster_id)
 
     if not original or not optimised:
         raise HTTPException(status_code=404, detail="Roster not found")

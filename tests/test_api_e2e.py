@@ -30,32 +30,41 @@ from decimal import Decimal
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
-from fastapi.testclient import TestClient
 
-from rosteriq.api import app
 from rosteriq.models import (
-    Employee, VenueConfig, DemandForecast, State,
+    Employee, VenueConfig, DemandForecast, State, AwardLevel,
     EmploymentType, ShiftStatus,
 )
-from rosteriq.database import reset_db
 
-
-@pytest.fixture(autouse=True)
-def reset_database():
-    """Reset the global database before and after each test."""
-    reset_db()
-    yield
-    reset_db()
+# The autouse database reset (+ auth-service rebind) and the rate-limiter
+# disabling are provided by tests/conftest.py.
 
 
 @pytest.fixture
-def client():
-    """Create a TestClient for the FastAPI app."""
-    return TestClient(app)
+def client(auth_client):
+    """
+    Authenticated TestClient for the FastAPI app.
+
+    Every venue/employee/forecast/roster endpoint sits behind TenantMiddleware,
+    so the e2e tests need a bearer token. ``auth_client`` (from conftest)
+    registers + logs in an owner user and sets the Authorization header by
+    default. The owner role sees all venues, so the global in-memory store is
+    fully visible regardless of which venue_ids attach to the user.
+    """
+    return auth_client
 
 
 # ============================================================================
 # HELPERS
+#
+# These build payloads that match the current models (models.py):
+#   * VenueConfig requires tanda_org_id, max_labour_pct, created_at; min_staff
+#     is a Dict[str, int]; there is no max_staff/budget field.
+#   * Employee requires award_level, state, hourly_base_rate, created_at,
+#     updated_at; names are a single ``name`` field (no first/last); there is no
+#     hourly_rate/available_days field.
+#   * DemandForecast signals_used are SignalType enums (e.g. "historical").
+# model_dump(mode="json") is used so date/datetime/Decimal serialise to JSON.
 # ============================================================================
 
 def create_test_venue(client, venue_id: str = "test-venue-1", name: str = "Test Venue"):
@@ -63,12 +72,13 @@ def create_test_venue(client, venue_id: str = "test-venue-1", name: str = "Test 
     venue = VenueConfig(
         id=venue_id,
         name=name,
+        tanda_org_id=f"org-{venue_id}",
         state=State.vic,
-        min_staff=2,
-        max_staff=10,
-        budget=Decimal("5000"),
+        min_staff={"floor": 2, "kitchen": 1},
+        max_labour_pct=30.0,
+        created_at=datetime.now(),
     )
-    response = client.post("/venues", json=venue.model_dump())
+    response = client.post("/venues", json=venue.model_dump(mode="json"))
     return response
 
 
@@ -76,20 +86,32 @@ def create_test_employee(
     client,
     employee_id: str,
     venue_id: str = "test-venue-1",
-    first_name: str = "John",
-    last_name: str = "Doe",
+    name: str = "John Doe",
 ):
     """Helper to create an employee and return the response."""
+    now = datetime.now()
     emp = Employee(
         id=employee_id,
-        first_name=first_name,
-        last_name=last_name,
+        name=name,
         venue_id=venue_id,
-        employment_type=EmploymentType.permanent,
-        hourly_rate=Decimal("25.50"),
-        available_days=["MON", "TUE", "WED", "THU", "FRI"],
+        employment_type=EmploymentType.full_time,
+        award_level=AwardLevel.level_3,
+        state=State.vic,
+        hourly_base_rate=Decimal("25.50"),
+        skills=["floor"],
+        availability={
+            "monday": [{"start": "09:00", "end": "22:00"}],
+            "tuesday": [{"start": "09:00", "end": "22:00"}],
+            "wednesday": [{"start": "09:00", "end": "22:00"}],
+            "thursday": [{"start": "09:00", "end": "22:00"}],
+            "friday": [{"start": "09:00", "end": "22:00"}],
+            "saturday": [{"start": "09:00", "end": "22:00"}],
+            "sunday": [{"start": "09:00", "end": "22:00"}],
+        },
+        created_at=now,
+        updated_at=now,
     )
-    response = client.post("/employees", json=emp.model_dump())
+    response = client.post("/employees", json=emp.model_dump(mode="json"))
     return response
 
 
@@ -119,7 +141,9 @@ def create_test_forecasts(
             )
             forecasts.append(fc)
 
-    response = client.post("/forecasts", json=[f.model_dump() for f in forecasts])
+    response = client.post(
+        "/forecasts", json=[f.model_dump(mode="json") for f in forecasts]
+    )
     return response
 
 
@@ -167,8 +191,12 @@ class TestHealthMonitoring:
         assert "forecasts" in data["data"]
 
     def test_root_endpoint(self, client):
-        """GET / returns HealthResponse with module list."""
-        response = client.get("/")
+        """GET /api/status returns HealthResponse with module list.
+
+        ``GET /`` now redirects to the HTML login page, so the JSON status
+        document (with the module list) lives at ``/api/status``.
+        """
+        response = client.get("/api/status")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
@@ -279,8 +307,7 @@ class TestEmployeeManagement:
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == "emp1"
-        assert data["first_name"] == "John"
-        assert data["last_name"] == "Doe"
+        assert data["name"] == "John Doe"
 
     def test_list_employees(self, client):
         """GET /employees lists all employees with pagination."""
@@ -311,15 +338,19 @@ class TestEmployeeManagement:
 
     def test_bulk_create_employees(self, client):
         """POST /employees/bulk creates multiple employees."""
+        now = datetime.now()
         employees = [
             Employee(
                 id=f"emp{i}",
-                first_name=f"Employee{i}",
-                last_name="Test",
+                name=f"Employee{i} Test",
                 venue_id="test-venue-1",
-                employment_type=EmploymentType.permanent,
-                hourly_rate=Decimal("25.00"),
-            ).model_dump()
+                employment_type=EmploymentType.full_time,
+                award_level=AwardLevel.level_3,
+                state=State.vic,
+                hourly_base_rate=Decimal("25.00"),
+                created_at=now,
+                updated_at=now,
+            ).model_dump(mode="json")
             for i in range(5)
         ]
 
@@ -426,7 +457,7 @@ class TestRosterGenerationFlow:
                 client,
                 employee_id=f"emp{i}",
                 venue_id="test-v1",
-                first_name=f"Staff{i}",
+                name=f"Staff{i}",
             )
 
         # Create forecasts for a week
@@ -745,8 +776,10 @@ class TestErrorHandling:
         response = client.get("/unknown-route-xyz")
         assert response.status_code == 404
 
-    def test_generate_roster_missing_forecasts(self, client):
-        """POST /rosters/generate returns 400 with no forecasts."""
+    def test_generate_roster_cold_start_without_forecasts(self, client):
+        """A venue with employees but NO forecasts now succeeds: /rosters/generate
+        auto-generates a cold-start demand forecast so a brand-new venue can produce
+        a first roster (previously this hard-failed with 400 'No forecasts')."""
         create_test_venue(client, venue_id="test-v1")
         for i in range(5):
             create_test_employee(client, employee_id=f"emp{i}", venue_id="test-v1")
@@ -760,7 +793,8 @@ class TestErrorHandling:
             }
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 200, response.text
+        assert len(response.json()["shifts"]) > 0
 
 
 # ============================================================================
@@ -829,7 +863,7 @@ class TestAwardRules:
         """GET /awards/penalty-rate returns penalty multiplier."""
         check_date = date.today()
         response = client.get(
-            f"/awards/penalty-rate?employment_type=permanent&check_date={check_date}&state=vic"
+            f"/awards/penalty-rate?employment_type=full_time&check_date={check_date}&state=vic"
         )
 
         assert response.status_code == 200
@@ -1025,7 +1059,7 @@ class TestFullWorkflow:
                 client,
                 employee_id=f"workflow-emp{i}",
                 venue_id="workflow-v1",
-                first_name=f"Staff{i}",
+                name=f"Staff{i}",
             )
             assert emp_response.status_code == 200
             employees.append(emp_response.json())

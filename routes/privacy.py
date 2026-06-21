@@ -35,6 +35,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _require_owner(current_user) -> None:
+    """
+    Enforce owner-only access.
+
+    get_current_user returns a UserContext (not a dict), and require_role is a
+    decorator factory — so the previous `_require_owner(current_user)`
+    calls were silent no-ops (no enforcement). This raises 403 for non-owners.
+    """
+    if getattr(current_user, "role", None) != "owner":
+        raise HTTPException(status_code=403, detail="Owner role required")
+
+
 # ============================================================================
 # Data Export (Portability)
 # ============================================================================
@@ -58,13 +70,13 @@ async def export_my_data(
     """
     try:
         service = PrivacyService(db)
-        data = service.export_user_data(current_user['id'])
+        data = service.export_user_data(current_user.user_id)
 
         # Return as downloadable JSON
         return JSONResponse(
             content=data,
             headers={
-                "Content-Disposition": f"attachment; filename=user_data_{current_user['id']}.json"
+                "Content-Disposition": f"attachment; filename=user_data_{current_user.user_id}.json"
             }
         )
 
@@ -98,8 +110,8 @@ async def export_employee_data(
             raise HTTPException(status_code=404, detail="Employee not found")
 
         # Check if user can access this employee
-        user = db.get_user_by_id(current_user['id'])
-        if current_user['role'] == 'staff':
+        user = db.get_user_by_id(current_user.user_id)
+        if current_user.role == 'staff':
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         service = PrivacyService(db)
@@ -146,7 +158,7 @@ async def anonymise_employee(
     """
     try:
         # Authorization: only venue owner
-        require_role(current_user, 'owner')
+        _require_owner(current_user)
 
         service = PrivacyService(db)
         result = service.anonymise_employee(employee_id)
@@ -188,10 +200,10 @@ async def get_my_consent(
     """
     try:
         service = PrivacyService(db)
-        consent_status = service.get_consent_status(current_user['id'])
+        consent_status = service.get_consent_status(current_user.user_id)
 
         return {
-            'user_id': current_user['id'],
+            'user_id': current_user.user_id,
             'consents': consent_status,
         }
 
@@ -226,14 +238,14 @@ async def update_my_consent(
         results = {}
         for consent_type, granted in consent_updates.items():
             result = service.record_consent(
-                current_user['id'],
+                current_user.user_id,
                 consent_type,
                 granted
             )
             results[consent_type] = result
 
         return {
-            'user_id': current_user['id'],
+            'user_id': current_user.user_id,
             'consents_updated': results,
         }
 
@@ -264,7 +276,7 @@ async def get_retention_stats(
     Requires: Admin role
     """
     try:
-        require_role(current_user, 'owner')
+        _require_owner(current_user)
 
         service = DataRetentionService(db)
         stats = service.get_retention_stats()
@@ -304,7 +316,7 @@ async def trigger_retention_cleanup(
         POST /api/privacy/retention/cleanup?dry_run=false # Execute
     """
     try:
-        require_role(current_user, 'owner')
+        _require_owner(current_user)
 
         service = DataRetentionService(db)
         stats = service.run_cleanup(dry_run=dry_run)
@@ -346,10 +358,10 @@ async def get_my_audit_log(
     """
     try:
         service = PrivacyService(db)
-        logs = service.get_privacy_logs(user_id=current_user['id'], limit=limit)
+        logs = service.get_privacy_logs(user_id=current_user.user_id, limit=limit)
 
         return {
-            'user_id': current_user['id'],
+            'user_id': current_user.user_id,
             'logs': logs,
             'count': len(logs),
         }
@@ -377,7 +389,7 @@ async def get_all_audit_logs(
     Requires: Admin role
     """
     try:
-        require_role(current_user, 'owner')
+        _require_owner(current_user)
 
         service = PrivacyService(db)
         logs = service.get_privacy_logs(limit=limit)

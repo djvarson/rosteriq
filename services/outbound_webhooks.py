@@ -280,97 +280,33 @@ class OutboundWebhookService:
             "X-RosterIQ-Delivery-Id": delivery_id,
         }
 
-        # Retry loop
-        for attempt in range(RETRY_ATTEMPTS):
-            try:
-                async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT) as client:
-                    response = await client.post(
-                        callback_url,
-                        content=body_bytes,
-                        headers=headers,
-                    )
+        # Enqueue into the DURABLE retry queue instead of retrying in-process.
+        # The queue persists the full delivery (url/payload/headers) before
+        # sending, so it survives a restart; the boot-started queue processor
+        # sends it immediately and handles retries with exponential backoff, a
+        # per-URL circuit breaker, and a dead-letter queue. (Previously this used
+        # an in-process asyncio.sleep retry loop whose in-flight state was lost
+        # on restart and which had no dead-letter handling.)
+        #
+        # The signature above is computed over json.dumps(body, default=str);
+        # the queue re-serialises `payload` (== body) with the identical call,
+        # so the signature the receiver verifies stays valid.
+        from rosteriq.services.webhook_queue import get_webhook_queue
 
-                    # Success
-                    if 200 <= response.status_code < 300:
-                        delivery = {
-                            "id": delivery_id,
-                            "subscription_id": subscription_id,
-                            "event_type": event_type,
-                            "status": "success",
-                            "response_code": response.status_code,
-                            "attempts": attempt + 1,
-                            "last_attempt_at": datetime.now(timezone.utc),
-                            "next_retry_at": None,
-                            "created_at": datetime.now(timezone.utc),
-                        }
-
-                        self.db.save_webhook_delivery(delivery)
-                        logger.info(
-                            f"Webhook {delivery_id} delivered to "
-                            f"{subscription_id} on attempt {attempt + 1}"
-                        )
-                        return
-
-                    # Non-2xx response; will retry
-                    logger.warning(
-                        f"Webhook {delivery_id} got {response.status_code} "
-                        f"on attempt {attempt + 1}"
-                    )
-
-            except (httpx.RequestError, httpx.TimeoutException) as e:
-                logger.warning(
-                    f"Webhook {delivery_id} delivery failed on "
-                    f"attempt {attempt + 1}: {e}"
-                )
-
-            # Schedule retry if not last attempt
-            if attempt < RETRY_ATTEMPTS - 1:
-                delay = RETRY_DELAYS[attempt]
-                next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
-
-                delivery = {
-                    "id": delivery_id,
-                    "subscription_id": subscription_id,
-                    "event_type": event_type,
-                    "status": "pending",
-                    "response_code": None,
-                    "attempts": attempt + 1,
-                    "last_attempt_at": datetime.now(timezone.utc),
-                    "next_retry_at": next_retry_at,
-                    "created_at": datetime.now(timezone.utc),
-                }
-
-                self.db.save_webhook_delivery(delivery)
-                logger.info(
-                    f"Webhook {delivery_id} scheduled for retry "
-                    f"in {delay}s (attempt {attempt + 2}/{RETRY_ATTEMPTS})"
-                )
-
-                # Small sleep before next attempt
-                import asyncio
-
-                await asyncio.sleep(delay)
-            else:
-                # Final failure
-                delivery = {
-                    "id": delivery_id,
-                    "subscription_id": subscription_id,
-                    "event_type": event_type,
-                    "status": "failed",
-                    "response_code": None,
-                    "attempts": RETRY_ATTEMPTS,
-                    "last_attempt_at": datetime.now(timezone.utc),
-                    "next_retry_at": None,
-                    "created_at": datetime.now(timezone.utc),
-                }
-
-                self.db.save_webhook_delivery(delivery)
-                logger.error(
-                    f"Webhook {delivery_id} failed after {RETRY_ATTEMPTS} attempts"
-                )
-                raise Exception(
-                    f"Webhook delivery failed after {RETRY_ATTEMPTS} attempts"
-                )
+        queue = get_webhook_queue()
+        await queue.enqueue(
+            delivery_id=delivery_id,
+            url=callback_url,
+            payload=body,
+            headers=headers,
+            venue_id=subscription.get("venue_id"),
+            subscription_id=subscription_id,
+            event_type=event_type,
+            attempt=0,
+        )
+        logger.info(
+            f"Webhook {delivery_id} enqueued for durable delivery to {subscription_id}"
+        )
 
     # ========================================================================
     # Delivery Log

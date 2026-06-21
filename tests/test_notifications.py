@@ -522,6 +522,10 @@ class TestEmailSending:
     @pytest.mark.asyncio
     async def test_send_email_success(self, notification_service):
         """Email is sent successfully with valid credentials."""
+        # send_email short-circuits to False without SMTP credentials, so the
+        # "valid credentials" path must actually supply them.
+        notification_service.smtp_user = "user@example.com"
+        notification_service.smtp_pass = "app-password"
         with patch.object(notification_service, '_send_smtp'):
             with patch('asyncio.get_event_loop') as mock_loop:
                 async def mock_run_in_executor(*args, **kwargs):

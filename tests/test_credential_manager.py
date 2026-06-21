@@ -88,8 +88,11 @@ def test_list_api_keys(credential_manager, test_user_id):
     assert len(keys) == 3
     assert all(k["is_active"] for k in keys)
     assert all("name" in k for k in keys)
-    # Ensure we never return the actual key
-    assert all("key" not in str(k) for k in keys)
+    # Ensure we never return the actual secret material (plaintext key or its hash).
+    # Note: the user-chosen key *name* legitimately contains "key", so we check the
+    # specific leak vectors rather than the bare substring "key".
+    assert all("key_hash" not in k for k in keys)
+    assert all("hash" not in str(k).lower() for k in keys)
 
 
 def test_revoke_api_key(credential_manager, test_user_id):

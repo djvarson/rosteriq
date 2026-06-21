@@ -20,9 +20,13 @@ from rosteriq.roster_optimiser import (
     _is_employee_available,
     _best_shift_template,
     _create_shift,
+    _roles_for_venue,
+    _allocate_headcount_to_roles,
+    _employee_can_fill_role,
     DEFAULT_COVERS_PER_STAFF,
     SHIFT_TEMPLATES,
 )
+from rosteriq.services.conflict_detector import detect_conflicts, ConflictType
 
 
 # ============================================================================
@@ -31,14 +35,16 @@ from rosteriq.roster_optimiser import (
 
 NOW = datetime(2026, 4, 1, 12, 0)
 
-# A Monday
-MONDAY = date(2026, 4, 6)
-TUESDAY = date(2026, 4, 7)
-WEDNESDAY = date(2026, 4, 8)
-THURSDAY = date(2026, 4, 9)
-FRIDAY = date(2026, 4, 10)
-SATURDAY = date(2026, 4, 11)
-SUNDAY = date(2026, 4, 12)
+# A Monday — week chosen to be free of VIC public holidays.
+# (The 2026-04-06 week was Easter Monday, a public holiday in VIC, which
+#  made the "weekday" baseline carry a 2.5x public-holiday penalty.)
+MONDAY = date(2026, 4, 13)
+TUESDAY = date(2026, 4, 14)
+WEDNESDAY = date(2026, 4, 15)
+THURSDAY = date(2026, 4, 16)
+FRIDAY = date(2026, 4, 17)
+SATURDAY = date(2026, 4, 18)
+SUNDAY = date(2026, 4, 19)
 
 
 def make_employee(**overrides) -> Employee:
@@ -458,14 +464,20 @@ class TestBestShiftTemplate:
         assert (end - start) <= 12  # MAX_SHIFT_LENGTH_HOURS is 11.5
 
     def test_ensures_minimum_engagement_casual(self):
-        # Casual minimum engagement is 3 hours
+        # Casual minimum engagement is 2 hours (Fair Work; see award_rules).
         start, end, brk = _best_shift_template(10, 11, EmploymentType.casual)
+        assert (end - start) >= 2
+
+    def test_ensures_minimum_engagement_pt(self):
+        # Part-time minimum engagement is 3 hours (Fair Work; see award_rules).
+        start, end, brk = _best_shift_template(10, 11, EmploymentType.part_time)
         assert (end - start) >= 3
 
     def test_ensures_minimum_engagement_ft(self):
-        # FT/PT minimum engagement is also 3 hours
+        # Full-time has no statutory minimum engagement, so a short period
+        # is not padded out.
         start, end, brk = _best_shift_template(10, 11, EmploymentType.full_time)
-        assert (end - start) >= 3
+        assert (end - start) == 1
 
     def test_break_added_for_long_shift(self):
         start, end, brk = _best_shift_template(9, 17, EmploymentType.full_time)
@@ -616,6 +628,174 @@ class TestGenerateDailyRoster:
             MONDAY, forecasts, employees, State.vic)
         for shift in shifts:
             assert shift.date == MONDAY
+
+
+# ============================================================================
+# Tests: Role-aware allocation helpers
+# ============================================================================
+
+class TestRoleAwareHelpers:
+    """Test the role allocation + skill-matching helpers."""
+
+    def test_roles_from_min_staff(self):
+        roles = _roles_for_venue({"bar": 1, "floor": 2})
+        assert set(roles) == {"bar", "floor"}
+
+    def test_roles_fallback_to_general(self):
+        assert _roles_for_venue(None) == ["general"]
+        assert _roles_for_venue({}) == ["general"]
+
+    def test_allocation_meets_minimums(self):
+        alloc = _allocate_headcount_to_roles(3, ["bar", "floor"], {"bar": 1, "floor": 2})
+        assert alloc["bar"] >= 1
+        assert alloc["floor"] >= 2
+
+    def test_allocation_total_equals_demand(self):
+        # Demand of 5 > sum of minimums (3): extras distributed round-robin.
+        alloc = _allocate_headcount_to_roles(5, ["bar", "floor"], {"bar": 1, "floor": 2})
+        assert sum(alloc.values()) == 5
+        # minimums still respected
+        assert alloc["bar"] >= 1
+        assert alloc["floor"] >= 2
+
+    def test_allocation_no_min_staff(self):
+        # Generic single-role fallback gets the whole headcount.
+        alloc = _allocate_headcount_to_roles(4, ["general"], None)
+        assert alloc == {"general": 4}
+
+    def test_can_fill_matching_skill(self):
+        emp = make_employee(skills=["bar", "floor"])
+        assert _employee_can_fill_role(emp, "bar") is True
+        assert _employee_can_fill_role(emp, "floor") is True
+
+    def test_cannot_fill_missing_skill(self):
+        emp = make_employee(skills=["bar"])
+        assert _employee_can_fill_role(emp, "floor") is False
+
+    def test_generalist_no_skills_fills_anything(self):
+        emp = make_employee(skills=[])
+        assert _employee_can_fill_role(emp, "bar") is True
+        assert _employee_can_fill_role(emp, "floor") is True
+
+    def test_generic_role_fillable_by_anyone(self):
+        emp = make_employee(skills=["bar"])
+        assert _employee_can_fill_role(emp, "general") is True
+
+
+# ============================================================================
+# Tests: Role-aware daily roster generation
+# ============================================================================
+
+class TestRoleAwareDailyRoster:
+    """Verify generated rosters are role-aware and skill-matched."""
+
+    def _mixed_skill_pool(self):
+        """Pool with enough skilled staff for bar(1) + floor(2)."""
+        return [
+            make_employee(id="bar-1", name="Bar One", skills=["bar"]),
+            make_employee(id="bar-2", name="Bar Two", skills=["bar", "floor"]),
+            make_employee(id="floor-1", name="Floor One", skills=["floor"]),
+            make_employee(id="floor-2", name="Floor Two", skills=["floor"]),
+            make_employee(id="floor-3", name="Floor Three", skills=["floor", "bar"]),
+        ]
+
+    def test_every_shift_role_is_a_venue_role(self):
+        config = make_venue_config(min_staff={"bar": 1, "floor": 2})
+        employees = self._mixed_skill_pool()
+        forecasts = make_day_forecasts(MONDAY, hours=[12], covers_per_hour=5)
+        shifts = generate_daily_roster(
+            MONDAY, forecasts, employees, State.vic, venue_config=config)
+        assert shifts, "expected shifts to be generated"
+        for s in shifts:
+            assert s.role in {"bar", "floor"}
+
+    def test_assigned_employees_have_the_role_skill(self):
+        config = make_venue_config(min_staff={"bar": 1, "floor": 2})
+        employees = self._mixed_skill_pool()
+        emp_by_id = {e.id: e for e in employees}
+        forecasts = make_day_forecasts(MONDAY, hours=[12], covers_per_hour=5)
+        shifts = generate_daily_roster(
+            MONDAY, forecasts, employees, State.vic, venue_config=config)
+        for s in shifts:
+            emp = emp_by_id[s.employee_id]
+            assert s.role in emp.skills, (
+                f"{emp.id} assigned role {s.role} but skills are {emp.skills}"
+            )
+
+    def test_min_staff_per_role_satisfied(self):
+        config = make_venue_config(min_staff={"bar": 1, "floor": 2})
+        employees = self._mixed_skill_pool()
+        forecasts = make_day_forecasts(MONDAY, hours=[12], covers_per_hour=5)
+        shifts = generate_daily_roster(
+            MONDAY, forecasts, employees, State.vic, venue_config=config)
+        role_counts = defaultdict(int)
+        for s in shifts:
+            role_counts[s.role] += 1
+        assert role_counts["bar"] >= 1
+        assert role_counts["floor"] >= 2
+
+    def test_no_employee_assigned_twice_in_a_day(self):
+        config = make_venue_config(min_staff={"bar": 1, "floor": 2})
+        employees = self._mixed_skill_pool()
+        # Multiple periods across the day.
+        forecasts = make_day_forecasts(MONDAY, hours=range(10, 22), covers_per_hour=5)
+        shifts = generate_daily_roster(
+            MONDAY, forecasts, employees, State.vic, venue_config=config)
+        emp_ids = [s.employee_id for s in shifts]
+        assert len(emp_ids) == len(set(emp_ids))
+
+    def test_roster_passes_conflict_detection_cleanly(self):
+        """A role-aware roster should produce zero skill-mismatch conflicts
+        and satisfy per-role min_staff."""
+        config = make_venue_config(min_staff={"bar": 1, "floor": 2})
+        employees = self._mixed_skill_pool()
+        forecasts = make_day_forecasts(MONDAY, hours=[12, 13], covers_per_hour=5)
+        shifts = generate_daily_roster(
+            MONDAY, forecasts, employees, State.vic, venue_config=config)
+        roster = Roster(
+            id="r-role", venue_id=config.id,
+            week_start=MONDAY, week_end=SUNDAY,
+            shifts=shifts, total_cost=Decimal("0"), created_at=NOW,
+        )
+        conflicts = detect_conflicts(roster, config, employees)
+        skill_conflicts = [c for c in conflicts
+                           if c.conflict_type == ConflictType.SKILL_MISMATCH]
+        understaffed = [c for c in conflicts
+                        if c.conflict_type == ConflictType.UNDERSTAFFED_HOUR]
+        assert skill_conflicts == [], (
+            f"unexpected skill mismatches: {[c.message for c in skill_conflicts]}"
+        )
+        assert understaffed == [], (
+            f"unexpected understaffing: {[c.message for c in understaffed]}"
+        )
+
+    def test_insufficient_skilled_staff_degrades_gracefully(self):
+        """If a role lacks enough skilled staff, the generator must not crash
+        and must not assign unskilled employees to that role."""
+        config = make_venue_config(min_staff={"bar": 1, "floor": 3})
+        # Only one floor-skilled employee for a floor minimum of 3.
+        employees = [
+            make_employee(id="bar-1", name="Bar", skills=["bar"]),
+            make_employee(id="floor-1", name="Floor", skills=["floor"]),
+        ]
+        emp_by_id = {e.id: e for e in employees}
+        forecasts = make_day_forecasts(MONDAY, hours=[12], covers_per_hour=5)
+        shifts = generate_daily_roster(
+            MONDAY, forecasts, employees, State.vic, venue_config=config)
+        # No crash; whatever is assigned is still skill-matched.
+        for s in shifts:
+            assert s.role in emp_by_id[s.employee_id].skills
+
+    def test_no_min_staff_uses_general_role(self):
+        """Venue with no min_staff falls back to role-agnostic 'general'."""
+        config = make_venue_config(min_staff={})
+        employees = make_employee_pool(4)
+        forecasts = make_day_forecasts(MONDAY, hours=[12], covers_per_hour=30)
+        shifts = generate_daily_roster(
+            MONDAY, forecasts, employees, State.vic, venue_config=config)
+        assert shifts
+        for s in shifts:
+            assert s.role == "general"
 
 
 # ============================================================================

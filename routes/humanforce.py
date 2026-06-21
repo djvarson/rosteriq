@@ -117,6 +117,26 @@ def _build_credentials(install: dict) -> HumanForceCredentials:
     )
 
 
+def _persist_refreshed_tokens(install: dict):
+    """
+    Build an on_token_refresh callback that writes refreshed HumanForce tokens
+    back into the venue's plugin_install record, so the next request reuses the
+    new access/refresh token instead of starting from the expired one.
+    """
+    def _save(creds) -> None:
+        tokens = install.setdefault("tokens", {})
+        tokens["access_token"] = creds.access_token
+        tokens["refresh_token"] = creds.refresh_token
+        tokens["token_expiry"] = creds.token_expiry.isoformat() if creds.token_expiry else None
+        tokens["base_url"] = creds.base_url
+        try:
+            get_db().save_plugin_install(install)
+        except Exception as e:  # noqa: BLE001 — never let persistence failure break the call
+            logger.warning(f"Failed to persist refreshed HumanForce tokens: {e}")
+
+    return _save
+
+
 def _org_key(venue_id: str) -> str:
     """Generate the organisation_id key used in plugin_installs for HumanForce."""
     return f"{HUMANFORCE_ORG_PREFIX}{venue_id}"
@@ -310,7 +330,7 @@ async def sync_employees(body: SyncEmployeesRequest) -> dict:
     credentials = _build_credentials(install)
 
     try:
-        async with HumanForceAdapter(credentials) as adapter:
+        async with HumanForceAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             employees = await adapter.sync_employees(active_only=body.active_only)
     except HumanForceAPIError as e:
         logger.error(f"HumanForce employee sync failed for venue {body.venue_id}: {e}")
@@ -339,7 +359,7 @@ async def sync_shifts(body: SyncShiftsRequest) -> dict:
     credentials = _build_credentials(install)
 
     try:
-        async with HumanForceAdapter(credentials) as adapter:
+        async with HumanForceAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             shifts = await adapter.sync_shifts(
                 start_date=body.start_date,
                 end_date=body.end_date,
@@ -386,7 +406,7 @@ async def push_roster(body: PushRosterRequest) -> dict:
         )
 
     try:
-        async with HumanForceAdapter(credentials) as adapter:
+        async with HumanForceAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             result = await adapter.push_roster(
                 roster=roster_data,
                 location_id=body.location_id,
@@ -440,7 +460,7 @@ async def get_timesheets(
     credentials = _build_credentials(install)
 
     try:
-        async with HumanForceAdapter(credentials) as adapter:
+        async with HumanForceAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             timesheets = await adapter.get_timesheets(
                 start_date=start_dt,
                 end_date=end_dt,
@@ -480,7 +500,7 @@ async def get_locations(
     credentials = _build_credentials(install)
 
     try:
-        async with HumanForceAdapter(credentials) as adapter:
+        async with HumanForceAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             locations = await adapter.get_locations()
     except HumanForceAPIError as e:
         logger.error(f"HumanForce locations fetch failed for venue {venue_id}: {e}")

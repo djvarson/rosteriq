@@ -163,7 +163,7 @@ async def publish_roster(
         body = PublishRosterRequest()
 
     logger.info(
-        f"Publishing roster {roster_id} by user {user.id} "
+        f"Publishing roster {roster_id} by user {user.user_id} "
         f"(skip_approval={body.skip_approval})"
     )
 
@@ -183,7 +183,7 @@ async def publish_roster(
     # Publish
     result = await publisher.publish_roster(
         roster_id=roster_id,
-        publisher_id=user.id,
+        publisher_id=user.user_id,
         skip_approval=body.skip_approval and user.role in ("owner", "manager"),
     )
 
@@ -234,7 +234,7 @@ async def recall_roster(
     if body is None:
         raise HTTPException(status_code=400, detail="Request body required")
 
-    logger.info(f"Recalling roster {roster_id} by user {user.id}: {body.reason}")
+    logger.info(f"Recalling roster {roster_id} by user {user.user_id}: {body.reason}")
 
     # Verify user is manager or owner
     if user.role not in ("owner", "manager"):
@@ -293,7 +293,7 @@ async def archive_roster(
         400: Roster not in PUBLISHED state
         403: User lacks permission
     """
-    logger.info(f"Archiving roster {roster_id} by user {user.id}")
+    logger.info(f"Archiving roster {roster_id} by user {user.user_id}")
 
     # Verify user is manager or owner
     if user.role not in ("owner", "manager"):
@@ -405,7 +405,7 @@ async def transition_roster_state(
         raise HTTPException(status_code=400, detail="Request body required")
 
     logger.info(
-        f"Manual state transition for roster {roster_id} by user {user.id}: "
+        f"Manual state transition for roster {roster_id} by user {user.user_id}: "
         f"{body.new_state} ({body.reason})"
     )
 
@@ -435,7 +435,7 @@ async def transition_roster_state(
         roster_id=roster_id,
         new_state=body.new_state,
         reason=body.reason,
-        actor_id=user.id,
+        actor_id=user.user_id,
     )
 
     if not success:
@@ -542,7 +542,7 @@ async def auto_publish_roster(
         404: Roster not found
         400: Roster has conflicts
     """
-    logger.info(f"Auto-publishing roster {roster_id} by user {user.id}")
+    logger.info(f"Auto-publishing roster {roster_id} by user {user.user_id}")
 
     # Verify user is manager or owner
     if user.role not in ("owner", "manager"):

@@ -35,6 +35,33 @@ class NotificationService:
         self.smtp_user = os.environ.get("SMTP_USER", "")
         self.smtp_pass = os.environ.get("SMTP_PASS", "")
         self.from_email = os.environ.get("FROM_EMAIL", "noreply@rosteriq.com")
+        # Base URL for links in email templates. Reuse the centralized
+        # APP_URL config so dashboard/roster links point at the deployed app
+        # rather than a developer's localhost. Falls back to APP_BASE_URL,
+        # then a production-safe default.
+        self.base_url = self._resolve_base_url()
+
+    @staticmethod
+    def _resolve_base_url() -> str:
+        """Resolve the public base URL for links in emails.
+
+        Order of preference:
+          1. APP_BASE_URL env var (explicit override)
+          2. The centralized AppConfig.app_url (reads APP_URL)
+          3. Production-safe default https://app.rosteriq.io
+        """
+        explicit = os.environ.get("APP_BASE_URL")
+        if explicit:
+            return explicit.rstrip("/")
+        try:
+            from rosteriq.services.config import get_config
+
+            app_url = get_config().app_url
+            if app_url:
+                return app_url.rstrip("/")
+        except Exception:
+            pass
+        return "https://app.rosteriq.io"
 
     async def send_email(
         self,
@@ -178,7 +205,7 @@ class NotificationService:
             {alerts_html}
 
             <div style="background: #e8f5e9; padding: 15px; margin: 20px 0; border-radius: 8px; text-align: center;">
-                <a href="http://localhost:8000/dashboard/{venue_id}/overview" style="background: #3366FF; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">
+                <a href="{self.base_url}/dashboard/{venue_id}/overview" style="background: #3366FF; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">
                     View Full Dashboard
                 </a>
             </div>
@@ -263,10 +290,10 @@ class NotificationService:
             {week_html}
 
             <div style="background: #e8f5e9; padding: 15px; margin: 20px 0; border-radius: 8px; text-align: center;">
-                <a href="http://localhost:8000/dashboard/{venue_id}/overview" style="background: #3366FF; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-right: 10px;">
+                <a href="{self.base_url}/dashboard/{venue_id}/overview" style="background: #3366FF; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-right: 10px;">
                     Review Roster
                 </a>
-                <a href="http://localhost:8000/rosters/{roster.id}" style="background: #666; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">
+                <a href="{self.base_url}/rosters/{roster.id}" style="background: #666; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">
                     View Details
                 </a>
             </div>
@@ -337,7 +364,7 @@ class NotificationService:
             </p>
 
             <div style="background: #e8f5e9; padding: 15px; margin: 20px 0; border-radius: 8px; text-align: center;">
-                <a href="http://localhost:8000/dashboard/{venue_id}/overview" style="background: #3366FF; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">
+                <a href="{self.base_url}/dashboard/{venue_id}/overview" style="background: #3366FF; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">
                     Review Roster
                 </a>
             </div>
@@ -576,7 +603,7 @@ class NotificationService:
             </p>
 
             <div style="background: #e8f5e9; padding: 15px; margin: 20px 0; border-radius: 8px; text-align: center;">
-                <a href="http://localhost:8000/dashboard/{venue_id}/live-pulse" style="background: #3366FF; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">
+                <a href="{self.base_url}/dashboard/{venue_id}/live-pulse" style="background: #3366FF; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">
                     View Live Pulse
                 </a>
             </div>
@@ -686,14 +713,16 @@ class NotificationService:
                 <div style="background: white; padding: 30px; border: 1px solid #e0e0e0;">
                     <div style="font-size: 12px; color: #999; margin-bottom: 20px;">{date_str}</div>
 
+                    <h1 style="font-size: 20px; font-weight: bold; color: #333; margin: 0 0 20px 0;">{title}</h1>
+
                     {body}
                 </div>
 
                 <!-- Footer -->
                 <div style="background: #f5f5f5; padding: 20px; border-radius: 0 0 8px 8px; border: 1px solid #e0e0e0; border-top: none; text-align: center; font-size: 12px; color: #666;">
                     <p style="margin: 0 0 10px 0;">
-                        <a href="http://localhost:8000" style="color: #3366FF; text-decoration: none;">RosterIQ Dashboard</a> |
-                        <a href="http://localhost:8000/docs" style="color: #3366FF; text-decoration: none;">API Docs</a>
+                        <a href="{self.base_url}" style="color: #3366FF; text-decoration: none;">RosterIQ Dashboard</a> |
+                        <a href="{self.base_url}/docs" style="color: #3366FF; text-decoration: none;">API Docs</a>
                     </p>
                     <p style="margin: 0; opacity: 0.8;">
                         This is an automated message from RosterIQ. Do not reply to this email.

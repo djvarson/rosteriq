@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 class JobType(str, Enum):
     """Supported background job types."""
     DAILY_DIGEST = "daily_digest"
+    WEEKLY_DIGEST = "weekly_digest"
     CERT_EXPIRY_CHECK = "cert_expiry_check"
     REVENUE_SYNC = "revenue_sync"
     VARIANCE_MONITOR = "variance_monitor"
@@ -169,26 +170,37 @@ class AsyncTaskScheduler:
         )
         self.register_job(daily_digest, "daily_digest")
 
-        # Cert expiry check daily at 7:00 AM AEST
+        # Weekly digest — once a week (the WeeklyDigest service was complete but
+        # was never scheduled, so it only ran when a human hit the endpoint).
+        weekly_digest = JobConfig(
+            job_type=JobType.WEEKLY_DIGEST,
+            enabled=True,
+            interval_hours=168,  # 7 days
+        )
+        self.register_job(weekly_digest, "weekly_digest")
+
+        # The following three jobs are registered but DISABLED by default: their
+        # handlers are currently log-only placeholders (no cert notifications, no
+        # variance alerts, no revenue pull), so running them on a timer would imply
+        # a live feature that does nothing. Enable each only once its handler is
+        # implemented (cert-expiry needs certification fields on Employee first).
         cert_check = JobConfig(
             job_type=JobType.CERT_EXPIRY_CHECK,
-            enabled=True,
+            enabled=False,
             run_time=time(7, 0),  # 7:00 AM
         )
         self.register_job(cert_check, "cert_expiry_check")
 
-        # Revenue sync every 4 hours
         revenue_sync = JobConfig(
             job_type=JobType.REVENUE_SYNC,
-            enabled=True,
+            enabled=False,
             interval_hours=4,
         )
         self.register_job(revenue_sync, "revenue_sync")
 
-        # Variance monitor every 30 minutes
         variance_monitor = JobConfig(
             job_type=JobType.VARIANCE_MONITOR,
-            enabled=True,
+            enabled=False,
             interval_hours=0,  # Will be treated as 30 min in handler
         )
         self.register_job(variance_monitor, "variance_monitor")
@@ -223,6 +235,7 @@ class AsyncTaskScheduler:
         """Get the handler function for a job type."""
         handlers = {
             JobType.DAILY_DIGEST: self._handle_daily_digest,
+            JobType.WEEKLY_DIGEST: self._handle_weekly_digest,
             JobType.CERT_EXPIRY_CHECK: self._handle_cert_expiry_check,
             JobType.REVENUE_SYNC: self._handle_revenue_sync,
             JobType.VARIANCE_MONITOR: self._handle_variance_monitor,
@@ -267,6 +280,32 @@ class AsyncTaskScheduler:
                     logger.info(f"Sent daily digest to {venue.name}")
             except Exception as e:
                 logger.error(f"Failed to send daily digest for {venue.id}: {e}")
+
+    async def _handle_weekly_digest(self, job: JobConfig):
+        """
+        Send the weekly digest email to each venue's manager.
+
+        Uses the (already complete) WeeklyDigest service, which was previously
+        only reachable via a manual endpoint and never actually scheduled.
+        """
+        venues = self._db.list_venues()
+        if not venues:
+            logger.info("No venues found for weekly digest")
+            return
+
+        from rosteriq.services.weekly_digest import WeeklyDigestGenerator
+        generator = WeeklyDigestGenerator()
+        today = datetime.now().date()
+        week_start = today - timedelta(days=today.weekday())  # Monday of this week
+
+        for venue in venues:
+            try:
+                manager_email = getattr(venue, "manager_email", None)
+                if manager_email:
+                    await generator.send_digest(venue.id, week_start, [manager_email])
+                    logger.info(f"Sent weekly digest to {venue.name}")
+            except Exception as e:
+                logger.error(f"Failed to send weekly digest for {venue.id}: {e}")
 
     async def _handle_cert_expiry_check(self, job: JobConfig):
         """

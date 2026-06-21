@@ -153,7 +153,7 @@ async def dispatch_notification(
         HTTPException: If invalid event type or user not authorized
     """
     # Verify user is admin or manager
-    user_id = current_user.get("id")
+    user_id = current_user.user_id
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -227,7 +227,7 @@ async def bulk_dispatch(
     Raises:
         HTTPException: If invalid request or user not authorized
     """
-    user_id = current_user.get("id")
+    user_id = current_user.user_id
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -305,7 +305,7 @@ async def get_audit_log(
     Returns:
         List of audit log entries
     """
-    user_id = current_user.get("id")
+    user_id = current_user.user_id
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -352,7 +352,7 @@ async def get_notification_stats(
     Returns:
         Notification dispatch statistics
     """
-    user_id = current_user.get("id")
+    user_id = current_user.user_id
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -393,7 +393,7 @@ async def get_preferences(
     Returns:
         Employee's notification preferences
     """
-    user_id = current_user.get("id")
+    user_id = current_user.user_id
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -445,7 +445,7 @@ async def update_preferences(
     Returns:
         Updated preferences
     """
-    user_id = current_user.get("id")
+    user_id = current_user.user_id
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

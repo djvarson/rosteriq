@@ -201,8 +201,10 @@ class PushService:
             True if sent successfully
         """
         if not HAS_WEBPUSH:
-            logger.info(f"Would send push to {subscription.get('endpoint')}: {payload}")
-            return True
+            # pywebpush not installed — nothing was actually sent. Return False
+            # so callers/audit logs don't record a phantom successful delivery.
+            logger.warning(f"pywebpush unavailable; push NOT sent to {subscription.get('endpoint')}")
+            return False
 
         try:
             import json
@@ -269,7 +271,10 @@ class PushService:
                     **extra_data,
                 }
 
-                if self._send_push_to_subscription(sub_info.get('subscription', {}), payload):
+                # Stored subscriptions are flat {endpoint, keys} dicts (same shape
+                # get_push_subscription returns) — pass directly, not via a
+                # nonexistent nested 'subscription' key (which sent {} to webpush).
+                if self._send_push_to_subscription(sub_info, payload):
                     sent_count += 1
 
             logger.info(f"Broadcast to {sent_count}/{len(subscriptions)} staff at venue {venue_id}")
@@ -327,16 +332,36 @@ class PushService:
         )
 
 
+_push_service_instance: Optional[PushService] = None
+
+
 def get_push_service(db, vapid_private_key: Optional[str] = None, vapid_public_key: Optional[str] = None) -> PushService:
     """
-    Factory function to get or create a PushService instance.
+    Return the process-wide PushService singleton.
+
+    VAPID keys default to the configured env keys (VAPID_PUBLIC_KEY /
+    VAPID_PRIVATE_KEY via config). This MUST be a singleton with stable keys:
+    previously a new service was created per call, each auto-generating fresh
+    ephemeral keys — so the public key handed to the browser never matched the
+    private key used to sign the push, and every push was rejected.
 
     Args:
         db: Database connection
-        vapid_private_key: Optional VAPID private key
-        vapid_public_key: Optional VAPID public key
+        vapid_private_key: Optional VAPID private key (overrides config)
+        vapid_public_key: Optional VAPID public key (overrides config)
 
     Returns:
-        PushService instance
+        Shared PushService instance
     """
-    return PushService(db, vapid_private_key, vapid_public_key)
+    global _push_service_instance
+    if _push_service_instance is None:
+        if not vapid_private_key or not vapid_public_key:
+            try:
+                from rosteriq.services.config import get_config
+                cfg = get_config()
+                vapid_private_key = vapid_private_key or (cfg.vapid_private_key or None)
+                vapid_public_key = vapid_public_key or (cfg.vapid_public_key or None)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Could not load VAPID keys from config: {e}")
+        _push_service_instance = PushService(db, vapid_private_key, vapid_public_key)
+    return _push_service_instance

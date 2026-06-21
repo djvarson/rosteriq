@@ -103,6 +103,12 @@ class AccuracyReport:
     # Recommendations
     recommendations: List[str]
 
+    # Fraction of forecast hours that had independently-observed actuals to grade
+    # against (0.0 = none; metrics above are unmeasurable when this is 0.0).
+    data_coverage: float = 0.0
+    # Number of forecast hours graded against real actuals.
+    measured_samples: int = 0
+
 
 class ForecastAccuracyService:
     """Service for tracking and analyzing forecast accuracy."""
@@ -120,6 +126,7 @@ class ForecastAccuracyService:
         venue_id: str,
         start_date: date,
         end_date: date,
+        _with_trend: bool = True,
     ) -> AccuracyReport:
         """
         Calculate comprehensive accuracy metrics comparing predictions to actuals.
@@ -128,18 +135,36 @@ class ForecastAccuracyService:
             venue_id: Target venue
             start_date: Period start
             end_date: Period end
+            _with_trend: Internal — when False, skip building the weekly trend.
+                The trend is itself built by re-running this method per week, so
+                the per-week runs must not recurse back into trend-building.
 
         Returns:
             Complete accuracy report with metrics and breakdowns
         """
         forecasts = self.db.get_forecasts(venue_id, start_date, end_date)
-        rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
 
-        if not forecasts or not rosters:
+        if not forecasts:
             return self._empty_report(venue_id, start_date, end_date)
 
-        # Build actual hourly covers from rosters
-        actual_by_hour = self._build_actual_hourly_data(rosters)
+        # Build actual hourly covers from INDEPENDENTLY OBSERVED data (POS/revenue
+        # actuals) — never from rosters. Rosters are generated FROM the forecast,
+        # so grading the forecast against roster-derived numbers is circular (the
+        # forecast grades its own homework). See api.py: "actuals must come from
+        # real POS/reservation data — never fake".
+        actual_by_hour = self._build_actual_hourly_data(venue_id, start_date, end_date)
+
+        if not actual_by_hour:
+            # No observed actuals to grade against. We deliberately do NOT fall
+            # back to roster-derived numbers — accuracy is genuinely unmeasurable
+            # for this period, and saying so is more honest than a fabricated MAPE.
+            report = self._empty_report(venue_id, start_date, end_date)
+            report.recommendations = [
+                "No observed actuals (POS covers/transactions) recorded for this "
+                "period — forecast accuracy cannot be measured. Connect a POS feed "
+                "or import actuals so predictions can be graded against real demand."
+            ]
+            return report
 
         # Collect all errors for calculations
         errors = []
@@ -171,9 +196,10 @@ class ForecastAccuracyService:
             squared_errors.append(float(sq_error))
             biases.append(float(predicted - actual))  # Positive = over-prediction
 
-            # MAPE component
-            if forecast.predicted_covers > 0:
-                pct_error = float(abs_error / predicted) * 100
+            # MAPE component: true MAPE normalises by the ACTUAL, not the prediction
+            # (|actual - predicted| / |actual|).
+            if actual > 0:
+                pct_error = float(abs_error / actual) * 100
             else:
                 pct_error = None
 
@@ -215,11 +241,11 @@ class ForecastAccuracyService:
         overall_rmse = math.sqrt(sum(squared_errors) / len(squared_errors))
         overall_bias = sum(biases) / len(biases)
 
-        # MAPE: mean absolute percentage error
+        # MAPE: mean absolute percentage error, normalised by ACTUAL covers.
         mape_values = [
-            float(abs(detail.error / detail.predicted_covers)) * 100
+            float(abs(detail.error / detail.actual_covers)) * 100
             for detail in predictions_details
-            if detail.predicted_covers > 0
+            if detail.actual_covers > 0
         ]
         overall_mape = sum(mape_values) / len(mape_values) if mape_values else None
 
@@ -257,18 +283,35 @@ class ForecastAccuracyService:
         by_hour_stats = self._calculate_hour_accuracy(by_hour_data)
         by_signal_stats = self._calculate_signal_accuracy(by_signal_data)
 
-        # Weekly trend
-        weekly_trend = self._calculate_weekly_trend(venue_id, start_date, end_date)
+        # Weekly trend (skipped in per-week sub-calls to avoid infinite recursion).
+        weekly_trend = (
+            self._calculate_weekly_trend(venue_id, start_date, end_date)
+            if _with_trend else []
+        )
 
         # Best and worst predictions
         sorted_by_error = sorted(predictions_details, key=lambda x: x.absolute_error, reverse=True)
         worst_predictions = sorted_by_error[:10]
         best_predictions = sorted(sorted_by_error, key=lambda x: x.absolute_error)[:10]
 
+        # Data coverage: how much of the forecast actually had observed actuals to
+        # grade against. Surfacing this keeps a high MAPE from being mistaken for a
+        # confident verdict when only a handful of hours were measured.
+        measured_samples = len(predictions_details)
+        data_coverage = measured_samples / len(forecasts) if forecasts else 0.0
+
         # Recommendations
         recommendations = self._generate_recommendations(
             overall_mape, overall_mae, by_day_of_week_stats, by_signal_stats
         )
+        if data_coverage < 0.5:
+            recommendations.insert(
+                0,
+                f"Only {data_coverage * 100:.0f}% of forecast hours had observed "
+                f"actuals ({measured_samples} of {len(forecasts)}). Metrics are "
+                f"based on limited data — import or connect more POS actuals for a "
+                f"reliable accuracy read.",
+            )
 
         return AccuracyReport(
             venue_id=venue_id,
@@ -287,6 +330,8 @@ class ForecastAccuracyService:
             worst_predictions=worst_predictions,
             best_predictions=best_predictions,
             recommendations=recommendations,
+            data_coverage=data_coverage,
+            measured_samples=measured_samples,
         )
 
     # ========================================================================
@@ -315,7 +360,9 @@ class ForecastAccuracyService:
             week_end = end_date - timedelta(days=week_offset * 7)
             week_start = week_end - timedelta(days=6)
 
-            report = self.calculate_accuracy(venue_id, week_start, week_end)
+            report = self.calculate_accuracy(
+                venue_id, week_start, week_end, _with_trend=False
+            )
 
             if report.overall_mae > 0:  # Only include weeks with data
                 trend.append(
@@ -362,10 +409,12 @@ class ForecastAccuracyService:
         for forecast in forecasts:
             by_model[forecast.model_version].append(forecast)
 
-        # For each model, create a pseudo-report
+        # For each model, create a pseudo-report. Actuals come from observed
+        # POS/revenue data, never from rosters (which are derived from forecasts).
         comparison = {}
-        rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
-        actual_by_hour = self._build_actual_hourly_data(rosters)
+        actual_by_hour = self._build_actual_hourly_data(venue_id, start_date, end_date)
+        if not actual_by_hour:
+            return {}
 
         for model_version, model_forecasts in by_model.items():
             errors = []
@@ -581,19 +630,64 @@ class ForecastAccuracyService:
     # Helper Methods
     # ========================================================================
 
-    def _build_actual_hourly_data(self, rosters) -> Dict[tuple, Dict]:
-        """Build actual covers by (date, hour) from rosters."""
-        actual_by_hour = defaultdict(lambda: {"covers": Decimal("0.00"), "count": 0})
+    def _build_actual_hourly_data(
+        self, venue_id: str, start_date: date, end_date: date
+    ) -> Dict[tuple, Dict]:
+        """
+        Build REAL observed actual covers by (date, hour) from persisted POS/revenue
+        actuals — NOT from rosters.
 
-        for roster in rosters:
-            for shift in roster.shifts:
-                # Estimate covers served = hours / staff_per_cover ratio
-                staff_per_cover = Decimal("0.04")  # 1 staff per 25 covers
-                shift_covers = Decimal(str(shift.net_hours)) / staff_per_cover
-                hour = shift.start_time.hour
+        Grading a forecast against roster-derived numbers is circular: the roster is
+        built from the forecast, so the old ``net_hours / 0.04`` reconstruction just
+        measured the forecast against itself and reported a flattering, meaningless
+        accuracy. Actuals must come from independently observed demand.
 
-                actual_by_hour[(shift.date, hour)]["covers"] += shift_covers
-                actual_by_hour[(shift.date, hour)]["count"] += 1
+        Reads each ``revenue_actuals`` record's ``hourly_breakdown`` (a list of
+        ``{hour, covers|transactions, revenue}``). Covers are taken from an explicit
+        ``covers`` field when present, else the real ``transactions`` count (each
+        transaction is an observed sale). Records without hourly detail can't be
+        attributed to an hour and are skipped — better measured-less than fabricated.
+        """
+        actual_by_hour: Dict[tuple, Dict] = {}
+
+        try:
+            records = self.db.list_revenue_actuals(
+                venue_id, start_date.isoformat(), end_date.isoformat()
+            )
+        except Exception:  # pragma: no cover - store may not support actuals
+            records = []
+
+        for record in records or []:
+            raw_date = record.get("date")
+            if isinstance(raw_date, str):
+                try:
+                    rec_date = date.fromisoformat(raw_date)
+                except ValueError:
+                    continue
+            elif isinstance(raw_date, date):
+                rec_date = raw_date
+            else:
+                continue
+
+            for entry in record.get("hourly_breakdown") or []:
+                hour = entry.get("hour")
+                if hour is None:
+                    continue
+                covers = entry.get("covers")
+                if covers is None:
+                    covers = entry.get("transactions")
+                if covers is None:
+                    continue
+                try:
+                    covers_dec = Decimal(str(covers))
+                except (ArithmeticError, ValueError):
+                    continue
+                # Last write wins for a given (date, hour); actuals are observed
+                # totals, not something to re-accumulate across records.
+                actual_by_hour[(rec_date, int(hour))] = {
+                    "covers": covers_dec,
+                    "count": 1,
+                }
 
         return actual_by_hour
 
@@ -671,7 +765,9 @@ class ForecastAccuracyService:
             week_start = current_date
             week_end = min(current_date + timedelta(days=6), end_date)
 
-            report = self.calculate_accuracy(venue_id, week_start, week_end)
+            report = self.calculate_accuracy(
+                venue_id, week_start, week_end, _with_trend=False
+            )
             if report.overall_mae > 0:
                 trend.append(
                     WeeklyAccuracy(

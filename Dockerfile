@@ -26,7 +26,11 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
+# libgomp1: OpenMP runtime required by xgboost's shared library. Without it,
+# `import xgboost` fails at dlopen (the import guard now degrades gracefully,
+# but then forecasting silently loses the XGBoost model).
 
 RUN useradd -m -u 1000 appuser
 
@@ -50,7 +54,9 @@ USER appuser
 
 EXPOSE 8000
 
+# Bind to $PORT when the platform injects one (Railway/Render/Heroku),
+# defaulting to 8000. The healthcheck uses the same value.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f "http://localhost:${PORT:-8000}/health" || exit 1
 
-CMD ["sh", "-c", "python -m rosteriq.migrations.run_migrations --run && exec uvicorn rosteriq.api:app --host 0.0.0.0 --port 8000 --workers 2"]
+CMD ["sh", "-c", "python -m rosteriq.migrations.run_migrations --run && exec uvicorn rosteriq.api:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]

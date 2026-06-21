@@ -99,6 +99,11 @@ class AccuracyReportResponse(BaseModel):
     # Recommendations
     recommendations: List[str]
 
+    # Fraction of forecast hours graded against observed actuals (0.0 = none;
+    # the metrics above are unmeasurable when this is 0.0).
+    data_coverage: float = 0.0
+    measured_samples: int = 0
+
 
 class AccuracyTrendResponse(BaseModel):
     """Accuracy trend over time."""
@@ -143,9 +148,11 @@ async def get_forecast_accuracy(
     """
     Calculate comprehensive forecast accuracy metrics.
 
-    Compares DemandForecast predictions against actual roster data.
-    Returns MAPE, RMSE, MAE, bias, R², directional accuracy, and
-    detailed breakdowns by day/hour/signal.
+    Compares DemandForecast predictions against INDEPENDENTLY OBSERVED actuals
+    (POS covers/transactions) — never roster-derived numbers, which would grade
+    the forecast against itself. Returns MAPE, RMSE, MAE, bias, R², directional
+    accuracy, detailed breakdowns by day/hour/signal, and ``data_coverage`` (the
+    fraction of forecast hours that had real actuals to grade against).
 
     Args:
         venue_id: Target venue ID
@@ -238,6 +245,8 @@ async def get_forecast_accuracy(
                 for p in report.best_predictions
             ],
             recommendations=report.recommendations,
+            data_coverage=report.data_coverage,
+            measured_samples=report.measured_samples,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")

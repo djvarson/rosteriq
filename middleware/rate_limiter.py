@@ -250,17 +250,20 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         return response
 
     def _get_client_id(self, request: Request) -> str:
-        """Extract client IP from request (with X-Forwarded-For support)."""
-        # Check for proxy headers first (common in containerized deployments)
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            # X-Forwarded-For can contain multiple IPs, take the first
-            return forwarded_for.split(",")[0].strip()
+        """
+        Client IP used as the rate-limit identity.
 
-        # Fall back to direct client connection
+        Use request.client.host directly and do NOT parse X-Forwarded-For here.
+        Whether forwarded headers are honoured is decided one layer down by
+        uvicorn's proxy-headers handling, which only rewrites client.host from
+        X-Forwarded-For when the immediate peer is in --forwarded-allow-ips
+        (env: FORWARDED_ALLOW_IPS). Trusting the raw header in app code instead
+        would let any caller spoof their identity and mint unlimited buckets,
+        regardless of proxy configuration. See FORWARDED_ALLOW_IPS in
+        .env.example for how to set this correctly per deployment.
+        """
         if request.client:
             return request.client.host
-
         return "unknown"
 
     def _get_client_tier(self, request: Request) -> str:
@@ -278,13 +281,18 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         return "unauthenticated"
 
     async def _get_bucket(self, client_id: str, tier: str) -> TokenBucket:
-        """Get or create token bucket for client."""
+        """Get or create token bucket for a (client, tier) pair."""
+        # Key by tier as well as client, so an IP gets the correct limit for its
+        # current auth tier instead of being pinned to whatever tier first
+        # created its bucket (e.g. an authenticated user stuck on the lower
+        # unauthenticated limit). Mirrors the Redis path's `{client_id}:{tier}`.
+        bucket_key = f"{client_id}:{tier}"
         async with self.lock:
-            if client_id not in self.buckets:
+            if bucket_key not in self.buckets:
                 capacity, refill_rate = self.TIER_LIMITS[tier]
-                self.buckets[client_id] = TokenBucket(capacity, refill_rate)
+                self.buckets[bucket_key] = TokenBucket(capacity, refill_rate)
 
-            return self.buckets[client_id]
+            return self.buckets[bucket_key]
 
     async def _cleanup_stale_buckets(self):
         """Remove buckets for clients not seen in 10+ minutes."""

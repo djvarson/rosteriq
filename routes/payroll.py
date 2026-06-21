@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.models import State
 from rosteriq.services.payroll_export import (
     PayrollExporter, PayrollBatch, PayrollStatus
@@ -129,6 +130,7 @@ async def prepare_payroll_batch(
     Returns payroll batch ready for approval and export.
     """
     try:
+        enforce_venue_access(request.venue_id)
         # Fetch shifts and employees for the period
         venue = db.get_venue(request.venue_id)
         if not venue:
@@ -207,6 +209,7 @@ async def get_payroll_batch(
         batch_dict = db.get_payroll_batch(batch_id)
         if not batch_dict:
             raise HTTPException(status_code=404, detail=f"Batch {batch_id} not found")
+        enforce_venue_access(batch_dict.get("venue_id"))
 
         return PayrollBatchResponse(
             batch_id=batch_dict["batch_id"],
@@ -239,6 +242,7 @@ async def approve_payroll_batch(
         batch_dict = db.get_payroll_batch(batch_id)
         if not batch_dict:
             raise HTTPException(status_code=404, detail=f"Batch {batch_id} not found")
+        enforce_venue_access(batch_dict.get("venue_id"))
 
         if batch_dict["status"] != "draft":
             raise HTTPException(
@@ -281,6 +285,7 @@ async def export_to_xero(
         batch_dict = db.get_payroll_batch(request.batch_id)
         if not batch_dict:
             raise HTTPException(status_code=404, detail=f"Batch {request.batch_id} not found")
+        enforce_venue_access(batch_dict.get("venue_id"))
 
         if batch_dict["status"] != "approved":
             raise HTTPException(
@@ -288,46 +293,103 @@ async def export_to_xero(
                 detail=f"Only approved batches can be exported (current: {batch_dict['status']})",
             )
 
-        # Initialize Xero client
+        # Reconstruct the stored batch into a PayrollBatch and push it to Xero.
+        from datetime import datetime, timedelta
         from rosteriq.xero_integration import XeroCredentials
-        from datetime import datetime
+        from rosteriq.services.xero_payroll import XeroPayrollClient
+        from rosteriq.services.payroll_export import payroll_batch_from_dict
 
+        venue_id = batch_dict["venue_id"]
+        batch = payroll_batch_from_dict(batch_dict)
+
+        # Prefer the venue's stored Xero credentials (so token refresh can work);
+        # fall back to the request-supplied access token. token_expires is set in
+        # the future so the provided token is used as-is.
+        stored = db.get_xero_credentials(venue_id) if hasattr(db, "get_xero_credentials") else None
+        stored = stored or {}
         credentials = XeroCredentials(
-            venue_id=batch_dict["venue_id"],
-            client_id="placeholder",
-            client_secret="placeholder",
+            venue_id=venue_id,
+            client_id=stored.get("client_id", ""),
+            client_secret=stored.get("client_secret", ""),
             tenant_id=request.xero_tenant_id,
             access_token=request.xero_access_token,
-            refresh_token="placeholder",
-            token_expires=datetime.utcnow(),
+            refresh_token=stored.get("refresh_token", ""),
+            token_expires=datetime.utcnow() + timedelta(hours=1),
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
 
-        # For now, mock the export since actual implementation requires async
-        logger.info(f"Exporting batch {request.batch_id} to Xero")
+        def _persist_xero(creds):
+            if hasattr(db, "save_xero_credentials"):
+                try:
+                    db.save_xero_credentials(venue_id, creds.model_dump(mode="json"))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"Failed to persist refreshed Xero creds: {e}")
 
-        # Update batch status
+        # Idempotency: the set of employee_ids already pushed for this batch in
+        # a prior (partially-failed) attempt. Skipping these on a retry is what
+        # prevents double-paying staff. The checkpoint callback persists each
+        # newly-pushed employee immediately so progress survives a mid-batch
+        # failure AND a process restart.
+        pushed_employees = list(batch_dict.get("pushed_employees", []))
+
+        def _checkpoint_pushed(employee_id: str):
+            current = db.get_payroll_batch(request.batch_id) or batch_dict
+            pushed = current.get("pushed_employees", [])
+            if employee_id not in pushed:
+                pushed.append(employee_id)
+            current["pushed_employees"] = pushed
+            db.save_payroll_batch(current)
+
+        # Optional tenant-specific NAME -> EarningsRateID GUID map (Xero rejects
+        # timesheet lines whose EarningTypeID is not a real GUID). When stored on
+        # the venue's Xero credentials it pins the IDs; otherwise the client
+        # resolves them live from the tenant's PayItems.
+        earnings_rate_ids = stored.get("earnings_rate_ids") or None
+        client = XeroPayrollClient(
+            credentials,
+            on_token_refresh=_persist_xero,
+            earnings_rate_ids=earnings_rate_ids,
+        )
+        result = await client.push_timesheets(
+            batch,
+            pushed_employees=pushed_employees,
+            on_employee_pushed=_checkpoint_pushed,
+        )
+
+        if not result.get("success"):
+            # Honest failure — do NOT mark the batch exported.
+            logger.warning(
+                f"Xero export for batch {request.batch_id} failed: "
+                f"{result.get('error_message')}"
+            )
+            return ExportResultResponse(
+                success=False,
+                batch_id=request.batch_id,
+                exported_at=None,
+                employee_count=result.get("employee_count", 0),
+                total_gross=batch_dict.get("total_gross", "0.00"),
+                error_message=result.get("error_message") or "Xero payroll export failed",
+            )
+
+        # Success — mark exported and record.
         batch_dict["status"] = "exported"
         batch_dict["exported_at"] = date.today().isoformat()
         db.save_payroll_batch(batch_dict)
-
-        # Record export
-        export_record = {
+        db.save_payroll_export({
             "batch_id": request.batch_id,
             "service": "xero",
             "status": "success",
             "total_gross": batch_dict["total_gross"],
-            "employee_count": len(batch_dict.get("employees", [])),
+            "employee_count": result.get("employee_count", len(batch_dict.get("employees", []))),
+            "reference": result.get("xero_reference"),
             "exported_at": date.today().isoformat(),
-        }
-        db.save_payroll_export(export_record)
-
+        })
         return ExportResultResponse(
             success=True,
             batch_id=request.batch_id,
             exported_at=date.today().isoformat(),
-            employee_count=len(batch_dict.get("employees", [])),
+            employee_count=result.get("employee_count", len(batch_dict.get("employees", []))),
             total_gross=batch_dict["total_gross"],
             error_message=None,
         )
@@ -349,6 +411,7 @@ async def export_to_keypay(
         batch_dict = db.get_payroll_batch(request.batch_id)
         if not batch_dict:
             raise HTTPException(status_code=404, detail=f"Batch {request.batch_id} not found")
+        enforce_venue_access(batch_dict.get("venue_id"))
 
         if batch_dict["status"] != "approved":
             raise HTTPException(
@@ -356,30 +419,66 @@ async def export_to_keypay(
                 detail=f"Only approved batches can be exported (current: {batch_dict['status']})",
             )
 
-        # Initialize KeyPay client
-        logger.info(f"Exporting batch {request.batch_id} to KeyPay")
+        # Reconstruct the stored batch and push it to KeyPay.
+        from rosteriq.services.keypay_export import KeyPayClient
+        from rosteriq.services.payroll_export import payroll_batch_from_dict
 
-        # For now, mock the export since actual implementation requires async
+        batch = payroll_batch_from_dict(batch_dict)
+        # Idempotency: skip employees already pushed in a prior attempt so a
+        # retry of a partially-failed batch never double-pays staff. The
+        # checkpoint callback persists each newly-pushed employee immediately.
+        pushed_employees = list(batch_dict.get("pushed_employees", []))
+
+        def _checkpoint_pushed(employee_id: str):
+            current = db.get_payroll_batch(request.batch_id) or batch_dict
+            pushed = current.get("pushed_employees", [])
+            if employee_id not in pushed:
+                pushed.append(employee_id)
+            current["pushed_employees"] = pushed
+            db.save_payroll_batch(current)
+
+        client = KeyPayClient(
+            api_key=request.keypay_api_key,
+            business_id=request.keypay_business_id,
+        )
+        result = await client.push_timesheets(
+            batch,
+            pushed_employees=pushed_employees,
+            on_employee_pushed=_checkpoint_pushed,
+        )
+
+        if not result.get("success"):
+            # Honest failure — do NOT mark the batch exported.
+            logger.warning(
+                f"KeyPay export for batch {request.batch_id} failed: "
+                f"{result.get('error_message')}"
+            )
+            return ExportResultResponse(
+                success=False,
+                batch_id=request.batch_id,
+                exported_at=None,
+                employee_count=result.get("employee_count", 0),
+                total_gross=batch_dict.get("total_gross", "0.00"),
+                error_message=result.get("error_message") or "KeyPay payroll export failed",
+            )
+
+        # Success — mark exported and record.
         batch_dict["status"] = "exported"
         batch_dict["exported_at"] = date.today().isoformat()
         db.save_payroll_batch(batch_dict)
-
-        # Record export
-        export_record = {
+        db.save_payroll_export({
             "batch_id": request.batch_id,
             "service": "keypay",
             "status": "success",
             "total_gross": batch_dict["total_gross"],
-            "employee_count": len(batch_dict.get("employees", [])),
+            "employee_count": result.get("employee_count", len(batch_dict.get("employees", []))),
             "exported_at": date.today().isoformat(),
-        }
-        db.save_payroll_export(export_record)
-
+        })
         return ExportResultResponse(
             success=True,
             batch_id=request.batch_id,
             exported_at=date.today().isoformat(),
-            employee_count=len(batch_dict.get("employees", [])),
+            employee_count=result.get("employee_count", len(batch_dict.get("employees", []))),
             total_gross=batch_dict["total_gross"],
             error_message=None,
         )
@@ -400,6 +499,7 @@ async def reconcile_payroll(
 ):
     """Get reconciliation report for a pay period."""
     try:
+        enforce_venue_access(venue_id)
         # Get payroll batches for the period
         batches = db.list_payroll_batches(venue_id)
         period_batches = [

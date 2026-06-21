@@ -568,6 +568,24 @@ class BaseStore:
         """List actual revenue records for a venue within date range (ISO format)."""
         raise NotImplementedError
 
+    def save_direct_bookings(self, venue_id: str, bookings: list[dict]) -> int:
+        """
+        Persist directly-ingested bookings for a venue (CSV/webhook import for any
+        booking system without a native adapter). Each booking: {date (ISO),
+        party_size, time (optional HH:MM)}. Returns the number stored.
+        """
+        raise NotImplementedError
+
+    def get_direct_bookings(
+        self, venue_id: str, start: str, end: str
+    ) -> list[dict]:
+        """Get directly-ingested bookings for a venue within a date range (ISO)."""
+        raise NotImplementedError
+
+    def count_direct_bookings(self, venue_id: str) -> int:
+        """Count directly-ingested bookings stored for a venue."""
+        raise NotImplementedError
+
     # --- Approval Workflow ---
 
     def save_approval_request(self, request: dict) -> None:
@@ -595,6 +613,29 @@ class BaseStore:
         Returns:
             List of approval request dicts
         """
+        raise NotImplementedError
+
+    # --- Roster publishing state machine ---
+
+    def get_roster_state(self, roster_id: str) -> str:
+        """Current publish state of a roster ('draft' if never transitioned)."""
+        raise NotImplementedError
+
+    def update_roster_state(self, roster_id: str, new_state: str, reason: str,
+                            actor_id: str = "system") -> None:
+        """Set a roster's publish state and append to its state history."""
+        raise NotImplementedError
+
+    def get_roster_state_history(self, roster_id: str) -> list[dict]:
+        """The roster's state-transition history (oldest first)."""
+        raise NotImplementedError
+
+    def save_publication_event(self, event: dict) -> None:
+        """Record a roster publication event."""
+        raise NotImplementedError
+
+    def get_publication_history(self, venue_id: str, limit: int = 50) -> list[dict]:
+        """Recent publication events for a venue (newest first)."""
         raise NotImplementedError
 
     def save_roster_revision(self, revision: dict) -> None:
@@ -684,6 +725,7 @@ class MemoryStore(BaseStore):
         self._webhook_subscriptions: dict[str, dict] = {}  # Key: subscription_id
         self._webhook_deliveries: dict[str, list[dict]] = {}  # Key: subscription_id
         self._webhook_retry_queue: dict[str, dict] = {}  # Key: delivery_id
+        self._webhook_deliveries_by_id: dict[str, dict] = {}  # Key: delivery_id (all statuses)
         self._dead_letters: dict[str, dict] = {}  # Key: delivery_id
         self._notification_preferences: dict[str, dict] = {}  # Key: user_id
         self._shift_swaps: dict[str, dict] = {}  # Key: swap_id
@@ -698,6 +740,9 @@ class MemoryStore(BaseStore):
         self._bids_by_shift: dict[str, list[str]] = {}  # Key: open_shift_id, Value: list of bid_ids
         self._approval_requests: dict[str, dict] = {}  # Key: request_id
         self._roster_revisions: dict[str, list[dict]] = {}  # Key: roster_id, Value: list of revisions
+        self._roster_states: dict[str, str] = {}  # roster_id -> current publish state
+        self._roster_state_history: dict[str, list[dict]] = {}  # roster_id -> transitions
+        self._publication_events: list[dict] = []  # roster publication events
         self._push_subscriptions: dict[str, dict] = {}  # Key: user_id
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
@@ -709,6 +754,31 @@ class MemoryStore(BaseStore):
         self._analytics_snapshots: dict[str, dict] = {}  # Key: f"{venue_id}:{date}:{metric_type}"
         self._revenue_models: dict[str, dict] = {}  # Key: venue_id
         self._revenue_actuals: list[dict] = []  # List of revenue records
+        self._direct_bookings: list[dict] = []  # List of {venue_id, date, party_size, time}
+
+    # Public aliases for the backing collections. These let tests and tooling
+    # seed/inspect in-memory data directly (e.g. store.venues[id] = venue)
+    # without reaching into private attributes. Each returns the live dict, so
+    # item assignment works.
+    @property
+    def venues(self) -> "dict[str, VenueConfig]":
+        return self._venues
+
+    @property
+    def employees(self) -> "dict[str, Employee]":
+        return self._employees
+
+    @property
+    def rosters(self) -> "dict[str, Roster]":
+        return self._rosters
+
+    @property
+    def shifts(self) -> "dict[str, Shift]":
+        return self._shifts
+
+    @property
+    def forecasts(self) -> "list[DemandForecast]":
+        return self._forecasts
 
     def save_venue(self, venue):
         self._venues[venue.id] = venue
@@ -1001,9 +1071,17 @@ class MemoryStore(BaseStore):
         delivery_id = delivery.get("id")
         subscription_id = delivery.get("subscription_id")
 
+        # Index every delivery by id so it can always be retrieved by
+        # get_webhook_delivery, regardless of status or subscription_id.
+        if delivery_id:
+            self._webhook_deliveries_by_id[delivery_id] = delivery
+
         # Save to retry queue for queue management
         if delivery_id and delivery.get("status") == "pending":
             self._webhook_retry_queue[delivery_id] = delivery
+        elif delivery_id:
+            # No longer pending (e.g. success/dead_letter) — drop from retry queue.
+            self._webhook_retry_queue.pop(delivery_id, None)
 
         if not subscription_id:
             return
@@ -1029,6 +1107,8 @@ class MemoryStore(BaseStore):
         """Get a webhook delivery record by ID."""
         if not hasattr(self, '_webhook_retry_queue'):
             self._webhook_retry_queue = {}
+        if not hasattr(self, '_webhook_deliveries_by_id'):
+            self._webhook_deliveries_by_id = {}
         if not hasattr(self, '_dead_letters'):
             self._dead_letters = {}
 
@@ -1039,6 +1119,11 @@ class MemoryStore(BaseStore):
         # Check dead letters
         if delivery_id in self._dead_letters:
             return self._dead_letters[delivery_id]
+
+        # Fall back to the by-id index (covers non-pending deliveries with no
+        # subscription_id, e.g. ones recorded only via record_attempt).
+        if delivery_id in self._webhook_deliveries_by_id:
+            return self._webhook_deliveries_by_id[delivery_id]
 
         return None
 
@@ -1555,6 +1640,33 @@ class MemoryStore(BaseStore):
         revisions = self._roster_revisions.get(roster_id, [])
         return sorted(revisions, key=lambda r: r.get("revision_number", 0))
 
+    # --- Roster publishing state machine ---
+
+    def get_roster_state(self, roster_id: str) -> str:
+        # A freshly generated roster has never transitioned -> publishable DRAFT.
+        return self._roster_states.get(roster_id, "draft")
+
+    def update_roster_state(self, roster_id: str, new_state: str, reason: str,
+                            actor_id: str = "system") -> None:
+        self._roster_states[roster_id] = new_state
+        self._roster_state_history.setdefault(roster_id, []).append({
+            "roster_id": roster_id,
+            "state": new_state,
+            "reason": reason,
+            "actor_id": actor_id,
+            "at": datetime.utcnow().isoformat(),
+        })
+
+    def get_roster_state_history(self, roster_id: str) -> list[dict]:
+        return list(self._roster_state_history.get(roster_id, []))
+
+    def save_publication_event(self, event: dict) -> None:
+        self._publication_events.append(event)
+
+    def get_publication_history(self, venue_id: str, limit: int = 50) -> list[dict]:
+        events = [e for e in self._publication_events if e.get("venue_id") == venue_id]
+        return list(reversed(events))[:limit]
+
     # --- Push Notifications ---
 
     def save_push_subscription(self, user_id: str, subscription: dict) -> None:
@@ -1627,6 +1739,55 @@ class MemoryStore(BaseStore):
 
         return results
 
+    def save_direct_bookings(self, venue_id: str, bookings: list[dict]) -> int:
+        # Idempotent: skip exact-duplicate rows so re-uploading the same bookings CSV
+        # doesn't double-count (which would inflate the demand signal + booking count).
+        existing = {
+            (b.get("venue_id"), str(b.get("date")), b.get("time"), b.get("party_size"))
+            for b in self._direct_bookings
+        }
+        stored = 0
+        for b in bookings or []:
+            d = b.get("date")
+            if not d:
+                continue
+            rec = {
+                "venue_id": venue_id,
+                "date": d,
+                "party_size": b.get("party_size") or b.get("covers") or 0,
+                "time": b.get("time"),
+            }
+            key = (venue_id, str(d), rec["time"], rec["party_size"])
+            if key in existing:
+                continue
+            self._direct_bookings.append(rec)
+            existing.add(key)
+            stored += 1
+        return stored
+
+    def get_direct_bookings(
+        self, venue_id: str, start: str, end: str
+    ) -> list[dict]:
+        try:
+            start_date = datetime.fromisoformat(start).date()
+            end_date = datetime.fromisoformat(end).date()
+        except (ValueError, AttributeError):
+            return []
+        results = []
+        for b in self._direct_bookings:
+            if b.get("venue_id") != venue_id:
+                continue
+            try:
+                bd = datetime.fromisoformat(str(b.get("date"))).date()
+            except (ValueError, AttributeError):
+                continue
+            if start_date <= bd <= end_date:
+                results.append(b)
+        return results
+
+    def count_direct_bookings(self, venue_id: str) -> int:
+        return sum(1 for b in self._direct_bookings if b.get("venue_id") == venue_id)
+
 
 # ============================================================================
 # PostgreSQL store (production)
@@ -1682,6 +1843,334 @@ class PostgresStore(BaseStore):
     def _cursor(self):
         import psycopg2.extras
         return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # ------------------------------------------------------------------
+    # Runtime schema guards
+    #
+    # A number of feature tables are NOT created by any SQL migration
+    # (001/003/004). On a fresh Postgres deploy the first venue to hit the
+    # relevant feature (password reset, email verify, audit logging, shift
+    # swaps/open shifts, templates, theming, payroll batches/exports,
+    # analytics/audit snapshots, approvals, A/B testing, privacy/consent,
+    # etc.) would otherwise raise psycopg2 UndefinedTable -> HTTP 500.
+    #
+    # Mirroring the existing revenue_actuals / direct_bookings pattern, each
+    # such table is created lazily via CREATE TABLE IF NOT EXISTS at the start
+    # of the methods that touch it. The DDL lives here once so the columns,
+    # JSONB fields and ON CONFLICT key constraints stay in lockstep with the
+    # INSERT/SELECT/UPDATE statements below.
+    # ------------------------------------------------------------------
+    _TABLE_DDL = {
+        "roster_states": """
+            CREATE TABLE IF NOT EXISTS roster_states (
+                roster_id TEXT PRIMARY KEY,
+                state TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "roster_state_history": """
+            CREATE TABLE IF NOT EXISTS roster_state_history (
+                id SERIAL PRIMARY KEY,
+                roster_id TEXT,
+                state TEXT,
+                reason TEXT,
+                actor_id TEXT,
+                at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "publication_events": """
+            CREATE TABLE IF NOT EXISTS publication_events (
+                id SERIAL PRIMARY KEY,
+                venue_id TEXT,
+                event JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "roster_templates": """
+            CREATE TABLE IF NOT EXISTS roster_templates (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                venue_id TEXT,
+                description TEXT,
+                created_by TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP,
+                shift_patterns JSONB
+            )
+        """,
+        "password_reset_tokens": """
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT,
+                expires_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "email_verification_tokens": """
+            CREATE TABLE IF NOT EXISTS email_verification_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT,
+                expires_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "webhook_subscriptions": """
+            CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT,
+                callback_url TEXT,
+                events JSONB,
+                secret TEXT,
+                active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP
+            )
+        """,
+        "shift_swaps": """
+            CREATE TABLE IF NOT EXISTS shift_swaps (
+                id TEXT PRIMARY KEY,
+                shift_id TEXT,
+                offered_by TEXT,
+                requested_by TEXT,
+                my_shift_id TEXT,
+                offered_shift_id TEXT,
+                date TEXT,
+                start_time TEXT,
+                end_time TEXT,
+                role TEXT,
+                venue TEXT,
+                venue_id TEXT,
+                status TEXT,
+                message TEXT,
+                created_at TEXT
+            )
+        """,
+        "privacy_consents": """
+            CREATE TABLE IF NOT EXISTS privacy_consents (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT,
+                consent_type TEXT,
+                granted BOOLEAN,
+                timestamp TIMESTAMP
+            )
+        """,
+        "privacy_audit_log": """
+            CREATE TABLE IF NOT EXISTS privacy_audit_log (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT,
+                action TEXT,
+                resource_type TEXT,
+                details JSONB,
+                logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "anonymised_employees": """
+            CREATE TABLE IF NOT EXISTS anonymised_employees (
+                employee_id TEXT PRIMARY KEY,
+                anonymised_at TIMESTAMP
+            )
+        """,
+        "revenue_snapshots": """
+            CREATE TABLE IF NOT EXISTS revenue_snapshots (
+                id SERIAL PRIMARY KEY,
+                venue_id TEXT,
+                date DATE,
+                revenue NUMERIC,
+                UNIQUE(venue_id, date)
+            )
+        """,
+        "analytics_snapshots": """
+            CREATE TABLE IF NOT EXISTS analytics_snapshots (
+                id SERIAL PRIMARY KEY,
+                venue_id TEXT,
+                date DATE,
+                metric_type TEXT,
+                value JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "audit_logs": """
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id SERIAL PRIMARY KEY,
+                venue_id TEXT,
+                user_id TEXT,
+                action TEXT,
+                resource_type TEXT,
+                resource_id TEXT,
+                details JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "themes": """
+            CREATE TABLE IF NOT EXISTS themes (
+                venue_id TEXT PRIMARY KEY,
+                config JSONB,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "api_key_records": """
+            CREATE TABLE IF NOT EXISTS api_key_records (
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                name TEXT,
+                key_hash TEXT,
+                is_active BOOLEAN,
+                created_at TIMESTAMP,
+                expires_at TIMESTAMP,
+                last_used_at TIMESTAMP,
+                usage_count INTEGER DEFAULT 0,
+                revoked_at TIMESTAMP,
+                suspicious_flags INTEGER DEFAULT 0
+            )
+        """,
+        "webhook_secrets": """
+            CREATE TABLE IF NOT EXISTS webhook_secrets (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT,
+                secret_hash TEXT,
+                is_active BOOLEAN,
+                grace_expires_at TIMESTAMP,
+                created_at TIMESTAMP,
+                rotated_at TIMESTAMP
+            )
+        """,
+        "preference_profiles": """
+            CREATE TABLE IF NOT EXISTS preference_profiles (
+                employee_id TEXT PRIMARY KEY,
+                profile_data JSONB,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "ab_experiments": """
+            CREATE TABLE IF NOT EXISTS ab_experiments (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                description TEXT,
+                control_strategy TEXT,
+                variant_strategy TEXT,
+                start_date TIMESTAMP,
+                end_date TIMESTAMP,
+                status TEXT,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                control_venues JSONB,
+                variant_venues JSONB,
+                minimum_sample_size INTEGER DEFAULT 30
+            )
+        """,
+        "ab_experiment_outcomes": """
+            CREATE TABLE IF NOT EXISTS ab_experiment_outcomes (
+                id TEXT PRIMARY KEY,
+                experiment_id TEXT,
+                venue_id TEXT,
+                roster_id TEXT,
+                "group" TEXT,
+                total_labour_cost NUMERIC,
+                labour_percentage NUMERIC,
+                demand_coverage_pct NUMERIC,
+                compliance_score NUMERIC,
+                staff_satisfaction_proxy NUMERIC,
+                overtime_hours NUMERIC,
+                penalty_hours NUMERIC,
+                recorded_at TIMESTAMP
+            )
+        """,
+        "payroll_batches": """
+            CREATE TABLE IF NOT EXISTS payroll_batches (
+                batch_id TEXT PRIMARY KEY,
+                venue_id TEXT,
+                period_start TEXT,
+                period_end TEXT,
+                status TEXT,
+                data JSONB,
+                created_at TEXT
+            )
+        """,
+        "payroll_exports": """
+            CREATE TABLE IF NOT EXISTS payroll_exports (
+                id SERIAL PRIMARY KEY,
+                batch_id TEXT,
+                service TEXT,
+                status TEXT,
+                data JSONB,
+                exported_at TEXT
+            )
+        """,
+        "approval_requests": """
+            CREATE TABLE IF NOT EXISTS approval_requests (
+                request_id TEXT PRIMARY KEY,
+                roster_id TEXT,
+                venue_id TEXT,
+                submitted_by TEXT,
+                submitted_at TIMESTAMP,
+                status TEXT,
+                reviewed_by TEXT,
+                reviewed_at TIMESTAMP,
+                review_notes TEXT,
+                revision_number INTEGER DEFAULT 1,
+                escalated_at TIMESTAMP,
+                escalated_to TEXT,
+                tier TEXT,
+                auto_approved_by_rules JSONB,
+                failed_rules JSONB,
+                data JSONB,
+                created_at TIMESTAMP
+            )
+        """,
+        "roster_revisions": """
+            CREATE TABLE IF NOT EXISTS roster_revisions (
+                revision_id TEXT PRIMARY KEY,
+                roster_id TEXT,
+                revision_number INTEGER,
+                changes JSONB,
+                created_at TIMESTAMP,
+                data JSONB
+            )
+        """,
+        "open_shifts": """
+            CREATE TABLE IF NOT EXISTS open_shifts (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT,
+                date DATE,
+                start_time TEXT,
+                end_time TEXT,
+                role_required TEXT,
+                skills_required JSONB,
+                min_rate NUMERIC,
+                max_rate NUMERIC,
+                posted_by TEXT,
+                posted_at TIMESTAMP,
+                deadline TIMESTAMP,
+                status TEXT,
+                notes TEXT,
+                created_at TIMESTAMP
+            )
+        """,
+        "bids": """
+            CREATE TABLE IF NOT EXISTS bids (
+                id TEXT PRIMARY KEY,
+                open_shift_id TEXT,
+                employee_id TEXT,
+                offered_rate NUMERIC,
+                message TEXT,
+                seniority_years NUMERIC DEFAULT 0,
+                preference_score NUMERIC DEFAULT 0,
+                submitted_at TIMESTAMP,
+                status TEXT,
+                created_at TIMESTAMP
+            )
+        """,
+    }
+
+    def _ensure_table(self, cur, name: str) -> None:
+        """Lazily create a feature table that no migration provisions.
+
+        Idempotent (CREATE TABLE IF NOT EXISTS); cheap to call at the top of
+        any read/write method that references the table.
+        """
+        ddl = self._TABLE_DDL.get(name)
+        if ddl:
+            cur.execute(ddl)
 
     # --- Venues ---
 
@@ -2004,7 +2493,19 @@ class PostgresStore(BaseStore):
     # --- Xero Credentials ---
 
     def save_xero_credentials(self, venue_id: str, credentials_dict: dict) -> None:
-        """Save Xero OAuth credentials."""
+        """Save Xero OAuth credentials (secret columns encrypted at rest).
+
+        client_secret / access_token / refresh_token are routed through
+        services.secret_box (Fernet) so they aren't persisted as plaintext —
+        mirroring how plugin_installs.tokens are protected. Non-secret columns
+        (client_id, tenant_id, token_expires) stay readable.
+        """
+        from rosteriq.services.secret_box import encrypt_tokens
+        secrets = encrypt_tokens({
+            "client_secret": credentials_dict.get("client_secret"),
+            "access_token": credentials_dict.get("access_token"),
+            "refresh_token": credentials_dict.get("refresh_token"),
+        })
         with self._cursor() as cur:
             cur.execute("""
                 INSERT INTO xero_credentials
@@ -2012,6 +2513,8 @@ class PostgresStore(BaseStore):
                      refresh_token, token_expires, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (venue_id) DO UPDATE SET
+                    client_id=EXCLUDED.client_id,
+                    client_secret=EXCLUDED.client_secret,
                     access_token=EXCLUDED.access_token,
                     refresh_token=EXCLUDED.refresh_token,
                     token_expires=EXCLUDED.token_expires,
@@ -2019,17 +2522,18 @@ class PostgresStore(BaseStore):
             """, (
                 venue_id,
                 credentials_dict.get("client_id"),
-                credentials_dict.get("client_secret"),
+                secrets.get("client_secret"),
                 credentials_dict.get("tenant_id"),
-                credentials_dict.get("access_token"),
-                credentials_dict.get("refresh_token"),
+                secrets.get("access_token"),
+                secrets.get("refresh_token"),
                 credentials_dict.get("token_expires"),
                 credentials_dict.get("created_at"),
                 credentials_dict.get("updated_at"),
             ))
 
     def get_xero_credentials(self, venue_id: str) -> Optional[dict]:
-        """Retrieve Xero credentials."""
+        """Retrieve Xero credentials (secret columns decrypted)."""
+        from rosteriq.services.secret_box import decrypt_tokens
         with self._cursor() as cur:
             cur.execute(
                 "SELECT * FROM xero_credentials WHERE venue_id = %s",
@@ -2037,13 +2541,18 @@ class PostgresStore(BaseStore):
             )
             row = cur.fetchone()
             if row:
+                secrets = decrypt_tokens({
+                    "client_secret": row["client_secret"],
+                    "access_token": row["access_token"],
+                    "refresh_token": row["refresh_token"],
+                })
                 return {
                     "venue_id": row["venue_id"],
                     "client_id": row["client_id"],
-                    "client_secret": row["client_secret"],
+                    "client_secret": secrets["client_secret"],
                     "tenant_id": row["tenant_id"],
-                    "access_token": row["access_token"],
-                    "refresh_token": row["refresh_token"],
+                    "access_token": secrets["access_token"],
+                    "refresh_token": secrets["refresh_token"],
                     "token_expires": row["token_expires"],
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
@@ -2253,7 +2762,8 @@ class PostgresStore(BaseStore):
             ))
 
     def save_plugin_install(self, install: dict) -> None:
-        """Save or update a plugin installation record."""
+        """Save or update a plugin installation record (secrets encrypted at rest)."""
+        from rosteriq.services.secret_box import encrypt_tokens
         with self._cursor() as cur:
             cur.execute("""
                 INSERT INTO plugin_installs
@@ -2268,26 +2778,28 @@ class PostgresStore(BaseStore):
                 install.get("organisation_id"),
                 install.get("venue_id"),
                 install.get("status", "active"),
-                json.dumps(install.get("tokens", {})),
+                json.dumps(encrypt_tokens(install.get("tokens", {}))),
                 install.get("installed_at", datetime.utcnow()),
                 install.get("updated_at", datetime.utcnow()),
             ))
 
     def get_plugin_install(self, organisation_id: str) -> Optional[dict]:
-        """Get plugin installation record by organisation ID."""
+        """Get plugin installation record by organisation ID (secrets decrypted)."""
+        from rosteriq.services.secret_box import decrypt_install
         with self._cursor() as cur:
             cur.execute(
                 "SELECT * FROM plugin_installs WHERE organisation_id = %s",
                 (organisation_id,)
             )
             row = cur.fetchone()
-            return dict(row) if row else None
+            return decrypt_install(dict(row)) if row else None
 
     def list_plugin_installs(self) -> list[dict]:
-        """List all plugin installations."""
+        """List all plugin installations (secrets decrypted)."""
+        from rosteriq.services.secret_box import decrypt_install
         with self._cursor() as cur:
             cur.execute("SELECT * FROM plugin_installs ORDER BY updated_at DESC")
-            return [dict(row) for row in cur.fetchall()]
+            return [decrypt_install(dict(row)) for row in cur.fetchall()]
 
     def save_feed_config(self, venue_id: str, feed_name: str, config: dict) -> None:
         """Save or update feed configuration for a venue."""
@@ -2358,6 +2870,7 @@ class PostgresStore(BaseStore):
     def save_roster_template(self, template: dict) -> None:
         """Save or update a roster template."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "roster_templates")
             cur.execute("""
                 INSERT INTO roster_templates (id, name, venue_id, description, created_by, created_at, updated_at, shift_patterns)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -2374,6 +2887,7 @@ class PostgresStore(BaseStore):
     def get_roster_template(self, template_id: str) -> Optional[dict]:
         """Get a roster template by ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "roster_templates")
             cur.execute("SELECT * FROM roster_templates WHERE id = %s", (template_id,))
             row = cur.fetchone()
             if not row:
@@ -2386,6 +2900,7 @@ class PostgresStore(BaseStore):
     def list_roster_templates(self, venue_id: str) -> list[dict]:
         """List all roster templates for a venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "roster_templates")
             cur.execute(
                 "SELECT * FROM roster_templates WHERE venue_id = %s ORDER BY created_at DESC",
                 (venue_id,)
@@ -2401,11 +2916,13 @@ class PostgresStore(BaseStore):
     def delete_roster_template(self, template_id: str) -> None:
         """Delete a roster template by ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "roster_templates")
             cur.execute("DELETE FROM roster_templates WHERE id = %s", (template_id,))
 
     def save_password_reset_token(self, token_hash: str, user_id: str, expires_at: datetime) -> None:
         """Save a password reset token."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "password_reset_tokens")
             cur.execute("""
                 INSERT INTO password_reset_tokens (token_hash, user_id, expires_at, created_at)
                 VALUES (%s, %s, %s, %s)
@@ -2416,6 +2933,7 @@ class PostgresStore(BaseStore):
     def get_password_reset_token(self, token_hash: str) -> Optional[dict]:
         """Get a password reset token by hash."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "password_reset_tokens")
             cur.execute(
                 "SELECT * FROM password_reset_tokens WHERE token_hash = %s",
                 (token_hash,)
@@ -2426,6 +2944,7 @@ class PostgresStore(BaseStore):
     def delete_password_reset_token(self, token_hash: str) -> None:
         """Delete a password reset token."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "password_reset_tokens")
             cur.execute(
                 "DELETE FROM password_reset_tokens WHERE token_hash = %s",
                 (token_hash,)
@@ -2434,6 +2953,7 @@ class PostgresStore(BaseStore):
     def save_email_verification_token(self, token_hash: str, user_id: str, expires_at: datetime) -> None:
         """Save an email verification token."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "email_verification_tokens")
             cur.execute("""
                 INSERT INTO email_verification_tokens (token_hash, user_id, expires_at, created_at)
                 VALUES (%s, %s, %s, %s)
@@ -2444,6 +2964,7 @@ class PostgresStore(BaseStore):
     def get_email_verification_token(self, token_hash: str) -> Optional[dict]:
         """Get an email verification token by hash."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "email_verification_tokens")
             cur.execute(
                 "SELECT * FROM email_verification_tokens WHERE token_hash = %s",
                 (token_hash,)
@@ -2454,6 +2975,7 @@ class PostgresStore(BaseStore):
     def delete_email_verification_token(self, token_hash: str) -> None:
         """Delete an email verification token."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "email_verification_tokens")
             cur.execute(
                 "DELETE FROM email_verification_tokens WHERE token_hash = %s",
                 (token_hash,)
@@ -2462,6 +2984,7 @@ class PostgresStore(BaseStore):
     def save_webhook_subscription(self, subscription: dict) -> None:
         """Save or update a webhook subscription."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "webhook_subscriptions")
             cur.execute("""
                 INSERT INTO webhook_subscriptions
                     (id, venue_id, callback_url, events, secret, active, created_at, updated_at)
@@ -2485,6 +3008,7 @@ class PostgresStore(BaseStore):
     def get_webhook_subscription(self, subscription_id: str) -> Optional[dict]:
         """Get a webhook subscription by ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "webhook_subscriptions")
             cur.execute(
                 "SELECT * FROM webhook_subscriptions WHERE id = %s",
                 (subscription_id,)
@@ -2500,6 +3024,7 @@ class PostgresStore(BaseStore):
     def list_webhook_subscriptions(self, venue_id: str) -> list[dict]:
         """List all webhook subscriptions for a venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "webhook_subscriptions")
             cur.execute(
                 "SELECT * FROM webhook_subscriptions WHERE venue_id = %s ORDER BY created_at DESC",
                 (venue_id,)
@@ -2515,6 +3040,7 @@ class PostgresStore(BaseStore):
     def delete_webhook_subscription(self, subscription_id: str) -> None:
         """Delete a webhook subscription."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "webhook_subscriptions")
             # Delete subscriptions
             cur.execute(
                 "DELETE FROM webhook_subscriptions WHERE id = %s",
@@ -2527,26 +3053,41 @@ class PostgresStore(BaseStore):
             )
 
     def save_webhook_delivery(self, delivery: dict) -> None:
-        """Save a webhook delivery record."""
+        """
+        Save a webhook delivery record.
+
+        Persists the FULL delivery (url, payload, headers, venue_id, attempt)
+        so a queued webhook survives a restart and can be redelivered — the
+        previous version dropped those columns, making durable retry impossible.
+        """
         with self._cursor() as cur:
             cur.execute("""
                 INSERT INTO webhook_deliveries
-                    (id, subscription_id, event_type, status, response_code,
-                     attempts, last_attempt_at, next_retry_at, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (id, subscription_id, venue_id, event_type, url, payload,
+                     headers, status, attempt, attempts, response_code, error,
+                     last_attempt_at, next_retry_at, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     status=EXCLUDED.status,
-                    response_code=EXCLUDED.response_code,
+                    attempt=EXCLUDED.attempt,
                     attempts=EXCLUDED.attempts,
+                    response_code=EXCLUDED.response_code,
+                    error=EXCLUDED.error,
                     last_attempt_at=EXCLUDED.last_attempt_at,
                     next_retry_at=EXCLUDED.next_retry_at
             """, (
                 delivery.get("id"),
                 delivery.get("subscription_id"),
+                delivery.get("venue_id"),
                 delivery.get("event_type"),
+                delivery.get("url"),
+                json.dumps(delivery.get("payload")) if delivery.get("payload") is not None else None,
+                json.dumps(delivery.get("headers")) if delivery.get("headers") is not None else None,
                 delivery.get("status"),
+                delivery.get("attempt", 0),
+                json.dumps(delivery.get("attempts", [])),
                 delivery.get("response_code"),
-                delivery.get("attempts"),
+                delivery.get("error"),
                 delivery.get("last_attempt_at"),
                 delivery.get("next_retry_at"),
                 delivery.get("created_at"),
@@ -2563,6 +3104,21 @@ class PostgresStore(BaseStore):
             """, (subscription_id, limit))
             return [dict(row) for row in cur.fetchall()]
 
+    @staticmethod
+    def _deserialize_webhook_row(row) -> dict:
+        """Normalise a webhook_deliveries row — ensure JSON fields are Python
+        objects (defensive: psycopg2 usually parses JSONB, but never rely on it
+        for the payload/headers the queue needs to redeliver)."""
+        d = dict(row)
+        for field in ("payload", "headers", "attempts"):
+            val = d.get(field)
+            if isinstance(val, (str, bytes)):
+                try:
+                    d[field] = json.loads(val)
+                except (ValueError, TypeError):
+                    pass
+        return d
+
     def get_webhook_delivery(self, delivery_id: str) -> Optional[dict]:
         """Get a webhook delivery record by ID."""
         with self._cursor() as cur:
@@ -2571,7 +3127,7 @@ class PostgresStore(BaseStore):
                 (delivery_id,)
             )
             row = cur.fetchone()
-            return dict(row) if row else None
+            return self._deserialize_webhook_row(row) if row else None
 
     def list_pending_retries(self, before: datetime) -> list[dict]:
         """List pending webhook deliveries ready for retry."""
@@ -2584,7 +3140,7 @@ class PostgresStore(BaseStore):
                 ORDER BY next_retry_at ASC
                 LIMIT 100
             """, (before,))
-            return [dict(row) for row in cur.fetchall()]
+            return [self._deserialize_webhook_row(row) for row in cur.fetchall()]
 
     def save_dead_letter(self, dead_letter: dict) -> None:
         """Save a dead letter delivery record."""
@@ -2654,6 +3210,7 @@ class PostgresStore(BaseStore):
     def save_shift_swap(self, swap: dict) -> None:
         """Save or update a shift swap record."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "shift_swaps")
             cur.execute("""
                 INSERT INTO shift_swaps (
                     id, shift_id, offered_by, requested_by, my_shift_id,
@@ -2684,6 +3241,7 @@ class PostgresStore(BaseStore):
     def list_shift_swaps(self, venue_id: Optional[str] = None) -> list[dict]:
         """List shift swaps, optionally filtered by venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "shift_swaps")
             if venue_id:
                 cur.execute("""
                     SELECT * FROM shift_swaps
@@ -2700,6 +3258,7 @@ class PostgresStore(BaseStore):
     def get_shift_swap(self, swap_id: str) -> Optional[dict]:
         """Get a shift swap record by ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "shift_swaps")
             cur.execute("SELECT * FROM shift_swaps WHERE id = %s", (swap_id,))
             row = cur.fetchone()
             return dict(row) if row else None
@@ -2739,6 +3298,7 @@ class PostgresStore(BaseStore):
     def save_consent(self, user_id: str, consent_type: str, granted: bool, timestamp: datetime) -> None:
         """Record a user's privacy consent."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "privacy_consents")
             cur.execute("""
                 INSERT INTO privacy_consents (user_id, consent_type, granted, timestamp)
                 VALUES (%s, %s, %s, %s)
@@ -2747,6 +3307,7 @@ class PostgresStore(BaseStore):
     def get_consents(self, user_id: str) -> list[dict]:
         """Get all consent records for a user."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "privacy_consents")
             cur.execute("""
                 SELECT user_id, consent_type, granted, timestamp
                 FROM privacy_consents
@@ -2758,6 +3319,7 @@ class PostgresStore(BaseStore):
     def save_privacy_log(self, entry: dict) -> None:
         """Save a privacy audit log entry."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "privacy_audit_log")
             cur.execute("""
                 INSERT INTO privacy_audit_log (user_id, action, resource_type, details, logged_at)
                 VALUES (%s, %s, %s, %s, %s)
@@ -2772,6 +3334,7 @@ class PostgresStore(BaseStore):
     def list_privacy_logs(self, user_id: Optional[str] = None, limit: int = 100) -> list[dict]:
         """List privacy audit logs, optionally filtered by user_id."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "privacy_audit_log")
             if user_id:
                 cur.execute("""
                     SELECT user_id, action, resource_type, details, logged_at
@@ -2793,6 +3356,7 @@ class PostgresStore(BaseStore):
     def anonymise_employee(self, employee_id: str) -> None:
         """Mark an employee as anonymised (anonymise PII, preserve history)."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "anonymised_employees")
             # Update employee record
             anon_name = f"Anonymised Employee #{employee_id[:8]}"
             anon_email = f"anon_{employee_id[:8]}@deleted.local"
@@ -2813,6 +3377,7 @@ class PostgresStore(BaseStore):
     def get_anonymised_employees(self) -> list[dict]:
         """Get list of all anonymised employees."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "anonymised_employees")
             cur.execute("""
                 SELECT employee_id, anonymised_at
                 FROM anonymised_employees
@@ -2876,6 +3441,7 @@ class PostgresStore(BaseStore):
     ) -> list[dict]:
         """Get revenue data for a venue within a date range."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "revenue_snapshots")
             cur.execute("""
                 SELECT date, revenue FROM revenue_snapshots
                 WHERE venue_id = %s
@@ -2896,6 +3462,7 @@ class PostgresStore(BaseStore):
     def save_analytics_snapshot(self, snapshot: dict) -> None:
         """Save an analytics snapshot."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "analytics_snapshots")
             cur.execute("""
                 INSERT INTO analytics_snapshots
                     (venue_id, date, metric_type, value, created_at)
@@ -2917,6 +3484,7 @@ class PostgresStore(BaseStore):
     ) -> list[dict]:
         """Get analytics snapshots for a venue and metric type."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "analytics_snapshots")
             cur.execute("""
                 SELECT venue_id, date, metric_type, value, created_at
                 FROM analytics_snapshots
@@ -2942,6 +3510,7 @@ class PostgresStore(BaseStore):
     def save_audit_log(self, entry: dict) -> None:
         """Save an audit log entry."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "audit_logs")
             cur.execute("""
                 INSERT INTO audit_logs (venue_id, user_id, action, resource_type, resource_id, details, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -2960,6 +3529,7 @@ class PostgresStore(BaseStore):
     ) -> list[dict]:
         """List audit logs for a venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "audit_logs")
             cur.execute("""
                 SELECT id, venue_id, user_id, action, resource_type, resource_id, details, created_at
                 FROM audit_logs
@@ -2981,6 +3551,7 @@ class PostgresStore(BaseStore):
     def save_theme(self, venue_id: str, theme: dict) -> None:
         """Save or update a theme configuration for a venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "themes")
             cur.execute("""
                 INSERT INTO themes (venue_id, config)
                 VALUES (%s, %s)
@@ -2990,6 +3561,7 @@ class PostgresStore(BaseStore):
     def get_theme(self, venue_id: str) -> Optional[dict]:
         """Get a theme configuration for a venue. Returns None if not set."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "themes")
             cur.execute("""
                 SELECT config FROM themes WHERE venue_id = %s
             """, (venue_id,))
@@ -3002,6 +3574,7 @@ class PostgresStore(BaseStore):
     def delete_theme(self, venue_id: str) -> None:
         """Delete a theme configuration, resetting to defaults."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "themes")
             cur.execute("""
                 DELETE FROM themes WHERE venue_id = %s
             """, (venue_id,))
@@ -3011,6 +3584,7 @@ class PostgresStore(BaseStore):
     def save_api_key_record(self, record: dict) -> None:
         """Save or update an API key record."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "api_key_records")
             cur.execute("""
                 INSERT INTO api_key_records
                     (id, user_id, name, key_hash, is_active, created_at, expires_at,
@@ -3040,6 +3614,7 @@ class PostgresStore(BaseStore):
     def list_api_key_records(self, user_id: str) -> list[dict]:
         """List all API key records for a user."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "api_key_records")
             cur.execute("""
                 SELECT * FROM api_key_records
                 WHERE user_id = %s
@@ -3050,6 +3625,7 @@ class PostgresStore(BaseStore):
     def get_api_key_record(self, key_id: str) -> Optional[dict]:
         """Get an API key record by key ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "api_key_records")
             cur.execute(
                 "SELECT * FROM api_key_records WHERE id = %s",
                 (key_id,)
@@ -3060,6 +3636,7 @@ class PostgresStore(BaseStore):
     def save_webhook_secret(self, venue_id: str, secret_record: dict) -> None:
         """Save or update a webhook secret record."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "webhook_secrets")
             cur.execute("""
                 INSERT INTO webhook_secrets
                     (id, venue_id, secret_hash, is_active, grace_expires_at, created_at, rotated_at)
@@ -3081,6 +3658,7 @@ class PostgresStore(BaseStore):
     def get_webhook_secrets(self, venue_id: str) -> list[dict]:
         """Get all webhook secret records for a venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "webhook_secrets")
             cur.execute("""
                 SELECT * FROM webhook_secrets
                 WHERE venue_id = %s
@@ -3091,6 +3669,7 @@ class PostgresStore(BaseStore):
     def save_preference_profile(self, employee_id: str, profile: dict) -> None:
         """Save or update a preference profile for an employee."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "preference_profiles")
             cur.execute("""
                 INSERT INTO preference_profiles (employee_id, profile_data, updated_at)
                 VALUES (%s, %s, %s)
@@ -3101,6 +3680,7 @@ class PostgresStore(BaseStore):
     def get_preference_profile(self, employee_id: str) -> Optional[dict]:
         """Get a preference profile for an employee. Returns None if not found."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "preference_profiles")
             cur.execute("""
                 SELECT profile_data FROM preference_profiles
                 WHERE employee_id = %s
@@ -3113,6 +3693,7 @@ class PostgresStore(BaseStore):
     def list_preference_profiles(self, venue_id: str) -> list[dict]:
         """List all preference profiles for a venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "preference_profiles")
             cur.execute("""
                 SELECT profile_data FROM preference_profiles
                 WHERE profile_data->>'venue_id' = %s
@@ -3126,6 +3707,7 @@ class PostgresStore(BaseStore):
     def save_experiment(self, experiment: dict) -> None:
         """Save or update an experiment."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "ab_experiments")
             cur.execute("""
                 INSERT INTO ab_experiments (
                     id, name, description, control_strategy, variant_strategy,
@@ -3157,6 +3739,7 @@ class PostgresStore(BaseStore):
     def get_experiment(self, experiment_id: str) -> Optional[dict]:
         """Get an experiment by ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "ab_experiments")
             cur.execute("""
                 SELECT id, name, description, control_strategy, variant_strategy,
                        start_date, end_date, status, created_at, updated_at,
@@ -3188,6 +3771,7 @@ class PostgresStore(BaseStore):
     def list_experiments(self, active_only: bool = False) -> list[dict]:
         """List all experiments, optionally filtering to active only."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "ab_experiments")
             query = """
                 SELECT id, name, description, control_strategy, variant_strategy,
                        start_date, end_date, status, created_at, updated_at,
@@ -3223,6 +3807,7 @@ class PostgresStore(BaseStore):
     def save_experiment_outcome(self, outcome: dict) -> None:
         """Save an experiment outcome."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "ab_experiment_outcomes")
             cur.execute("""
                 INSERT INTO ab_experiment_outcomes (
                     id, experiment_id, venue_id, roster_id, "group",
@@ -3250,6 +3835,7 @@ class PostgresStore(BaseStore):
     def list_experiment_outcomes(self, experiment_id: str) -> list[dict]:
         """List all outcomes for an experiment."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "ab_experiment_outcomes")
             cur.execute("""
                 SELECT id, experiment_id, venue_id, roster_id, "group",
                        total_labour_cost, labour_percentage, demand_coverage_pct,
@@ -3283,6 +3869,7 @@ class PostgresStore(BaseStore):
     def save_payroll_batch(self, batch: dict) -> None:
         """Save or update a payroll batch."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "payroll_batches")
             cur.execute("""
                 INSERT INTO payroll_batches (batch_id, venue_id, period_start, period_end, status, data, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -3301,6 +3888,7 @@ class PostgresStore(BaseStore):
     def get_payroll_batch(self, batch_id: str) -> Optional[dict]:
         """Get a payroll batch by ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "payroll_batches")
             cur.execute("""
                 SELECT data FROM payroll_batches
                 WHERE batch_id = %s
@@ -3313,6 +3901,7 @@ class PostgresStore(BaseStore):
     def list_payroll_batches(self, venue_id: str) -> list[dict]:
         """List all payroll batches for a venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "payroll_batches")
             cur.execute("""
                 SELECT data FROM payroll_batches
                 WHERE venue_id = %s
@@ -3326,6 +3915,7 @@ class PostgresStore(BaseStore):
     def save_payroll_export(self, export: dict) -> None:
         """Record a payroll export to external service."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "payroll_exports")
             cur.execute("""
                 INSERT INTO payroll_exports (batch_id, service, status, data, exported_at)
                 VALUES (%s, %s, %s, %s, %s)
@@ -3340,6 +3930,8 @@ class PostgresStore(BaseStore):
     def list_payroll_exports(self, venue_id: str, limit: int = 50) -> list[dict]:
         """List payroll exports for a venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "payroll_batches")
+            self._ensure_table(cur, "payroll_exports")
             cur.execute("""
                 SELECT pe.data FROM payroll_exports pe
                 JOIN payroll_batches pb ON pe.batch_id = pb.batch_id
@@ -3380,6 +3972,7 @@ class PostgresStore(BaseStore):
     def save_approval_request(self, request: dict) -> None:
         """Save or update an approval request."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "approval_requests")
             cur.execute("""
                 INSERT INTO approval_requests (
                     request_id, roster_id, venue_id, submitted_by, submitted_at,
@@ -3415,6 +4008,7 @@ class PostgresStore(BaseStore):
     def get_approval_request(self, request_id: str) -> Optional[dict]:
         """Get an approval request by ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "approval_requests")
             cur.execute("""
                 SELECT data FROM approval_requests WHERE request_id = %s
             """, (request_id,))
@@ -3431,6 +4025,7 @@ class PostgresStore(BaseStore):
     ) -> list[dict]:
         """List approval requests with optional filters."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "approval_requests")
             query = "SELECT data FROM approval_requests WHERE 1=1"
             params = []
 
@@ -3452,10 +4047,69 @@ class PostgresStore(BaseStore):
                 results.append(json.loads(row["data"]))
             return results
 
+    # --- Roster publishing state machine ---
+
+    def get_roster_state(self, roster_id: str) -> str:
+        with self._cursor() as cur:
+            self._ensure_table(cur, "roster_states")
+            cur.execute("SELECT state FROM roster_states WHERE roster_id = %s", (roster_id,))
+            row = cur.fetchone()
+            return row["state"] if row else "draft"
+
+    def update_roster_state(self, roster_id: str, new_state: str, reason: str,
+                            actor_id: str = "system") -> None:
+        with self._cursor() as cur:
+            self._ensure_table(cur, "roster_states")
+            self._ensure_table(cur, "roster_state_history")
+            cur.execute("""
+                INSERT INTO roster_states (roster_id, state, updated_at)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (roster_id) DO UPDATE SET state = EXCLUDED.state,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (roster_id, new_state))
+            cur.execute("""
+                INSERT INTO roster_state_history (roster_id, state, reason, actor_id)
+                VALUES (%s, %s, %s, %s)
+            """, (roster_id, new_state, reason, actor_id))
+
+    def get_roster_state_history(self, roster_id: str) -> list[dict]:
+        with self._cursor() as cur:
+            self._ensure_table(cur, "roster_state_history")
+            cur.execute("""
+                SELECT roster_id, state, reason, actor_id, at FROM roster_state_history
+                WHERE roster_id = %s ORDER BY at ASC, id ASC
+            """, (roster_id,))
+            out = []
+            for row in cur.fetchall():
+                d = dict(row)
+                if hasattr(d.get("at"), "isoformat"):
+                    d["at"] = d["at"].isoformat()
+                out.append(d)
+            return out
+
+    def save_publication_event(self, event: dict) -> None:
+        with self._cursor() as cur:
+            self._ensure_table(cur, "publication_events")
+            cur.execute(
+                "INSERT INTO publication_events (venue_id, event) VALUES (%s, %s)",
+                (event.get("venue_id"), json.dumps(event, default=str)),
+            )
+
+    def get_publication_history(self, venue_id: str, limit: int = 50) -> list[dict]:
+        with self._cursor() as cur:
+            self._ensure_table(cur, "publication_events")
+            cur.execute("""
+                SELECT event FROM publication_events WHERE venue_id = %s
+                ORDER BY created_at DESC LIMIT %s
+            """, (venue_id, limit))
+            return [json.loads(row["event"]) if isinstance(row["event"], str) else row["event"]
+                    for row in cur.fetchall()]
+
     def save_roster_revision(self, revision: dict) -> None:
         """Save a roster revision with change tracking."""
         import uuid
         with self._cursor() as cur:
+            self._ensure_table(cur, "roster_revisions")
             cur.execute("""
                 INSERT INTO roster_revisions (
                     revision_id, roster_id, revision_number, changes, created_at, data
@@ -3472,6 +4126,7 @@ class PostgresStore(BaseStore):
     def list_roster_revisions(self, roster_id: str) -> list[dict]:
         """List all revisions for a roster."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "roster_revisions")
             cur.execute("""
                 SELECT data FROM roster_revisions
                 WHERE roster_id = %s
@@ -3593,11 +4248,99 @@ class PostgresStore(BaseStore):
                 results.append(record)
             return results
 
+    def save_direct_bookings(self, venue_id: str, bookings: list[dict]) -> int:
+        with self._cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS direct_bookings (
+                    id SERIAL PRIMARY KEY,
+                    venue_id TEXT,
+                    booking_date DATE,
+                    party_size NUMERIC DEFAULT 0,
+                    booking_time TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # Idempotent: skip exact-duplicate rows so re-uploading the same CSV
+            # doesn't double-count. Pre-read existing keys for this venue.
+            cur.execute(
+                "SELECT booking_date, party_size, booking_time FROM direct_bookings WHERE venue_id = %s",
+                (venue_id,),
+            )
+            existing = {
+                (str(r["booking_date"]), float(r["party_size"]) if r["party_size"] is not None else 0.0,
+                 r["booking_time"])
+                for r in cur.fetchall()
+            }
+            stored = 0
+            for b in bookings or []:
+                d = b.get("date")
+                if not d:
+                    continue
+                party = float(b.get("party_size") or b.get("covers") or 0)
+                time_v = b.get("time")
+                key = (str(d), party, time_v)
+                if key in existing:
+                    continue
+                cur.execute("""
+                    INSERT INTO direct_bookings (venue_id, booking_date, party_size, booking_time)
+                    VALUES (%s, %s, %s, %s)
+                """, (venue_id, d, party, time_v))
+                existing.add(key)
+                stored += 1
+            return stored
+
+    def get_direct_bookings(
+        self, venue_id: str, start: str, end: str
+    ) -> list[dict]:
+        with self._cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS direct_bookings (
+                    id SERIAL PRIMARY KEY,
+                    venue_id TEXT,
+                    booking_date DATE,
+                    party_size NUMERIC DEFAULT 0,
+                    booking_time TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                SELECT booking_date, party_size, booking_time FROM direct_bookings
+                WHERE venue_id = %s AND booking_date BETWEEN %s AND %s
+                ORDER BY booking_date ASC
+            """, (venue_id, start, end))
+            results = []
+            for row in cur.fetchall():
+                bd = row['booking_date']
+                results.append({
+                    "venue_id": venue_id,
+                    "date": bd.isoformat() if hasattr(bd, 'isoformat') else bd,
+                    "party_size": float(row['party_size']) if row['party_size'] is not None else 0,
+                    "time": row['booking_time'],
+                })
+            return results
+
+    def count_direct_bookings(self, venue_id: str) -> int:
+        with self._cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS direct_bookings (
+                    id SERIAL PRIMARY KEY,
+                    venue_id TEXT,
+                    booking_date DATE,
+                    party_size NUMERIC DEFAULT 0,
+                    booking_time TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("SELECT COUNT(*) AS c FROM direct_bookings WHERE venue_id = %s", (venue_id,))
+            row = cur.fetchone()
+            return int(row['c']) if row else 0
+
     # --- Shift Bidding Marketplace ---
 
     def save_open_shift(self, shift: dict) -> None:
         """Save or update an open shift."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "open_shifts")
             cur.execute("""
                 INSERT INTO open_shifts
                     (id, venue_id, date, start_time, end_time, role_required,
@@ -3628,6 +4371,7 @@ class PostgresStore(BaseStore):
     def get_open_shift(self, shift_id: str) -> Optional[dict]:
         """Get an open shift by ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "open_shifts")
             cur.execute("""
                 SELECT * FROM open_shifts WHERE id = %s
             """, (shift_id,))
@@ -3654,6 +4398,7 @@ class PostgresStore(BaseStore):
     def list_open_shifts(self, venue_id: str, status: str) -> list[dict]:
         """List open shifts for a venue filtered by status."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "open_shifts")
             cur.execute("""
                 SELECT * FROM open_shifts
                 WHERE venue_id = %s AND status = %s
@@ -3682,6 +4427,7 @@ class PostgresStore(BaseStore):
     def save_bid(self, bid: dict) -> None:
         """Save or update a bid."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "bids")
             cur.execute("""
                 INSERT INTO bids
                     (id, open_shift_id, employee_id, offered_rate, message,
@@ -3706,6 +4452,7 @@ class PostgresStore(BaseStore):
     def get_bid(self, bid_id: str) -> Optional[dict]:
         """Get a bid by ID."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "bids")
             cur.execute("""
                 SELECT * FROM bids WHERE id = %s
             """, (bid_id,))
@@ -3727,6 +4474,7 @@ class PostgresStore(BaseStore):
     def list_bids(self, open_shift_id: str) -> list[dict]:
         """List all bids for an open shift."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "bids")
             cur.execute("""
                 SELECT * FROM bids
                 WHERE open_shift_id = %s

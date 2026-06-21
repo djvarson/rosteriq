@@ -5,6 +5,8 @@ Uses the custom BaseStore database layer instead of SQLAlchemy.
 """
 from typing import Optional
 import asyncio
+import logging
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 
@@ -27,7 +29,27 @@ from rosteriq.schemas import (
     ApiKeyResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _bootstrap_owner_allowed() -> bool:
+    """
+    Whether the public /register endpoint may auto-grant the global ``owner``
+    role to the first user.
+
+    The ``owner`` role grants unrestricted cross-tenant access, so on a live
+    multi-tenant deployment the first internet visitor must NOT be able to
+    claim it (a land-grab). Bootstrap is therefore only permitted outside
+    production, or when an operator explicitly opts in with
+    ``ALLOW_BOOTSTRAP_OWNER=true`` (e.g. during a controlled first-run setup).
+    In production the initial owner should be seeded out-of-band (migration /
+    CLI / invite).
+    """
+    if os.environ.get("ALLOW_BOOTSTRAP_OWNER", "").lower() in ("1", "true", "yes"):
+        return True
+    return os.environ.get("ENVIRONMENT", "development") != "production"
 
 
 @router.post("/register", response_model=UserDetailResponse, status_code=status.HTTP_201_CREATED)
@@ -48,9 +70,26 @@ async def register(
             detail="User with this email already exists",
         )
 
-    # Determine role: first user is owner, rest are staff
+    # Determine role. The first registered user may bootstrap as the global
+    # owner, but only when bootstrap is allowed (see _bootstrap_owner_allowed)
+    # so a public signup on a fresh production deployment cannot seize
+    # cross-tenant owner access. Everyone else registers as staff.
     user_count = len(db.list_users())
-    role = "owner" if user_count == 0 else "staff"
+    if user_count == 0 and _bootstrap_owner_allowed():
+        role = "owner"
+        logger.warning(
+            "Bootstrapping first user %s as global owner (bootstrap allowed).",
+            request.email,
+        )
+    else:
+        role = "staff"
+        if user_count == 0:
+            logger.warning(
+                "First user %s registered as staff; owner bootstrap is disabled "
+                "in production. Seed the initial owner out-of-band or set "
+                "ALLOW_BOOTSTRAP_OWNER=true for a controlled first-run.",
+                request.email,
+            )
 
     # Create user
     try:

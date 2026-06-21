@@ -13,7 +13,7 @@ All monetary values in AUD.
 
 import asyncio
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import Optional, Dict, List, Any
 from enum import Enum
@@ -59,43 +59,96 @@ class XeroPayrollClient:
     XERO_API_BASE = "https://api.xero.com"
     PAYROLL_API_PATH = "/payroll.xro/2.0"
 
-    def __init__(self, credentials: XeroCredentials):
+    def __init__(
+        self,
+        credentials: XeroCredentials,
+        on_token_refresh=None,
+        earnings_rate_ids: Optional[Dict[str, str]] = None,
+    ):
         """
         Initialize Xero Payroll client.
 
         Args:
             credentials: XeroCredentials with OAuth tokens and tenant ID
+            on_token_refresh: optional callback(credentials) invoked after a
+                token refresh so the caller can persist the new tokens.
+            earnings_rate_ids: optional pre-configured map of earning-type NAME
+                (e.g. "Ordinary Hours") -> Xero EarningsRateID GUID for this
+                tenant. When provided, it overrides the live PayItems lookup.
+                EarningsRateIDs are tenant-specific GUIDs and MUST be real — Xero
+                rejects timesheet lines whose EarningTypeID is not a known GUID.
         """
         self.credentials = credentials
         self.tenant_id = credentials.tenant_id
         self._token_expires = credentials.token_expires
+        self._on_token_refresh = on_token_refresh
+        # NAME -> EarningsRateID(GUID) for this tenant. Seeded from config if
+        # given, else resolved once from the tenant's PayItems at push time.
+        self._earnings_rate_map: Dict[str, str] = dict(earnings_rate_ids or {})
 
     async def _ensure_valid_token(self):
-        """Refresh token if expired."""
-        if datetime.utcnow() >= self._token_expires:
+        """Refresh the access token if it has expired (or is about to)."""
+        # Refresh slightly early to avoid races right on the expiry boundary.
+        # token_expires is naive UTC (set via datetime.utcnow), so compare in UTC.
+        if datetime.utcnow() >= self._token_expires - timedelta(seconds=60):
             await self._refresh_token()
 
     async def _refresh_token(self):
-        """Refresh OAuth2 token from Xero."""
-        # In production, implement actual token refresh
-        # This is a placeholder that would call Xero token endpoint
-        logger.warning("Token refresh not yet implemented in payroll client")
+        """
+        Refresh the OAuth2 access token via the Xero identity endpoint,
+        reusing the canonical refresh implementation in xero_integration.
+        """
+        # Imported here to avoid a circular import at module load.
+        from rosteriq.xero_integration import XeroOAuth
+
+        oauth = XeroOAuth(
+            client_id=self.credentials.client_id,
+            client_secret=self.credentials.client_secret,
+            redirect_uri="",
+        )
+        # refresh_access_token mutates and returns the same credentials object,
+        # updating access_token / refresh_token / token_expires.
+        self.credentials = await oauth.refresh_access_token(self.credentials)
+        self._token_expires = self.credentials.token_expires
+        logger.info("Xero payroll access token refreshed")
+
+        if self._on_token_refresh:
+            try:
+                self._on_token_refresh(self.credentials)
+            except Exception as e:
+                logger.warning(f"Failed to persist refreshed Xero token: {e}")
 
     async def push_timesheets(
-        self, batch: PayrollBatch
+        self,
+        batch: PayrollBatch,
+        pushed_employees: Optional[List[str]] = None,
+        on_employee_pushed=None,
     ) -> XeroPayrollResult:
         """
         Push timesheet batch to Xero Payroll.
 
         Creates or updates timesheets for each employee in the pay period.
 
+        This is idempotent/resumable: employees whose timesheets have already
+        been pushed (their employee_id present in ``pushed_employees``) are
+        SKIPPED, so a retry of a partially-failed batch never re-pushes an
+        already-paid employee. After each successful per-employee push the
+        ``on_employee_pushed`` callback is invoked immediately so the caller
+        can checkpoint progress (survives a mid-batch failure AND a restart).
+
         Args:
             batch: PayrollBatch with prepared timesheet data
+            pushed_employees: employee_ids already successfully pushed for this
+                batch (from a prior attempt). These are skipped.
+            on_employee_pushed: optional callback(employee_id) invoked right
+                after each successful per-employee push so the caller can
+                persist the updated pushed-set.
 
         Returns:
             XeroPayrollResult with success status and pay run details
         """
         result = XeroPayrollResult()
+        already_pushed = set(pushed_employees or [])
 
         try:
             await self._ensure_valid_token()
@@ -104,6 +157,19 @@ class XeroPayrollClient:
             employees_data = await self._get_employees_from_xero()
             if not employees_data:
                 result["error_message"] = "Failed to fetch employees from Xero"
+                return result
+
+            # Resolve earning-type NAMES -> tenant EarningsRateID GUIDs. Xero
+            # rejects timesheet lines whose EarningTypeID is not a real GUID, so
+            # we must translate before pushing. Fail loud (push nothing) if the
+            # tenant has no usable earnings rates rather than send bad pay data.
+            await self._ensure_earnings_rate_map()
+            if not self._earnings_rate_map:
+                result["error_message"] = (
+                    "No Xero EarningsRateIDs available: could not resolve any "
+                    "earning types to tenant GUIDs. Configure earnings_rate_ids "
+                    "or ensure the tenant's PayItems expose earnings rates."
+                )
                 return result
 
             # Step 2: Create/get pay run
@@ -116,9 +182,17 @@ class XeroPayrollClient:
 
             result["pay_run_id"] = pay_run.get("PayRunID")
 
-            # Step 3: Push timesheet entries
-            success_count = 0
+            # Step 3: Push timesheet entries (skipping already-pushed employees)
+            retryable_error = None
             for emp_payroll in batch.employees:
+                # Idempotency: never re-push an employee already pushed.
+                if emp_payroll.employee_id in already_pushed:
+                    logger.info(
+                        f"Skipping already-pushed Xero employee "
+                        f"{emp_payroll.name} ({emp_payroll.employee_id})"
+                    )
+                    continue
+
                 # Find matching Xero employee
                 xero_emp = self._find_xero_employee(
                     emp_payroll, employees_data
@@ -130,29 +204,57 @@ class XeroPayrollClient:
                     continue
 
                 # Push timesheet for this employee
-                pushed = await self._push_employee_timesheet(
+                idempotency_ref = f"{batch.batch_id}:{emp_payroll.employee_id}"
+                pushed, retryable = await self._push_employee_timesheet(
                     emp_payroll,
                     xero_emp,
                     pay_run.get("PayRunID"),
+                    idempotency_ref,
                 )
                 if pushed:
-                    success_count += 1
+                    # Checkpoint immediately so a later failure does not lose
+                    # the record that this employee was already paid.
+                    already_pushed.add(emp_payroll.employee_id)
+                    if on_employee_pushed:
+                        try:
+                            on_employee_pushed(emp_payroll.employee_id)
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(
+                                f"Failed to checkpoint pushed employee "
+                                f"{emp_payroll.employee_id}: {e}"
+                            )
+                elif retryable:
+                    # e.g. a 429 — do NOT treat as a permanent failure; record
+                    # it so the batch can be retried later (employee not in the
+                    # pushed-set, so it will be attempted again, not skipped).
+                    retryable_error = (
+                        f"Xero rate limited (429) for {emp_payroll.name}; "
+                        f"retry the export"
+                    )
 
-            # Step 4: Update result
-            result["success"] = success_count == len(batch.employees)
-            result["employee_count"] = success_count
+            # Step 4: Update result. Success means every employee in the batch
+            # has now been pushed (either this attempt or a prior one).
+            all_done = all(
+                e.employee_id in already_pushed for e in batch.employees
+            )
+            result["success"] = all_done
+            result["employee_count"] = len(already_pushed)
             result["total_gross"] = str(batch.total_gross)
             result["exported_at"] = datetime.utcnow().isoformat()
             result["xero_reference"] = f"PR-{batch.batch_id[:8].upper()}"
 
-            if result["success"]:
+            if all_done:
                 logger.info(
-                    f"Xero Payroll export successful: {success_count} employees, "
+                    f"Xero Payroll export successful: "
+                    f"{len(already_pushed)} employees, "
                     f"pay run {pay_run.get('PayRunID')}"
                 )
             else:
+                if retryable_error and not result["error_message"]:
+                    result["error_message"] = retryable_error
                 logger.warning(
-                    f"Xero Payroll export partial: {success_count}/{len(batch.employees)}"
+                    f"Xero Payroll export partial: "
+                    f"{len(already_pushed)}/{len(batch.employees)}"
                 )
 
         except Exception as e:
@@ -166,8 +268,14 @@ class XeroPayrollClient:
         emp_payroll,
         xero_emp: Dict[str, Any],
         pay_run_id: str,
-    ) -> bool:
-        """Push timesheet for a single employee."""
+        idempotency_ref: Optional[str] = None,
+    ) -> tuple:
+        """Push timesheet for a single employee.
+
+        Returns a ``(pushed, retryable)`` tuple: ``pushed`` is True on success;
+        ``retryable`` is True for transient failures (e.g. HTTP 429) that must
+        NOT be treated as a permanent per-employee failure.
+        """
         try:
             # Build earnings data
             earnings = self._build_earnings_for_employee(emp_payroll)
@@ -178,13 +286,17 @@ class XeroPayrollClient:
                 f"/Employees/{xero_emp['EmployeeID']}/Timesheets"
             )
 
-            payload = {
-                "Timesheet": {
-                    "EmployeeID": xero_emp["EmployeeID"],
-                    "PayRunID": pay_run_id,
-                    "TimesheetLines": earnings,
-                }
+            timesheet = {
+                "EmployeeID": xero_emp["EmployeeID"],
+                "PayRunID": pay_run_id,
+                "TimesheetLines": earnings,
             }
+            # Idempotency reference derived from f"{batch_id}:{employee_id}" so
+            # the provider can de-dupe a re-submitted timesheet.
+            if idempotency_ref:
+                timesheet["Reference"] = idempotency_ref
+
+            payload = {"Timesheet": timesheet}
 
             async with httpx.AsyncClient() as client:
                 headers = {
@@ -192,6 +304,9 @@ class XeroPayrollClient:
                     "Xero-tenant-id": self.tenant_id,
                     "Content-Type": "application/json",
                 }
+                if idempotency_ref:
+                    # Xero honours an Idempotency-Key header to de-dupe writes.
+                    headers["Idempotency-Key"] = idempotency_ref
                 response = await client.post(
                     endpoint,
                     json=payload,
@@ -203,27 +318,112 @@ class XeroPayrollClient:
                     logger.info(
                         f"Xero timesheet pushed for {emp_payroll.name}"
                     )
-                    return True
+                    return True, False
+                elif response.status_code == 429:
+                    logger.warning(
+                        f"Xero timesheet push rate limited (429) for "
+                        f"{emp_payroll.name}; will retry"
+                    )
+                    return False, True
                 else:
                     logger.error(
                         f"Xero timesheet push failed: {response.text}"
                     )
-                    return False
+                    return False, False
 
         except Exception as e:
             logger.error(
                 f"Error pushing timesheet for {emp_payroll.name}: {str(e)}"
             )
-            return False
+            return False, False
+
+    async def _ensure_earnings_rate_map(self) -> None:
+        """
+        Populate self._earnings_rate_map (NAME -> EarningsRateID GUID) for the
+        tenant, unless it was already supplied via config. Resolved once per
+        client. Best-effort: leaves the map empty on failure so the caller can
+        fail loud rather than push name-strings as EarningTypeIDs.
+        """
+        if self._earnings_rate_map:
+            return
+        self._earnings_rate_map = await self._get_earnings_rates_from_xero()
+
+    async def _get_earnings_rates_from_xero(self) -> Dict[str, str]:
+        """
+        Fetch the tenant's earnings rates from Xero PayItems and return a
+        ``{Name: EarningsRateID}`` map. EarningsRateIDs are the GUIDs Xero
+        expects as ``EarningTypeID`` on timesheet lines.
+        """
+        try:
+            endpoint = f"{self.XERO_API_BASE}{self.PAYROLL_API_PATH}/PayItems"
+            async with httpx.AsyncClient() as client:
+                headers = {
+                    "Authorization": f"Bearer {self.credentials.access_token}",
+                    "Xero-tenant-id": self.tenant_id,
+                }
+                response = await client.get(endpoint, headers=headers, timeout=10.0)
+
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch Xero PayItems: {response.text}")
+                return {}
+
+            data = response.json()
+            # PayItems groups rates under EarningsRates (Name + EarningsRateID).
+            pay_items = data.get("PayItems") or data
+            earnings_rates = []
+            if isinstance(pay_items, dict):
+                earnings_rates = pay_items.get("EarningsRates", [])
+            elif isinstance(pay_items, list):
+                earnings_rates = pay_items
+
+            rate_map: Dict[str, str] = {}
+            for rate in earnings_rates:
+                name = rate.get("Name")
+                rate_id = rate.get("EarningsRateID")
+                if name and rate_id:
+                    rate_map[name] = rate_id
+            if not rate_map:
+                logger.error(
+                    "Xero PayItems returned no usable EarningsRates "
+                    "(Name + EarningsRateID)."
+                )
+            return rate_map
+        except Exception as e:
+            logger.error(f"Error fetching Xero earnings rates: {str(e)}")
+            return {}
+
+    def _resolve_earning_type_id(self, name: str) -> str:
+        """
+        Translate an earning-type NAME to the tenant's EarningsRateID GUID.
+
+        Fails loud if the name is not present in the tenant's earnings rates —
+        pushing the name string (or a placeholder) would create incorrect pay or
+        be rejected by Xero.
+        """
+        rate_id = self._earnings_rate_map.get(name)
+        if not rate_id:
+            raise ValueError(
+                f"No Xero EarningsRateID for earning type '{name}'. Create a "
+                f"matching earnings rate in the Xero tenant or map it via "
+                f"earnings_rate_ids. Available: {sorted(self._earnings_rate_map)}"
+            )
+        return rate_id
 
     def _build_earnings_for_employee(self, emp_payroll) -> List[Dict[str, Any]]:
-        """Build Xero timesheet lines from employee payroll data."""
+        """Build Xero timesheet lines from employee payroll data.
+
+        EarningTypeID is resolved to the tenant's real EarningsRateID GUID (see
+        _resolve_earning_type_id); a missing mapping raises rather than pushing a
+        name string Xero would reject.
+        """
         lines = []
 
         # Ordinary hours
         if emp_payroll.ordinary_hours > 0:
             lines.append({
-                "EarningTypeID": XeroEarningType.ordinary_hours.value,
+                "EarningTypeID": self._resolve_earning_type_id(
+                    XeroEarningType.ordinary_hours.value
+                ),
                 "NumberOfUnits": float(emp_payroll.ordinary_hours),
                 "UnitAmount": float(emp_payroll.ordinary_rate),
             })
@@ -232,7 +432,7 @@ class XeroPayrollClient:
         for penalty in emp_payroll.penalty_entries:
             earning_type = self._map_penalty_to_xero_type(penalty.penalty_type)
             lines.append({
-                "EarningTypeID": earning_type,
+                "EarningTypeID": self._resolve_earning_type_id(earning_type),
                 "NumberOfUnits": float(penalty.hours),
                 "UnitAmount": float(emp_payroll.ordinary_rate * penalty.multiplier),
             })
@@ -241,7 +441,7 @@ class XeroPayrollClient:
         if emp_payroll.overtime_hours > 0:
             overtime_type = XeroEarningType.overtime_1_5.value
             lines.append({
-                "EarningTypeID": overtime_type,
+                "EarningTypeID": self._resolve_earning_type_id(overtime_type),
                 "NumberOfUnits": float(emp_payroll.overtime_hours),
                 "UnitAmount": float(emp_payroll.ordinary_rate * Decimal("1.5")),
             })
@@ -256,7 +456,7 @@ class XeroPayrollClient:
         return lines
 
     def _map_penalty_to_xero_type(self, penalty_type) -> str:
-        """Map RosterIQ penalty type to Xero earning type."""
+        """Map RosterIQ penalty type to Xero earning type NAME."""
         mapping = {
             "saturday": XeroEarningType.saturday_loading.value,
             "sunday": XeroEarningType.sunday_loading.value,

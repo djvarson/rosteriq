@@ -208,9 +208,23 @@ class BillingService:
         self.stripe_key = os.environ.get("STRIPE_SECRET_KEY")
         self.stripe_webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
+        # Real Stripe Price IDs per tier, supplied via env (created once in the
+        # Stripe dashboard or API). Optional — when unset, change_tier creates a
+        # price on the fly from TIER_PRICES. Set these to pin to your dashboard
+        # prices: STRIPE_PRICE_STARTER / STRIPE_PRICE_PRO / STRIPE_PRICE_ENTERPRISE.
+        self.tier_price_ids = {
+            tier: os.environ.get(f"STRIPE_PRICE_{tier.value.upper()}")
+            for tier in SubscriptionTier
+        }
+        # Cache for prices created on the fly this process (tier -> price id).
+        self._created_price_ids: dict = {}
+
         if STRIPE_AVAILABLE and self.stripe_key:
             stripe.api_key = self.stripe_key
             logger.info("Stripe configured (key found)")
+            configured = [t.value for t, pid in self.tier_price_ids.items() if pid]
+            if configured:
+                logger.info(f"Stripe price IDs configured for tiers: {configured}")
         elif STRIPE_AVAILABLE:
             logger.warning("Stripe library loaded but STRIPE_SECRET_KEY not set — billing disabled")
         else:
@@ -897,11 +911,51 @@ class BillingService:
             logger.error(f"Failed to save webhook audit log: {e}")
 
     def _get_or_create_price(self, tier: SubscriptionTier, price_cents: int) -> str:
-        """Get or create a Stripe price for a tier. Returns price ID."""
-        # In production, you'd search Stripe for existing prices or create them
-        # For now, return a placeholder
-        # This would need proper integration with Stripe's product/price API
-        return f"price_{tier.value}"
+        """
+        Resolve the Stripe Price ID for a tier. Returns a REAL price ID.
+
+        Resolution order:
+          1. An env-configured price ID (STRIPE_PRICE_<TIER>) — pins to the price
+             you created in the Stripe dashboard.
+          2. A price created on the fly via the Stripe API from TIER_PRICES
+             (cached for this process), so tier changes work without manual setup.
+
+        Never returns a fabricated ``price_<tier>`` string — passing that to
+        Stripe.Subscription.modify fails with an opaque "No such price" error, so
+        we either use a real configured/created ID or raise a clear error.
+        """
+        configured = self.tier_price_ids.get(tier)
+        if configured:
+            return configured
+
+        if tier in self._created_price_ids:
+            return self._created_price_ids[tier]
+
+        if not self.is_enabled():
+            raise RuntimeError(
+                f"Cannot resolve a Stripe price for tier '{tier.value}': Stripe is "
+                f"not configured. Set STRIPE_PRICE_{tier.value.upper()} to a real "
+                f"price ID, or configure STRIPE_SECRET_KEY so one can be created."
+            )
+
+        try:
+            price = stripe.Price.create(
+                currency="aud",
+                unit_amount=price_cents,
+                recurring={"interval": "month", "interval_count": 1},
+                product_data={"name": f"RosterIQ {tier.value.capitalize()}"},
+                metadata={"tier": tier.value},
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to create a Stripe price for tier '{tier.value}': {e}. "
+                f"Set STRIPE_PRICE_{tier.value.upper()} to a pre-created price ID "
+                f"to avoid on-the-fly creation."
+            ) from e
+
+        self._created_price_ids[tier] = price.id
+        logger.info(f"Created Stripe price {price.id} for tier '{tier.value}'")
+        return price.id
 
 
 # ============================================================================

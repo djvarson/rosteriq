@@ -6,8 +6,10 @@ Maps Pydantic models to GraphQL types with field resolution.
 
 from datetime import date, datetime, time
 from decimal import Decimal
+from enum import Enum
 from typing import Optional, List
 import strawberry
+from strawberry.scalars import JSON
 
 from rosteriq.models import (
     Employee, Shift, Roster, VenueConfig, DemandForecast,
@@ -29,7 +31,7 @@ from rosteriq.models import (
 # ============================================================================
 
 @strawberry.enum
-class EmploymentTypeEnum(str):
+class EmploymentTypeEnum(str, Enum):
     """Employment type classification."""
     FULL_TIME = "full_time"
     PART_TIME = "part_time"
@@ -37,7 +39,7 @@ class EmploymentTypeEnum(str):
 
 
 @strawberry.enum
-class ShiftStatusEnum(str):
+class ShiftStatusEnum(str, Enum):
     """Status of a roster shift."""
     SCHEDULED = "scheduled"
     CONFIRMED = "confirmed"
@@ -48,7 +50,7 @@ class ShiftStatusEnum(str):
 
 
 @strawberry.enum
-class AwardLevelEnum(str):
+class AwardLevelEnum(str, Enum):
     """Australian hospitality award levels."""
     LEVEL_1 = "level_1"
     LEVEL_2 = "level_2"
@@ -59,7 +61,7 @@ class AwardLevelEnum(str):
 
 
 @strawberry.enum
-class StateEnum(str):
+class StateEnum(str, Enum):
     """Australian states and territories."""
     NSW = "nsw"
     VIC = "vic"
@@ -72,7 +74,7 @@ class StateEnum(str):
 
 
 @strawberry.enum
-class AlertTypeEnum(str):
+class AlertTypeEnum(str, Enum):
     """Types of roster alerts."""
     OVERSTAFFED = "overstaffed"
     UNDERSTAFFED = "understaffed"
@@ -82,7 +84,7 @@ class AlertTypeEnum(str):
 
 
 @strawberry.enum
-class SignalTypeEnum(str):
+class SignalTypeEnum(str, Enum):
     """Signal types for variance engine."""
     WEATHER = "weather"
     EVENTS = "events"
@@ -112,7 +114,7 @@ class VenueType:
     tanda_org_id: str
     state: StateEnum
     timezone: str
-    min_staff: strawberry.field(description="Min staff by role")
+    min_staff: JSON = strawberry.field(description="Min staff by role")
     max_labour_pct: float
     pos_system: Optional[str]
     created_at: str  # ISO format datetime

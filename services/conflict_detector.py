@@ -208,9 +208,16 @@ class ConflictDetector:
                 suggestion=f"Adjust shift times to match availability or confirm with employee"
             ))
 
+    # Generic roles that any hospitality employee can fill — not a specific skill.
+    _GENERIC_ROLES = {"general", "any", "staff", "floor_general"}
+
     def _check_skill_mismatch(self, shift: Shift, employee: Employee) -> None:
         """Check if employee has the required skill for the shift role."""
         if not employee.skills or not shift.role:
+            return
+
+        # A generic/catch-all role isn't a specialised skill, so don't flag it.
+        if shift.role.lower() in self._GENERIC_ROLES:
             return
 
         if shift.role not in employee.skills:
@@ -277,24 +284,32 @@ class ConflictDetector:
                 suggestion=f"Add {required_break - shift.break_minutes}min break"
             ))
 
+    @staticmethod
+    def _shift_end_dt(s: Shift) -> datetime:
+        """Actual end datetime, accounting for crossing midnight (overnight shifts)."""
+        end_dt = datetime.combine(s.date, s.end_time)
+        if s.end_time <= s.start_time:
+            end_dt += timedelta(days=1)
+        return end_dt
+
     def _check_fatigue_risk(self, shift: Shift, employee_shifts: List[Shift]) -> None:
         """Check if employee has at least 10 hours rest between consecutive shifts."""
-        previous_shifts = [s for s in employee_shifts if (s.date < shift.date) or (s.date == shift.date and s.end_time < shift.start_time)]
+        this_start = datetime.combine(shift.date, shift.start_time)
+        # A "previous" shift is any OTHER shift that actually ends at or before this
+        # one starts — using real datetimes so an overnight previous shift's
+        # next-day end (e.g. Mon 22:00->Tue 06:00) is compared correctly.
+        previous_shifts = [
+            s for s in employee_shifts
+            if s.id != shift.id and self._shift_end_dt(s) <= this_start
+        ]
 
         if not previous_shifts:
             return
 
-        previous_shift = max(previous_shifts, key=lambda s: (s.date, s.end_time))
+        previous_shift = max(previous_shifts, key=self._shift_end_dt)
+        hours_rest = (this_start - self._shift_end_dt(previous_shift)).total_seconds() / 3600
 
-        if previous_shift.date == shift.date:
-            hours_rest = (shift.start_time.hour + shift.start_time.minute / 60) - (
-                previous_shift.end_time.hour + previous_shift.end_time.minute / 60
-            )
-        else:
-            hours_rest = 24 - (previous_shift.end_time.hour + previous_shift.end_time.minute / 60)
-            hours_rest += shift.start_time.hour + shift.start_time.minute / 60
-
-        if hours_rest < MINIMUM_HOURS_BETWEEN_SHIFTS:
+        if 0 <= hours_rest < MINIMUM_HOURS_BETWEEN_SHIFTS:
             self.conflicts.append(RosterConflict(
                 conflict_type=ConflictType.FATIGUE_RISK,
                 severity=ConflictSeverity.WARNING,
@@ -342,6 +357,12 @@ class ConflictDetector:
 
         sorted_shifts = sorted(shifts, key=lambda s: s.date)
 
+        # Respect the employee's own consecutive-days limit when set; fall back
+        # to the award-wide maximum otherwise. (Previously this always compared
+        # against the global MAX_CONSECUTIVE_DAYS, so a per-employee limit
+        # stricter than the award cap was never enforced.)
+        limit = getattr(employee, "consecutive_days_limit", None) or MAX_CONSECUTIVE_DAYS
+
         max_consecutive = 1
         current_consecutive = 1
         current_date = sorted_shifts[0].date
@@ -355,17 +376,17 @@ class ConflictDetector:
                 current_consecutive = 1
                 current_date = shift.date
 
-        if max_consecutive > MAX_CONSECUTIVE_DAYS:
+        if max_consecutive > limit:
             self.conflicts.append(RosterConflict(
                 conflict_type=ConflictType.CONSECUTIVE_DAYS_VIOLATION,
                 severity=ConflictSeverity.WARNING,
                 message=(
                     f"Employee {employee.id} scheduled {max_consecutive} consecutive days, "
-                    f"exceeds limit of {MAX_CONSECUTIVE_DAYS}"
+                    f"exceeds limit of {limit}"
                 ),
                 employee_ids=[employee.id],
                 shift_ids=[s.id for s in sorted_shifts],
-                suggestion=f"Provide at least {max_consecutive - MAX_CONSECUTIVE_DAYS} days off"
+                suggestion=f"Provide at least {max_consecutive - limit} days off"
             ))
 
     def _check_staffing_levels(
@@ -395,7 +416,9 @@ class ConflictDetector:
                     current_date = current_date + timedelta(days=1)
 
         for (check_date, hour), staff_ids in staffing_by_hour.items():
-            total_min = min(venue.min_staff.values()) if venue.min_staff else 0
+            # Total minimum bodies = the SUM of each role's minimum (the venue
+            # needs e.g. bar>=1 AND floor>=2 = 3 total), not min() of one role.
+            total_min = sum(venue.min_staff.values()) if venue.min_staff else 0
 
             if total_min > 0 and len(staff_ids) < total_min:
                 self.conflicts.append(RosterConflict(
@@ -442,6 +465,15 @@ class ConflictDetector:
             return time(hour=hours, minute=minutes)
         except (ValueError, AttributeError):
             return None
+
+
+def detect_conflicts(
+    roster: Roster,
+    venue: VenueConfig,
+    employees: List[Employee],
+) -> List[RosterConflict]:
+    """Module-level convenience wrapper around ConflictDetector.detect_conflicts."""
+    return ConflictDetector().detect_conflicts(roster, venue, employees)
 
 
 class ConflictSummary:

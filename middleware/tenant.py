@@ -3,25 +3,57 @@ Tenant context middleware and dependencies for multi-tenancy data isolation.
 
 Ensures all requests carry tenant context (venue_ids) extracted from JWT tokens.
 Provides dependency injection for tenant context and venue access validation.
-Uses thread-local storage for accessing tenant context in DB methods.
+Uses a contextvars.ContextVar so the tenant context is correct under async
+concurrency (a thread-local is unsafe here: FastAPI may run awaited code on a
+shared thread pool, which could leak one request's tenant context into
+another). A ContextVar is isolated per-task and per-thread.
 """
 
-import threading
 import logging
+from contextvars import ContextVar
 from typing import Optional, List
 from functools import wraps
 
 from fastapi import Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from rosteriq.database import get_db
 from rosteriq.middleware.auth import UserContext, get_current_user, SKIP_AUTH_PATHS, WEBHOOK_PATHS
 
 
 logger = logging.getLogger(__name__)
 
 
-# Thread-local storage for tenant context
-_tenant_context: threading.local = threading.local()
+# Per-request tenant context. ContextVar is async-task isolated, so concurrent
+# requests cannot observe each other's context. Default None = no context set.
+_tenant_context_var: ContextVar[Optional["TenantContext"]] = ContextVar(
+    "tenant_context", default=None
+)
+
+
+class _TenantContextProxy:
+    """
+    Backward-compatible accessor over the ContextVar.
+
+    Existing code and tests use ``_tenant_context.value = ...`` / read
+    ``_tenant_context.value``. This proxy preserves that surface while the
+    underlying storage is an async-safe ContextVar.
+    """
+
+    @property
+    def value(self) -> Optional["TenantContext"]:
+        return _tenant_context_var.get()
+
+    @value.setter
+    def value(self, ctx: Optional["TenantContext"]) -> None:
+        _tenant_context_var.set(ctx)
+
+    def clear(self) -> None:
+        _tenant_context_var.set(None)
+
+
+_tenant_context = _TenantContextProxy()
 
 
 class TenantContext:
@@ -71,6 +103,7 @@ EXEMPT_PATHS = {
     "/admin",
     "/staff",
     "/login",
+    "/connections",
     "/sw.js",
     "/docs/api",
     "/favicon.ico",
@@ -85,7 +118,7 @@ WEBHOOK_EXEMPT = {"/api/webhooks", "/api/events"}
 class TenantMiddleware(BaseHTTPMiddleware):
     """
     FastAPI middleware that extracts and stores tenant context from authenticated user.
-    Sets thread-local TenantContext for DB layer access.
+    Sets the per-request TenantContext (async-safe ContextVar) for DB layer access.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -94,41 +127,100 @@ class TenantMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             return response
 
+        # Token lets us reset the ContextVar to its prior state for THIS task
+        # on the way out, rather than blindly clearing shared state.
+        ctx_token = None
         try:
-            # Try to get current user from request
+            # Try to get current user from request. Pass a real db store —
+            # called outside FastAPI dependency injection, the Depends default
+            # would otherwise be unresolved.
             user = None
             try:
-                user = await get_current_user(request)
-            except HTTPException:
+                user = await get_current_user(request, get_db())
+            except HTTPException as exc:
                 # Some endpoints allow webhooks or API keys
                 if self._is_webhook_exempt(request.url.path):
                     response = await call_next(request)
                     return response
-                raise
+                # HTTPException raised inside middleware is NOT handled by
+                # FastAPI's exception handlers (those only cover the routing
+                # layer), so it would surface as a 500. Convert it to the
+                # intended status code (e.g. 401) here.
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"detail": exc.detail},
+                    headers=getattr(exc, "headers", None),
+                )
 
             if user:
-                # Store tenant context in thread-local storage
-                _tenant_context.value = TenantContext(
-                    user_id=user.user_id,
-                    venue_ids=user.venue_ids,
-                    is_owner=user.is_owner,
+                # Store tenant context in the async-safe ContextVar.
+                ctx_token = _tenant_context_var.set(
+                    TenantContext(
+                        user_id=user.user_id,
+                        venue_ids=user.venue_ids,
+                        is_owner=user.is_owner,
+                    )
                 )
+
+                # Enforce venue ownership for path-scoped venue endpoints (covers all
+                # current + future /dashboard/{venue_id}/... routes in one place).
+                denied = self._enforce_path_venue_scope(request.url.path, user)
+                if denied is not None:
+                    return denied
 
             response = await call_next(request)
             return response
 
+        except HTTPException as exc:
+            # Any other HTTPException bubbling up through middleware also needs
+            # to be converted to a proper response rather than a 500.
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+                headers=getattr(exc, "headers", None),
+            )
         except Exception as e:
             logger.error(f"TenantMiddleware error: {e}", exc_info=True)
             raise
         finally:
-            # Clean up thread-local storage
-            if hasattr(_tenant_context, 'value'):
-                delattr(_tenant_context, 'value')
+            # Reset the ContextVar for this task so the context never leaks.
+            if ctx_token is not None:
+                _tenant_context_var.reset(ctx_token)
+
+    @staticmethod
+    def _enforce_path_venue_scope(path: str, user) -> Optional[JSONResponse]:
+        """
+        For path-scoped venue endpoints, deny if the user can't access that venue.
+        Returns a 403 JSONResponse to short-circuit, or None to proceed.
+
+        Owners (platform admins) pass. Currently guards the /dashboard/{venue_id}/...
+        family (cross-venue analytics); other venue-scoped routes enforce explicitly
+        via enforce_venue_access(). Path-based so it covers future dashboard routes too.
+        """
+        if user.is_owner:
+            return None
+        segments = [s for s in path.split("/") if s]
+        venue_id = None
+        if len(segments) >= 2 and segments[0] == "dashboard":
+            venue_id = segments[1]
+        if venue_id and venue_id not in user.venue_ids:
+            audit_cross_tenant_attempt(venue_id, "dashboard", "access")
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "You do not have access to this venue"},
+            )
+        return None
 
     @staticmethod
     def _is_exempt(path: str) -> bool:
         """Check if path is exempt from tenant validation."""
         if path in EXEMPT_PATHS:
+            return True
+        # OAuth callbacks are hit by the provider's browser redirect with no JWT —
+        # they identify the venue from the signed `state` param, not app auth. Any
+        # connector's /callback must be public or its OAuth connect flow 401s. This
+        # covers existing (deputy/xero/myob/humanforce/tanda) and future connectors.
+        if path.endswith("/callback"):
             return True
         return any(path.startswith(p) for p in EXEMPT_PREFIXES)
 
@@ -148,12 +240,13 @@ def get_tenant_context() -> TenantContext:
         async def list_venues(tenant: TenantContext = Depends(get_tenant_context)):
             ...
     """
-    if not hasattr(_tenant_context, 'value') or _tenant_context.value is None:
+    ctx = _tenant_context_var.get()
+    if ctx is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Tenant context not found. Authentication required.",
         )
-    return _tenant_context.value
+    return ctx
 
 
 def get_tenant_context_optional() -> Optional[TenantContext]:
@@ -161,7 +254,36 @@ def get_tenant_context_optional() -> Optional[TenantContext]:
     Optional version of get_tenant_context.
     Returns TenantContext if available, None otherwise.
     """
-    return getattr(_tenant_context, 'value', None)
+    return _tenant_context_var.get()
+
+
+def enforce_venue_access(venue_id: Optional[str]) -> None:
+    """
+    Enforce that the CURRENT request's user may act on ``venue_id``. Call this at
+    the top of any venue-scoped route handler — it reads the tenant context the
+    middleware already set (no route-signature change needed).
+
+    Owners (platform admins, role="owner") pass; managers/staff are limited to
+    their venue_ids. Raises HTTP 403 on denial. A None/empty venue_id is a no-op
+    (the handler validates presence itself). If there is no tenant context on a
+    venue-scoped endpoint, access is denied (fail closed).
+    """
+    if not venue_id:
+        return
+    tenant = get_tenant_context_optional()
+    if tenant is None:
+        # No tenant context = not inside an authenticated HTTP request (direct unit
+        # call, background task, scheduler). Every venue-scoped HTTP route reaches
+        # this only AFTER TenantMiddleware sets the context, so a None here is never
+        # a real request — no-op (consistent with TenantScopedDB._check_venue_access).
+        return
+    if tenant.has_access_to(venue_id):
+        return
+    audit_cross_tenant_attempt(venue_id, "venue_scoped", "access")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have access to this venue",
+    )
 
 
 def require_venue_access(venue_id: str):

@@ -26,6 +26,7 @@ from rosteriq.data_feeds.reservations import (
     ResDiaryAdapter,
     OpenTableAdapter,
     BookitLiveAdapter,
+    SevenRoomsAdapter,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/reservations", tags=["reservations"])
 
 # Valid reservation providers
-VALID_PROVIDERS = {"nowbookit", "resdiary", "opentable", "bookitlive"}
+#
+# Note: SevenRooms is an API-based provider (api_key install model) and is wired
+# below. DirectBookingImporter ("direct_bookings") is intentionally NOT exposed
+# here — it is not an API/OAuth provider but a webhook/CSV ingestion sink that
+# reads from an in-memory per-instance store. Since these routes build a fresh
+# adapter per request, its fetch_signals would always return [] for a stateless
+# install/sync flow. It needs a separate ingestion endpoint, not this factory.
+VALID_PROVIDERS = {"nowbookit", "resdiary", "opentable", "bookitlive", "sevenrooms"}
 
 # Key prefix for plugin_installs table
 RESERVATION_PREFIX_MAP = {
@@ -41,6 +49,7 @@ RESERVATION_PREFIX_MAP = {
     "resdiary": "resdiary_reservations_",
     "opentable": "opentable_reservations_",
     "bookitlive": "bookitlive_reservations_",
+    "sevenrooms": "sevenrooms_reservations_",
 }
 
 # Human-readable provider names
@@ -49,6 +58,7 @@ PROVIDER_DISPLAY_NAMES = {
     "resdiary": "ResDiary",
     "opentable": "OpenTable",
     "bookitlive": "BookitLive",
+    "sevenrooms": "SevenRooms",
 }
 
 
@@ -117,6 +127,7 @@ def _build_adapter(provider: str, api_key: str):
         "resdiary": ResDiaryAdapter,
         "opentable": OpenTableAdapter,
         "bookitlive": BookitLiveAdapter,
+        "sevenrooms": SevenRoomsAdapter,
     }
     adapter_cls = adapter_map[provider]
     return adapter_cls(api_key=api_key)
@@ -288,7 +299,7 @@ async def sync_reservations(
     adapter = _build_adapter(provider, api_key)
     try:
         from rosteriq.data_feeds.base import Location
-        location = Location(lat=0, lon=0)  # Location not needed for API-based fetches
+        location = Location(latitude=0, longitude=0)  # Location not needed for API-based fetches
 
         signals = await adapter.fetch_signals(
             location=location,
@@ -374,7 +385,7 @@ async def get_today(
     adapter = _build_adapter(provider, api_key)
     try:
         from rosteriq.data_feeds.base import Location
-        location = Location(lat=0, lon=0)
+        location = Location(latitude=0, longitude=0)
 
         signals = await adapter.fetch_signals(
             location=location,
@@ -459,7 +470,7 @@ async def get_forecast(
     adapter = _build_adapter(provider, api_key)
     try:
         from rosteriq.data_feeds.base import Location
-        location = Location(lat=0, lon=0)
+        location = Location(latitude=0, longitude=0)
 
         signals = await adapter.fetch_signals(
             location=location,

@@ -11,7 +11,7 @@ import logging
 from datetime import date, datetime
 from typing import Optional, List, Dict
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Path, Depends
 from pydantic import BaseModel
 
 from rosteriq.database import get_db, BaseStore
@@ -98,6 +98,13 @@ class MultiVenueComparisonResponse(BaseModel):
     venues_compared: int
     comparisons: List[BenchmarkComparisonResponse]
     summary: Dict
+
+
+class MultiVenueComparisonRequest(BaseModel):
+    """Request body for comparing multiple venues against industry benchmarks."""
+    venue_configs: List[Dict[str, str]]  # [{venue_id, venue_type}, ...]
+    start_date: Optional[str] = None  # Period start (YYYY-MM-DD)
+    end_date: Optional[str] = None    # Period end (YYYY-MM-DD)
 
 
 # ============================================================================
@@ -288,7 +295,7 @@ async def get_venue_recommendations(
 
 @router.get("/benchmarks/{venue_type}")
 async def get_industry_benchmarks(
-    venue_type: str = Query(
+    venue_type: str = Path(
         ...,
         description="Venue type (cafe, restaurant_casual, restaurant_fine_dining, "
                    "bar_pub, hotel, fast_food_qsr, catering)",
@@ -327,12 +334,7 @@ async def get_industry_benchmarks(
 
 @router.post("/benchmarks/compare-venues")
 async def compare_multiple_venues(
-    venue_configs: List[Dict[str, str]] = Query(
-        ...,
-        description="List of {venue_id, venue_type} dicts",
-    ),
-    start_date: Optional[str] = Query(None, description="Period start (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="Period end (YYYY-MM-DD)"),
+    request: MultiVenueComparisonRequest,
     service: IndustryBenchmarkService = Depends(get_industry_benchmark_service),
 ) -> MultiVenueComparisonResponse:
     """
@@ -357,7 +359,7 @@ async def compare_multiple_venues(
     """
     try:
         comparisons = service.compare_venues(
-            venue_configs, start_date, end_date
+            request.venue_configs, request.start_date, request.end_date
         )
 
         if not comparisons:

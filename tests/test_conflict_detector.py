@@ -399,10 +399,12 @@ def test_clean_roster_no_conflicts():
     venue = create_test_venue()
     detector = ConflictDetector()
 
-    # Properly scheduled shifts
+    # Properly scheduled shifts. 7h shifts only require a 30min unpaid break
+    # (shifts over 7h require 50min total per the award), so a 30min break
+    # here is fully compliant.
     shifts = [
-        create_test_shift("s1", "emp1", week_start, 9, 17, break_minutes=30),
-        create_test_shift("s2", "emp1", week_start + timedelta(days=2), 10, 18, break_minutes=30),
+        create_test_shift("s1", "emp1", week_start, 9, 16, break_minutes=30),
+        create_test_shift("s2", "emp1", week_start + timedelta(days=2), 10, 17, break_minutes=30),
     ]
 
     roster = create_test_roster(week_start, venue.id, shifts)

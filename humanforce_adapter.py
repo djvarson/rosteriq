@@ -237,11 +237,17 @@ class HumanForceAdapter:
     MAX_RETRIES = 3
     RETRY_BACKOFF = 1.0  # seconds, doubles each retry
 
-    def __init__(self, credentials: HumanForceCredentials, state: State = State.vic):
+    def __init__(
+        self,
+        credentials: HumanForceCredentials,
+        state: State = State.vic,
+        on_token_refresh=None,
+    ):
         self.credentials = credentials
         self.state = state
         self._client: Optional[httpx.AsyncClient] = None
         self._rate_limiter = HumanForceRateLimiter()
+        self._on_token_refresh = on_token_refresh  # callback(credentials) to persist new tokens
 
     async def __aenter__(self):
         self._client = httpx.AsyncClient(
@@ -369,8 +375,17 @@ class HumanForceAdapter:
         )
 
         # Update client headers
-        self._client.headers["Authorization"] = f"Bearer {self.credentials.access_token}"
+        if self._client is not None:
+            self._client.headers["Authorization"] = f"Bearer {self.credentials.access_token}"
         logger.info("HumanForce access token refreshed successfully")
+
+        # Persist refreshed tokens if a callback was provided, so the next
+        # request reuses the new token instead of the expired stored one.
+        if self._on_token_refresh:
+            try:
+                self._on_token_refresh(self.credentials)
+            except Exception as e:
+                logger.warning(f"Failed to persist refreshed HumanForce token: {e}")
 
     # -- Employee Methods -----------------------------------------------------
 

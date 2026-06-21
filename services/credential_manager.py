@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 API_KEY_PREFIX = "riq_"
+WEBHOOK_SECRET_PREFIX = "rq_"
 MAX_KEYS_PER_USER = 5
 WEBHOOK_GRACE_PERIOD_HOURS = 24
 SUSPICIOUS_PATTERN_THRESHOLD = 3  # Auto-revoke after 3 flags in 24 hours
@@ -49,8 +50,8 @@ class CredentialManager:
         Returns:
             (new_secret, old_secret, grace_expires_at)
         """
-        # Generate new secret
-        new_secret = secrets.token_urlsafe(32)
+        # Generate new secret (prefixed so it is recognizable as a webhook secret)
+        new_secret = f"{WEBHOOK_SECRET_PREFIX}{secrets.token_urlsafe(32)}"
         new_secret_hash = hashlib.sha256(new_secret.encode()).hexdigest()
 
         now = datetime.utcnow()
@@ -440,7 +441,13 @@ class CredentialManager:
             created_at = datetime.fromisoformat(created_at)
 
         lifetime_minutes = (now - created_at).total_seconds() / 60
-        if lifetime_minutes > 0:
+        # Only evaluate the sustained-rate rule once the key has been alive long
+        # enough for the average to be meaningful. Dividing a small request count
+        # by a near-zero lifetime (e.g. several calls within the first second of a
+        # freshly created key) yields an astronomically high RPM and would cause a
+        # false-positive auto-revocation. Require at least one full minute of
+        # history before the rate is considered representative.
+        if lifetime_minutes >= 1.0:
             rpm = usage_count / lifetime_minutes
             if rpm > REQUESTS_PER_MINUTE_LIMIT:
                 logger.warning(

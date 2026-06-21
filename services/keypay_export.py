@@ -91,20 +91,36 @@ class KeyPayClient:
         }
 
     async def push_timesheets(
-        self, batch: PayrollBatch
+        self,
+        batch: PayrollBatch,
+        pushed_employees: Optional[List[str]] = None,
+        on_employee_pushed=None,
     ) -> KeyPayResult:
         """
         Push timesheet batch to KeyPay.
 
         Creates timesheet entries for each employee in the pay period.
 
+        This is idempotent/resumable: employees whose timesheets have already
+        been pushed (their employee_id present in ``pushed_employees``) are
+        SKIPPED, so a retry of a partially-failed batch never re-pushes an
+        already-paid employee. After each successful per-employee push the
+        ``on_employee_pushed`` callback is invoked immediately so the caller
+        can checkpoint progress (survives a mid-batch failure AND a restart).
+
         Args:
             batch: PayrollBatch with prepared timesheet data
+            pushed_employees: employee_ids already successfully pushed for this
+                batch (from a prior attempt). These are skipped.
+            on_employee_pushed: optional callback(employee_id) invoked right
+                after each successful per-employee push so the caller can
+                persist the updated pushed-set.
 
         Returns:
             KeyPayResult with success status and timesheet IDs
         """
         result = KeyPayResult()
+        already_pushed = set(pushed_employees or [])
 
         try:
             # Step 1: Fetch KeyPay employees for matching
@@ -113,11 +129,19 @@ class KeyPayClient:
                 result["error_message"] = "Failed to fetch employees from KeyPay"
                 return result
 
-            # Step 2: Push timesheet for each employee
-            success_count = 0
+            # Step 2: Push timesheet for each employee (skipping already-pushed)
             timesheet_ids = []
+            retryable_error = None
 
             for emp_payroll in batch.employees:
+                # Idempotency: never re-push an employee already pushed.
+                if emp_payroll.employee_id in already_pushed:
+                    logger.info(
+                        f"Skipping already-pushed KeyPay employee "
+                        f"{emp_payroll.name} ({emp_payroll.employee_id})"
+                    )
+                    continue
+
                 # Find matching KeyPay employee
                 keypay_emp = self._find_keypay_employee(
                     emp_payroll, employees_data
@@ -129,31 +153,56 @@ class KeyPayClient:
                     continue
 
                 # Push timesheet for this employee
-                timesheet_id = await self._push_employee_timesheet(
+                idempotency_ref = f"{batch.batch_id}:{emp_payroll.employee_id}"
+                timesheet_id, retryable = await self._push_employee_timesheet(
                     emp_payroll,
                     keypay_emp,
                     batch.period_start,
                     batch.period_end,
+                    idempotency_ref,
                 )
                 if timesheet_id:
-                    success_count += 1
                     timesheet_ids.append(timesheet_id)
+                    # Checkpoint immediately so a later failure does not lose
+                    # the record that this employee was already paid.
+                    already_pushed.add(emp_payroll.employee_id)
+                    if on_employee_pushed:
+                        try:
+                            on_employee_pushed(emp_payroll.employee_id)
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(
+                                f"Failed to checkpoint pushed employee "
+                                f"{emp_payroll.employee_id}: {e}"
+                            )
+                elif retryable:
+                    # e.g. a 429 — do NOT treat as a permanent failure.
+                    retryable_error = (
+                        f"KeyPay rate limited (429) for {emp_payroll.name}; "
+                        f"retry the export"
+                    )
 
-            # Step 3: Update result
-            result["success"] = success_count == len(batch.employees)
+            # Step 3: Update result. Success means every employee in the batch
+            # has now been pushed (either this attempt or a prior one).
+            all_done = all(
+                e.employee_id in already_pushed for e in batch.employees
+            )
+            result["success"] = all_done
             result["timesheet_ids"] = timesheet_ids
-            result["employee_count"] = success_count
+            result["employee_count"] = len(already_pushed)
             result["total_gross"] = str(batch.total_gross)
             result["exported_at"] = datetime.utcnow().isoformat()
             result["keypay_reference"] = f"KP-{batch.batch_id[:8].upper()}"
 
-            if result["success"]:
+            if all_done:
                 logger.info(
-                    f"KeyPay export successful: {success_count} timesheets"
+                    f"KeyPay export successful: {len(already_pushed)} employees"
                 )
             else:
+                if retryable_error and not result["error_message"]:
+                    result["error_message"] = retryable_error
                 logger.warning(
-                    f"KeyPay export partial: {success_count}/{len(batch.employees)}"
+                    f"KeyPay export partial: "
+                    f"{len(already_pushed)}/{len(batch.employees)}"
                 )
 
         except Exception as e:
@@ -168,8 +217,14 @@ class KeyPayClient:
         keypay_emp: Dict[str, Any],
         period_start: date,
         period_end: date,
-    ) -> Optional[str]:
-        """Push timesheet for a single employee to KeyPay."""
+        idempotency_ref: Optional[str] = None,
+    ) -> tuple:
+        """Push timesheet for a single employee to KeyPay.
+
+        Returns a ``(timesheet_id, retryable)`` tuple: ``timesheet_id`` is the
+        new id on success (else None); ``retryable`` is True for transient
+        failures (e.g. HTTP 429) that must NOT be treated as permanent.
+        """
         try:
             await self._rate_limit()
 
@@ -186,12 +241,19 @@ class KeyPayClient:
                 "endDate": period_end.isoformat(),
                 "payCategories": pay_categories,
             }
+            # Idempotency reference derived from f"{batch_id}:{employee_id}" so
+            # KeyPay can de-dupe a re-submitted timesheet.
+            if idempotency_ref:
+                payload["externalReference"] = idempotency_ref
 
             async with httpx.AsyncClient() as client:
+                headers = self._get_headers()
+                if idempotency_ref:
+                    headers["Idempotency-Key"] = idempotency_ref
                 response = await client.post(
                     endpoint,
                     json=payload,
-                    headers=self._get_headers(),
+                    headers=headers,
                     timeout=10.0,
                 )
 
@@ -202,18 +264,24 @@ class KeyPayClient:
                         f"KeyPay timesheet pushed for {emp_payroll.name} "
                         f"(ID: {timesheet_id})"
                     )
-                    return timesheet_id
+                    return timesheet_id, False
+                elif response.status_code == 429:
+                    logger.warning(
+                        f"KeyPay timesheet push rate limited (429) for "
+                        f"{emp_payroll.name}; will retry"
+                    )
+                    return None, True
                 else:
                     logger.error(
                         f"KeyPay timesheet push failed: {response.text}"
                     )
-                    return None
+                    return None, False
 
         except Exception as e:
             logger.error(
                 f"Error pushing timesheet for {emp_payroll.name}: {str(e)}"
             )
-            return None
+            return None, False
 
     def _build_pay_categories(self, emp_payroll) -> List[Dict[str, Any]]:
         """Build KeyPay pay categories from employee payroll data."""

@@ -12,7 +12,9 @@ Endpoints:
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 from datetime import datetime, date
 from typing import Optional
 
@@ -71,9 +73,14 @@ def create_pos_realtime_router(pos_feed_instance):
     # ========================================================================
 
     @router.post("/ingest")
-    async def ingest_sale(req: SaleIngestRequest):
+    async def ingest_sale(req: SaleIngestRequest, request: Request):
         """
         Receive a POS sale event (webhook push).
+
+        Authenticated with a shared secret: POS systems post machine-to-machine
+        (no user token), so the request must carry an X-POS-Webhook-Secret header
+        matching POS_WEBHOOK_SECRET. Without this, anyone could inject fake sales
+        for any venue and skew variance-driven staffing decisions.
 
         Example:
             POST /api/pos/live/ingest
@@ -84,6 +91,20 @@ def create_pos_realtime_router(pos_feed_instance):
               "transaction_id": "txn_abc123"
             }
         """
+        expected_secret = os.environ.get("POS_WEBHOOK_SECRET")
+        if expected_secret:
+            provided = request.headers.get("X-POS-Webhook-Secret", "")
+            if not hmac.compare_digest(provided, expected_secret):
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid or missing POS webhook secret",
+                )
+        else:
+            logger.warning(
+                "POS_WEBHOOK_SECRET not set — /api/pos/live/ingest is UNAUTHENTICATED. "
+                "Set it in production to prevent fake-sale injection."
+            )
+
         if not pos_feed:
             raise HTTPException(status_code=500, detail="POS feed not initialized")
 

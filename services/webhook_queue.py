@@ -248,9 +248,12 @@ class WebhookRetryQueue:
             "error": None,
         }
 
-        # Schedule first retry
+        # Schedule when this delivery becomes eligible to send.
+        # The very first attempt (attempt 0) should be sent immediately — backoff
+        # only applies to *retries* after a failure. Re-enqueuing at a later attempt
+        # (attempt > 0) honours the exponential backoff schedule.
         if attempt < MAX_ATTEMPTS:
-            delay_seconds = BACKOFF_SCHEDULE[attempt]
+            delay_seconds = 0 if attempt == 0 else BACKOFF_SCHEDULE[attempt]
             retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
             delivery["next_retry_at"] = retry_at.isoformat()
 

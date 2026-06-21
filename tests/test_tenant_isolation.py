@@ -17,7 +17,9 @@ from rosteriq.models import (
 from rosteriq.services.tenant_isolation import (
     TenantScopedDB, IsolationViolation, validate_venue_access,
 )
-from rosteriq.middleware.tenant import TenantContext, _tenant_context
+from rosteriq.middleware.tenant import (
+    TenantContext, _tenant_context, get_tenant_context_optional,
+)
 
 
 # ============================================================================
@@ -52,6 +54,7 @@ def setup_test_data(memory_store):
         min_staff={"lunch": 3, "dinner": 5},
         max_labour_pct=Decimal("35"),
         pos_system="swiftpos",
+        created_at=datetime(2026, 1, 1, 0, 0, 0),
     )
 
     venue2 = VenueConfig(
@@ -63,6 +66,7 @@ def setup_test_data(memory_store):
         min_staff={"lunch": 2, "dinner": 4},
         max_labour_pct=Decimal("32"),
         pos_system="lightspeed",
+        created_at=datetime(2026, 1, 1, 0, 0, 0),
     )
 
     memory_store.save_venue(venue1)
@@ -83,6 +87,8 @@ def setup_test_data(memory_store):
         availability={},
         max_hours_per_week=40.0,
         consecutive_days_limit=6,
+        created_at=datetime(2026, 1, 1),
+        updated_at=datetime(2026, 1, 1),
     )
     emp1.venue_id = "venue-1"
 
@@ -101,6 +107,8 @@ def setup_test_data(memory_store):
         availability={},
         max_hours_per_week=20.0,
         consecutive_days_limit=5,
+        created_at=datetime(2026, 1, 1),
+        updated_at=datetime(2026, 1, 1),
     )
     emp2.venue_id = "venue-2"
 
@@ -119,6 +127,8 @@ def setup_test_data(memory_store):
         availability={},
         max_hours_per_week=15.0,
         consecutive_days_limit=4,
+        created_at=datetime(2026, 1, 1),
+        updated_at=datetime(2026, 1, 1),
     )
     emp3.venue_id = "venue-1"  # Assigned to venue 1 only
 
@@ -146,6 +156,7 @@ def setup_test_data(memory_store):
             ),
         ],
         total_cost=Decimal("204.00"),
+        created_at=datetime(2026, 1, 1),
     )
 
     roster2 = Roster(
@@ -167,6 +178,7 @@ def setup_test_data(memory_store):
             ),
         ],
         total_cost=Decimal("176.00"),
+        created_at=datetime(2026, 1, 1),
     )
 
     memory_store.save_roster(roster1)
@@ -269,10 +281,20 @@ class TestTenantScopedDBVenues:
     """Test venue operations in TenantScopedDB."""
 
     def test_get_venue_without_tenant_context(self, scoped_db, setup_test_data):
-        """Getting venue without tenant context should fail."""
-        with pytest.raises(AttributeError):
-            # No tenant context set, will fail when checking access
-            scoped_db.get_venue("venue-1")
+        """
+        Without tenant context, TenantScopedDB treats the call as auth-exempt
+        (the path health/metrics/etc take) and does not crash.
+
+        Previously this asserted AttributeError, which was an artifact of the
+        thread-local implementation raising when `.value` was unset — not real
+        access control. With the async-safe ContextVar, no context cleanly
+        resolves to None. Real unauthenticated data requests never reach this
+        layer: TenantMiddleware now rejects them with 401 first.
+        """
+        # No tenant context set — must not raise.
+        assert get_tenant_context_optional() is None
+        result = scoped_db.get_venue("venue-1")
+        assert result is not None and result.id == "venue-1"
 
     def test_list_venues_for_owner(self, scoped_db, setup_test_data):
         """Owner should see all venues."""
@@ -362,6 +384,8 @@ class TestTenantScopedDBEmployees:
             availability={},
             max_hours_per_week=10.0,
             consecutive_days_limit=3,
+            created_at=datetime(2026, 1, 1),
+            updated_at=datetime(2026, 1, 1),
         )
         new_emp.venue_id = "venue-2"
 

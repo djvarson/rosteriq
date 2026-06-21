@@ -10,7 +10,9 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-rosteriq_dev_2026}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      # Schema is created by the migration runner (see api service command),
+      # NOT by mounting schema.sql here — that snapshot has drifted and is
+      # missing the v3 tables. Migrations are the single source of truth.
     ports:
       - "5432:5432"
     healthcheck:
@@ -32,13 +34,16 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ./rosteriq:/app/rosteriq:ro  # Live reload in dev
+      # Project root holds the package contents (imported as rosteriq.*), which
+      # the image places at /app/rosteriq. Mount the root there for live reload.
+      - .:/app/rosteriq:ro
     command: >
-      uvicorn rosteriq.api:app
+      sh -c "python -m rosteriq.migrations.run_migrations --run &&
+      exec uvicorn rosteriq.api:app
       --host 0.0.0.0
       --port 8000
       --reload
-      --log-level info
+      --log-level info"
 
   # Dashboard (served via nginx)
   dashboard:

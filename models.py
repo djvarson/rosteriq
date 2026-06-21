@@ -530,7 +530,10 @@ class APIError(BaseModel):
 
     status_code: int
     message: str
-    detail: Optional[str] = None
+    # Accepts a string OR structured data (adapters pass dicts like
+    # {"url": ..., "response": ...}); a str-only type raised ValidationError
+    # on those error paths instead of surfacing the real API error.
+    detail: Optional[Any] = None
     retry_after: Optional[float] = None
 
 

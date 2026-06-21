@@ -50,7 +50,7 @@ class ShiftSplitResponse(BaseModel):
     reason: str  # compliance/breaks/cost_optimisation
     original_start: str  # ISO format time
     original_end: str
-    new_segments: List[ShiftSplitResponse] = []
+    new_segments: List[ShiftSegmentResponse] = []
     compliance_violations_fixed: List[str] = []
 
     # Flatten nested structure for response

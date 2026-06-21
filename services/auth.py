@@ -8,7 +8,7 @@ import os
 import secrets
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, Dict
 from uuid import uuid4
 
@@ -54,7 +54,10 @@ class AuthService:
     @staticmethod
     def create_access_token(user_id: str, email: str, role: str) -> Tuple[str, datetime]:
         """Create a JWT access token."""
-        now = datetime.utcnow()
+        # Use timezone-aware UTC so .timestamp() does not re-apply the host's
+        # local offset (naive utcnow().timestamp() makes tokens expire early
+        # on non-UTC servers).
+        now = datetime.now(timezone.utc)
         expires = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
         payload = {
@@ -100,7 +103,9 @@ class AuthService:
                 return None
 
             return payload
-        except jwt.JWTError:
+        except jwt.PyJWTError:
+            # PyJWT raises PyJWTError subclasses (ExpiredSignatureError,
+            # InvalidTokenError, etc). jwt.JWTError does not exist in PyJWT.
             return None
 
     def verify_refresh_token(self, token: str) -> Optional[str]:

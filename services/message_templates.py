@@ -666,26 +666,21 @@ class MessageTemplateService:
                 error=f"Template not found: {template_id}"
             )
 
-        result = SendResult(success=True)
-
-        try:
-            # TODO: Dispatch via notification_hub with recipients and channels
-            # For now, log the prepared message
-            logger.info(
-                f"Would send {template_id} to {len(recipients)} "
-                f"recipients via {channels}"
-            )
-
-            result.sent_count = len(recipients)
-            result.message_id = f"msg_{template_id}_{datetime.utcnow().timestamp()}"
-
-        except Exception as e:
-            logger.error(f"Failed to send from template {template_id}: {e}")
-            result.success = False
-            result.error = str(e)
-            result.failed_count = len(recipients)
-
-        return result
+        # Dispatch is not yet wired to the notification hub. Previously this LOGGED
+        # the message and returned success=True with sent_count=len(recipients) —
+        # i.e. it claimed to have messaged staff while sending nothing. Until it's
+        # wired, return an HONEST failure (success=False, nothing sent) so callers
+        # don't believe recipients were notified.
+        logger.warning(
+            f"send_from_template({template_id}) not dispatched — notification hub "
+            f"wiring pending; {len(recipients)} recipient(s) NOT messaged."
+        )
+        return SendResult(
+            success=False,
+            sent_count=0,
+            failed_count=len(recipients),
+            error="Template sending is not yet wired to the notification hub — no messages were sent.",
+        )
 
 
 # ============================================================================

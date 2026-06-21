@@ -15,13 +15,17 @@ All monetary values in AUD using Decimal for precision.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
 from rosteriq.models import Employee, Shift, EmploymentType, DayType, State
-from rosteriq.award_rules import get_day_type, get_penalty_multiplier
+from rosteriq.award_rules import (
+    get_day_type,
+    get_penalty_multiplier,
+    split_weekday_hours_by_band,
+)
 from rosteriq.cost_calculator import SUPER_RATE
 
 
@@ -266,6 +270,78 @@ def _employee_payroll_to_dict(emp: EmployeePayroll) -> Dict[str, Any]:
     }
 
 
+def _employee_payroll_from_dict(d: Dict[str, Any]) -> EmployeePayroll:
+    """Reconstruct an EmployeePayroll from its stored dict (reverse of
+    _employee_payroll_to_dict). Computed properties (total_gross, etc.) are
+    intentionally NOT set — they derive from the fields below."""
+    return EmployeePayroll(
+        employee_id=d["employee_id"],
+        name=d["name"],
+        email=d.get("email"),
+        tax_file_number_masked=d.get("tax_file_number_masked"),
+        ordinary_hours=Decimal(d.get("ordinary_hours", "0.00")),
+        ordinary_rate=Decimal(d.get("ordinary_rate", "0.00")),
+        ordinary_gross=Decimal(d.get("ordinary_gross", "0.00")),
+        penalty_entries=[
+            PenaltyEntry(
+                penalty_type=PenaltyType(pe["penalty_type"]),
+                hours=Decimal(pe["hours"]),
+                multiplier=Decimal(pe["multiplier"]),
+                amount=Decimal(pe["amount"]),
+            )
+            for pe in d.get("penalty_entries", [])
+        ],
+        penalty_gross=Decimal(d.get("penalty_gross", "0.00")),
+        overtime_hours=Decimal(d.get("overtime_hours", "0.00")),
+        overtime_amount=Decimal(d.get("overtime_amount", "0.00")),
+        leave_entries=[
+            LeaveEntry(
+                leave_type=le["leave_type"],
+                hours=Decimal(le["hours"]),
+                rate=Decimal(le["rate"]),
+                amount=Decimal(le["amount"]),
+            )
+            for le in d.get("leave_entries", [])
+        ],
+        leave_gross=Decimal(d.get("leave_gross", "0.00")),
+        allowances=[
+            Allowance(allowance_type=a["allowance_type"], amount=Decimal(a["amount"]))
+            for a in d.get("allowances", [])
+        ],
+        allowances_total=Decimal(d.get("allowances_total", "0.00")),
+        super_amount=Decimal(d.get("super_amount", "0.00")),
+    )
+
+
+def payroll_batch_from_dict(data: Dict[str, Any]) -> PayrollBatch:
+    """
+    Reconstruct a PayrollBatch from its stored dict (reverse of
+    PayrollBatch.to_dict) so a persisted batch can be pushed to a payroll
+    provider. Totals are recomputed from the employees for self-consistency.
+    """
+    batch = PayrollBatch(
+        batch_id=data.get("batch_id", ""),
+        venue_id=data.get("venue_id", ""),
+        period_start=date.fromisoformat(data["period_start"]),
+        period_end=date.fromisoformat(data["period_end"]),
+        status=PayrollStatus(data.get("status", "draft")),
+        created_at=(
+            datetime.fromisoformat(data["created_at"])
+            if data.get("created_at") else datetime.utcnow()
+        ),
+        approved_at=(
+            datetime.fromisoformat(data["approved_at"]) if data.get("approved_at") else None
+        ),
+        exported_at=(
+            datetime.fromisoformat(data["exported_at"]) if data.get("exported_at") else None
+        ),
+        employees=[_employee_payroll_from_dict(e) for e in data.get("employees", [])],
+        validation_errors=data.get("validation_errors", []),
+    )
+    batch.calculate_totals()
+    return batch
+
+
 class PayrollExporter:
     """Base class for payroll export operations."""
 
@@ -363,64 +439,103 @@ class PayrollExporter:
             ordinary_rate=employee.hourly_base_rate,
         )
 
-        # Aggregate hours by penalty type
+        # Aggregate hours by penalty type. Shifts are processed CHRONOLOGICALLY
+        # and accumulated so hours beyond 38/week become overtime (only the
+        # ordinary portion is bucketed by penalty type). Previously every hour
+        # was bucketed as ordinary/penalty and overtime was never computed.
         ordinary_total = Decimal("0.00")
         penalties_by_type: Dict[PenaltyType, Decimal] = {}
         overtime_total = Decimal("0.00")
+        overtime_amount = Decimal("0.00")
+        base_rate = employee.hourly_base_rate
+        is_casual = employee.employment_type == EmploymentType.casual
+        cumulative = Decimal("0")
+        ot_used = Decimal("0")  # OT hours costed so far this week (for 1.5x->2x tier)
 
-        for shift in shifts:
+        for shift in sorted(shifts, key=lambda s: (s.date, s.start_time or time(0, 0))):
             day_type = get_day_type(shift.date, state)
             net_hours = Decimal(str(shift.net_hours))
-            shift_hour = shift.start_time.hour if shift.start_time else 12
+            if net_hours <= 0:
+                continue
 
-            # Get penalty multiplier
-            multiplier = get_penalty_multiplier(
-                employee.employment_type,
-                day_type,
-                hour=shift_hour,
-                overtime_hours=0,
-            )
-
-            # Classify hours
-            if day_type == DayType.public_holiday:
-                penalty_type = PenaltyType.public_holiday
-                if penalty_type not in penalties_by_type:
-                    penalties_by_type[penalty_type] = Decimal("0.00")
-                penalties_by_type[penalty_type] += net_hours
-            elif day_type == DayType.sunday:
-                penalty_type = PenaltyType.sunday
-                if penalty_type not in penalties_by_type:
-                    penalties_by_type[penalty_type] = Decimal("0.00")
-                penalties_by_type[penalty_type] += net_hours
-            elif day_type == DayType.saturday:
-                penalty_type = PenaltyType.saturday
-                if penalty_type not in penalties_by_type:
-                    penalties_by_type[penalty_type] = Decimal("0.00")
-                penalties_by_type[penalty_type] += net_hours
-            elif shift_hour >= 22 or shift_hour < 5:
-                # Night shift (after 10pm or before 5am)
-                penalty_type = PenaltyType.night
-                if penalty_type not in penalties_by_type:
-                    penalties_by_type[penalty_type] = Decimal("0.00")
-                penalties_by_type[penalty_type] += net_hours
-            elif shift_hour >= 19:
-                # Evening (7pm or later)
-                penalty_type = PenaltyType.evening
-                if penalty_type not in penalties_by_type:
-                    penalties_by_type[penalty_type] = Decimal("0.00")
-                penalties_by_type[penalty_type] += net_hours
+            # Split into ordinary (<=38h cumulative) vs overtime (>38h). Casuals
+            # do not accrue overtime.
+            if is_casual:
+                ord_hrs, ot_hrs = net_hours, Decimal("0.00")
             else:
-                # Ordinary time
-                ordinary_total += net_hours
+                remaining_ordinary = max(Decimal("0.00"), Decimal("38") - cumulative)
+                ord_hrs = min(net_hours, remaining_ordinary)
+                ot_hrs = net_hours - ord_hrs
+            cumulative += net_hours
 
-        # Calculate ordinary gross
+            # Bucket the ORDINARY portion by penalty type.
+            if ord_hrs > 0:
+                if day_type == DayType.public_holiday:
+                    penalties_by_type[PenaltyType.public_holiday] = (
+                        penalties_by_type.get(PenaltyType.public_holiday, Decimal("0.00")) + ord_hrs
+                    )
+                elif day_type == DayType.sunday:
+                    penalties_by_type[PenaltyType.sunday] = (
+                        penalties_by_type.get(PenaltyType.sunday, Decimal("0.00")) + ord_hrs
+                    )
+                elif day_type == DayType.saturday:
+                    penalties_by_type[PenaltyType.saturday] = (
+                        penalties_by_type.get(PenaltyType.saturday, Decimal("0.00")) + ord_hrs
+                    )
+                else:
+                    # Weekday: evening/night loading applies to the hours ACTUALLY
+                    # WORKED in each window (19:00-24:00 evening, 00:00-07:00 night),
+                    # not to the whole shift gated on its start hour. Distribute the
+                    # ordinary portion across bands in the shift's own proportions.
+                    if shift.start_time and shift.end_time:
+                        bands = split_weekday_hours_by_band(
+                            shift.start_time, shift.end_time, net_hours
+                        )
+                        factor = (ord_hrs / net_hours) if net_hours > 0 else Decimal("0")
+                        ordinary_total += bands["ordinary"] * factor
+                        if bands["evening"] > 0:
+                            penalties_by_type[PenaltyType.evening] = (
+                                penalties_by_type.get(PenaltyType.evening, Decimal("0.00"))
+                                + bands["evening"] * factor
+                            )
+                        if bands["night"] > 0:
+                            penalties_by_type[PenaltyType.night] = (
+                                penalties_by_type.get(PenaltyType.night, Decimal("0.00"))
+                                + bands["night"] * factor
+                            )
+                    else:
+                        ordinary_total += ord_hrs
+
+            # Overtime portion: first 2 OT hours of the week at 1.5x, then 2x;
+            # Sunday/public-holiday OT at their flat rates.
+            if ot_hrs > 0:
+                overtime_total += ot_hrs
+                if day_type == DayType.public_holiday:
+                    overtime_amount += ot_hrs * base_rate * Decimal("2.5")
+                elif day_type == DayType.sunday:
+                    overtime_amount += ot_hrs * base_rate * Decimal("2.0")
+                else:
+                    first_tier = max(Decimal("0.00"), Decimal("2") - ot_used)
+                    at_15 = min(ot_hrs, first_tier)
+                    at_20 = ot_hrs - at_15
+                    overtime_amount += at_15 * base_rate * Decimal("1.5") + at_20 * base_rate * Decimal("2.0")
+                ot_used += ot_hrs
+
+        # Calculate ordinary gross (band-split can yield long decimals; round hours).
+        ordinary_total = ordinary_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         emp_payroll.ordinary_hours = ordinary_total
         emp_payroll.ordinary_gross = (
             ordinary_total * employee.hourly_base_rate
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+        emp_payroll.overtime_hours = overtime_total
+        emp_payroll.overtime_amount = overtime_amount.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+
         # Calculate penalty entries
         for penalty_type, hours in penalties_by_type.items():
+            hours = hours.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             multiplier = self._get_penalty_multiplier_for_type(
                 employee.employment_type, penalty_type
             )
@@ -447,11 +562,11 @@ class PayrollExporter:
         )
         emp_payroll.allowances_total = sum(a.amount for a in emp_payroll.allowances)
 
-        # Calculate superannuation on gross pay (excl. super)
+        # Superannuation is on Ordinary Time Earnings — OVERTIME is excluded
+        # (overtime is not OTE under SG law), so overtime_amount is NOT added.
         gross_for_super = (
             emp_payroll.ordinary_gross
             + emp_payroll.penalty_gross
-            + emp_payroll.overtime_amount
             + emp_payroll.leave_gross
         )
         emp_payroll.super_amount = (
@@ -471,7 +586,7 @@ class PayrollExporter:
                 PenaltyType.ordinary: Decimal("1.0"),
                 PenaltyType.saturday: Decimal("1.25"),
                 PenaltyType.sunday: Decimal("1.5"),
-                PenaltyType.public_holiday: Decimal("2.5"),
+                PenaltyType.public_holiday: Decimal("2.25"),  # MA000009 FT/PT PH = 225%
                 PenaltyType.evening: Decimal("1.15"),
                 PenaltyType.night: Decimal("1.175"),
                 PenaltyType.overtime_1_5: Decimal("1.5"),
@@ -481,7 +596,7 @@ class PayrollExporter:
                 PenaltyType.ordinary: Decimal("1.0"),
                 PenaltyType.saturday: Decimal("1.25"),
                 PenaltyType.sunday: Decimal("1.5"),
-                PenaltyType.public_holiday: Decimal("2.5"),
+                PenaltyType.public_holiday: Decimal("2.25"),  # MA000009 FT/PT PH = 225%
                 PenaltyType.evening: Decimal("1.15"),
                 PenaltyType.night: Decimal("1.175"),
                 PenaltyType.overtime_1_5: Decimal("1.5"),

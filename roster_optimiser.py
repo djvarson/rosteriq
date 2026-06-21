@@ -21,7 +21,10 @@ from datetime import date, time, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 from collections import defaultdict
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from rosteriq.models import (
     Employee, Shift, Roster, DemandForecast, VenueConfig,
@@ -34,7 +37,7 @@ from rosteriq.award_rules import (
     check_consecutive_days, calculate_overtime_hours,
     MAX_SHIFT_LENGTH_HOURS,
 )
-from rosteriq.cost_calculator import calculate_shift_cost_breakdown
+from rosteriq.cost_calculator import calculate_shift_cost_breakdown, calculate_roster_cost
 
 
 # ============================================================================
@@ -320,6 +323,77 @@ def _create_shift(
 
 
 # ============================================================================
+# Role-aware allocation
+# ============================================================================
+
+# Generic/catch-all roles that any employee can fill regardless of skills.
+# Kept in sync with ConflictDetector._GENERIC_ROLES so generated rosters
+# pass skill-mismatch detection cleanly.
+GENERIC_ROLES = {"general", "any", "staff", "floor_general"}
+
+
+def _roles_for_venue(min_staff_by_role: Optional[dict[str, int]]) -> list[str]:
+    """
+    Determine the ordered list of roles to staff.
+
+    Falls back to a single generic "general" role when the venue defines no
+    per-role minimums (preserves the original role-agnostic behaviour).
+    """
+    if not min_staff_by_role:
+        return ["general"]
+    return list(min_staff_by_role.keys())
+
+
+def _allocate_headcount_to_roles(
+    staff_needed: int,
+    roles: list[str],
+    min_staff_by_role: Optional[dict[str, int]],
+) -> dict[str, int]:
+    """
+    Split a period's required headcount across roles.
+
+    Each role starts at its configured minimum; any remaining demand-driven
+    slots are distributed round-robin across roles so the TOTAL equals
+    staff_needed exactly.
+
+    `staff_needed` is already floored at sum(min_staff) upstream in
+    calculate_required_staff, so the minimums always fit.
+    """
+    if not roles:
+        return {}
+
+    min_staff_by_role = min_staff_by_role or {}
+    allocation = {role: min_staff_by_role.get(role, 0) for role in roles}
+
+    remaining = staff_needed - sum(allocation.values())
+
+    # Distribute any extra demand-driven slots round-robin across roles.
+    i = 0
+    while remaining > 0:
+        allocation[roles[i % len(roles)]] += 1
+        remaining -= 1
+        i += 1
+
+    return allocation
+
+
+def _employee_can_fill_role(employee: Employee, role: str) -> bool:
+    """
+    Skill-matching rule.
+
+    An employee may work a role if:
+    - the role is a generic/catch-all role (no specialised skill required), OR
+    - the employee lists no skills at all (treated as a generalist), OR
+    - the role is one of the employee's listed skills.
+    """
+    if role.lower() in GENERIC_ROLES:
+        return True
+    if not employee.skills:
+        return True
+    return role in employee.skills
+
+
+# ============================================================================
 # Main optimiser
 # ============================================================================
 
@@ -364,57 +438,86 @@ def generate_daily_roster(
     # Step 2: Identify peak periods
     periods = identify_peak_periods(required)
 
+    # Determine which roles this venue staffs (falls back to ["general"]).
+    roles = _roles_for_venue(min_staff_by_role)
+
     # Track weekly hours for each employee
     weekly_hours = defaultdict(float)
     for shift in existing_shifts:
         if shift.status not in (ShiftStatus.cancelled, ShiftStatus.no_show):
             weekly_hours[shift.employee_id] += shift.net_hours
 
-    # Step 3: For each period, assign employees
+    # Step 3: For each period, allocate headcount across roles, then assign
+    # skill-matched, cheapest-first employees per role.
+    #
+    # Process periods HIGHEST-DEMAND FIRST (not clock order). Each employee takes
+    # one shift/day, so iterating in clock order let the quiet morning claim every
+    # employee before the loop reached the busy dinner peak — leaving the peak with
+    # ZERO staff. Staffing the peak first guarantees the busiest service is covered;
+    # whatever's left covers the quieter periods.
     day_shifts = []
     assigned_today = set()  # employee IDs already assigned today
 
-    for period in periods:
+    for period in sorted(periods, key=lambda p: (-int(p["peak_staff"]), p["start_hour"])):
         staff_needed = int(period["peak_staff"])
         start_h = period["start_hour"]
         end_h = period["end_hour"]
 
-        # Score and sort employees by cost (cheapest first)
-        candidates = []
-        for emp in employees:
-            if emp.id in assigned_today:
+        # Split the period's required headcount across roles.
+        role_targets = _allocate_headcount_to_roles(
+            staff_needed, roles, min_staff_by_role
+        )
+
+        for role, role_count in role_targets.items():
+            if role_count <= 0:
                 continue
 
-            available, reason = _is_employee_available(
-                emp, target_date, start_h, end_h,
-                existing_shifts + day_shifts,
-                weekly_hours[emp.id],
-            )
-            if not available:
-                continue
+            # Score and sort skill-matched, available employees (cheapest first).
+            candidates = []
+            for emp in employees:
+                if emp.id in assigned_today:
+                    continue
 
-            score = _employee_cost_score(emp, target_date, state, weekly_hours[emp.id])
-            candidates.append((score, emp))
+                if not _employee_can_fill_role(emp, role):
+                    continue
 
-        # Sort by score (lowest = cheapest)
-        candidates.sort(key=lambda x: x[0])
+                available, reason = _is_employee_available(
+                    emp, target_date, start_h, end_h,
+                    existing_shifts + day_shifts,
+                    weekly_hours[emp.id],
+                )
+                if not available:
+                    continue
 
-        # Assign the cheapest N employees
-        for _, emp in candidates[:staff_needed]:
-            shift_start, shift_end, break_mins = _best_shift_template(
-                start_h, end_h, emp.employment_type
-            )
-            shift = _create_shift(emp, target_date, shift_start, shift_end, break_mins)
+                score = _employee_cost_score(emp, target_date, state, weekly_hours[emp.id])
+                candidates.append((score, emp))
 
-            # Validate compliance before committing
-            emp_existing = [s for s in existing_shifts + day_shifts if s.employee_id == emp.id]
-            violations = validate_shift_compliance(emp, shift, emp_existing)
-            if violations:
-                continue  # Skip this assignment, try next candidate
+            # Sort by score (lowest = cheapest)
+            candidates.sort(key=lambda x: x[0])
 
-            day_shifts.append(shift)
-            assigned_today.add(emp.id)
-            weekly_hours[emp.id] += shift.net_hours
+            # Assign up to role_count employees to this role.
+            assigned_for_role = 0
+            for _, emp in candidates:
+                if assigned_for_role >= role_count:
+                    break
+
+                shift_start, shift_end, break_mins = _best_shift_template(
+                    start_h, end_h, emp.employment_type
+                )
+                shift = _create_shift(
+                    emp, target_date, shift_start, shift_end, break_mins, role=role
+                )
+
+                # Validate compliance before committing
+                emp_existing = [s for s in existing_shifts + day_shifts if s.employee_id == emp.id]
+                violations = validate_shift_compliance(emp, shift, emp_existing)
+                if violations:
+                    continue  # Skip this assignment, try next candidate
+
+                day_shifts.append(shift)
+                assigned_today.add(emp.id)
+                weekly_hours[emp.id] += shift.net_hours
+                assigned_for_role += 1
 
     return day_shifts
 
@@ -464,17 +567,24 @@ def generate_weekly_roster(
             venue_config=venue_config,
             covers_per_staff=covers_per_staff,
         )
+        # Surface a day that has demand but produced no shifts (e.g. everyone hit
+        # the consecutive-days cap) — otherwise a manager publishes an empty day
+        # unaware. The conflict detector also flags the resulting understaffing.
+        if not day_shifts and any(f.predicted_covers > 0 for f in day_forecasts):
+            logger.warning(
+                "Roster: %s has demand but no staff could be assigned "
+                "(likely consecutive-days/hours limits with a thin pool).",
+                target_date.isoformat(),
+            )
         all_shifts.extend(day_shifts)
 
-    # Calculate total cost
+    # Per-shift display costs (the per-shift breakdown is overtime-unaware).
     emp_dict = {e.id: e for e in employees}
-    total_cost = Decimal("0")
     for shift in all_shifts:
         if shift.employee_id in emp_dict:
             breakdown = calculate_shift_cost_breakdown(
                 emp_dict[shift.employee_id], shift, state
             )
-            total_cost += breakdown.total_cost
             shift.cost = breakdown.total_cost
             shift.penalty_multiplier = float(
                 get_penalty_multiplier(
@@ -483,15 +593,19 @@ def generate_weekly_roster(
                 )
             )
 
-    return Roster(
+    roster = Roster(
         id=str(uuid.uuid4())[:8],
         venue_id=venue_config.id,
         week_start=week_start,
         week_end=week_end,
         shifts=all_shifts,
-        total_cost=total_cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        total_cost=Decimal("0"),
         created_at=datetime.now(),
     )
+    # Roster-level total MUST include weekly overtime — summing per-shift breakdowns
+    # under-costs any week where an employee exceeds 38h (OT is a weekly concept).
+    roster.total_cost = calculate_roster_cost(roster, emp_dict, state)
+    return roster
 
 
 # ============================================================================
@@ -550,12 +664,16 @@ def analyse_roster(
                 "violation": v,
             })
 
-    avg_cost = (total_cost / Decimal(str(total_hours))).quantize(
+    # Headline total includes weekly overtime (cost_by_day stays a per-day,
+    # overtime-unaware breakdown — OT is a weekly concept and can't be attributed
+    # to a single day, so total_cost >= sum(cost_by_day) when OT is present).
+    accurate_total = calculate_roster_cost(roster, employees, state)
+    avg_cost = (accurate_total / Decimal(str(total_hours))).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     ) if total_hours > 0 else Decimal("0")
 
     return {
-        "total_cost": total_cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        "total_cost": accurate_total,
         "total_hours": round(total_hours, 1),
         "total_shifts": len(roster.shifts),
         "avg_cost_per_hour": avg_cost,
@@ -631,7 +749,11 @@ def suggest_improvements(
             continue
         day_type = get_day_type(shift.date, state)
         mult = float(get_penalty_multiplier(emp.employment_type, day_type))
-        if mult >= 2.0 and shift.net_hours > 6:
+        # Flag long premium-rate shifts (Sunday and public-holiday work).
+        # Casual Sunday is 1.75x and public holidays are 2.5x; the previous
+        # 2.0 threshold only ever caught public holidays, so premium Sunday
+        # shifts were silently never surfaced.
+        if mult >= 1.75 and shift.net_hours > 6:
             suggestions.append(
                 f"Shift {shift.id} on {shift.date}: {emp.name} ({emp.employment_type.value}) "
                 f"at {mult}x rate for {shift.net_hours:.1f}h — consider splitting or swapping"

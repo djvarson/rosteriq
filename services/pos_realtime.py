@@ -55,6 +55,10 @@ class VenueRevenueState:
     hourly_data: dict[int, HourlyRevenue] = field(default_factory=dict)
     total_revenue: Decimal = Decimal("0.00")
     total_transactions: int = 0
+    # POS transaction ids already counted today. Bounds memory to one day's
+    # worth of sales: the whole state is recreated when the date rolls over
+    # (or on reset_day), clearing this set.
+    seen_transaction_ids: set[str] = field(default_factory=set)
 
     def get_hour_data(self, hour: int) -> HourlyRevenue:
         """Get or create hourly data for this hour."""
@@ -87,7 +91,8 @@ class RevenueAccumulator:
         venue_id: str,
         amount: Decimal | float,
         timestamp: Optional[datetime] = None,
-    ) -> None:
+        transaction_id: Optional[str] = None,
+    ) -> bool:
         """
         Add a transaction to the accumulator.
 
@@ -95,6 +100,13 @@ class RevenueAccumulator:
             venue_id: Venue identifier.
             amount: Transaction amount.
             timestamp: Transaction time (defaults to now).
+            transaction_id: POS transaction id. If provided and already seen
+                for this venue/day, the transaction is ignored (deduplicated)
+                so webhook re-delivery does not double-count revenue and fire
+                false staffing triggers.
+
+        Returns:
+            True if the transaction was counted, False if it was a duplicate.
         """
         if timestamp is None:
             timestamp = datetime.now()
@@ -111,11 +123,23 @@ class RevenueAccumulator:
                 self._state[key] = VenueRevenueState(venue_id=venue_id, date=today)
 
             state = self._state[key]
+
+            # Dedup by POS transaction id (bounded to today's set).
+            if transaction_id is not None:
+                tid = str(transaction_id)
+                if tid in state.seen_transaction_ids:
+                    logger.info(
+                        f"Ignoring duplicate POS transaction {tid} for venue {venue_id}"
+                    )
+                    return False
+                state.seen_transaction_ids.add(tid)
+
             hour_data = state.get_hour_data(hour)
             hour_data.add_transaction(amount)
 
             state.total_revenue += amount
             state.total_transactions += 1
+            return True
 
     async def get_current_hour(self, venue_id: str) -> Optional[dict[str, Any]]:
         """
@@ -427,13 +451,22 @@ class RealtimePOSFeed:
             except (ValueError, TypeError):
                 timestamp = None
 
-        await self._accumulator.add_transaction(
+        # POS webhooks can re-deliver the same sale; dedup by transaction id.
+        transaction_id = sale_data.get("transaction_id") or sale_data.get("id")
+
+        counted = await self._accumulator.add_transaction(
             venue_id=venue_id,
             amount=amount,
             timestamp=timestamp,
+            transaction_id=transaction_id,
         )
 
-        # Check variance after each transaction
+        # Skip variance re-evaluation for duplicates — re-delivery must not
+        # fire a false 'call_in'/'send_home' staffing trigger.
+        if not counted:
+            return
+
+        # Check variance after each (newly counted) transaction
         await self._check_variance_and_trigger(venue_id)
 
     async def get_live_revenue(self, venue_id: str) -> Optional[dict[str, Any]]:

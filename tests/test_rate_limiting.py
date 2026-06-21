@@ -17,6 +17,7 @@ import asyncio
 import time
 import sys
 import os
+import pytest
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -130,12 +131,14 @@ def test_bucket_drains_on_requests():
     # Check initial
     assert bucket.get_remaining() == 5
 
-    # Consume
+    # Consume. get_remaining() reflects a tiny continuous refill (1 token/sec)
+    # for the microseconds of elapsed wall-clock time, so compare with a small
+    # tolerance rather than exact equality.
     bucket.consume()
-    assert bucket.get_remaining() == 4
+    assert bucket.get_remaining() == pytest.approx(4, abs=0.01)
 
     bucket.consume(2)
-    assert bucket.get_remaining() == 2
+    assert bucket.get_remaining() == pytest.approx(2, abs=0.01)
 
     print("PASS: test_bucket_drains_on_requests")
 

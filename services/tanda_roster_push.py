@@ -179,6 +179,11 @@ class TandaRosterPush:
         self.tanda = tanda
         self.rate_limiter = PushRateLimiter()
         self._employee_id_map: Dict[str, str] = {}  # RosterIQ ID -> Tanda user ID
+        # RosterIQ-shift-id -> Tanda-schedule-id, so re-publishing a week is
+        # idempotent: a shift already pushed maps to its Tanda id and is
+        # updated in place instead of being POSTed again (which would create a
+        # duplicate schedule in Tanda).
+        self._shift_id_map: Dict[str, str] = {}
 
     async def push_roster(
         self,
@@ -187,12 +192,23 @@ class TandaRosterPush:
         dry_run: bool = True,
     ) -> PushResult:
         """
-        Push a roster to Tanda.
+        Push a roster to Tanda, idempotently.
+
+        Drives off diff_roster() rather than blindly POSTing every shift:
+        - NEW shifts (present in RosterIQ, absent in Tanda) are created (POST).
+        - CHANGED shifts (present in both, timing/assignment differs) are
+          updated in place (PUT) against their existing Tanda schedule id.
+        - REMOVED shifts (present in Tanda, absent in RosterIQ) are deleted.
+        - UNCHANGED shifts are left untouched.
+
+        This means re-publishing the same week does NOT create duplicate
+        shifts in Tanda — the previous implementation POSTed every shift on
+        every call, duplicating the entire roster on each re-publish.
 
         Args:
             roster: The RosterIQ Roster to push.
             venue_id: Tanda venue/org ID.
-            dry_run: If True, validate without actually pushing. Defaults to True.
+            dry_run: If True, validate + diff without mutating Tanda.
 
         Returns:
             PushResult with success/failure counts and details.
@@ -203,7 +219,7 @@ class TandaRosterPush:
             f"Starting roster push: {len(roster.shifts)} shifts, dry_run={dry_run}"
         )
 
-        # Validate all shifts have valid employee mappings
+        # Validate all shifts have valid employee mappings up front.
         for shift in roster.shifts:
             if not await self._validate_employee_mapping(shift.employee_id):
                 error = f"No Tanda user ID mapping for employee {shift.employee_id}"
@@ -216,31 +232,104 @@ class TandaRosterPush:
             )
             return result
 
-        # Push each shift
-        for shift in roster.shifts:
+        # Diff against what is currently in Tanda so we only apply deltas.
+        diff = await self.diff_roster(roster, venue_id)
+
+        tanda_roster_id = venue_id
+
+        # 1) CREATE new shifts (POST). Record the resulting Tanda schedule id
+        #    so a subsequent re-publish updates rather than re-creates.
+        for shift in diff.new_shifts:
             try:
                 if not dry_run:
-                    # Get a tanda_roster_id for this venue (you may need to create one)
-                    # For now, assume it's stored or we use a default
-                    tanda_roster_id = venue_id
-                    await self.push_shift(shift, tanda_roster_id)
-
+                    response = await self.push_shift(shift, tanda_roster_id)
+                    tanda_id = self._extract_tanda_shift_id(response)
+                    if tanda_id is not None:
+                        self._shift_id_map[shift.id] = tanda_id
                 result.add_success(shift.id)
-                logger.debug(f"Pushed shift {shift.id}")
-
+                logger.debug(f"Created shift {shift.id}")
             except TandaAPIError as e:
-                error = f"Failed to push shift {shift.id}: {e.api_error.message}"
+                error = f"Failed to create shift {shift.id}: {e.api_error.message}"
                 logger.error(error)
                 result.add_error(error)
             except Exception as e:
-                error = f"Unexpected error pushing shift {shift.id}: {str(e)}"
+                error = f"Unexpected error creating shift {shift.id}: {str(e)}"
+                logger.error(error)
+                result.add_error(error)
+
+        # 2) UPDATE changed shifts in place (PUT) against the existing Tanda id.
+        for change in diff.changed_shifts:
+            rosteriq_shift: Shift = change["rosteriq"]
+            tanda_shift = change["tanda"]
+            tanda_id = getattr(tanda_shift, "id", None) or self._shift_id_map.get(
+                rosteriq_shift.id
+            )
+            try:
+                if not dry_run:
+                    if tanda_id is None:
+                        # No existing id to target — fall back to a create so
+                        # the shift still lands, but never blind-POST a shift
+                        # we believe already exists.
+                        response = await self.push_shift(rosteriq_shift, tanda_roster_id)
+                        new_id = self._extract_tanda_shift_id(response)
+                        if new_id is not None:
+                            self._shift_id_map[rosteriq_shift.id] = new_id
+                    else:
+                        await self.update_shift(
+                            rosteriq_shift, str(tanda_id), tanda_roster_id
+                        )
+                        self._shift_id_map[rosteriq_shift.id] = str(tanda_id)
+                result.add_success(rosteriq_shift.id)
+                logger.debug(f"Updated shift {rosteriq_shift.id} -> Tanda {tanda_id}")
+            except TandaAPIError as e:
+                error = f"Failed to update shift {rosteriq_shift.id}: {e.api_error.message}"
+                logger.error(error)
+                result.add_error(error)
+            except Exception as e:
+                error = f"Unexpected error updating shift {rosteriq_shift.id}: {str(e)}"
+                logger.error(error)
+                result.add_error(error)
+
+        # 3) DELETE shifts that are in Tanda but no longer in RosterIQ.
+        for removed in diff.removed_shifts:
+            tanda_id = removed.get("id")
+            if tanda_id is None:
+                continue
+            try:
+                if not dry_run:
+                    ok = await self.delete_shift(str(tanda_id))
+                    if not ok:
+                        result.add_error(f"Failed to delete Tanda shift {tanda_id}")
+                        continue
+                result.add_success(f"deleted:{tanda_id}")
+                logger.debug(f"Deleted Tanda shift {tanda_id}")
+            except Exception as e:
+                error = f"Unexpected error deleting Tanda shift {tanda_id}: {str(e)}"
                 logger.error(error)
                 result.add_error(error)
 
         logger.info(
-            f"Roster push complete: {result.success_count} succeeded, {result.failed_count} failed"
+            f"Roster push complete: {result.success_count} succeeded, "
+            f"{result.failed_count} failed "
+            f"(created={len(diff.new_shifts)}, changed={len(diff.changed_shifts)}, "
+            f"removed={len(diff.removed_shifts)}, unchanged={diff.unchanged_count})"
         )
         return result
+
+    @staticmethod
+    def _extract_tanda_shift_id(response: dict) -> Optional[str]:
+        """
+        Pull the created schedule id out of a Tanda POST /schedules response.
+
+        Tanda may return the record directly ({"id": ...}) or wrapped in a
+        "schedule"/"data" envelope. Returns None if no id is present.
+        """
+        if not isinstance(response, dict):
+            return None
+        for container in (response, response.get("schedule"), response.get("data")):
+            if isinstance(container, dict) and container.get("id") is not None:
+                return str(container["id"])
+        return None
 
     async def diff_roster(
         self,
@@ -354,6 +443,46 @@ class TandaRosterPush:
 
         # POST to Tanda
         response = await self.tanda._request("POST", "/schedules", json=payload)
+        return response
+
+    async def update_shift(
+        self,
+        shift: Shift,
+        tanda_shift_id: str,
+        tanda_roster_id: str,
+    ) -> dict:
+        """
+        Update an existing Tanda schedule in place (PUT /schedules/{id}).
+
+        Used for shifts that already exist in Tanda but whose timing or
+        assignment changed in RosterIQ — avoids creating a duplicate.
+
+        Args:
+            shift: The RosterIQ Shift with the new values.
+            tanda_shift_id: The existing Tanda schedule id to update.
+            tanda_roster_id: Tanda roster ID (or venue ID).
+
+        Returns:
+            Tanda API response dict.
+
+        Raises:
+            TandaAPIError: If the update fails.
+        """
+        tanda_user_id = await self._get_tanda_user_id(shift.employee_id)
+        if not tanda_user_id:
+            raise ValueError(f"No Tanda user ID for employee {shift.employee_id}")
+
+        payload = self._build_tanda_shift_payload(shift, tanda_user_id, tanda_roster_id)
+
+        await self.rate_limiter.acquire()
+
+        logger.info(
+            f"Updating Tanda shift {tanda_shift_id} from RosterIQ shift {shift.id}"
+        )
+
+        response = await self.tanda._request(
+            "PUT", f"/schedules/{tanda_shift_id}", json=payload
+        )
         return response
 
     async def delete_shift(self, tanda_shift_id: str) -> bool:

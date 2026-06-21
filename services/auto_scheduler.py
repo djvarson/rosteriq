@@ -61,7 +61,8 @@ SHIFT_TEMPLATES = {
 # Data Classes
 # ============================================================================
 
-class CoverageGap(dataclass):
+@dataclass
+class CoverageGap:
     """Represents an unfilled shift slot."""
     date: date
     hour: int
@@ -69,7 +70,8 @@ class CoverageGap(dataclass):
     reason: str  # "no_available_staff", "all_at_max_hours", etc.
 
 
-class HiringRecommendation(dataclass):
+@dataclass
+class HiringRecommendation:
     """Hiring recommendation based on coverage gaps."""
     role: str
     priority: str  # "urgent", "high", "medium", "low"
@@ -78,7 +80,8 @@ class HiringRecommendation(dataclass):
     reason: str
 
 
-class ScheduleResult(dataclass):
+@dataclass
+class ScheduleResult:
     """Result of schedule generation."""
     roster: Roster
     schedule_quality: float  # 0-100 composite score
@@ -259,14 +262,10 @@ class AutoScheduler:
             hourly = {}
 
             for fc in forecasts:
-                # Convert covers to staff needed
+                # Convert covers to staff needed. (Removed dead venue_ratio
+                # lookup: VenueConfig has no covers_per_staff field, so the
+                # branch never took effect and the result was unused.)
                 staff_needed = max(1, int(fc.predicted_covers / covers_per_staff + 0.5))
-
-                # Apply venue minimum
-                if hasattr(venue, 'covers_per_staff'):
-                    venue_ratio = venue.covers_per_staff
-                else:
-                    venue_ratio = covers_per_staff
 
                 if fc.hour not in hourly:
                     hourly[fc.hour] = defaultdict(int)

@@ -61,8 +61,16 @@ async def subscribe_to_push(request: Request, subscription: PushSubscription):
         db = get_db()
         push_service = get_push_service(db)
 
+        # Attach the user's venue so venue broadcasts (roster published, staffing
+        # alerts) can target them — list_push_subscriptions filters by venue_id,
+        # which was never being stored.
+        sub_dict = subscription.dict()
+        user = db.get_user_by_id(user_id)
+        if user and user.get("venue_ids"):
+            sub_dict["venue_id"] = user["venue_ids"][0]
+
         # Store subscription
-        success = push_service.subscribe(user_id, subscription.dict())
+        success = push_service.subscribe(user_id, sub_dict)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to store subscription")
 

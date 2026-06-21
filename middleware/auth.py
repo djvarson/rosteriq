@@ -7,7 +7,7 @@ Uses the custom BaseStore database layer instead of SQLAlchemy.
 from typing import Optional, List
 from functools import wraps
 
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, status, Request, params
 
 from rosteriq.database import get_db
 from rosteriq.services.auth import auth_service
@@ -78,7 +78,16 @@ async def get_current_user(
     Extract and validate JWT token from Authorization header.
     Returns UserContext with current user info.
     Raises HTTPException if token is missing or invalid.
+
+    Note: when called directly (not via FastAPI dependency injection, e.g. from
+    TenantMiddleware) the caller must pass a real `db` — `get_db()`. Otherwise
+    `db` is the unresolved Depends marker.
     """
+    # Resolve db if called outside FastAPI's dependency injection (db left as
+    # the Depends marker rather than a real store).
+    if isinstance(db, params.Depends):
+        db = get_db()
+
     # Skip auth for certain paths
     if request.url.path in SKIP_AUTH_PATHS or any(
         request.url.path.startswith(p) for p in WEBHOOK_PATHS

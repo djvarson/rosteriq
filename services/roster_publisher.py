@@ -29,7 +29,7 @@ from rosteriq.models import Roster, Shift, VenueConfig, Employee
 from rosteriq.services.conflict_detector import ConflictDetector, ConflictSeverity
 from rosteriq.services.approval_workflow import approval_workflow, ApprovalStatus
 from rosteriq.services.notification_hub import get_notification_hub, NotificationEventType
-from rosteriq.services.tanda_roster_push import TandaRosterPusher
+from rosteriq.services.tanda_roster_push import TandaRosterPush as TandaRosterPusher
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +104,31 @@ class RosterPublisher:
 
     def __init__(self):
         """Initialize publisher with dependencies."""
-        self.db = get_db()
         self.conflict_detector = ConflictDetector()
         self.notification_hub = get_notification_hub()
-        self.tanda_pusher = TandaRosterPusher()  # Lazy loads on first use
+        # Built lazily per-venue — TandaRosterPush needs that venue's authed Tanda
+        # adapter, so it can't be constructed at init (doing so crashed import and
+        # silently dropped the ENTIRE publishing router).
+        self.tanda_pusher = None
+
+    @property
+    def db(self):
+        # Resolve the store dynamically rather than caching at init — `publisher`
+        # is a module-level singleton, so a cached db would point at a stale store
+        # after the test harness resets the global DB (and is simply more correct).
+        return get_db()
+
+    def _tanda_pusher_for(self, venue):
+        """Build a TandaRosterPush for a venue's Tanda connection, or None if the
+        venue has no usable Tanda install (publish then proceeds locally)."""
+        try:
+            from rosteriq.services.tanda_plugin import TandaPluginService
+            state_code = venue.state.value if hasattr(venue.state, "value") else str(venue.state)
+            adapter = TandaPluginService(self.db).build_adapter(venue.tanda_org_id, state_code)
+            return TandaRosterPusher(adapter)
+        except Exception as e:
+            logger.warning(f"Tanda push unavailable for venue {getattr(venue, 'id', '?')}: {e}")
+            return None
 
     async def publish_roster(
         self,
@@ -156,13 +177,17 @@ class RosterPublisher:
                 return result
 
             current_state_str = self.db.get_roster_state(roster_id)
+            # FAILED and a stale PUBLISHING are retryable — a transient Tanda outage
+            # or a mid-publish crash must not permanently block re-publishing.
             if current_state_str not in (
                 RosterPublishState.DRAFT.value,
                 RosterPublishState.REJECTED.value,
+                RosterPublishState.FAILED.value,
+                RosterPublishState.PUBLISHING.value,
             ):
                 result.message = (
                     f"Roster in {current_state_str} state; "
-                    f"can only publish from DRAFT or REJECTED"
+                    f"can only publish from DRAFT, REJECTED, FAILED or a stalled PUBLISHING"
                 )
                 logger.error(result.message)
                 return result
@@ -176,7 +201,7 @@ class RosterPublisher:
                 logger.error(result.message)
                 return result
 
-            employees = self.db.list_employees(roster.venue_id)
+            employees = [e for e in self.db.list_employees() if getattr(e, "venue_id", None) == roster.venue_id]
 
             # Step 3: Detect conflicts
             conflicts = self.conflict_detector.detect_conflicts(
@@ -272,7 +297,10 @@ class RosterPublisher:
                 result.state = RosterPublishState.PUBLISHING.value
 
                 try:
-                    tanda_result = await self.tanda_pusher.push_roster(
+                    pusher = self._tanda_pusher_for(venue)
+                    if pusher is None:
+                        raise RuntimeError("Tanda is not connected for this venue")
+                    tanda_result = await pusher.push_roster(
                         roster=roster,
                         venue_id=venue.tanda_org_id,
                         dry_run=False,
@@ -411,7 +439,10 @@ class RosterPublisher:
                     )
 
                     try:
-                        tanda_result = await self.tanda_pusher.push_roster(
+                        pusher = self._tanda_pusher_for(venue)
+                        if pusher is None:
+                            raise RuntimeError("Tanda is not connected for this venue")
+                        tanda_result = await pusher.push_roster(
                             roster=roster,
                             venue_id=venue.tanda_org_id,
                             dry_run=False,
@@ -497,15 +528,17 @@ class RosterPublisher:
 
         state_history = self.db.get_roster_state_history(roster_id) or []
 
+        # The store writes each transition as {state, reason, actor_id, at} — read
+        # those keys (not the non-existent "actor"/"timestamp", which returned None).
         return RosterState(
             roster_id=roster_id,
             current_state=current_state,
             state_history=[
-                (h.get("state"), h.get("timestamp"), h.get("actor"))
+                (h.get("state"), h.get("at"), h.get("actor_id"))
                 for h in state_history
             ],
-            last_modified_by=state_history[-1].get("actor") if state_history else "",
-            last_modified_at=state_history[-1].get("timestamp") if state_history else "",
+            last_modified_by=state_history[-1].get("actor_id") if state_history else "",
+            last_modified_at=state_history[-1].get("at") if state_history else "",
         )
 
     def transition_state(
@@ -669,7 +702,7 @@ class RosterPublisher:
                 result.message = f"Venue {roster.venue_id} not found"
                 return result
 
-            employees = self.db.list_employees(roster.venue_id)
+            employees = [e for e in self.db.list_employees() if getattr(e, "venue_id", None) == roster.venue_id]
 
             # Check conflicts
             conflicts = self.conflict_detector.detect_conflicts(

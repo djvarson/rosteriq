@@ -1,5 +1,13 @@
--- RosterIQ PostgreSQL Schema
--- Run: psql -d rosteriq -f schema.sql
+-- RosterIQ PostgreSQL Schema — REFERENCE SNAPSHOT ONLY, DO NOT USE TO PROVISION.
+--
+-- This file is an early snapshot of the core tables and has DRIFTED: it does
+-- not include the v3 feature tables (shift bids, approval workflows, web push
+-- subscriptions, backups, conflicts, etc) added in migrations 002/003.
+--
+-- The authoritative schema is migrations/*.sql, applied by:
+--     python -m rosteriq.migrations.run_migrations --run
+-- Provision every environment (Docker, Railway, Render, local) via the runner,
+-- never by piping this file into psql.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 

@@ -173,41 +173,36 @@ async def execute_action(body: ActionRequest) -> dict:
     db = get_db()
     action_type = body.action_type
 
+    # NOTE: these AI-suggested actions are not yet wired to the execution engines.
+    # They previously returned a fabricated success ("Message sent to 8 staff",
+    # "Roster generation queued") while doing NOTHING — dangerous on the messaging
+    # path especially. Until they're wired to the real engines (roster generator /
+    # shift update / notification hub) they FAIL LOUD and point at the working UI,
+    # so a manager is never misled into thinking staff were notified.
     try:
-        if action_type == "generate_roster":
-            start = body.params.get("start_date", date.today().isoformat())
-            end = body.params.get("end_date", (date.today() + timedelta(days=7)).isoformat())
-            # Delegate to the roster generation engine
-            return {
-                "status": "success",
-                "action_type": action_type,
-                "message": f"Roster generation queued for {start} to {end}. Check the Roster tab for results.",
-                "redirect": "roster",
-            }
+        known = {"generate_roster", "adjust_shift", "send_message"}
+        if action_type in known:
+            redirect = {
+                "generate_roster": "roster",
+                "adjust_shift": "roster",
+                "send_message": "staff",
+            }[action_type]
+            guidance = {
+                "generate_roster": "Open the Roster tab and click Generate to build the roster.",
+                "adjust_shift": "Edit the shift directly in the Roster tab.",
+                "send_message": "Use the Staff tab to message your team — the AI shortcut isn't wired yet.",
+            }[action_type]
+            raise HTTPException(
+                status_code=501,
+                detail={
+                    "status": "not_implemented",
+                    "action_type": action_type,
+                    "message": guidance,
+                    "redirect": redirect,
+                },
+            )
 
-        elif action_type == "adjust_shift":
-            shift_id = body.params.get("shift_id")
-            action = body.params.get("action")
-            if not shift_id:
-                raise HTTPException(status_code=400, detail="shift_id required")
-            return {
-                "status": "success",
-                "action_type": action_type,
-                "message": f"Shift {shift_id} {action} completed.",
-            }
-
-        elif action_type == "send_message":
-            recipients = body.params.get("recipient_ids", [])
-            message = body.params.get("message", "")
-            channel = body.params.get("channel", "both")
-            return {
-                "status": "success",
-                "action_type": action_type,
-                "message": f"Message sent to {len(recipients)} staff member(s) via {channel}.",
-            }
-
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown action type: {action_type}")
+        raise HTTPException(status_code=400, detail=f"Unknown action type: {action_type}")
 
     except HTTPException:
         raise

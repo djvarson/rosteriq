@@ -12,7 +12,7 @@ import json
 import logging
 import os
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 try:
@@ -149,11 +149,34 @@ async def process_webhook_event(
         logger.error("Failed to import webhook services")
         raise HTTPException(status_code=503, detail="Webhook services not available")
 
-    # Verify signature if provided
-    if webhook_secret and webhook_signature:
+    # Verify signature. Fail CLOSED: when a webhook secret is configured, a
+    # valid signature is REQUIRED — a missing signature is rejected, not
+    # silently accepted (the previous `secret and signature` guard let
+    # unsigned payloads through whenever the signature header was absent).
+    if webhook_secret:
+        if not webhook_signature:
+            logger.warning("Webhook rejected: signature required but missing")
+            raise HTTPException(status_code=401, detail="Missing webhook signature")
         if not verify_hmac_signature(raw_payload, webhook_signature, webhook_secret):
             logger.warning("Invalid webhook signature")
             raise HTTPException(status_code=401, detail="Invalid signature")
+    else:
+        # No secret configured. In PRODUCTION this is unsafe (any caller could
+        # forge events), so fail CLOSED and reject. Outside production we keep
+        # the warn-and-accept dev behaviour for local/testing convenience.
+        if os.environ.get("ENVIRONMENT") == "production":
+            logger.error(
+                "TANDA_WEBHOOK_SECRET not set in production — rejecting inbound "
+                "webhook (cannot verify signature)."
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="webhook verification not configured",
+            )
+        logger.warning(
+            "TANDA_WEBHOOK_SECRET not set — inbound webhook signatures are NOT "
+            "verified. Set it in production to prevent forged webhook events."
+        )
 
     # Extract payload
     event_type_str = payload_dict.get("event_type")
@@ -180,6 +203,17 @@ async def process_webhook_event(
         timestamp = datetime.fromisoformat(timestamp_str)
     except (ValueError, TypeError):
         timestamp = datetime.utcnow()
+
+    # Replay protection: reject events whose timestamp is outside a freshness
+    # window. Combined with enforced signatures (the signature covers the
+    # timestamp), this stops a captured signed payload being replayed later.
+    MAX_WEBHOOK_AGE_SECONDS = 300
+    now_utc = datetime.now(timezone.utc)
+    ts_utc = timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
+    age_seconds = abs((now_utc - ts_utc).total_seconds())
+    if age_seconds > MAX_WEBHOOK_AGE_SECONDS:
+        logger.warning(f"Webhook {webhook_id} rejected: timestamp {age_seconds:.0f}s outside window")
+        raise HTTPException(status_code=400, detail="Webhook timestamp outside acceptable window")
 
     payload = WebhookPayload(
         event_type=event_type,
@@ -252,6 +286,20 @@ async def receive_webhook(
     # Get signature and secret
     webhook_signature = request.headers.get("x-tanda-signature")
     webhook_secret = os.environ.get("TANDA_WEBHOOK_SECRET")
+
+    # Fail CLOSED in production: without a configured secret we cannot verify
+    # the signature, so an unconfigured secret must reject inbound webhooks
+    # (rather than letting forgeable, unsigned payloads through). Processing
+    # happens in a background task that returns 200 to the client, so the
+    # rejection has to be enforced here on the request path.
+    if not webhook_secret and os.environ.get("ENVIRONMENT") == "production":
+        logger.error(
+            "TANDA_WEBHOOK_SECRET not set in production — rejecting inbound webhook."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="webhook verification not configured",
+        )
 
     # Reject unsigned requests if secret is configured
     if webhook_secret and not webhook_signature:

@@ -15,9 +15,13 @@ Key regulations implemented:
 - Public holiday entitlements
 """
 
+import logging
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from functools import lru_cache
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from rosteriq.models import (
     EmploymentType,
@@ -39,13 +43,15 @@ PENALTY_MULTIPLIERS = {
         DayType.weekday: Decimal("1.0"),
         DayType.saturday: Decimal("1.25"),
         DayType.sunday: Decimal("1.5"),
-        DayType.public_holiday: Decimal("2.5"),
+        # MA000009 public holiday penalty for full-time/part-time is 225%
+        # (was incorrectly 250%, the casual rate).
+        DayType.public_holiday: Decimal("2.25"),
     },
     EmploymentType.part_time: {
         DayType.weekday: Decimal("1.0"),
         DayType.saturday: Decimal("1.25"),
         DayType.sunday: Decimal("1.5"),
-        DayType.public_holiday: Decimal("2.5"),
+        DayType.public_holiday: Decimal("2.25"),
     },
     EmploymentType.casual: {
         DayType.weekday: Decimal("1.25"),  # includes 25% casual loading
@@ -70,6 +76,63 @@ EVENING_LOADING_THRESHOLDS = {
     # After midnight: +17.5% loading (replaces 7pm loading)
     "midnight": Decimal("0.175"),
 }
+
+# Time-of-day band boundaries (minutes from midnight) for weekday loading.
+_EVENING_START_MIN = 19 * 60   # 7:00pm
+_NIGHT_END_MIN = 7 * 60        # 7:00am (after-midnight band runs 00:00-07:00)
+
+
+def split_weekday_hours_by_band(start_time, end_time, net_hours) -> dict:
+    """
+    Split a weekday shift's NET worked hours across time-of-day bands:
+      - 'evening' : hours worked 19:00-24:00 (+15% loading)
+      - 'night'   : hours worked 00:00-07:00 (+17.5% loading)
+      - 'ordinary': all other hours (07:00-19:00)
+
+    This is what makes loading apply to the hours ACTUALLY WORKED in the evening/
+    night, rather than classifying the whole shift by its start hour (so a
+    09:00-23:00 shift now earns evening loading on its 19:00-23:00 hours instead
+    of $0). Handles shifts crossing midnight. The unpaid break is deducted
+    proportionally across the worked span. Returns a dict summing to net_hours.
+
+    NOTE: the loading PERCENTAGES are the existing model values; the exact award
+    $ amounts / band boundaries are a separate confirmation item.
+    """
+    net = Decimal(str(net_hours))
+    if net <= 0:
+        return {"ordinary": Decimal("0.00"), "evening": Decimal("0.00"), "night": Decimal("0.00")}
+
+    start_min = start_time.hour * 60 + start_time.minute
+    end_min = end_time.hour * 60 + end_time.minute
+    if end_min <= start_min:
+        end_min += 24 * 60  # shift crosses midnight
+
+    def _overlap(a, b, lo, hi):
+        return max(0, min(b, hi) - max(a, lo))
+
+    # Evening 19:00-24:00 (this day) and the same window on a next-day spillover.
+    evening_min = (
+        _overlap(start_min, end_min, _EVENING_START_MIN, 24 * 60)
+        + _overlap(start_min, end_min, 24 * 60 + _EVENING_START_MIN, 48 * 60)
+    )
+    # Night 00:00-07:00 (this day, e.g. an overnight start) and next-day 00:00-07:00.
+    night_min = (
+        _overlap(start_min, end_min, 0, _NIGHT_END_MIN)
+        + _overlap(start_min, end_min, 24 * 60, 24 * 60 + _NIGHT_END_MIN)
+    )
+    gross_min = end_min - start_min
+    ordinary_min = max(0, gross_min - evening_min - night_min)
+    gross_hours = Decimal(gross_min) / 60
+    if gross_hours <= 0:
+        return {"ordinary": net, "evening": Decimal("0.00"), "night": Decimal("0.00")}
+
+    # Scale gross band hours down to NET (proportional unpaid-break deduction).
+    scale = net / gross_hours
+    return {
+        "ordinary": (Decimal(ordinary_min) / 60 * scale),
+        "evening": (Decimal(evening_min) / 60 * scale),
+        "night": (Decimal(night_min) / 60 * scale),
+    }
 
 # Compliance constants
 MAX_SHIFT_LENGTH_HOURS = 11.5
@@ -115,6 +178,29 @@ def _easter_date(year: int) -> date:
     return date(year, month, day)
 
 
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    """Date of the nth <weekday> (0=Mon..6=Sun) in a month (n>=1)."""
+    first = date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + (n - 1) * 7)
+
+
+def _add_with_substitute(holidays: List[date], d: date) -> None:
+    """
+    Append a fixed-date holiday and, if it falls on a weekend, the next free
+    weekday as a substitute. NYD / Australia Day / Christmas / Boxing Day are
+    substituted to a weekday in every state when they land on Sat/Sun (so staff
+    working the observed day get public-holiday rates). Process in date order so
+    Christmas/Boxing-Day substitutes don't collide.
+    """
+    holidays.append(d)
+    if d.weekday() >= 5:  # Saturday(5) or Sunday(6)
+        sub = d + timedelta(days=1)
+        while sub.weekday() >= 5 or sub in holidays:
+            sub += timedelta(days=1)
+        holidays.append(sub)
+
+
 def _first_monday_in_august(year: int) -> date:
     """Return the first Monday in August for a given year."""
     aug_1 = date(year, 8, 1)
@@ -154,25 +240,65 @@ def _last_monday_in_october(year: int) -> date:
     return oct_31 - timedelta(days=days_back)
 
 
+# Our State enum -> the `holidays` library's Australian subdivision codes.
+_AU_SUBDIV = {
+    State.nsw: "NSW", State.vic: "VIC", State.qld: "QLD", State.sa: "SA",
+    State.wa: "WA", State.tas: "TAS", State.nt: "NT", State.act: "ACT",
+}
+
+
+@lru_cache(maxsize=512)
+def _public_holidays_cached(state: State, year: int) -> tuple:
+    """Memoized (state, year) -> immutable tuple of public-holiday dates.
+
+    The PH set for a (state, year) is fixed, but get_day_type() calls this for EVERY
+    shift cost calc and the optimiser calls it per candidate×role×period×day — so
+    rebuilding the holidays.Australia object each time was ~700x wasted work on a
+    single roster pass. Caching the result removes it.
+    """
+    subdiv = _AU_SUBDIV.get(state)
+    if subdiv is not None:
+        try:
+            import holidays as _holidays
+            au = _holidays.Australia(subdiv=subdiv, years=year)
+            return tuple(sorted(au.keys()))
+        except Exception as e:  # pragma: no cover - defensive fallback
+            logger.warning(
+                "holidays library unavailable (%s); using fallback PH list for %s",
+                e, state,
+            )
+    return tuple(_get_public_holidays_manual(state, year))
+
+
 def get_public_holidays(state: State, year: int) -> List[date]:
     """
-    Return public holidays for a given state and year.
+    Public holidays for an Australian state/territory and year — drives the
+    public-holiday penalty rate, so correctness here is money-sensitive for EVERY
+    venue, in every state.
 
-    Includes national holidays and state-specific holidays for NSW, VIC, and QLD.
-    For other states, returns only national holidays.
+    Backed by the maintained `holidays` library, which knows each state's gazetted
+    public holidays, including ones a fixed rule can't compute: WA's King's Birthday
+    (proclaimed annually, late Sep/early Oct), QLD's King's Birthday (October),
+    Easter Saturday only where it actually applies (NOT WA/TAS), and state-only days
+    (WA Day, Adelaide Cup, Picnic Day, Reconciliation Day, May Day, etc.), plus
+    weekend substitutes. Falls back to a hand-computed list only if the library is
+    unavailable. Memoized per (state, year) — returns a fresh list so callers may
+    mutate it without corrupting the cache.
+    """
+    return list(_public_holidays_cached(state, year))
 
-    Args:
-        state: Australian state (State enum)
-        year: Calendar year
 
-    Returns:
-        List of date objects representing public holidays
+def _get_public_holidays_manual(state: State, year: int) -> List[date]:
+    """
+    Hand-computed fallback (national + the major state holidays). Used only when the
+    `holidays` library can't be imported. Incomplete for WA/SA/TAS/NT/ACT — the
+    library is the source of truth; this just keeps the engine running.
     """
     holidays = []
 
-    # National holidays
-    holidays.append(date(year, 1, 1))  # New Year's Day
-    holidays.append(date(year, 1, 26))  # Australia Day
+    # National holidays (weekend-substituted to a weekday when they fall Sat/Sun)
+    _add_with_substitute(holidays, date(year, 1, 1))   # New Year's Day
+    _add_with_substitute(holidays, date(year, 1, 26))  # Australia Day
 
     # Easter dates
     easter_sunday = _easter_date(year)
@@ -187,9 +313,22 @@ def get_public_holidays(state: State, year: int) -> List[date]:
     # Anzac Day
     holidays.append(date(year, 4, 25))
 
-    # Christmas and Boxing Day
-    holidays.append(date(year, 12, 25))
-    holidays.append(date(year, 12, 26))
+    # Christmas and Boxing Day (weekend-substituted)
+    _add_with_substitute(holidays, date(year, 12, 25))
+    _add_with_substitute(holidays, date(year, 12, 26))
+
+    # Labour Day (state-specific date). Missing entirely before — a real public
+    # holiday on which staff were underpaid. Standard AU dates:
+    #   WA  1st Mon Mar | VIC/TAS 2nd Mon Mar | QLD/NT 1st Mon May
+    #   NSW/SA/ACT 1st Mon Oct
+    _labour_day = {
+        State.wa: (3, 1), State.vic: (3, 2), State.tas: (3, 2),
+        State.qld: (5, 1), State.nt: (5, 1),
+        State.nsw: (10, 1), State.sa: (10, 1), State.act: (10, 1),
+    }
+    if state in _labour_day:
+        month, nth = _labour_day[state]
+        holidays.append(_nth_weekday(year, month, 0, nth))  # 0 = Monday
 
     # State-specific holidays
     if state == State.nsw:
@@ -474,29 +613,39 @@ def _check_consecutive_days_violation(shift: Shift, recent_shifts: List[Shift]) 
     return violations
 
 
+def _shift_end_datetime(shift: Shift) -> datetime:
+    """A shift's actual END as a datetime, accounting for crossing midnight (an
+    overnight shift's end_time is on the day AFTER its .date)."""
+    end_dt = datetime.combine(shift.date, shift.end_time)
+    if shift.end_time <= shift.start_time:
+        end_dt += timedelta(days=1)
+    return end_dt
+
+
 def _check_minimum_rest_violation(shift: Shift, recent_shifts: List[Shift]) -> List[str]:
     """Check if shift violates minimum rest between shifts."""
     violations = []
 
-    # Find previous shift (if any)
-    previous_shifts = [s for s in recent_shifts if s.date < shift.date]
+    # Any OTHER shift that actually ENDS at or before this one starts — compared as
+    # real datetimes, so it catches both an overnight previous-day shift (Mon
+    # 22:00->Tue 06:00 vs Tue 09:00 = 3h) AND a SAME-DAY split shift under the
+    # minimum (06:00-14:00 then 15:00-23:00 = 1h). Filtering by `s.date < shift.date`
+    # missed the same-day case, diverging from conflict_detector._check_fatigue_risk.
+    this_start = datetime.combine(shift.date, shift.start_time)
+    previous_shifts = [
+        s for s in recent_shifts
+        if getattr(s, "id", None) != getattr(shift, "id", None)
+        and _shift_end_datetime(s) <= this_start
+    ]
     if not previous_shifts:
         return violations
 
-    last_shift = max(previous_shifts, key=lambda x: x.end_time)
+    last_shift = max(previous_shifts, key=_shift_end_datetime)
+    rest_hours = (this_start - _shift_end_datetime(last_shift)).total_seconds() / 3600
 
-    # Calculate hours of rest between end of last shift and start of this shift
-    time_between = (
-        shift.date - last_shift.date
-    ).total_seconds() / 3600 + (
-        shift.start_time.hour - last_shift.end_time.hour
-    ) + (
-        shift.start_time.minute - last_shift.end_time.minute
-    ) / 60
-
-    if time_between < MINIMUM_HOURS_BETWEEN_SHIFTS and last_shift.date < shift.date:
+    if 0 <= rest_hours < MINIMUM_HOURS_BETWEEN_SHIFTS:
         violations.append(
-            f"Only {time_between:.1f}h rest between shifts "
+            f"Only {rest_hours:.1f}h rest between shifts "
             f"(minimum {MINIMUM_HOURS_BETWEEN_SHIFTS}h required)"
         )
 
@@ -579,7 +728,7 @@ def calculate_shift_cost(
     - Overtime rates if applicable
     - Evening/night work loadings
     - 25% casual loading (already in casual base multiplier)
-    - Superannuation (9.5% of gross for casual, included in rates for others)
+    (Superannuation is NOT included here — this returns the gross shift wage only.)
 
     Args:
         employee: The employee working the shift
@@ -593,19 +742,26 @@ def calculate_shift_cost(
 
     # Get base multiplier
     base_multiplier = PENALTY_MULTIPLIERS[employee.employment_type][day_type]
+    rate = employee.hourly_base_rate
+    net_hours = Decimal(str(shift.net_hours))
 
-    # Apply evening loading if applicable
-    start_hour = shift.start_time.hour
-    if day_type == DayType.weekday:
-        if start_hour >= 19 and start_hour < 24:
-            base_multiplier += EVENING_LOADING_THRESHOLDS["7pm"]
-        elif start_hour >= 0 and start_hour < 7:
-            base_multiplier += EVENING_LOADING_THRESHOLDS["midnight"]
+    # On a weekday, evening/night loading applies to the hours ACTUALLY WORKED in
+    # those windows (19:00-24:00 +15%, 00:00-07:00 +17.5%), not the whole shift
+    # gated on its start hour — otherwise a 17:00-23:00 shift earns no loading and a
+    # 06:00-15:00 shift over-charges all 9h. Sat/Sun/PH use the whole day-type rate.
+    if day_type == DayType.weekday and shift.start_time and shift.end_time:
+        bands = split_weekday_hours_by_band(shift.start_time, shift.end_time, net_hours)
+        band_loading = {
+            "ordinary": Decimal("0"),
+            "evening": EVENING_LOADING_THRESHOLDS["7pm"],
+            "night": EVENING_LOADING_THRESHOLDS["midnight"],
+        }
+        shift_cost = Decimal("0")
+        for band, bhrs in bands.items():
+            if bhrs <= 0:
+                continue
+            shift_cost += rate * (base_multiplier + band_loading[band]) * bhrs
+    else:
+        shift_cost = rate * base_multiplier * net_hours
 
-    # Calculate shift cost based on net hours
-    shift_cost = employee.hourly_base_rate * base_multiplier * Decimal(str(shift.net_hours))
-
-    # Round to 2 decimal places
-    shift_cost = shift_cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    return shift_cost
+    return shift_cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

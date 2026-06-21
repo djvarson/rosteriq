@@ -2335,6 +2335,10 @@
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
           <span>Reports</span>
         </div>
+        <div class="nav-item" onclick="window.location.href='/connections'" style="cursor:pointer;">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg></span>
+          <span>Connections</span>
+        </div>
       </div>
     </div>
 
@@ -3026,7 +3030,8 @@
                 <span style="display:inline-block; width:1px; height:20px; background:#2A3040; margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterPDF()" title="Download PDF for printing">PDF</button>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterCSV()" title="Download CSV for Excel">CSV</button>
-                <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" title="Push roster to connected system" style="background:rgba(245,158,11,0.1); border-color:var(--brand-blue); color:var(--brand-blue);">Push to System</button>
+                <button class="btn btn-primary btn-small" onclick="publishRoster()" id="btn-publish-roster" title="Publish this roster and notify staff (no integration required)">Publish Roster</button>
+                <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" title="Also push roster to a connected rostering system (Tanda/Deputy/Humanforce)" style="background:rgba(245,158,11,0.1); border-color:var(--brand-blue); color:var(--brand-blue);">Push to System</button>
                 <span style="display:inline-block; width:1px; height:20px; background:#2A3040; margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportDailyRunsheet()" title="Print today's shift runsheet">Runsheet</button>
                 <button class="btn btn-secondary btn-small" onclick="sendRosterToStaff()" id="btn-send-roster" title="Email/SMS roster to all staff" style="background:rgba(34,197,94,0.1); border-color:var(--success); color:var(--success);">Send to Staff</button>
@@ -4572,6 +4577,71 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-generate-roster')">Cancel</button>
       <button class="btn btn-primary" id="btn-modal-generate">Generate</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal-add-employee">
+  <div class="modal-content">
+    <div class="modal-header">Add Employee</div>
+    <div class="modal-body">
+      <p style="color: var(--text-muted); margin-bottom: 16px;">Add a staff member to this venue. They'll appear in your Staff Directory and be available for rostering.</p>
+      <div class="input-group">
+        <label>Name *</label>
+        <input type="text" id="add-emp-name" placeholder="e.g., Jane Smith">
+      </div>
+      <div class="input-group">
+        <label>Employment Type *</label>
+        <select id="add-emp-employment-type">
+          <option value="full_time">Full-time</option>
+          <option value="part_time">Part-time</option>
+          <option value="casual" selected>Casual</option>
+        </select>
+      </div>
+      <div class="input-group">
+        <label>Award Level</label>
+        <select id="add-emp-award-level">
+          <option value="level_1">Level 1</option>
+          <option value="level_2" selected>Level 2</option>
+          <option value="level_3">Level 3</option>
+          <option value="level_4">Level 4</option>
+          <option value="level_5">Level 5</option>
+          <option value="level_6">Level 6</option>
+        </select>
+      </div>
+      <div class="input-group">
+        <label>State</label>
+        <select id="add-emp-state">
+          <option value="nsw">NSW</option>
+          <option value="vic">VIC</option>
+          <option value="qld">QLD</option>
+          <option value="sa">SA</option>
+          <option value="wa">WA</option>
+          <option value="tas">TAS</option>
+          <option value="nt">NT</option>
+          <option value="act">ACT</option>
+        </select>
+      </div>
+      <div class="input-group">
+        <label>Hourly Base Rate (AUD) *</label>
+        <input type="number" id="add-emp-rate" placeholder="e.g., 28.50" step="0.01" min="0">
+      </div>
+      <div class="input-group">
+        <label>Primary Role / Skill</label>
+        <input type="text" id="add-emp-role" placeholder="e.g., bartender">
+      </div>
+      <div class="input-group">
+        <label>Phone</label>
+        <input type="text" id="add-emp-phone" placeholder="e.g., 0400 000 000">
+      </div>
+      <div class="input-group">
+        <label>Email</label>
+        <input type="email" id="add-emp-email" placeholder="e.g., jane@example.com">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-add-employee')">Cancel</button>
+      <button class="btn btn-primary" id="btn-modal-add-employee">Add Employee</button>
     </div>
   </div>
 </div>
@@ -6419,6 +6489,82 @@ document.getElementById('btn-modal-generate').addEventListener('click', async ()
     loadVenueData();
   } catch (error) {
     showError('#page-dashboard', 'Failed to generate roster: ' + error.message);
+  }
+});
+
+// ----- Add Employee -----
+function getCurrentVenueState() {
+  const venue = (state.venues || []).find(v => v.id === state.currentVenue);
+  const s = venue && venue.state ? String(venue.state).toLowerCase() : 'vic';
+  const valid = ['nsw','vic','qld','sa','wa','tas','nt','act'];
+  return valid.includes(s) ? s : 'vic';
+}
+
+document.getElementById('btn-add-staff').addEventListener('click', () => {
+  if (!state.currentVenue) {
+    showToast('Select a venue before adding staff', 'warning');
+    return;
+  }
+  // Reset form
+  document.getElementById('add-emp-name').value = '';
+  document.getElementById('add-emp-employment-type').value = 'casual';
+  document.getElementById('add-emp-award-level').value = 'level_2';
+  document.getElementById('add-emp-state').value = getCurrentVenueState();
+  document.getElementById('add-emp-rate').value = '';
+  document.getElementById('add-emp-role').value = '';
+  document.getElementById('add-emp-phone').value = '';
+  document.getElementById('add-emp-email').value = '';
+  openModal('modal-add-employee');
+});
+
+document.getElementById('btn-modal-add-employee').addEventListener('click', async () => {
+  const name = document.getElementById('add-emp-name').value.trim();
+  const employmentType = document.getElementById('add-emp-employment-type').value;
+  const rateRaw = document.getElementById('add-emp-rate').value.trim();
+  const rate = parseFloat(rateRaw);
+  const role = document.getElementById('add-emp-role').value.trim();
+  const phone = document.getElementById('add-emp-phone').value.trim();
+  const email = document.getElementById('add-emp-email').value.trim();
+
+  // Client-side validation of required fields
+  if (!name) { showToast('Name is required', 'error'); return; }
+  if (!employmentType) { showToast('Employment type is required', 'error'); return; }
+  if (!rateRaw || isNaN(rate) || rate <= 0) {
+    showToast('Hourly base rate must be greater than 0', 'error');
+    return;
+  }
+  if (!state.currentVenue) { showToast('No venue selected', 'error'); return; }
+
+  const now = new Date().toISOString();
+  const payload = {
+    id: `emp-${Date.now()}`,
+    venue_id: state.currentVenue,
+    name: name,
+    employment_type: employmentType,
+    award_level: document.getElementById('add-emp-award-level').value,
+    state: document.getElementById('add-emp-state').value,
+    hourly_base_rate: rate.toFixed(2),
+    skills: role ? [role] : [],
+    created_at: now,
+    updated_at: now,
+  };
+  if (phone) payload.phone = phone;
+  if (email) payload.email = email;
+
+  const btn = document.getElementById('btn-modal-add-employee');
+  btn.disabled = true;
+  try {
+    await fetchAPI('/employees', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    closeModal('modal-add-employee');
+    showToast(`${name} added to staff`, 'success');
+    loadVenueData();
+  } catch (error) {
+    showToast('Failed to add employee: ' + error.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 });
 
@@ -8653,6 +8799,38 @@ function exportRosterCSV() {
 }
 
 // ── Roster Push to Connected System ─────────────────────────────────
+// ── Publish Roster (connector-independent) ──────────────────────────
+// Publishes the current roster internally (marks it published, runs conflict
+// checks, notifies staff) WITHOUT requiring a Tanda/Deputy/Humanforce integration.
+// If one IS connected, the backend also pushes to it. "Push to System" remains a
+// separate action for venues that want to push to their external system.
+async function publishRoster() {
+  const btn = document.getElementById('btn-publish-roster');
+  const venueId = state.currentVenue;
+  if (!venueId) { showToast('No venue selected', 'error'); return; }
+  const rosterId = (state.rosters && state.rosters.length > 0) ? state.rosters[0].id : null;
+  if (!rosterId) { showToast('Generate a roster first, then publish.', 'warning', 4000); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Publishing...'; }
+  try {
+    const result = await fetchAPI('/api/v1/rosters/' + rosterId + '/publish', {
+      method: 'POST',
+      body: JSON.stringify({ skip_approval: true })
+    });
+    if (result && result.success) {
+      const notified = result.notifications_sent || 0;
+      showToast('Roster published' + (notified ? ' — ' + notified + ' staff notified.' : '.'), 'success', 4000);
+    } else {
+      showToast('Could not publish: ' + ((result && result.message) || 'roster not in a publishable state'), 'warning', 6000);
+    }
+  } catch (err) {
+    console.error('Publish failed:', err);
+    showToast('Publish failed: ' + (err.message || 'Unknown error'), 'error', 5000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Publish Roster'; }
+  }
+}
+
 async function pushToRosteringSystem() {
   const btn = document.getElementById('btn-push-roster');
   if (btn) { btn.disabled = true; btn.textContent = 'Pushing...'; }
@@ -8937,8 +9115,9 @@ async function loadRosterForWeek() {
   if (!venueId) return;
 
   try {
-    const roster = await fetchAPI('/api/rosters?venue_id=' + venueId + '&week_start=' + dateStr);
-    if (roster && roster.length > 0) {
+    const resp = await fetchAPI('/rosters?venue_id=' + venueId + '&week_start=' + dateStr);
+    const roster = (resp && resp.items) || [];
+    if (roster.length > 0) {
       renderRosterTable(roster[0]);
     } else {
       // No roster for this week — show empty state

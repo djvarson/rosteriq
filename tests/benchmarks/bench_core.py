@@ -127,7 +127,7 @@ def create_test_employees(count: int) -> List[Employee]:
             max_hours_per_week=38 if i % 3 == 0 else (25 if i % 3 == 1 else 15),
             employment_type=employment_types[i % 3],
             award_level=award_levels[i % 3],
-            state=State.NSW,
+            state=State.nsw,
             skills=["bar", "kitchen"],
             availability={"Monday": True, "Tuesday": True, "Wednesday": True},
             created_at=datetime.utcnow(),
@@ -174,7 +174,7 @@ def create_test_venue() -> VenueConfig:
         location="Sydney, NSW",
         timezone="Australia/Sydney",
         award_level=AwardLevel.LEVEL_1,
-        state=State.NSW,
+        state=State.nsw,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -434,7 +434,7 @@ def benchmark_award_rules():
 
     def get_day():
         test_date = date.today() + timedelta(days=(int(time.perf_counter() * 1000) % 365))
-        return get_day_type(test_date, State.NSW)
+        return get_day_type(test_date, State.nsw)
 
     elapsed, _ = benchmark(get_day, iterations=10000)
     result_daytype.record(elapsed / 10000)
@@ -448,7 +448,7 @@ def benchmark_award_rules():
         emp_type = [EmploymentType.CASUAL, EmploymentType.PART_TIME, EmploymentType.FULL_TIME][
             int(time.perf_counter() * 1000) % 3
         ]
-        day_type = get_day_type(date.today(), State.NSW)
+        day_type = get_day_type(date.today(), State.nsw)
         return get_penalty_multiplier(emp_type, day_type)
 
     elapsed, _ = benchmark(get_multiplier, iterations=10000)

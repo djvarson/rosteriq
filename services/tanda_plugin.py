@@ -15,6 +15,8 @@ import os
 import logging
 import hashlib
 import hmac
+
+import httpx
 from datetime import datetime, timedelta
 from typing import Optional
 from decimal import Decimal
@@ -159,6 +161,62 @@ class TandaPluginService:
             logger.error(f"Plugin install failed for {organisation_id}: {e}")
             raise ValueError(f"Installation failed: {str(e)}")
 
+    def build_adapter(
+        self,
+        organisation_id: str,
+        state_code: str = "vic",
+    ) -> TandaAdapter:
+        """
+        Construct a TandaAdapter from a stored plugin install record, wired so
+        that any OAuth token refresh is persisted back to the install record.
+
+        Without this persistence callback, a token refreshed mid-session is
+        only updated in memory and is lost on process restart (the bug that
+        Deputy/MYOB/HumanForce already avoid via on_token_refresh). Here we
+        construct credentials from the stored install and pass a callback that
+        writes the refreshed access/refresh tokens back to the database.
+
+        Args:
+            organisation_id: Tanda organisation ID with a stored install.
+            state_code: Australian state code for employee mapping.
+
+        Returns:
+            A TandaAdapter ready to use as an async context manager.
+
+        Raises:
+            ValueError: If no install record exists for the organisation.
+        """
+        install = self.db.get_plugin_install(organisation_id)
+        if not install:
+            raise ValueError(f"No install found for org {organisation_id}")
+
+        credentials = TandaCredentials(
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            access_token=install.get("access_token"),
+            refresh_token=install.get("refresh_token"),
+            token_expires_at=install.get("token_expires_at"),
+            org_id=organisation_id,
+        )
+
+        def _persist_refreshed_tokens(creds: TandaCredentials) -> None:
+            # Re-read the latest install so we don't clobber concurrent writes,
+            # then persist the refreshed tokens.
+            record = self.db.get_plugin_install(organisation_id) or install
+            record["access_token"] = creds.access_token
+            record["refresh_token"] = creds.refresh_token
+            record["token_expires_at"] = creds.token_expires_at
+            self.db.save_plugin_install(record)
+            logger.info(
+                f"Persisted refreshed Tanda token for org {organisation_id}"
+            )
+
+        return TandaAdapter(
+            credentials,
+            state=State(state_code),
+            on_token_refresh=_persist_refreshed_tokens,
+        )
+
     async def handle_uninstall(self, organisation_id: str) -> dict:
         """
         Handle uninstallation: revoke tokens, mark venue inactive, cancel billing.
@@ -184,11 +242,13 @@ class TandaPluginService:
 
             venue_id = install["venue_id"]
 
-            # Step 2: Revoke OAuth tokens (best-effort)
+            # Step 2: Revoke OAuth tokens at Tanda (best-effort).
+            tokens_revoked = False
             try:
-                # In production, call Tanda's token revocation endpoint
-                # await self._revoke_oauth_tokens(install["access_token"])
-                pass
+                tokens_revoked = await self._revoke_oauth_tokens(
+                    install.get("access_token", ""),
+                    install.get("refresh_token", ""),
+                )
             except Exception as e:
                 logger.warning(f"Failed to revoke tokens for {organisation_id}: {e}")
 
@@ -219,7 +279,14 @@ class TandaPluginService:
 
             return {
                 "status": "success",
-                "message": "Uninstallation complete. Tokens revoked and venue deactivated.",
+                "tokens_revoked": tokens_revoked,
+                "message": (
+                    "Uninstallation complete. Tokens revoked and venue deactivated."
+                    if tokens_revoked
+                    else "Uninstallation complete and venue deactivated. Token "
+                         "revocation could not be confirmed with Tanda; tokens may "
+                         "remain valid until they expire."
+                ),
             }
 
         except Exception as e:
@@ -308,14 +375,37 @@ class TandaPluginService:
         timestamp = datetime.utcnow().strftime("%s")
         return f"venue_{organisation_id}_{timestamp}"
 
-    async def _revoke_oauth_tokens(self, access_token: str) -> None:
-        """
-        Revoke OAuth tokens at Tanda's token revocation endpoint.
+    REVOKE_URL = "https://my.tanda.co/api/oauth/revoke"
 
-        In production, this calls Tanda's /oauth/revoke endpoint.
-        For now, it's a placeholder.
+    async def _revoke_oauth_tokens(self, access_token: str, refresh_token: str = "") -> bool:
         """
-        # TODO: Implement token revocation
-        # POST https://my.tanda.co/api/oauth/revoke
-        # with access_token
-        pass
+        Revoke OAuth tokens at Tanda's revocation endpoint (RFC 7009, best-effort).
+
+        Returns True if at least one token was accepted for revocation. Never
+        raises — revocation failure must not block uninstall.
+        """
+        revoked_any = False
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for token, hint in ((access_token, "access_token"), (refresh_token, "refresh_token")):
+                if not token:
+                    continue
+                try:
+                    resp = await client.post(
+                        self.REVOKE_URL,
+                        data={
+                            "token": token,
+                            "token_type_hint": hint,
+                            "client_id": self.client_id,
+                            "client_secret": self.client_secret,
+                        },
+                    )
+                    # RFC 7009: a successful revocation returns 200 (Tanda may
+                    # also use 204). 200 is returned even for an unknown token.
+                    if resp.status_code in (200, 204):
+                        logger.info(f"Revoked Tanda {hint}")
+                        revoked_any = True
+                    else:
+                        logger.warning(f"Tanda {hint} revoke returned {resp.status_code}")
+                except httpx.HTTPError as e:
+                    logger.warning(f"Tanda {hint} revoke request failed: {e}")
+        return revoked_any

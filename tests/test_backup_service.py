@@ -117,7 +117,8 @@ def create_test_memory_store() -> MemoryStore:
             signals_used=["historical"],
             model_version="v2.0",
         )
-        store.forecasts[fc.id] = fc
+        # forecasts is a list, not a dict — append rather than key-assign.
+        store.forecasts.append(fc)
 
     return store
 

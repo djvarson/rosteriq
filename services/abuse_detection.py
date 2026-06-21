@@ -169,8 +169,12 @@ class AbuseDetector:
             if is_failed and endpoint == "/auth/login":
                 self._failed_logins[ip].append(time.time())
 
-            # Track invalid API key attempts
-            if status_code == 401 and "X-API-Key" in endpoint:
+            # Track invalid API key / credential probing attempts.
+            # A 401 on any non-login endpoint means the supplied credential
+            # (API key / token) was rejected. Repeated 401s from one IP are the
+            # signature of API-key probing. (Login brute-force is tracked
+            # separately above for the /auth/login endpoint.)
+            if status_code == 401 and endpoint != "/auth/login":
                 self._api_key_probes[ip].append(time.time())
 
             # Periodic cleanup
@@ -199,8 +203,17 @@ class AbuseDetector:
                         abuse_score=1.0,
                     )
                 else:
-                    # Block expired, clean up
+                    # Block expired: clear the block AND the offending history
+                    # for this IP so the cooldown actually grants a fresh window.
+                    # Without resetting the counters, the same un-aged history
+                    # would immediately re-trigger detection and re-block the IP,
+                    # making the cooldown meaningless.
                     del self._blocked_ips[ip]
+                    self._request_history.pop(ip, None)
+                    self._user_attempts.pop(ip, None)
+                    self._failed_logins.pop(ip, None)
+                    self._api_key_probes.pop(ip, None)
+                    self._last_enumeration_id.pop(ip, None)
 
             # Run detection checks
             abuse_score = 0.0

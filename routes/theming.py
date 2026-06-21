@@ -20,7 +20,7 @@ from fastapi.responses import PlainTextResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from rosteriq.services.theming import ThemeService, ThemeConfig
-from rosteriq.services.auth import get_current_user
+from rosteriq.middleware.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/theme", tags=["theming"])
@@ -75,10 +75,15 @@ class ThemeConfigResponse(BaseModel):
 # ============================================================================
 
 
-def _check_venue_auth(venue_id: str, current_user: dict) -> None:
-    """Verify user has access to the venue."""
-    # Check if user is admin or belongs to the venue
-    if current_user.get("role") != "admin" and current_user.get("venue_id") != venue_id:
+def _check_venue_auth(venue_id: str, current_user) -> None:
+    """Verify the user has access to the venue.
+
+    current_user is a UserContext (not a dict). Owners have unrestricted
+    access; everyone else must have the venue in their venue_ids.
+    """
+    if getattr(current_user, "is_owner", False):
+        return
+    if venue_id not in getattr(current_user, "venue_ids", []):
         raise HTTPException(status_code=403, detail="Not authorized for this venue")
 
 

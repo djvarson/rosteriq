@@ -351,10 +351,11 @@ class XeroClient:
             await self._save_credentials()
 
     async def _save_credentials(self) -> None:
-        """Persist updated credentials to database."""
-        # Implementation depends on database layer
-        # For now, in-memory update
-        pass
+        """Persist refreshed credentials so the next request reuses the new token."""
+        try:
+            await save_xero_credentials(self.db, self.credentials)
+        except Exception as e:
+            logger.warning(f"Failed to persist refreshed Xero credentials: {e}")
 
     async def _make_request(
         self,

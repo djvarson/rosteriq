@@ -15,3 +15,9 @@ venv/
 .venv/
 test_report.json
 *.bak
+
+# Stray session-export snapshots (old zipped project copies)
+Andy/
+Andy (1)/
+*RosterIQ_session.zip
+.claude/worktrees/

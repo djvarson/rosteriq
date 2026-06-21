@@ -13,6 +13,22 @@ Usage:
 import asyncio
 import time
 from datetime import date, datetime, time as time_type, timedelta
+from zoneinfo import ZoneInfo
+
+# Map an Australian state to its IANA timezone, so Tanda Unix timestamps are
+# resolved to the venue's LOCAL date/hour. Parsing epochs in server-local time
+# (the previous behaviour) put AU shifts on the wrong day/hour on a UTC host,
+# corrupting day-of-week/time-of-day penalty rates (Sat/Sun/PH/evening).
+_STATE_TZ = {
+    "vic": "Australia/Melbourne",
+    "nsw": "Australia/Sydney",
+    "act": "Australia/Sydney",
+    "tas": "Australia/Hobart",
+    "qld": "Australia/Brisbane",
+    "sa": "Australia/Adelaide",
+    "nt": "Australia/Darwin",
+    "wa": "Australia/Perth",
+}
 from decimal import Decimal
 from typing import Optional
 
@@ -235,18 +251,27 @@ class TandaAdapter:
     MAX_RETRIES = 3
     RETRY_BACKOFF = [1, 2, 4]  # seconds
 
-    def __init__(self, credentials: TandaCredentials, state: State = State.vic):
+    def __init__(
+        self,
+        credentials: TandaCredentials,
+        state: State = State.vic,
+        on_token_refresh=None,
+    ):
         """
         Initialise the Tanda adapter.
 
         Args:
             credentials: Tanda OAuth credentials.
             state: Default Australian state for employee mapping.
+            on_token_refresh: Optional callback(credentials) invoked after a
+                successful token refresh, so refreshed tokens can be persisted
+                back to storage (mirrors Deputy/MYOB/HumanForce).
         """
         self.credentials = credentials
         self.state = state
         self.rate_limiter = RateLimiter()
         self._client: Optional[httpx.AsyncClient] = None
+        self._on_token_refresh = on_token_refresh  # callback(credentials) to persist new tokens
 
     async def __aenter__(self) -> "TandaAdapter":
         """Context manager entry — create HTTP client."""
@@ -384,11 +409,14 @@ class TandaAdapter:
                 )
             )
 
-        # Token refresh bypasses rate limiter — uses a direct request
+        # Token refresh bypasses rate limiter — uses a direct request.
+        # Use the same endpoint + form encoding as the OAuth code exchange
+        # (TandaOAuth.TOKEN_URL). The previous code POSTed JSON to the wrong
+        # path (/oauth/token, missing /api), so refresh 404'd/415'd in prod.
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.post(
-                "https://my.tanda.co/oauth/token",
-                json={
+                "https://my.tanda.co/api/oauth/token",
+                data={
                     "client_id": self.credentials.client_id,
                     "client_secret": self.credentials.client_secret,
                     "refresh_token": self.credentials.refresh_token,
@@ -415,6 +443,22 @@ class TandaAdapter:
         self.credentials.token_expires_at = datetime.now().replace(
             microsecond=0
         ) + timedelta(seconds=expires_in)
+
+        # Update client auth header so subsequent requests use the new token.
+        if self._client is not None:
+            self._client.headers["Authorization"] = (
+                f"Bearer {self.credentials.access_token}"
+            )
+
+        # Persist refreshed tokens if a callback was provided, so the new
+        # access/refresh tokens survive a restart (mirrors Deputy).
+        if self._on_token_refresh:
+            try:
+                self._on_token_refresh(self.credentials)
+            except Exception:
+                # Persistence failure must not break the in-flight request;
+                # the refreshed token still works for this process.
+                pass
 
     async def get_employees(self) -> list[Employee]:
         """
@@ -566,17 +610,20 @@ class TandaAdapter:
         Returns:
             Shift model instance.
         """
-        # Parse start/finish times — Tanda uses Unix timestamps or ISO strings
+        # Parse start/finish times — Tanda uses Unix timestamps or ISO strings.
+        # Resolve epochs in the venue's LOCAL timezone so the shift lands on the
+        # correct date/hour (drives day-of-week/time-of-day penalty rates).
         start = data.get("start", data.get("start_time"))
         finish = data.get("finish", data.get("end_time", data.get("end")))
+        tz = ZoneInfo(_STATE_TZ.get(getattr(self.state, "value", str(self.state)), "Australia/Melbourne"))
 
         if isinstance(start, (int, float)):
-            start_dt = datetime.fromtimestamp(start)
+            start_dt = datetime.fromtimestamp(start, tz=tz)
         else:
             start_dt = datetime.fromisoformat(str(start))
 
         if isinstance(finish, (int, float)):
-            end_dt = datetime.fromtimestamp(finish)
+            end_dt = datetime.fromtimestamp(finish, tz=tz)
         else:
             end_dt = datetime.fromisoformat(str(finish))
 

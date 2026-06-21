@@ -2971,8 +2971,10 @@
     // INITIALIZATION
     // ============================================
     async function init() {
-      // Check if logged in
-      const token = sessionStorage.getItem('access_token');
+      // Check if logged in. login.html stores the JWT in localStorage under
+      // 'jwt_token' (same as the dashboard/admin pages) — read the same key so
+      // real staff sessions are picked up instead of silently falling to demo.
+      const token = localStorage.getItem('jwt_token');
       if (!token) {
         // Load demo mode instead of redirecting
         initDemoMode();
@@ -3549,7 +3551,8 @@
     };
 
     document.getElementById('logoutBtn').onclick = () => {
-      sessionStorage.removeItem('access_token');
+      localStorage.removeItem('jwt_token');
+      localStorage.removeItem('jwt_refresh_token');
       window.location.href = '/login';
     };
 
@@ -3963,7 +3966,7 @@
       };
 
       try {
-        await apiCall('/api/staff/notification-preferences', {
+        await apiCall('/api/notifications/preferences', {
           method: 'PUT',
           body: JSON.stringify(prefs),
         });

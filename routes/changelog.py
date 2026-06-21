@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Optional, List
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Depends, Body
+from fastapi import APIRouter, HTTPException, Query, Path, Depends, Body
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
@@ -320,7 +320,7 @@ async def get_diff(
 @router.post("/rosters/{roster_id}/changelog/revert/{version}")
 async def revert_to_version(
     roster_id: str,
-    version: int = Query(..., ge=1, description="Target version to revert to"),
+    version: int = Path(..., ge=1, description="Target version to revert to"),
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ) -> dict:

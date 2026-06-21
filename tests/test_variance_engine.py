@@ -35,7 +35,19 @@ class TestDefaultWeights:
         assert sum(DEFAULT_WEIGHTS.values()) == pytest.approx(1.0)
 
     def test_all_signal_types_present(self):
-        for st in SignalType:
+        # DEFAULT_WEIGHTS is the 5-signal core weighting model (see module
+        # docstring); these weights must sum to 1.0. The SignalType enum was
+        # later expanded with additional auxiliary signals that fall back to a
+        # default weight via DEFAULT_WEIGHTS.get(type, 0.1) and are not part of
+        # the core weighted set. Assert the core weighted signals are present.
+        core_weighted = {
+            SignalType.historical,
+            SignalType.bookings,
+            SignalType.pos_trends,
+            SignalType.weather,
+            SignalType.events,
+        }
+        for st in core_weighted:
             assert st in DEFAULT_WEIGHTS
 
     def test_historical_highest_weight(self):

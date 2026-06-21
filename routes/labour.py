@@ -436,6 +436,10 @@ def create_labour_router(labour_tracker: LabourTracker) -> APIRouter:
             logger.error(f"Error updating thresholds: {e}")
             raise HTTPException(status_code=500, detail="Failed to update thresholds")
 
+    # Return the configured router so app.include_router() receives a real
+    # APIRouter (previously returned None -> "'NoneType' has no attribute 'routes'").
+    return router
+
 
 # ============================================================================
 # Module initialization

@@ -1,0 +1,1111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#1e3a5f">
+  <title>RosterIQ - Connections</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --dark-navy: #090C12;
+      --dark-bg: #0F1419;
+      --card-bg: #161B22;
+      --light-bg: #0D1117;
+      --text-primary: #E6EDF3;
+      --text-secondary: #8B949E;
+      --text-muted: #484F58;
+      --brand-blue: #F59E0B;
+      --brand-accent: #D97706;
+      --success: #10B981;
+      --warning: #F59E0B;
+      --danger: #EF4444;
+      --info: #F59E0B;
+      --border: #21262D;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--light-bg);
+      color: var(--text-primary);
+    }
+
+    /* ============================================
+       LAYOUT: Sidebar + Main
+       ============================================ */
+    .app-container { display: flex; min-height: 100vh; }
+
+    .sidebar {
+      width: 220px;
+      background: var(--dark-navy);
+      border-right: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 24px 0;
+      overflow-y: auto;
+      position: fixed;
+      height: 100vh;
+      left: 0;
+      top: 0;
+      z-index: 1000;
+      transition: transform 0.3s ease, top 0.3s ease;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar.collapsed { transform: translateX(-220px); }
+
+    .main-content {
+      flex: 1;
+      margin-left: 220px;
+      transition: margin-left 0.3s ease;
+      background: var(--light-bg);
+    }
+
+    .sidebar.collapsed ~ .main-content { margin-left: 0; }
+
+    .sidebar-logo {
+      padding: 0 16px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sidebar-logo svg { width: 32px; height: 32px; }
+
+    .sidebar-logo-text { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; }
+    .sidebar-logo-text span { color: #F59E0B; }
+
+    .venue-selector { padding: 8px 12px 8px 8px; margin-bottom: 12px; }
+
+    .venue-selector label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .venue-selector select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--dark-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .venue-selector select:hover,
+    .venue-selector select:focus {
+      border-color: #F59E0B;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+    }
+
+    .sidebar-divider { height: 1px; background: rgba(255, 255, 255, 0.1); margin: 16px 0; }
+
+    .sidebar-section { margin-bottom: 8px; }
+
+    .sidebar-section-title {
+      padding: 8px 16px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .sidebar-nav { display: flex; flex-direction: column; gap: 4px; padding: 0 12px; }
+
+    .nav-item {
+      padding: 8px 12px;
+      border-radius: 6px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 13px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      user-select: none;
+      text-decoration: none;
+    }
+
+    .nav-item:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); }
+
+    .nav-item.active {
+      background: rgba(245, 158, 11, 0.12);
+      color: #F59E0B;
+      border-left: 2px solid #F59E0B;
+    }
+
+    .nav-item-icon { font-size: 18px; flex-shrink: 0; }
+
+    /* ============================================
+       TOP BAR
+       ============================================ */
+    .top-bar {
+      background: rgba(15, 20, 27, 0.85);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 500;
+    }
+
+    .top-bar-left { display: flex; align-items: center; gap: 16px; }
+    .top-bar-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+    .top-bar-right { display: flex; align-items: center; gap: 16px; }
+    .clock { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+    .hamburger {
+      display: none;
+      width: 36px;
+      height: 36px;
+      border: none;
+      background: none;
+      cursor: pointer;
+      padding: 6px;
+    }
+
+    .hamburger span {
+      display: block;
+      width: 20px;
+      height: 2px;
+      background: var(--text-secondary);
+      margin: 4px 0;
+      border-radius: 1px;
+      transition: all 0.3s;
+    }
+
+    /* ============================================
+       CONTENT AREA
+       ============================================ */
+    .content { padding: 20px 24px; max-width: 1100px; margin: 0 auto; }
+
+    .page-header { margin-bottom: 20px; }
+
+    .page-title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .page-subtitle { font-size: 13px; color: var(--text-muted); }
+
+    /* ============================================
+       CATEGORIES & CARDS
+       ============================================ */
+    .category { margin-bottom: 32px; }
+
+    .category-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .connector-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .connector-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    .connector-card:hover { border-color: rgba(245, 158, 11, 0.2); }
+
+    .connector-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .connector-head-left { flex: 1; min-width: 220px; }
+
+    .connector-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .connector-summary { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px; }
+
+    .connector-imports {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .connector-imports strong { color: var(--text-secondary); font-weight: 600; }
+
+    .connector-head-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+    }
+
+    /* Badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+
+    .badge-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+    .badge.connected { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+    .badge.connected .badge-dot { background: var(--success); }
+    .badge.pending { background: rgba(245, 158, 11, 0.12); color: var(--warning); }
+    .badge.pending .badge-dot { background: var(--warning); }
+    .badge.disconnected { background: rgba(139, 148, 158, 0.12); color: var(--text-secondary); }
+    .badge.disconnected .badge-dot { background: var(--text-secondary); }
+
+    /* Buttons */
+    .btn {
+      padding: 9px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+
+    .btn-primary { background: var(--brand-blue); color: #0D1117; }
+    .btn-primary:hover:not(:disabled) { background: var(--brand-accent); box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); border-color: #475569; }
+
+    .btn-small { padding: 6px 12px; font-size: 12px; }
+
+    /* Expandable panel */
+    .connector-panel {
+      display: none;
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+    }
+
+    .connector-panel.open { display: block; }
+
+    .method {
+      background: var(--dark-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+
+    .method:last-child { margin-bottom: 0; }
+
+    .method-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 12px;
+    }
+
+    .method-endpoint {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
+      margin-left: 8px;
+      font-weight: 400;
+    }
+
+    .directions-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--brand-blue);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .directions {
+      margin: 0 0 14px 0;
+      padding-left: 0;
+      list-style: none;
+      counter-reset: step;
+    }
+
+    .directions li {
+      position: relative;
+      padding: 6px 0 6px 34px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text-secondary);
+      counter-increment: step;
+    }
+
+    .directions li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 5px;
+      width: 22px;
+      height: 22px;
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--brand-blue);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    /* Forms */
+    .field-group { margin-bottom: 14px; }
+
+    .field-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+
+    .field-label .req { color: var(--danger); margin-left: 3px; }
+
+    .field-input,
+    .field-file {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--dark-navy);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 13px;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+
+    .field-input:focus {
+      outline: none;
+      border-color: var(--brand-blue);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+    }
+
+    .field-input::placeholder { color: var(--text-muted); }
+
+    .field-help { font-size: 11px; color: var(--text-muted); margin-top: 5px; line-height: 1.4; }
+
+    .method-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .env-note {
+      font-size: 12px;
+      color: var(--warning);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .docs-link {
+      font-size: 12px;
+      color: var(--brand-blue);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .docs-link:hover { text-decoration: underline; }
+
+    /* Inline messages */
+    .method-message {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+
+    .method-message.show { display: block; animation: slideIn 0.3s ease; }
+    .method-message.success { background: rgba(16, 185, 129, 0.1); color: #6EE7B7; border-left: 3px solid var(--success); }
+    .method-message.error { background: rgba(239, 68, 68, 0.1); color: #FCA5A5; border-left: 3px solid var(--danger); }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Detail chips */
+    .detail-row {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .detail-chip {
+      font-size: 11px;
+      color: var(--text-secondary);
+      background: var(--dark-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 8px;
+    }
+
+    .detail-chip strong { color: var(--text-muted); font-weight: 600; }
+
+    /* State containers */
+    .state-box { text-align: center; padding: 56px 24px; color: var(--text-muted); }
+    .state-box .icon { font-size: 40px; margin-bottom: 16px; }
+    .state-box .title { font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+    .state-box .msg { font-size: 13px; margin-bottom: 16px; }
+
+    .loading {
+      display: inline-block;
+      width: 28px;
+      height: 28px;
+      border: 3px solid var(--border);
+      border-top-color: var(--brand-blue);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ============================================
+       RESPONSIVE
+       ============================================ */
+    @media (max-width: 768px) {
+      .hamburger { display: flex; }
+      .sidebar { width: 260px; transform: translateX(-260px); box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3); }
+      .sidebar.open { transform: translateX(0); }
+      .main-content { margin-left: 0; }
+      .content { padding: 16px; }
+      .page-title { font-size: 18px; }
+      .connector-head-right { align-items: flex-start; width: 100%; flex-direction: row; justify-content: space-between; }
+      .btn { min-height: 44px; }
+    }
+
+    @media (max-width: 480px) {
+      .content { padding: 12px; }
+      .connector-card { padding: 16px; }
+      .method { padding: 12px; }
+      .btn { width: 100%; justify-content: center; }
+      .method-actions { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <svg viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="14" cy="10" r="5" fill="none" stroke="#f59e0b" stroke-width="1.5"/>
+          <path d="M8 22 Q8 16 14 16 Q20 16 20 22" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="26" cy="12" r="4" fill="none" stroke="#d97706" stroke-width="1.2"/>
+          <path d="M21 22 Q21 18 26 18 Q31 18 31 22" fill="none" stroke="#d97706" stroke-width="1.2" stroke-linecap="round"/>
+          <circle cx="6" cy="14" r="3.5" fill="none" stroke="#d97706" stroke-width="1.0" opacity="0.6"/>
+          <path d="M1 24 Q1 20 6 20 Q11 20 11 24" fill="none" stroke="#d97706" stroke-width="1.0" stroke-linecap="round" opacity="0.6"/>
+          <rect x="0" y="29" width="32" height="1" rx="0.5" fill="#f59e0b" opacity="0.3"/>
+          <rect x="0" y="32" width="32" height="1" rx="0.5" fill="#f59e0b" opacity="0.2"/>
+          <rect x="0" y="35" width="32" height="1" rx="0.5" fill="#f59e0b" opacity="0.15"/>
+          <rect x="2" y="29" width="8" height="1" rx="0.5" fill="#f59e0b" opacity="0.8"/>
+          <rect x="14" y="32" width="10" height="1" rx="0.5" fill="#d97706" opacity="0.7"/>
+          <rect x="6" y="35" width="6" height="1" rx="0.5" fill="#f59e0b" opacity="0.6"/>
+        </svg>
+        <div class="sidebar-logo-text">Roster<span>IQ</span></div>
+      </div>
+
+      <div class="venue-selector">
+        <label for="venue-select">Venue</label>
+        <select id="venue-select" onchange="onVenueChange()">
+          <option value="">Select a venue...</option>
+        </select>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Main</div>
+        <div class="sidebar-nav">
+          <a class="nav-item" href="/static/dashboard.html">
+            <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></span>
+            <span>Dashboard</span>
+          </a>
+          <a class="nav-item" href="/static/staff.html">
+            <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+            <span>Staff</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Setup</div>
+        <div class="sidebar-nav">
+          <a class="nav-item active" href="/connections">
+            <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+            <span>Connections</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="sidebar-section" style="margin-top:auto; padding-bottom:12px;">
+        <div class="sidebar-nav">
+          <a class="nav-item" href="#" onclick="handleLogout(); return false;" style="cursor:pointer;">
+            <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+            <span>Sign Out</span>
+          </a>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <div class="main-content">
+      <div class="top-bar">
+        <div class="top-bar-left">
+          <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
+            <span></span><span></span><span></span>
+          </button>
+          <div class="top-bar-title">Connections</div>
+        </div>
+        <div class="top-bar-right">
+          <button class="btn btn-secondary btn-small" onclick="refreshConnections()">Refresh</button>
+          <div class="clock" id="clock"></div>
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="page-header">
+          <h1 class="page-title">Connections hub</h1>
+          <p class="page-subtitle">Connect RosterIQ to your workforce, POS, bookings and accounting tools. Follow the directions on each card to get set up.</p>
+        </div>
+
+        <div id="connections-root">
+          <div class="state-box">
+            <div class="loading"></div>
+            <div class="msg" style="margin-top:16px;">Loading connections…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ========================================================================
+    // STATE & AUTH — mirrors dashboard.html conventions
+    // ========================================================================
+    const state = {
+      // Same token keys/order the dashboard uses.
+      authToken: localStorage.getItem('jwt_token') || localStorage.getItem('auth_token') || null,
+      currentVenue: null,
+      venues: [],
+      data: null,
+    };
+
+    // Auth gate — same as dashboard: no token -> login page.
+    if (!state.authToken) {
+      window.location.href = '/static/login.html';
+    }
+
+    // ----- HTML escaping (same name/role as dashboard's esc) -----
+    function esc(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // ----- Authenticated fetch — same header convention as dashboard -----
+    async function apiFetch(endpoint, options = {}) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (state.authToken) headers['Authorization'] = `Bearer ${state.authToken}`;
+      const response = await fetch(endpoint, {
+        ...options,
+        headers: { ...headers, ...(options.headers || {}) },
+      });
+      let data;
+      const ct = response.headers.get('content-type');
+      if (ct && ct.includes('application/json')) {
+        data = await response.json();
+      } else {
+        data = await response.text();
+      }
+      if (response.status === 401) {
+        // Token invalid/expired — behave like the dashboard.
+        localStorage.removeItem('jwt_token');
+        window.location.href = '/static/login.html';
+        throw new Error('Unauthorized');
+      }
+      return { ok: response.ok, status: response.status, data };
+    }
+
+    // Pull a human-readable error out of a JSON error body.
+    function errorDetail(data, fallback) {
+      if (!data) return fallback;
+      if (typeof data === 'string') return data || fallback;
+      return data.detail || data.message || data.error || fallback;
+    }
+
+    // ========================================================================
+    // VENUE SELECTION — mirrors dashboard: ?venue_id= param, then
+    // localStorage('rosteriq_current_venue'), then GET /venues (first venue).
+    // ========================================================================
+    function venueFromQuery() {
+      return new URLSearchParams(window.location.search).get('venue_id');
+    }
+
+    async function loadVenues() {
+      const select = document.getElementById('venue-select');
+      const queryVenue = venueFromQuery();
+      const savedVenue = localStorage.getItem('rosteriq_current_venue');
+
+      try {
+        const res = await apiFetch('/venues');
+        if (res.ok) {
+          state.venues = Array.isArray(res.data) ? res.data : (res.data.items || []);
+        }
+      } catch (e) {
+        state.venues = [];
+      }
+
+      if (state.venues.length > 0) {
+        select.innerHTML = '<option value="">Select a venue...</option>' +
+          state.venues.map(v => `<option value="${esc(v.id)}">${esc(v.name || v.id)}</option>`).join('');
+        // Priority: query param -> saved -> first venue.
+        let chosen = null;
+        if (queryVenue && state.venues.find(v => v.id === queryVenue)) chosen = queryVenue;
+        else if (savedVenue && state.venues.find(v => v.id === savedVenue)) chosen = savedVenue;
+        else chosen = state.venues[0].id;
+        state.currentVenue = chosen;
+        select.value = chosen;
+      } else {
+        // No venue list available — still honour an explicit query param / saved id
+        // so the page works even if /venues isn't reachable.
+        const fallback = queryVenue || savedVenue;
+        if (fallback) {
+          state.currentVenue = fallback;
+          select.innerHTML = `<option value="${esc(fallback)}" selected>${esc(fallback)}</option>`;
+        }
+      }
+    }
+
+    function onVenueChange() {
+      const select = document.getElementById('venue-select');
+      const val = select.value;
+      if (!val) return;
+      state.currentVenue = val;
+      localStorage.setItem('rosteriq_current_venue', val);
+      loadConnections();
+    }
+
+    // ========================================================================
+    // RENDERING
+    // ========================================================================
+    const rootEl = () => document.getElementById('connections-root');
+
+    function stateBox(icon, title, msg, actionHtml) {
+      return `
+        <div class="state-box">
+          <div class="icon">${icon}</div>
+          <div class="title">${esc(title)}</div>
+          <div class="msg">${esc(msg)}</div>
+          ${actionHtml || ''}
+        </div>`;
+    }
+
+    const STATUS_LABEL = { connected: 'Connected', pending: 'Pending', disconnected: 'Not connected' };
+
+    function badgeHtml(status) {
+      const cls = ['connected', 'pending', 'disconnected'].includes(status) ? status : 'disconnected';
+      return `<span class="badge ${cls}"><span class="badge-dot"></span>${esc(STATUS_LABEL[cls])}</span>`;
+    }
+
+    function detailHtml(detail) {
+      if (!detail || typeof detail !== 'object') return '';
+      const chips = Object.keys(detail).map(k => {
+        let v = detail[k];
+        if (v === null || v === undefined || v === '') return '';
+        if (typeof v === 'object') v = JSON.stringify(v);
+        const label = k.replace(/_/g, ' ');
+        return `<span class="detail-chip"><strong>${esc(label)}:</strong> ${esc(v)}</span>`;
+      }).filter(Boolean);
+      if (!chips.length) return '';
+      return `<div class="detail-row">${chips.join('')}</div>`;
+    }
+
+    function fieldHtml(connectorKey, methodId, field) {
+      const inputId = `f_${connectorKey}_${methodId}_${field.name}`;
+      const required = field.required ? '<span class="req">*</span>' : '';
+      const help = field.help ? `<div class="field-help">${esc(field.help)}</div>` : '';
+      // Special CSV file field.
+      if (field.name === 'csv_data' && connectorKey === 'direct_bookings' && methodId === 'csv') {
+        return `
+          <div class="field-group">
+            <label class="field-label" for="${esc(inputId)}">${esc(field.label || field.name)}${required}</label>
+            <input class="field-file" type="file" id="${esc(inputId)}" accept=".csv,text/csv" data-field="${esc(field.name)}" ${field.required ? 'required' : ''}>
+            ${help}
+          </div>`;
+      }
+      const type = field.secret ? 'password' : 'text';
+      const placeholder = field.placeholder ? ` placeholder="${esc(field.placeholder)}"` : '';
+      return `
+        <div class="field-group">
+          <label class="field-label" for="${esc(inputId)}">${esc(field.label || field.name)}${required}</label>
+          <input class="field-input" type="${type}" id="${esc(inputId)}" data-field="${esc(field.name)}"${placeholder} ${field.required ? 'required' : ''} autocomplete="off">
+          ${help}
+        </div>`;
+    }
+
+    function methodHtml(connector, method) {
+      const hasFields = Array.isArray(method.fields) && method.fields.length > 0;
+      const directions = Array.isArray(method.directions) ? method.directions : [];
+      const directionsHtml = directions.length
+        ? `<div class="directions-title">Directions</div><ol class="directions">${directions.map(d => `<li>${esc(d)}</li>`).join('')}</ol>`
+        : '';
+
+      const fieldsHtml = hasFields ? method.fields.map(f => fieldHtml(connector.key, method.id, f)).join('') : '';
+
+      // OAuth/marketplace method readiness.
+      const serverReady = method.server_ready !== false; // default true if absent
+      const missingEnv = Array.isArray(method.missing_env) ? method.missing_env : [];
+      let actionsHtml = '';
+      if (!hasFields && !serverReady) {
+        actionsHtml = `
+          <button class="btn btn-primary" disabled>Connect</button>
+          <span class="env-note">Needs server setup: ${esc(missingEnv.join(', '))}</span>`;
+      } else {
+        actionsHtml = `<button class="btn btn-primary" onclick="runMethod(this, '${esc(connector.key)}', '${esc(method.id)}')">Connect</button>`;
+      }
+      if (connector.docs_url) {
+        actionsHtml += `<a class="docs-link" href="${esc(connector.docs_url)}" target="_blank" rel="noopener">Docs ↗</a>`;
+      }
+
+      const msgId = `msg_${connector.key}_${method.id}`;
+      return `
+        <div class="method" data-method="${esc(method.id)}">
+          <div class="method-label">${esc(method.label || method.id)}<span class="method-endpoint">${esc(method.endpoint || '')}</span></div>
+          ${directionsHtml}
+          ${fieldsHtml}
+          <div class="method-actions">${actionsHtml}</div>
+          <div class="method-message" id="${esc(msgId)}"></div>
+        </div>`;
+    }
+
+    function connectorCardHtml(connector) {
+      const status = connector.status || 'disconnected';
+      const btnLabel = status === 'connected' ? 'Manage' : 'Connect';
+      const imports = connector.imports
+        ? `<div class="connector-imports"><strong>Imports:</strong> ${esc(connector.imports)}</div>`
+        : '';
+      const methods = Array.isArray(connector.methods) ? connector.methods : [];
+      const methodsHtml = methods.length
+        ? methods.map(m => methodHtml(connector, m)).join('')
+        : `<div class="field-help">No connection methods available for this integration yet.</div>`;
+
+      return `
+        <div class="connector-card" data-connector="${esc(connector.key)}">
+          <div class="connector-head">
+            <div class="connector-head-left">
+              <div class="connector-name">${esc(connector.name || connector.key)}</div>
+              <div class="connector-summary">${esc(connector.summary || '')}</div>
+              ${imports}
+              ${detailHtml(connector.detail)}
+            </div>
+            <div class="connector-head-right">
+              ${badgeHtml(status)}
+              <button class="btn btn-secondary btn-small" onclick="togglePanel('${esc(connector.key)}', this)">${btnLabel}</button>
+            </div>
+          </div>
+          <div class="connector-panel" id="panel_${esc(connector.key)}">
+            ${methodsHtml}
+          </div>
+        </div>`;
+    }
+
+    function render(data) {
+      state.data = data;
+      const categories = data.categories || {};
+      const connectors = Array.isArray(data.connectors) ? data.connectors : [];
+
+      if (!connectors.length) {
+        rootEl().innerHTML = stateBox('🔌', 'No integrations available', 'There are no connectors configured for this venue yet.');
+        return;
+      }
+
+      // Group connectors by category, preserving the category order from the map.
+      const byCat = {};
+      connectors.forEach(c => {
+        const cat = c.category || 'other';
+        (byCat[cat] = byCat[cat] || []).push(c);
+      });
+
+      // Ordered category keys: those declared in categories map first, then any extras.
+      const orderedCats = Object.keys(categories).filter(k => byCat[k]);
+      Object.keys(byCat).forEach(k => { if (!orderedCats.includes(k)) orderedCats.push(k); });
+
+      const html = orderedCats.map(catKey => {
+        const title = categories[catKey] || catKey;
+        const cards = byCat[catKey].map(connectorCardHtml).join('');
+        return `
+          <div class="category">
+            <div class="category-title">${esc(title)}</div>
+            <div class="connector-grid">${cards}</div>
+          </div>`;
+      }).join('');
+
+      rootEl().innerHTML = html;
+    }
+
+    // ========================================================================
+    // INTERACTIONS
+    // ========================================================================
+    function togglePanel(key, btn) {
+      const panel = document.getElementById('panel_' + key);
+      if (!panel) return;
+      const open = panel.classList.toggle('open');
+      // Keep label in sync (Manage/Connect on the card header button).
+      const connector = (state.data?.connectors || []).find(c => c.key === key);
+      const base = connector && connector.status === 'connected' ? 'Manage' : 'Connect';
+      btn.textContent = open ? 'Hide' : base;
+    }
+
+    function showMethodMessage(connectorKey, methodId, type, text) {
+      const el = document.getElementById(`msg_${connectorKey}_${methodId}`);
+      if (!el) return;
+      el.className = `method-message show ${type}`;
+      el.textContent = text;
+    }
+
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          // result is a data URL: "data:<mime>;base64,XXXX" — strip the prefix.
+          const result = reader.result || '';
+          const comma = result.indexOf(',');
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = () => reject(new Error('Could not read file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Split "VERB /path" into [verb, path] on the FIRST space only.
+    function parseEndpoint(endpoint) {
+      const ep = (endpoint || '').trim();
+      const idx = ep.indexOf(' ');
+      if (idx === -1) return ['GET', ep];
+      return [ep.slice(0, idx).toUpperCase(), ep.slice(idx + 1).trim()];
+    }
+
+    async function runMethod(btn, connectorKey, methodId) {
+      const connector = (state.data?.connectors || []).find(c => c.key === connectorKey);
+      if (!connector) return;
+      const method = (connector.methods || []).find(m => m.id === methodId);
+      if (!method) return;
+
+      if (!state.currentVenue) {
+        showMethodMessage(connectorKey, methodId, 'error', 'Select a venue first.');
+        return;
+      }
+
+      const [verb, path] = parseEndpoint(method.endpoint);
+      const hasFields = Array.isArray(method.fields) && method.fields.length > 0;
+      const methodEl = btn.closest('.method');
+
+      // Build request body from fields (if any).
+      const body = { venue_id: state.currentVenue };
+      if (hasFields) {
+        for (const field of method.fields) {
+          const input = methodEl.querySelector(`[data-field="${CSS.escape(field.name)}"]`);
+          if (!input) continue;
+          if (input.type === 'file') {
+            const file = input.files && input.files[0];
+            if (!file) {
+              if (field.required) {
+                showMethodMessage(connectorKey, methodId, 'error', `Please choose a file for "${field.label || field.name}".`);
+                return;
+              }
+              continue;
+            }
+            try {
+              body[field.name] = await readFileAsBase64(file);
+            } catch (e) {
+              showMethodMessage(connectorKey, methodId, 'error', 'Could not read the selected file.');
+              return;
+            }
+          } else {
+            const val = input.value.trim();
+            if (field.required && !val) {
+              showMethodMessage(connectorKey, methodId, 'error', `"${field.label || field.name}" is required.`);
+              return;
+            }
+            if (val !== '') body[field.name] = val;
+          }
+        }
+      }
+
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Connecting…';
+
+      try {
+        let res;
+        if (verb === 'GET') {
+          // OAuth-style GET (e.g. GET /api/xero/connect) — pass venue_id as query.
+          if (!hasFields && method.server_ready !== false) {
+            const sep = path.includes('?') ? '&' : '?';
+            window.location = `${path}${sep}venue_id=${encodeURIComponent(state.currentVenue)}`;
+            return;
+          }
+          res = await apiFetch(path, { method: 'GET' });
+        } else {
+          res = await apiFetch(path, { method: verb, body: JSON.stringify(body) });
+        }
+
+        if (res.ok) {
+          // OAuth/marketplace: redirect to the authorize URL if provided.
+          const authUrl = res.data && typeof res.data === 'object'
+            ? (res.data.authorize_url || res.data.authorization_url || res.data.redirect_url)
+            : null;
+          if (authUrl) {
+            window.location = authUrl;
+            return;
+          }
+          const successMsg = (res.data && typeof res.data === 'object' && (res.data.message || res.data.detail))
+            ? (res.data.message || res.data.detail)
+            : 'Connected successfully.';
+          showMethodMessage(connectorKey, methodId, 'success', successMsg);
+          // Re-fetch venue status to update badges.
+          await loadConnections(true);
+        } else {
+          showMethodMessage(connectorKey, methodId, 'error', errorDetail(res.data, 'Connection failed. Please try again.'));
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      } catch (e) {
+        showMethodMessage(connectorKey, methodId, 'error', e.message || 'Connection error. Please try again.');
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    }
+
+    // ========================================================================
+    // LOAD
+    // ========================================================================
+    async function loadConnections(silent) {
+      if (!state.currentVenue) {
+        rootEl().innerHTML = stateBox('🏢', 'No venue selected', 'Choose a venue from the selector to view its connections.');
+        return;
+      }
+      if (!silent) {
+        rootEl().innerHTML = `<div class="state-box"><div class="loading"></div><div class="msg" style="margin-top:16px;">Loading connections…</div></div>`;
+      }
+      try {
+        const res = await apiFetch(`/api/connections/venue/${encodeURIComponent(state.currentVenue)}`);
+        if (res.ok && res.data && typeof res.data === 'object') {
+          render(res.data);
+        } else {
+          rootEl().innerHTML = stateBox(
+            '⚠️',
+            'Could not load connections',
+            errorDetail(res.data, `Request failed (${res.status}).`),
+            `<button class="btn btn-primary" onclick="loadConnections()">Retry</button>`
+          );
+        }
+      } catch (e) {
+        rootEl().innerHTML = stateBox(
+          '⚠️',
+          'Could not load connections',
+          e.message || 'Network error.',
+          `<button class="btn btn-primary" onclick="loadConnections()">Retry</button>`
+        );
+      }
+    }
+
+    function refreshConnections() { loadConnections(); }
+
+    // ========================================================================
+    // CHROME: clock, mobile menu, logout — mirrors dashboard helpers
+    // ========================================================================
+    function toggleMobileMenu() {
+      const sidebar = document.getElementById('sidebar');
+      if (!sidebar) return;
+      sidebar.classList.toggle('open');
+      sidebar.classList.toggle('collapsed');
+    }
+
+    function handleLogout() {
+      localStorage.removeItem('jwt_token');
+      localStorage.removeItem('jwt_refresh_token');
+      localStorage.removeItem('auth_token');
+      window.location.href = '/static/login.html';
+    }
+
+    function tickClock() {
+      const el = document.getElementById('clock');
+      if (el) el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // ========================================================================
+    // INIT
+    // ========================================================================
+    (async function init() {
+      tickClock();
+      setInterval(tickClock, 30000);
+      await loadVenues();
+      await loadConnections();
+    })();
+  </script>
+</body>
+</html>

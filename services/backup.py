@@ -114,7 +114,10 @@ class BackupService:
         Raises:
             Exception on backup failure
         """
-        backup_id = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Include microseconds so backups created within the same second get
+        # distinct IDs (second resolution alone caused IDs to collide and
+        # silently overwrite each other).
+        backup_id = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         timestamp = datetime.now().isoformat()
 
         logger.info(f"Creating {backup_type} backup: {backup_id}")
@@ -145,6 +148,11 @@ class BackupService:
                 compressed=True,
                 db_type="postgres" if isinstance(self.db, PostgresStore) else "memory",
             )
+
+            # Persist metadata sidecar so the ORIGINAL checksum survives. Without
+            # this, _load_metadata recomputes the checksum from the (possibly
+            # corrupted) file on restore, making integrity validation a no-op.
+            self._save_metadata(metadata)
 
             logger.info(f"Backup created: {backup_id} ({size_bytes} bytes)")
 
@@ -505,28 +513,27 @@ class BackupService:
         if not isinstance(self.db, MemoryStore):
             raise ValueError("Database is not MemoryStore")
 
-        # Serialize all data structures
+        # Serialize each record to JSON-compatible primitives. model_dump(
+        # mode="json") converts datetime/date/Decimal to strings; asdict is the
+        # fallback for plain dataclasses (with default=str on dumps as a net).
+        def _to_jsonable(obj):
+            if hasattr(obj, "model_dump"):
+                return obj.model_dump(mode="json")
+            if hasattr(obj, "dict"):
+                return obj.dict()
+            return asdict(obj)
+
         backup_dict = {
-            "venues": [
-                v.dict() if hasattr(v, "dict") else asdict(v)
-                for v in self.db.list_venues()
-            ],
-            "employees": [
-                e.dict() if hasattr(e, "dict") else asdict(e)
-                for e in self.db.list_employees()
-            ],
-            "rosters": [
-                r.dict() if hasattr(r, "dict") else asdict(r)
-                for r in self.db.list_rosters()
-            ],
-            "forecasts": [
-                f.dict() if hasattr(f, "dict") else asdict(f)
-                for f in self.db.get_forecasts()
-            ],
+            "venues": [_to_jsonable(v) for v in self.db.list_venues()],
+            "employees": [_to_jsonable(e) for e in self.db.list_employees()],
+            "rosters": [_to_jsonable(r) for r in self.db.list_rosters()],
+            "forecasts": [_to_jsonable(f) for f in self.db.get_forecasts()],
             "backup_timestamp": datetime.now().isoformat(),
         }
 
-        return json.dumps(backup_dict).encode("utf-8")
+        # default=str catches any residual non-JSON types (e.g. Decimal/datetime
+        # from dataclass asdict) so a backup never fails to serialize.
+        return json.dumps(backup_dict, default=str).encode("utf-8")
 
     def _compress_backup(self, data: bytes, backup_id: str) -> str:
         """Compress backup data with gzip and save to file."""
@@ -627,6 +634,15 @@ class BackupService:
             return None
 
         return self._load_metadata(backup_file)
+
+    def _save_metadata(self, metadata: BackupMetadata) -> None:
+        """Persist a backup's metadata (incl. original checksum) as a JSON sidecar."""
+        metadata_file = Path(metadata.path).with_suffix(".json")
+        try:
+            with open(metadata_file, "w") as f:
+                json.dump(asdict(metadata), f, default=str)
+        except Exception as e:
+            logger.error(f"Failed to save metadata for {metadata.path}: {e}")
 
     def _load_metadata(self, backup_file: Path) -> Optional[BackupMetadata]:
         """Load metadata from a backup file."""

@@ -60,7 +60,8 @@ class TestPenaltyMultipliers:
         assert get_penalty_multiplier(EmploymentType.full_time, DayType.sunday) == Decimal("1.5")
 
     def test_ft_public_holiday(self):
-        assert get_penalty_multiplier(EmploymentType.full_time, DayType.public_holiday) == Decimal("2.5")
+        # MA000009 full-time public holiday penalty is 225% (not 250%).
+        assert get_penalty_multiplier(EmploymentType.full_time, DayType.public_holiday) == Decimal("2.25")
 
     def test_pt_weekday(self):
         assert get_penalty_multiplier(EmploymentType.part_time, DayType.weekday) == Decimal("1.0")
@@ -72,7 +73,8 @@ class TestPenaltyMultipliers:
         assert get_penalty_multiplier(EmploymentType.part_time, DayType.sunday) == Decimal("1.5")
 
     def test_pt_public_holiday(self):
-        assert get_penalty_multiplier(EmploymentType.part_time, DayType.public_holiday) == Decimal("2.5")
+        # MA000009 part-time public holiday penalty is 225% (not 250%).
+        assert get_penalty_multiplier(EmploymentType.part_time, DayType.public_holiday) == Decimal("2.25")
 
     # Casual rates (include 25% loading)
     def test_casual_weekday(self):
@@ -119,10 +121,17 @@ class TestGetDayType:
         assert get_day_type(date(2026, 4, 7), State.vic) == DayType.weekday  # Tuesday
 
     def test_saturday(self):
-        assert get_day_type(date(2026, 4, 4), State.vic) == DayType.saturday
+        # 2026-04-04 is Easter Saturday — a VIC public holiday — so use a
+        # plain Saturday instead. 2026-04-11 is a Saturday with no holiday.
+        assert get_day_type(date(2026, 4, 11), State.vic) == DayType.saturday
 
     def test_sunday(self):
-        assert get_day_type(date(2026, 4, 5), State.vic) == DayType.sunday
+        # 2026-04-12 is a normal Sunday (2026-04-05 is Easter Sunday, a VIC PH).
+        assert get_day_type(date(2026, 4, 12), State.vic) == DayType.sunday
+
+    def test_easter_sunday_is_public_holiday_in_vic(self):
+        # The library correctly flags Easter Sunday as a public holiday in VIC.
+        assert get_day_type(date(2026, 4, 5), State.vic) == DayType.public_holiday
 
     def test_christmas_day(self):
         assert get_day_type(date(2026, 12, 25), State.vic) == DayType.public_holiday
@@ -174,11 +183,12 @@ class TestPublicHolidays:
         october_holidays = [d for d in holidays if d.month == 10]
         assert len(october_holidays) >= 1
 
-    def test_nsw_bank_holiday(self):
+    def test_nsw_bank_holiday_is_not_a_general_public_holiday(self):
+        # The NSW "Bank Holiday" (1st Mon August) is bank-only — it is NOT a general
+        # public holiday and does NOT attract award public-holiday penalty rates, so
+        # it must not appear here (the old hand-coded list wrongly included it).
         holidays = get_public_holidays(State.nsw, 2026)
-        # First Monday in August
-        august_holidays = [d for d in holidays if d.month == 8]
-        assert len(august_holidays) >= 1
+        assert not [d for d in holidays if d.month == 8]
 
     def test_holidays_are_sorted(self):
         holidays = get_public_holidays(State.vic, 2026)
@@ -235,7 +245,9 @@ class TestMinimumEngagement:
 class TestShiftCompliance:
     def test_valid_shift_no_violations(self):
         emp = make_employee()
-        shift = make_shift()
+        # 9:00-17:00 is an 8h shift, which requires a 50min break under the
+        # Hospitality Award (>7h). Provide a compliant break.
+        shift = make_shift(break_minutes=50)
         violations = validate_shift_compliance(emp, shift)
         assert violations == []
 
@@ -371,7 +383,7 @@ class TestCalculateShiftCost:
         emp = make_employee(hourly_base_rate=Decimal("30.00"))
         shift = make_shift(
             start_time=time(9, 0), end_time=time(17, 0),
-            break_minutes=30, date=date(2026, 4, 4),  # Saturday
+            break_minutes=30, date=date(2026, 4, 11),  # Saturday (not Easter Sat)
         )
         cost = calculate_shift_cost(emp, shift, State.vic)
         # 7.5h * $30 * 1.25 = $281.25
@@ -384,7 +396,7 @@ class TestCalculateShiftCost:
         )
         shift = make_shift(
             start_time=time(10, 0), end_time=time(16, 0),
-            break_minutes=30, date=date(2026, 4, 5),  # Sunday
+            break_minutes=30, date=date(2026, 4, 12),  # normal Sunday (Apr 5 is Easter Sun, a PH)
         )
         cost = calculate_shift_cost(emp, shift, State.vic)
         # 5.5h * $28 * 1.75 = $269.50
@@ -397,5 +409,5 @@ class TestCalculateShiftCost:
             break_minutes=30, date=date(2026, 12, 25),  # Christmas
         )
         cost = calculate_shift_cost(emp, shift, State.vic)
-        # 7.5h * $30 * 2.5 = $562.50
-        assert cost == Decimal("562.50")
+        # 7.5h * $30 * 2.25 (FT public holiday = 225%) = $506.25
+        assert cost == Decimal("506.25")

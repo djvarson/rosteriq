@@ -72,7 +72,8 @@ class TestEnums:
         assert len(list(DayType)) == 4
 
     def test_signal_types(self):
-        assert len(list(SignalType)) == 5
+        # SignalType has grown to 14 members as the variance engine gained signals.
+        assert len(list(SignalType)) == 14
         assert SignalType.pos_trends.value == "pos_trends"
 
     def test_staff_actions(self):

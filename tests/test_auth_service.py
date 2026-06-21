@@ -7,7 +7,7 @@ refresh tokens, API key management, user creation, and rate limiting.
 
 import sys
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -71,8 +71,9 @@ class TestAccessTokens:
         assert isinstance(token, str)
         # Expires should be a datetime
         assert isinstance(expires, datetime)
-        # Expires should be in the future
-        assert expires > datetime.utcnow()
+        # Expires should be in the future. Access tokens now use timezone-aware
+        # UTC, so compare against an aware "now".
+        assert expires > datetime.now(timezone.utc)
 
     def test_access_token_expiration(self):
         """Access token expires in correct time."""
@@ -82,9 +83,10 @@ class TestAccessTokens:
 
         token, expires = AuthService.create_access_token(user_id, email, role)
 
-        # Should expire in approximately ACCESS_TOKEN_EXPIRE_MINUTES
-        expected_min = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES - 1)
-        expected_max = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES + 1)
+        # Should expire in approximately ACCESS_TOKEN_EXPIRE_MINUTES (aware UTC).
+        now = datetime.now(timezone.utc)
+        expected_min = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES - 1)
+        expected_max = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES + 1)
 
         assert expected_min < expires < expected_max
 

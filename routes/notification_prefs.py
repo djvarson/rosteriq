@@ -98,7 +98,7 @@ async def get_notification_preferences(
     Returns:
         User's notification preferences
     """
-    user_id = current_user.get("id")
+    user_id = current_user.user_id
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -136,7 +136,7 @@ async def update_notification_preferences(
     Returns:
         Updated preferences
     """
-    user_id = current_user.get("id")
+    user_id = current_user.user_id
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

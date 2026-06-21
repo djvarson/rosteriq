@@ -19,17 +19,21 @@ from typing import Optional
 
 from rosteriq.models import DemandForecast, SignalType, VenueConfig
 
-# Conditional imports for ML libraries
+# Conditional imports for ML libraries.
+# Catch Exception, not just ImportError: native-backed libs (xgboost, prophet)
+# can be installed but fail to load their shared objects (e.g. missing
+# libomp/libgomp), which raises OSError at import. Treat that as "unavailable"
+# and degrade gracefully rather than crashing the whole app at startup.
 try:
     import xgboost as xgb
     HAS_XGBOOST = True
-except ImportError:
+except Exception:
     HAS_XGBOOST = False
 
 try:
     from prophet import Prophet
     HAS_PROPHET = True
-except ImportError:
+except Exception:
     HAS_PROPHET = False
 
 try:

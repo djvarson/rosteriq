@@ -30,10 +30,12 @@ from rosteriq import __version__
 from rosteriq.models import (
     Employee, Shift, Roster, DemandForecast, VenueConfig,
     EmploymentType, ShiftStatus, AwardLevel, State,
-    CostBreakdown, VarianceSignal, StaffingRecommendation,
+    CostBreakdown, VarianceSignal, StaffingRecommendation, SignalType,
 )
 from rosteriq.middleware.api_version import APIVersionMiddleware
-from rosteriq.middleware.tenant import TenantMiddleware
+from rosteriq.middleware.tenant import (
+    TenantMiddleware, enforce_venue_access, get_tenant_context_optional,
+)
 from rosteriq.roster_optimiser import (
     generate_weekly_roster, generate_daily_roster,
     analyse_roster, suggest_improvements,
@@ -487,6 +489,33 @@ except ImportError:
     logger.info("Reservation routes not available — skipping")
 except Exception as e:
     logger.error(f"Failed to register reservation routes: {e}")
+
+try:
+    from rosteriq.routes.connections import router as connections_router
+    app.include_router(connections_router)
+    logger.info("Connections hub routes registered")
+except ImportError:
+    logger.info("Connections hub routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register connections hub routes: {e}")
+
+try:
+    from rosteriq.routes.direct_bookings import router as direct_bookings_router
+    app.include_router(direct_bookings_router)
+    logger.info("Direct booking ingestion routes registered")
+except ImportError:
+    logger.info("Direct booking routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register direct booking routes: {e}")
+
+try:
+    from rosteriq.routes.keypay import router as keypay_router
+    app.include_router(keypay_router)
+    logger.info("KeyPay connect routes registered")
+except ImportError:
+    logger.info("KeyPay routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register KeyPay routes: {e}")
 
 # Function Tracker event/function management routes
 try:
@@ -1258,6 +1287,18 @@ def _validate_environment():
                 "Use a strong, randomly generated secret."
             )
 
+        # FEED_CONFIG_ENCRYPTION_KEY must be a real Fernet key in production — a
+        # missing/dev/short key silently disables at-rest encryption of stored
+        # connector credentials (they'd be written to the DB as plaintext).
+        feed_key = os.environ.get("FEED_CONFIG_ENCRYPTION_KEY", "")
+        if not feed_key or feed_key.startswith("dev") or len(feed_key) < 44:
+            raise RuntimeError(
+                "FATAL: FEED_CONFIG_ENCRYPTION_KEY must be a valid 44-char Fernet key "
+                "in production (generate with: python -c \"from cryptography.fernet "
+                "import Fernet; print(Fernet.generate_key().decode())\"). Without it, "
+                "stored connector/integration credentials would be unencrypted at rest."
+            )
+
         # Warn about optional but recommended vars
         if not os.environ.get("SENTRY_DSN"):
             logger.warning(
@@ -1695,6 +1736,28 @@ async def cache_stats():
         return {"error": str(e)}, 500
 
 
+@app.get("/connections", tags=["connections"])
+async def connections_page():
+    """
+    Connections hub — static HTML page where a venue connects integrations
+    (Deputy, SwiftPOS, reservations, Xero, etc.) with built-in directions.
+
+    Loads data via fetch() from /api/connections/venue/{venue_id}.
+    """
+    try:
+        import pathlib
+        page = pathlib.Path(__file__).parent / "static" / "connections.html"
+        if page.exists():
+            from fastapi.responses import FileResponse
+            return FileResponse(page, media_type="text/html")
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse("<h1>Connections</h1><p>Page not found.</p>", status_code=404)
+    except Exception as e:
+        logger.error(f"Error serving connections page: {e}")
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse("<h1>Connections</h1><p>Error.</p>", status_code=500)
+
+
 @app.get("/admin", tags=["admin"])
 async def admin_panel():
     """
@@ -1850,10 +1913,15 @@ async def list_venues(
     offset: int = Query(0, ge=0),
     request: Request = None,
 ):
+    # Tenant scoping: a non-owner sees only their own venues (owners see all). The
+    # scope is folded into the cache key so a cached page can't leak across tenants.
+    _tenant = get_tenant_context_optional()
+    _scope = "owner" if (_tenant is None or _tenant.is_owner) else ",".join(sorted(_tenant.venue_ids))
+
     # Use cache if available
     if get_cache_manager and request:
         try:
-            cache_key = f"venues_limit={limit}_offset={offset}"
+            cache_key = f"venues_scope={_scope}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
             cached = await cache_manager.get("venue_configs", cache_key)
             if cached is not None:
@@ -1863,6 +1931,8 @@ async def list_venues(
             logger.debug(f"Cache lookup failed: {e}")
 
     all_venues = list(_store["venues"].values())
+    if _tenant is not None and not _tenant.is_owner:
+        all_venues = [v for v in all_venues if getattr(v, "id", None) in _tenant.venue_ids]
     total = len(all_venues)
     items = all_venues[offset:offset + limit]
     result = {
@@ -1875,7 +1945,7 @@ async def list_venues(
     # Store in cache if available
     if get_cache_manager and request:
         try:
-            cache_key = f"venues_limit={limit}_offset={offset}"
+            cache_key = f"venues_scope={_scope}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
             await cache_manager.set("venue_configs", cache_key, result, ttl=300)
             logger.debug(f"Cached: {cache_key}")
@@ -1887,6 +1957,7 @@ async def list_venues(
 
 @app.get("/venues/{venue_id}")
 async def get_venue(venue_id: str):
+    enforce_venue_access(venue_id)
     if venue_id not in _store["venues"]:
         raise HTTPException(404, f"Venue {venue_id} not found")
     return _store["venues"][venue_id]
@@ -1898,6 +1969,7 @@ async def get_venue(venue_id: str):
 
 @app.post("/employees")
 async def create_employee(employee: Employee):
+    enforce_venue_access(getattr(employee, "venue_id", None))
     _store["employees"][employee.id] = employee
 
     # Invalidate employee cache
@@ -1914,6 +1986,8 @@ async def create_employee(employee: Employee):
 
 @app.post("/employees/bulk")
 async def bulk_create_employees(employees: list[Employee]):
+    for emp in employees:
+        enforce_venue_access(getattr(emp, "venue_id", None))
     for emp in employees:
         _store["employees"][emp.id] = emp
 
@@ -1936,10 +2010,18 @@ async def list_employees(
     venue_id: Optional[str] = Query(None),
     request: Request = None,
 ):
+    # Tenant scoping: a non-owner only ever sees employees from their own venues
+    # (owners/platform admins see all). If a specific venue_id is requested, it must
+    # be one they own. The cache key includes the scope so results never leak across
+    # users.
+    enforce_venue_access(venue_id)
+    _tenant = get_tenant_context_optional()
+    _scope = "owner" if (_tenant is None or _tenant.is_owner) else ",".join(sorted(_tenant.venue_ids))
+
     # Use cache if available
     if get_cache_manager and request:
         try:
-            cache_key = f"employees_venue={venue_id}_limit={limit}_offset={offset}"
+            cache_key = f"employees_scope={_scope}_venue={venue_id}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
             cached = await cache_manager.get("employee_lists", cache_key)
             if cached is not None:
@@ -1950,6 +2032,11 @@ async def list_employees(
 
     all_employees = list(_store["employees"].values())
 
+    # Scope to the caller's venues (owners see all).
+    if _tenant is not None and not _tenant.is_owner:
+        all_employees = [
+            e for e in all_employees if getattr(e, "venue_id", None) in _tenant.venue_ids
+        ]
     if venue_id:
         all_employees = [e for e in all_employees if e.venue_id == venue_id]
 
@@ -1965,7 +2052,7 @@ async def list_employees(
     # Store in cache if available
     if get_cache_manager and request:
         try:
-            cache_key = f"employees_venue={venue_id}_limit={limit}_offset={offset}"
+            cache_key = f"employees_scope={_scope}_venue={venue_id}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
             await cache_manager.set("employee_lists", cache_key, result, ttl=120)
             logger.debug(f"Cached: {cache_key}")
@@ -1979,7 +2066,9 @@ async def list_employees(
 async def get_employee(employee_id: str):
     if employee_id not in _store["employees"]:
         raise HTTPException(404, f"Employee {employee_id} not found")
-    return _store["employees"][employee_id]
+    emp = _store["employees"][employee_id]
+    enforce_venue_access(getattr(emp, "venue_id", None))
+    return emp
 
 
 # ============================================================================
@@ -2011,10 +2100,16 @@ async def get_forecasts(
     offset: int = Query(0, ge=0),
     request: Request = None,
 ):
+    # Tenant scoping (non-owner sees only their venues' forecasts); scope in the
+    # cache key so results never leak across users.
+    enforce_venue_access(venue_id)
+    _tenant = get_tenant_context_optional()
+    _scope = "owner" if (_tenant is None or _tenant.is_owner) else ",".join(sorted(_tenant.venue_ids))
+
     # Use cache if available
     if get_cache_manager and request:
         try:
-            cache_key = f"forecasts_venue={venue_id}_start={start_date}_end={end_date}_limit={limit}_offset={offset}"
+            cache_key = f"forecasts_scope={_scope}_venue={venue_id}_start={start_date}_end={end_date}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
             cached = await cache_manager.get("forecast_data", cache_key)
             if cached is not None:
@@ -2024,6 +2119,8 @@ async def get_forecasts(
             logger.debug(f"Cache lookup failed: {e}")
 
     results = _store["forecasts"]
+    if _tenant is not None and not _tenant.is_owner:
+        results = [f for f in results if getattr(f, "venue_id", None) in _tenant.venue_ids]
     if venue_id:
         results = [f for f in results if f.venue_id == venue_id]
     if start_date:
@@ -2043,7 +2140,7 @@ async def get_forecasts(
     # Store in cache if available
     if get_cache_manager and request:
         try:
-            cache_key = f"forecasts_venue={venue_id}_start={start_date}_end={end_date}_limit={limit}_offset={offset}"
+            cache_key = f"forecasts_scope={_scope}_venue={venue_id}_start={start_date}_end={end_date}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
             await cache_manager.set("forecast_data", cache_key, result, ttl=600)
             logger.debug(f"Cached: {cache_key}")
@@ -2059,6 +2156,7 @@ async def get_required_staff(
     target_date: date,
     covers_per_staff: float = DEFAULT_COVERS_PER_STAFF,
 ):
+    enforce_venue_access(venue_id)
     venue = _store["venues"].get(venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {venue_id} not found")
@@ -2081,8 +2179,45 @@ async def get_required_staff(
 # Roster generation
 # ============================================================================
 
+async def _ensure_week_forecasts(venue, week_start):
+    """
+    Return the week's demand forecasts, generating cold-start ones if none exist.
+
+    The roster engine REQUIRES DemandForecasts. A brand-new venue has no sales
+    history, so without this /rosters/generate would 400 ("No forecasts") and the
+    venue could never produce a first roster. The ensemble forecaster yields a sane
+    cold-start demand curve from zero history; the generated forecasts are persisted
+    so the dashboard/forecast views see them too. Real POS history later improves them.
+    """
+    week_end = week_start + timedelta(days=6)
+    # Query only THIS venue's week (not a full scan of every venue's forecasts —
+    # which on Postgres materialised the whole table into memory each call).
+    existing = get_db().get_forecasts(venue.id, week_start, week_end)
+    if existing:
+        return existing
+    try:
+        generated = EnsembleForecaster(venue).predict_week(week_start)
+    except Exception as e:
+        logger.warning(f"Cold-start forecast generation failed for {venue.id}: {e}")
+        generated = []
+    if generated:
+        _store["forecasts"].extend(generated)
+        # Keep the forecast list cache fresh (mirrors POST /forecasts).
+        if get_cache_manager:
+            try:
+                await get_cache_manager().invalidate_all("forecast_data")
+            except Exception:
+                pass
+        logger.info(
+            "Cold-start: generated %d forecasts for venue %s (week of %s)",
+            len(generated), venue.id, week_start,
+        )
+    return generated
+
+
 @app.post("/rosters/generate")
 async def generate_roster(req: GenerateRosterRequest):
+    enforce_venue_access(req.venue_id)
     venue = _store["venues"].get(req.venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")
@@ -2091,14 +2226,13 @@ async def generate_roster(req: GenerateRosterRequest):
     if not employees:
         raise HTTPException(400, "No employees loaded")
 
-    week_end = req.week_start + timedelta(days=6)
-    forecasts = [
-        f for f in _store["forecasts"]
-        if f.venue_id == req.venue_id
-        and req.week_start <= f.date <= week_end
-    ]
+    # Auto-generate cold-start forecasts if the venue has none for this week, so a
+    # brand-new venue (no history) can still produce a first roster.
+    forecasts = await _ensure_week_forecasts(venue, req.week_start)
     if not forecasts:
-        raise HTTPException(400, f"No forecasts for {req.venue_id} in week of {req.week_start}")
+        raise HTTPException(
+            400, f"Could not produce a demand forecast for {req.venue_id} in week of {req.week_start}"
+        )
 
     roster = generate_weekly_roster(
         req.week_start, forecasts, employees, venue, req.covers_per_staff
@@ -2121,8 +2255,36 @@ async def generate_roster(req: GenerateRosterRequest):
     return roster
 
 
+class GenerateForecastRequest(BaseModel):
+    venue_id: str
+    week_start: date
+
+
+@app.post("/forecasts/generate")
+async def generate_forecasts_endpoint(req: GenerateForecastRequest):
+    """
+    Generate (cold-start) demand forecasts for a venue's week if it has none yet.
+
+    Lets the UI/onboarding bootstrap demand for a brand-new venue with no history,
+    so the very first roster has something to optimise against. Idempotent — if
+    forecasts already exist for the week, returns them unchanged.
+    """
+    enforce_venue_access(req.venue_id)
+    venue = _store["venues"].get(req.venue_id)
+    if not venue:
+        raise HTTPException(404, f"Venue {req.venue_id} not found")
+    forecasts = await _ensure_week_forecasts(venue, req.week_start)
+    return {
+        "venue_id": req.venue_id,
+        "week_start": req.week_start.isoformat(),
+        "count": len(forecasts),
+        "generated": len(forecasts) > 0,
+    }
+
+
 @app.post("/rosters/generate-daily")
 async def generate_daily(req: DailyRosterRequest):
+    enforce_venue_access(req.venue_id)
     venue = _store["venues"].get(req.venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")
@@ -2146,10 +2308,22 @@ async def generate_daily(req: DailyRosterRequest):
 
 @app.get("/rosters")
 async def list_rosters(
+    venue_id: Optional[str] = Query(None, description="Filter to one venue"),
+    week_start: Optional[str] = Query(None, description="Filter to a week (YYYY-MM-DD)"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
+    enforce_venue_access(venue_id)
     all_rosters = list(_store["rosters"].values())
+    # Scope to the caller's venues (owners see all).
+    _tenant = get_tenant_context_optional()
+    if _tenant is not None and not _tenant.is_owner:
+        all_rosters = [r for r in all_rosters if getattr(r, "venue_id", None) in _tenant.venue_ids]
+    # Optional filters let the dashboard load a single venue's roster for a week.
+    if venue_id:
+        all_rosters = [r for r in all_rosters if getattr(r, "venue_id", None) == venue_id]
+    if week_start:
+        all_rosters = [r for r in all_rosters if str(getattr(r, "week_start", "")) == week_start]
     total = len(all_rosters)
     items = all_rosters[offset:offset + limit]
     return {
@@ -2164,7 +2338,9 @@ async def list_rosters(
 async def get_roster(roster_id: str):
     if roster_id not in _store["rosters"]:
         raise HTTPException(404, f"Roster {roster_id} not found")
-    return _store["rosters"][roster_id]
+    roster = _store["rosters"][roster_id]
+    enforce_venue_access(getattr(roster, "venue_id", None))
+    return roster
 
 
 @app.get("/rosters/{roster_id}/analyse")
@@ -2172,6 +2348,7 @@ async def analyse(roster_id: str):
     roster = _store["rosters"].get(roster_id)
     if not roster:
         raise HTTPException(404, f"Roster {roster_id} not found")
+    enforce_venue_access(getattr(roster, "venue_id", None))
 
     venue = _store["venues"].get(roster.venue_id)
     state = venue.state if venue else State.vic
@@ -2188,6 +2365,7 @@ async def get_suggestions(
     roster = _store["rosters"].get(roster_id)
     if not roster:
         raise HTTPException(404, f"Roster {roster_id} not found")
+    enforce_venue_access(getattr(roster, "venue_id", None))
 
     venue = _store["venues"].get(roster.venue_id)
     state = venue.state if venue else State.vic
@@ -2221,6 +2399,7 @@ async def shift_cost(
     emp = _store["employees"].get(employee_id)
     if not emp:
         raise HTTPException(404, f"Employee {employee_id} not found")
+    enforce_venue_access(getattr(emp, "venue_id", None))
 
     from rosteriq.models import Shift, ShiftStatus
     from datetime import time
@@ -2242,6 +2421,7 @@ async def labour_pct(
     roster = _store["rosters"].get(roster_id)
     if not roster:
         raise HTTPException(404, f"Roster {roster_id} not found")
+    enforce_venue_access(getattr(roster, "venue_id", None))
 
     venue = _store["venues"].get(roster.venue_id)
     state = venue.state if venue else State.vic
@@ -2257,13 +2437,32 @@ async def labour_pct(
 
 @app.post("/variance/calculate")
 async def calc_variance(req: VarianceRequest):
+    valid_signal_types = {st.value for st in SignalType}
     signals = []
     for s in req.signals:
+        raw_type = s["signal_type"]
+        # Skip signals whose type is not a recognised SignalType so a single
+        # unknown signal doesn't 500 the whole request.
+        if raw_type not in valid_signal_types:
+            continue
+        # The payload carries a pre-computed signal `value` (already expressed
+        # in variance terms). create_signal() works from actual/expected, so
+        # feed `value` as `actual` with `expected=0.0`, which makes it use the
+        # value directly (clamped to [-1, 1]). Callers may instead supply
+        # explicit actual/expected pairs.
+        if "actual" in s and "expected" in s:
+            actual = s["actual"]
+            expected = s["expected"]
+        else:
+            actual = s["value"]
+            expected = 0.0
         signals.append(create_signal(
-            signal_type=s["signal_type"],
-            value=s["value"],
+            signal_type=raw_type,
+            actual=actual,
+            expected=expected,
             confidence=s.get("confidence", 0.8),
             source=s.get("source", "api"),
+            weight=s.get("weight"),
         ))
     variance = calculate_weighted_variance(signals)
     breach = detect_threshold_breach(variance)
@@ -2277,6 +2476,7 @@ async def calc_variance(req: VarianceRequest):
 
 @app.post("/decisions/recommend")
 async def recommend_decision(req: DecisionRequest):
+    enforce_venue_access(req.venue_id)
     venue = _store["venues"].get(req.venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")
@@ -2350,6 +2550,7 @@ class POSImportRequest(BaseModel):
 
 @app.post("/pos/import")
 async def import_pos(req: POSImportRequest):
+    enforce_venue_access(req.venue_id)
     """
     Import POS transaction data from a CSV string.
 
@@ -2397,6 +2598,7 @@ async def import_pos(req: POSImportRequest):
 
 @app.post("/pos/import-file")
 async def import_pos_file(venue_id: str = Query(...), system: Optional[str] = None):
+    enforce_venue_access(venue_id)
     """
     Import POS data from an uploaded file.
 
@@ -2504,6 +2706,7 @@ async def tanda_callback(code: str, state: str = ""):
 
 @app.post("/tanda/sync/{venue_id}")
 async def tanda_sync(venue_id: str):
+    enforce_venue_access(venue_id)
     """
     Sync employees and shifts from Tanda for a connected venue.
 
@@ -2550,6 +2753,7 @@ async def tanda_push_roster(
     venue_id: str = Query(...),
     dry_run: bool = Query(True),
 ):
+    enforce_venue_access(venue_id)
     """
     Push a RosterIQ roster back to Tanda.
 
@@ -2604,6 +2808,7 @@ async def tanda_diff_roster(
     roster_id: str = Query(...),
     venue_id: str = Query(...),
 ):
+    enforce_venue_access(venue_id)
     """
     Compare a RosterIQ roster against the current Tanda roster.
 
@@ -2932,6 +3137,8 @@ async def dashboard_overview(venue_id: str):
         today_shifts = [s for s in today_roster.shifts if s.date == today]
 
     staff_cost_today = _get_today_costs(today_roster, _store["employees"])
+    # VenueConfig has no daily-budget field; use it if present, else a default.
+    _venue_budget = getattr(venue, "budget", None) or 1000
 
     # Demand outlook summary
     demand_level = _demand_classification(avg_covers, avg_covers)
@@ -2969,8 +3176,9 @@ async def dashboard_overview(venue_id: str):
         "top_impactful_signals": top_signals,
         "labour_cost_vs_budget": {
             "today_cost": round(staff_cost_today, 2),
-            "budget": round(float(venue.budget) if venue.budget else 1000, 2),
-            "remaining": round(float(venue.budget) - staff_cost_today if venue.budget else 1000 - staff_cost_today, 2),
+            # VenueConfig has no explicit daily budget field; fall back to a default.
+            "budget": round(float(_venue_budget), 2),
+            "remaining": round(float(_venue_budget) - staff_cost_today, 2),
         },
     }
 
@@ -3274,7 +3482,7 @@ async def dashboard_week_ahead(venue_id: str):
 
         week_data.append({
             "date": d.isoformat(),
-            "day_type": str(day_type),
+            "day_type": day_type.value if hasattr(day_type, "value") else str(day_type),
             "demand_level": demand_level,
             "predicted_peak_covers": round(peak_covers, 1),
             "predicted_average_covers": round(pred_covers, 1),
@@ -3364,6 +3572,7 @@ async def dashboard_signals_history(
 
 @app.post("/dashboard/{venue_id}/configure-feeds")
 async def configure_feeds(venue_id: str, config: DataFeedConfig):
+    enforce_venue_access(venue_id)  # explicit, not just path-prefix middleware (stores feed API keys)
     """
     POST /dashboard/{venue_id}/configure-feeds
 
@@ -3435,6 +3644,7 @@ async def send_test_notification(req: NotificationTestRequest):
 
 @app.post("/api/notifications/digest/{venue_id}")
 async def trigger_daily_digest(venue_id: str, manager_email: str = Query(...)):
+    enforce_venue_access(venue_id)
     """
     POST /api/notifications/digest/{venue_id}?manager_email=manager@example.com
 

@@ -3,6 +3,7 @@
 import pytest
 import asyncio
 import time
+from zoneinfo import ZoneInfo
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -45,10 +46,15 @@ def make_tanda_user(id=1, name="Alice", employment_type="casual", hourly_rate=28
 
 
 def make_tanda_shift(id=1, user_id=1, start_ts=None, end_ts=None):
+    # Build the epochs in the venue's timezone (the adapter defaults to VIC =
+    # Australia/Melbourne) so a "9am shift" round-trips to 9am local regardless
+    # of the test runner's TZ. (A bare datetime().timestamp() would be the
+    # runner's local time, which is exactly the bug the adapter now fixes.)
+    _mel = ZoneInfo("Australia/Melbourne")
     if start_ts is None:
-        start_ts = datetime(2026, 4, 7, 9, 0).timestamp()
+        start_ts = datetime(2026, 4, 7, 9, 0, tzinfo=_mel).timestamp()
     if end_ts is None:
-        end_ts = datetime(2026, 4, 7, 17, 0).timestamp()
+        end_ts = datetime(2026, 4, 7, 17, 0, tzinfo=_mel).timestamp()
     return {
         "id": id,
         "user_id": user_id,
@@ -272,7 +278,11 @@ class TestErrorHandling:
             with pytest.raises(TandaAPIError):
                 await adapter.refresh_token()
 
-        asyncio.get_event_loop().run_until_complete(test())
+        # Use asyncio.run() so a fresh event loop is created. The previous
+        # asyncio.get_event_loop().run_until_complete() pattern raises
+        # "There is no current event loop" on Python 3.12 once an earlier
+        # pytest-asyncio test has closed the loop (test-ordering dependency).
+        asyncio.run(test())
 
 
 # ============================================================================

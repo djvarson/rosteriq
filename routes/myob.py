@@ -131,6 +131,27 @@ def _build_credentials(install: dict) -> MYOBCredentials:
     )
 
 
+def _persist_refreshed_tokens(install: dict):
+    """
+    Build an on_token_refresh callback that writes refreshed MYOB tokens back
+    into the venue's plugin_install record, so the next request reuses the new
+    access/refresh token instead of starting from the expired one.
+    """
+    def _save(creds: "MYOBCredentials") -> None:
+        tokens = install.setdefault("tokens", {})
+        tokens["access_token"] = creds.access_token
+        tokens["refresh_token"] = creds.refresh_token
+        tokens["token_expires_at"] = (
+            creds.token_expires_at.isoformat() if creds.token_expires_at else None
+        )
+        try:
+            get_db().save_plugin_install(install)
+        except Exception as e:  # noqa: BLE001 — never let persistence failure break the call
+            logger.warning(f"Failed to persist refreshed MYOB tokens: {e}")
+
+    return _save
+
+
 def _get_install_or_404(venue_id: str) -> dict:
     """Fetch the MYOB install record for a venue, or raise 404."""
     db = get_db()
@@ -385,7 +406,7 @@ async def list_company_files(
     credentials = _build_credentials(install)
 
     try:
-        async with MYOBAdapter(credentials) as adapter:
+        async with MYOBAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             files = await adapter.list_company_files()
     except MYOBAPIError as e:
         raise HTTPException(status_code=502, detail=f"MYOB API error: {e}")
@@ -410,7 +431,7 @@ async def sync_employees(body: MYOBSyncEmployeesRequest) -> dict:
     credentials = _build_credentials(install)
 
     try:
-        async with MYOBAdapter(credentials) as adapter:
+        async with MYOBAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             employees = await adapter.get_employees(active_only=body.active_only)
     except MYOBAPIError as e:
         raise HTTPException(status_code=502, detail=f"MYOB API error: {e}")
@@ -448,7 +469,7 @@ async def sync_timesheets(body: MYOBTimesheetSyncRequest) -> dict:
     credentials = _build_credentials(install)
 
     try:
-        async with MYOBAdapter(credentials) as adapter:
+        async with MYOBAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             timesheets = await adapter.get_timesheets(
                 start_date=body.start_date,
                 end_date=body.end_date,
@@ -474,7 +495,7 @@ async def push_timesheet(body: MYOBTimesheetPushRequest) -> dict:
     credentials = _build_credentials(install)
 
     try:
-        async with MYOBAdapter(credentials) as adapter:
+        async with MYOBAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             result = await adapter.push_timesheet(
                 employee_uid=body.employee_uid,
                 start_date=body.start_date,
@@ -506,7 +527,7 @@ async def get_payroll_categories(
     credentials = _build_credentials(install)
 
     try:
-        async with MYOBAdapter(credentials) as adapter:
+        async with MYOBAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             categories = await adapter.get_payroll_categories()
     except MYOBAPIError as e:
         raise HTTPException(status_code=502, detail=f"MYOB API error: {e}")
@@ -528,7 +549,7 @@ async def get_pay_runs(
     ed = date.fromisoformat(end_date) if end_date else None
 
     try:
-        async with MYOBAdapter(credentials) as adapter:
+        async with MYOBAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             runs = await adapter.get_pay_runs(start_date=sd, end_date=ed)
     except MYOBAPIError as e:
         raise HTTPException(status_code=502, detail=f"MYOB API error: {e}")
@@ -550,7 +571,7 @@ async def get_accounts(
     credentials = _build_credentials(install)
 
     try:
-        async with MYOBAdapter(credentials) as adapter:
+        async with MYOBAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
             accounts = await adapter.get_accounts()
     except MYOBAPIError as e:
         raise HTTPException(status_code=502, detail=f"MYOB API error: {e}")
