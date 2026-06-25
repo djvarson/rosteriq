@@ -1811,6 +1811,14 @@ class PostgresStore(BaseStore):
                 self._conn = psycopg2.connect(dsn)
                 self._conn.autocommit = True
                 logger.info("Connected to PostgreSQL: %s", dsn.split("@")[-1])
+                # Self-heal the core schema. Migration 001 creates these tables,
+                # but its first statement (CREATE EXTENSION "uuid-ossp") fails on
+                # managed Postgres where the app's role lacks superuser, which
+                # rolls back the whole transaction and leaves NO core tables — so
+                # every login 500s. These idempotent CREATE TABLE IF NOT EXISTS
+                # statements (no privileged extension) guarantee the tables exist
+                # regardless of migration state. No-op when 001 already applied.
+                self._ensure_core_schema()
                 return  # success
             except psycopg2.OperationalError as e:
                 last_error = e
@@ -2171,6 +2179,208 @@ class PostgresStore(BaseStore):
         ddl = self._TABLE_DDL.get(name)
         if ddl:
             cur.execute(ddl)
+
+    # Core tables provisioned by migration 001, mirrored here as idempotent
+    # CREATE TABLE IF NOT EXISTS so the app self-heals when 001 never completed
+    # (e.g. CREATE EXTENSION privilege failure on managed Postgres). Faithful to
+    # 001's columns/constraints; the privileged uuid-ossp extension is omitted
+    # (the schema uses app-generated TEXT ids, so it is not needed). Ordered by
+    # foreign-key dependency; each runs independently under autocommit.
+    _CORE_SCHEMA_DDL = [
+        ("venues", """
+            CREATE TABLE IF NOT EXISTS venues (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                tanda_org_id TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL,
+                timezone TEXT NOT NULL DEFAULT 'Australia/Melbourne',
+                min_staff JSONB DEFAULT '{}',
+                max_labour_pct NUMERIC(5, 2) NOT NULL,
+                pos_system TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("employees", """
+            CREATE TABLE IF NOT EXISTS employees (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+                tanda_id TEXT,
+                name TEXT NOT NULL,
+                employment_type TEXT NOT NULL,
+                award_level TEXT NOT NULL,
+                hourly_base_rate NUMERIC(10, 2) NOT NULL,
+                skills JSONB DEFAULT '[]',
+                availability JSONB DEFAULT '{}',
+                max_hours_per_week NUMERIC(5, 2) DEFAULT 38.0,
+                consecutive_days INTEGER DEFAULT 6,
+                phone TEXT,
+                email TEXT,
+                active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("rosters", """
+            CREATE TABLE IF NOT EXISTS rosters (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+                week_start DATE NOT NULL,
+                week_end DATE NOT NULL,
+                total_cost NUMERIC(12, 2),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("shifts", """
+            CREATE TABLE IF NOT EXISTS shifts (
+                id TEXT PRIMARY KEY,
+                roster_id TEXT NOT NULL REFERENCES rosters(id) ON DELETE CASCADE,
+                employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                shift_date DATE NOT NULL,
+                start_time TIME NOT NULL,
+                end_time TIME NOT NULL,
+                break_minutes INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'scheduled',
+                role TEXT DEFAULT 'general',
+                cost NUMERIC(10, 2),
+                penalty_multiplier NUMERIC(5, 2) DEFAULT 1.0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("forecasts", """
+            CREATE TABLE IF NOT EXISTS forecasts (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+                forecast_date DATE NOT NULL,
+                hour INTEGER NOT NULL CHECK (hour >= 0 AND hour <= 23),
+                predicted_covers NUMERIC(10, 2) NOT NULL,
+                confidence NUMERIC(3, 2) NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+                signals_used TEXT[] DEFAULT '{}',
+                model_version TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(venue_id, forecast_date, hour, model_version)
+            )"""),
+        ("users", """
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'staff',
+                api_key_hash TEXT,
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP WITH TIME ZONE
+            )"""),
+        ("refresh_tokens", """
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                is_revoked BOOLEAN DEFAULT false,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("login_attempts", """
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                id BIGSERIAL PRIMARY KEY,
+                email TEXT NOT NULL,
+                ip_address TEXT NOT NULL,
+                success BOOLEAN NOT NULL,
+                attempted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("subscriptions", """
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                venue_id TEXT PRIMARY KEY REFERENCES venues(id) ON DELETE CASCADE,
+                stripe_customer_id TEXT,
+                stripe_subscription_id TEXT UNIQUE,
+                tier TEXT NOT NULL DEFAULT 'starter',
+                status TEXT NOT NULL DEFAULT 'inactive',
+                current_period_start TIMESTAMP WITH TIME ZONE,
+                current_period_end TIMESTAMP WITH TIME ZONE,
+                payment_method TEXT,
+                last_payment_date TIMESTAMP WITH TIME ZONE,
+                next_billing_date TIMESTAMP WITH TIME ZONE,
+                cancel_at_period_end BOOLEAN DEFAULT false,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("onboarding_states", """
+            CREATE TABLE IF NOT EXISTS onboarding_states (
+                venue_id TEXT PRIMARY KEY REFERENCES venues(id) ON DELETE CASCADE,
+                state_data JSONB NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("plugin_installs", """
+            CREATE TABLE IF NOT EXISTS plugin_installs (
+                organisation_id TEXT PRIMARY KEY,
+                venue_id TEXT REFERENCES venues(id) ON DELETE SET NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                tokens JSONB DEFAULT '{}',
+                installed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("xero_credentials", """
+            CREATE TABLE IF NOT EXISTS xero_credentials (
+                venue_id TEXT PRIMARY KEY REFERENCES venues(id) ON DELETE CASCADE,
+                client_id TEXT,
+                client_secret TEXT,
+                tenant_id TEXT,
+                access_token TEXT,
+                refresh_token TEXT,
+                token_expires TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("feed_configs", """
+            CREATE TABLE IF NOT EXISTS feed_configs (
+                venue_id TEXT NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+                feed_name TEXT NOT NULL,
+                enabled BOOLEAN DEFAULT true,
+                api_key TEXT,
+                poll_interval_minutes INTEGER DEFAULT 30,
+                last_updated_at TIMESTAMP WITH TIME ZONE,
+                last_tested_at TIMESTAMP WITH TIME ZONE,
+                last_test_status TEXT,
+                custom_params JSONB DEFAULT '{}',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (venue_id, feed_name)
+            )"""),
+        ("billing_events", """
+            CREATE TABLE IF NOT EXISTS billing_events (
+                event_id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                stripe_event_id TEXT UNIQUE,
+                payload JSONB NOT NULL,
+                processed BOOLEAN DEFAULT false,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+        ("webhook_events", """
+            CREATE TABLE IF NOT EXISTS webhook_events (
+                webhook_id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                payload_hash TEXT NOT NULL,
+                processed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )"""),
+    ]
+
+    def _ensure_core_schema(self) -> None:
+        """Create any missing core tables (idempotent, best-effort).
+
+        Runs at connect time. Each statement is independent under autocommit, so
+        a single failure (e.g. a permission issue) is logged and the rest still
+        apply. Never raises — a self-heal must never prevent app startup.
+        """
+        created = 0
+        for name, ddl in self._CORE_SCHEMA_DDL:
+            try:
+                with self._cursor() as cur:
+                    cur.execute(ddl)
+                created += 1
+            except Exception as e:  # noqa: BLE001 — best-effort, must not crash boot
+                logger.warning("Core-schema ensure for %s failed: %s", name, e)
+        logger.info("Core schema ensured (%d/%d tables present).",
+                    created, len(self._CORE_SCHEMA_DDL))
 
     # --- Venues ---
 
