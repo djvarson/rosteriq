@@ -13,6 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from rosteriq.database import get_db
 from rosteriq.services.auth import auth_service
 from rosteriq.services.notifications import get_notification_service
+from rosteriq.services.demo import (
+    seed_demo_environment, DEMO_USER_ID, DEMO_USER_EMAIL,
+)
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.schemas import (
     RegisterRequest,
@@ -32,6 +35,35 @@ from rosteriq.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+@router.post("/demo")
+async def demo_session(request: Request, db = Depends(get_db)):
+    """Mint a short-lived session for the sandboxed demo user so prospects can
+    try the product (incl. the AI agent) without registering.
+
+    The demo user is scoped to the demo venue only, so this exposes no real
+    tenant data. Rate-limited per IP to bound abuse of the unauthenticated path.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    # Reuse the login throttle: too many recent attempts from this IP -> back off.
+    if not auth_service.check_login_rate_limit(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many demo sessions from this address. Try again shortly.",
+        )
+
+    try:
+        seed_demo_environment(db)
+    except Exception as e:  # never 500 the public demo path
+        logger.warning("Demo seed issue (continuing): %s", e)
+
+    access_token, _ = auth_service.create_access_token(
+        DEMO_USER_ID, DEMO_USER_EMAIL, "staff"
+    )
+    # Record as a (successful) attempt so the per-IP counter advances.
+    auth_service.record_login_attempt(DEMO_USER_EMAIL, client_ip, True)
+    return {"access_token": access_token, "token_type": "bearer", "demo": True}
 
 
 def _bootstrap_owner_allowed() -> bool:

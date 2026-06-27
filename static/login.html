@@ -667,8 +667,27 @@
             }
         });
 
-        // Handle demo button click
-        demoBtn.addEventListener('click', () => {
+        // Handle demo button click — mint a real (sandboxed) demo session so
+        // authenticated features like the AI agent work in the demo too.
+        demoBtn.addEventListener('click', async () => {
+            demoBtn.disabled = true;
+            demoBtn.textContent = 'Loading demo...';
+            try {
+                const resp = await fetch('/api/auth/demo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.access_token) {
+                        localStorage.setItem('jwt_token', data.access_token);
+                    }
+                }
+            } catch (e) {
+                // Non-fatal: fall through to the visual demo even if the token
+                // couldn't be minted (the dashboard still renders sample data).
+                console.warn('Demo session token unavailable:', e);
+            }
             window.location.href = '/static/dashboard.html?demo=true';
         });
 

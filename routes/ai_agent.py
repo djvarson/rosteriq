@@ -27,12 +27,25 @@ from rosteriq.ai_agent import (
     GEMINI_MODEL,
     MINIMAX_MODEL,
 )
+from rosteriq.middleware.tenant import get_tenant_context_optional
+from rosteriq.services.demo import DEMO_USER_ID, DEMO_VENUE_ID
 
 
 def _active_model() -> Optional[str]:
     if not llm_configured():
         return None
     return MINIMAX_MODEL if LLM_PROVIDER == "minimax" else GEMINI_MODEL
+
+
+def _guard_demo_scope(venue_id: str) -> None:
+    """The sandboxed demo user may only target the demo venue. Real users are
+    unaffected. Prevents the public demo session from being a cross-tenant lever."""
+    ctx = get_tenant_context_optional()
+    if ctx and ctx.user_id == DEMO_USER_ID and venue_id != DEMO_VENUE_ID:
+        raise HTTPException(
+            status_code=403,
+            detail="The demo account can only access the demo venue.",
+        )
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +110,8 @@ async def chat(body: ChatRequest) -> dict:
     to look up employees, shifts, costs, compliance, and more.
     It can also suggest actions (roster generation, shift changes, messaging).
     """
+    _guard_demo_scope(body.venue_id)
+
     if not llm_configured():
         env = "MINIMAX_API_KEY" if LLM_PROVIDER == "minimax" else "GEMINI_API_KEY"
         raise HTTPException(
@@ -153,6 +168,8 @@ async def get_insights(
     These are fast rule-based checks (no LLM call) that surface
     staffing gaps, cost alerts, compliance issues, and demand signals.
     """
+    _guard_demo_scope(venue_id)
+
     try:
         insights = await generate_insights(venue_id, max_insights=max_count)
     except Exception as e:

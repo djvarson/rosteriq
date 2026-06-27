@@ -795,6 +795,14 @@ class MemoryStore(BaseStore):
     def list_employees(self):
         return list(self._employees.values())
 
+    def get_employees(self, venue_id=None):
+        """Employees, optionally filtered to one venue. Used by the AI agent's
+        data tools (which pass a venue_id)."""
+        emps = list(self._employees.values())
+        if venue_id is not None:
+            emps = [e for e in emps if getattr(e, "venue_id", None) == venue_id]
+        return emps
+
     def get_employee(self, employee_id):
         return self._employees.get(employee_id)
 
@@ -2473,6 +2481,18 @@ class PostgresStore(BaseStore):
     def list_employees(self):
         with self._cursor() as cur:
             cur.execute("SELECT * FROM employees WHERE active = true ORDER BY name")
+            return [self._row_to_employee(r) for r in cur.fetchall()]
+
+    def get_employees(self, venue_id=None):
+        """Active employees, optionally scoped to one venue (AI agent tools)."""
+        with self._cursor() as cur:
+            if venue_id is not None:
+                cur.execute(
+                    "SELECT * FROM employees WHERE active = true AND venue_id = %s ORDER BY name",
+                    (venue_id,),
+                )
+            else:
+                cur.execute("SELECT * FROM employees WHERE active = true ORDER BY name")
             return [self._row_to_employee(r) for r in cur.fetchall()]
 
     def get_employee(self, employee_id):
