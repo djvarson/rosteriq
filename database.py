@@ -2168,6 +2168,27 @@ class PostgresStore(BaseStore):
                 created_at TIMESTAMP
             )
         """,
+        # Notification tables use a blob model (user_id + a JSON payload), which
+        # is what every caller and the MemoryStore use. Migration 003 defined a
+        # different, normalised schema that NO code matches; these idempotent
+        # definitions are the authoritative ones the runtime relies on.
+        "notification_preferences": """
+            CREATE TABLE IF NOT EXISTS notification_preferences (
+                user_id TEXT PRIMARY KEY,
+                preferences JSONB NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "push_subscriptions": """
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                user_id TEXT PRIMARY KEY,
+                venue_id TEXT,
+                subscription_data JSONB NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
     }
 
     def _ensure_table(self, cur, name: str) -> None:
@@ -4159,6 +4180,7 @@ class PostgresStore(BaseStore):
     def save_notification_preferences(self, user_id: str, prefs: dict) -> None:
         """Save or update notification preferences for a user."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "notification_preferences")
             cur.execute("""
                 INSERT INTO notification_preferences (user_id, preferences, created_at, updated_at)
                 VALUES (%s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -4169,6 +4191,7 @@ class PostgresStore(BaseStore):
     def get_notification_preferences(self, user_id: str) -> Optional[dict]:
         """Get notification preferences for a user."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "notification_preferences")
             cur.execute("""
                 SELECT preferences FROM notification_preferences WHERE user_id = %s
             """, (user_id,))
@@ -4352,6 +4375,7 @@ class PostgresStore(BaseStore):
     def save_push_subscription(self, user_id: str, subscription: dict) -> None:
         """Save or update a push notification subscription for a user."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "push_subscriptions")
             cur.execute("""
                 INSERT INTO push_subscriptions (user_id, venue_id, subscription_data, created_at, updated_at)
                 VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -4362,6 +4386,7 @@ class PostgresStore(BaseStore):
     def get_push_subscription(self, user_id: str) -> Optional[dict]:
         """Get push notification subscription for a user."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "push_subscriptions")
             cur.execute("""
                 SELECT subscription_data FROM push_subscriptions WHERE user_id = %s
             """, (user_id,))
@@ -4373,6 +4398,7 @@ class PostgresStore(BaseStore):
     def delete_push_subscription(self, user_id: str) -> None:
         """Delete push notification subscription for a user."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "push_subscriptions")
             cur.execute("""
                 DELETE FROM push_subscriptions WHERE user_id = %s
             """, (user_id,))
@@ -4380,6 +4406,7 @@ class PostgresStore(BaseStore):
     def list_push_subscriptions(self, venue_id: str) -> list[dict]:
         """List all push subscriptions for staff at a venue."""
         with self._cursor() as cur:
+            self._ensure_table(cur, "push_subscriptions")
             cur.execute("""
                 SELECT subscription_data FROM push_subscriptions WHERE venue_id = %s
             """, (venue_id,))

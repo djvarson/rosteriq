@@ -116,19 +116,15 @@ CREATE INDEX IF NOT EXISTS idx_notification_log_event_status
 -- NOTIFICATION PREFERENCES - Per-employee notification settings
 -- ============================================================================
 
+-- Blob model: keyed by user_id with the whole preference payload as JSON.
+-- This matches what the application code and MemoryStore use (an earlier
+-- normalised schema here was never referenced by any code path).
 CREATE TABLE IF NOT EXISTS notification_preferences (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    employee_id TEXT NOT NULL UNIQUE REFERENCES employees(id) ON DELETE CASCADE,
-    channels JSONB DEFAULT '["email","push"]',
-    quiet_hours_start TIME DEFAULT '22:00',
-    quiet_hours_end TIME DEFAULT '07:00',
-    event_types JSONB,
-    rate_limit_per_hour INTEGER DEFAULT 20,
+    user_id TEXT PRIMARY KEY,
+    preferences JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE INDEX IF NOT EXISTS idx_notification_preferences_employee
-    ON notification_preferences(employee_id);
 
 -- ============================================================================
 -- ROSTER CONFLICTS - Detected conflicts cache
@@ -160,18 +156,16 @@ CREATE INDEX IF NOT EXISTS idx_roster_conflicts_detected
 -- PUSH SUBSCRIPTIONS - Web push subscription data
 -- ============================================================================
 
+-- Blob model: keyed by user_id, the full web-push subscription stored as JSON.
+-- Matches the application code / MemoryStore (the earlier normalised schema
+-- with endpoint/p256dh/auth columns was never referenced by any code path).
 CREATE TABLE IF NOT EXISTS push_subscriptions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-    endpoint TEXT NOT NULL,
-    p256dh TEXT NOT NULL,
-    auth TEXT NOT NULL,
-    user_agent TEXT,
+    user_id TEXT PRIMARY KEY,
+    venue_id TEXT,
+    subscription_data JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    last_used_at TIMESTAMP WITH TIME ZONE
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_push_subscriptions_employee
-    ON push_subscriptions(employee_id);
-CREATE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint
-    ON push_subscriptions(endpoint);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_venue
+    ON push_subscriptions(venue_id);

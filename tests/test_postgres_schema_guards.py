@@ -96,39 +96,31 @@ def _table_columns() -> dict:
                 line = line.strip().strip(",")
                 if not line or line.startswith("--"):
                     continue
-                lead = re.match(r"([a-zA-Z_][a-zA-Z0-9_]*)", line)
+                # leading identifier, tolerating a quoted reserved word ("group")
+                lead = re.match(r'"?([a-zA-Z_][a-zA-Z0-9_]*)"?', line)
                 if not lead or lead.group(1).upper() in _NON_COLUMN_LEADS:
                     continue
                 colset.add(lead.group(1).lower())
     return cols
 
 
-def _core_self_heal_tables() -> set:
-    """The core tables PostgresStore ensures at startup (_CORE_SCHEMA_DDL).
-    These have clean, authoritative DDL, so column checks against them are
-    reliable (unlike some feature tables with quoted identifiers)."""
-    db_src = open(DATABASE_PY, encoding="utf-8").read()
-    block = re.search(r"_CORE_SCHEMA_DDL\s*=\s*\[(.*?)\n    \]", db_src, re.DOTALL)
-    assert block, "_CORE_SCHEMA_DDL not found"
-    return {m.lower() for m in re.findall(r'\(\s*"([a-zA-Z_]+)"\s*,', block.group(1))}
-
-
-def test_core_insert_columns_exist_in_table_schema():
-    """Every column a PostgresStore INSERT names (for a core/auth table) must
-    exist in that table's CREATE TABLE. Catches column-name drift like
-    login_attempts.created_at vs .attempted_at — which 500'd every login on real
-    Postgres yet slipped past the MemoryStore-backed suite."""
+def test_insert_columns_exist_in_table_schema():
+    """Every column a PostgresStore INSERT names must exist in that table's
+    CREATE TABLE. Catches column-name drift that 500s on real Postgres but slips
+    past the MemoryStore-backed suite, e.g.:
+      - login_attempts.created_at vs the real .attempted_at column
+      - notification_preferences / push_subscriptions, whose code uses a blob
+        schema (user_id + JSON) that an earlier normalised migration didn't match
+    Tables with no locally-defined DDL are skipped (provisioned elsewhere)."""
     pg_src = _postgres_store_source()
     cols = _table_columns()
-    core = _core_self_heal_tables()
     problems = []
     for table, collist in _INSERT_COLS_RE.findall(pg_src):
-        t = table.lower()
-        if t not in core:
-            continue  # only audit the clean core/auth tables here
-        known = cols.get(t, set())
+        known = cols.get(table.lower())
+        if not known:
+            continue  # table defined outside our DDL sources — out of scope
         for c in collist.split(","):
-            c = c.strip().lower()
+            c = c.strip().strip('"').lower()  # tolerate quoted identifiers
             if c and c not in known:
                 problems.append(f"{table}.{c}")
     assert not problems, (
