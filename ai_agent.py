@@ -378,6 +378,21 @@ def _gemini_tools_to_openai(gemini_tools: list) -> list:
 OPENAI_TOOLS = _gemini_tools_to_openai(GEMINI_TOOLS)
 
 
+def _system_prompt_now() -> str:
+    """System prompt with the current date appended. Without this the model has
+    no idea what 'today' is, guesses a date, and every date-scoped tool call
+    (shifts, labour, events) silently misses the real data."""
+    today = date.today()
+    return (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"## Current date\n"
+        f"Today is {today.strftime('%A, %d %B %Y')} ({today.isoformat()}), "
+        f"Australian local time. When the user says \"today\", \"tonight\", "
+        f"\"this week\", or \"tomorrow\", resolve it against this date and pass "
+        f"explicit YYYY-MM-DD dates to tools."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tool execution — maps tool names to actual data/action functions
 # ---------------------------------------------------------------------------
@@ -1212,7 +1227,7 @@ class RosterIQAgent:
         actions: list = []
         tool_calls_log: list = []
 
-        oai_messages: list = [{"role": "system", "content": SYSTEM_PROMPT}]
+        oai_messages: list = [{"role": "system", "content": _system_prompt_now()}]
         for msg in messages:
             role = msg.get("role", "user")
             if role not in ("user", "assistant", "system"):
@@ -1344,7 +1359,7 @@ class RosterIQAgent:
             "contents": contents,
             "tools": GEMINI_TOOLS,
             "systemInstruction": {
-                "parts": [{"text": SYSTEM_PROMPT}],
+                "parts": [{"text": _system_prompt_now()}],
             },
             "generationConfig": {
                 "maxOutputTokens": 2048,

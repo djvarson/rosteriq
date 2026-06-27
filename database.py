@@ -3700,28 +3700,18 @@ class PostgresStore(BaseStore):
                 ORDER BY r.week_start
             """, (venue_id, end_date, start_date))
 
+            # Materialise the rosters first so the cursor is free to re-query
+            # shifts per roster below.
+            roster_rows = cur.fetchall()
             rosters = []
-            for row in cur.fetchall():
-                # Reconstruct Roster with shifts
-                shifts = []
-                cur.execute("""
-                    SELECT * FROM shifts WHERE roster_id = %s
-                """, (row['id'],))
-
-                for shift_row in cur.fetchall():
-                    shift = Shift(
-                        id=shift_row['id'],
-                        employee_id=shift_row['employee_id'],
-                        date=shift_row['date'],
-                        start_time=shift_row['start_time'],
-                        end_time=shift_row['end_time'],
-                        break_minutes=shift_row.get('break_minutes', 0),
-                        status=ShiftStatus(shift_row['status']),
-                        role=shift_row.get('role', ''),
-                        cost=Decimal(str(shift_row['cost'])) if shift_row.get('cost') else None,
-                        penalty_multiplier=float(shift_row.get('penalty_multiplier', 1.0)),
-                    )
-                    shifts.append(shift)
+            for row in roster_rows:
+                # Reconstruct Roster with shifts. Use _row_to_shift so the column
+                # mapping (notably shift_date, not 'date') stays correct and DRY.
+                cur.execute(
+                    "SELECT * FROM shifts WHERE roster_id = %s ORDER BY shift_date, start_time",
+                    (row['id'],),
+                )
+                shifts = [self._row_to_shift(s) for s in cur.fetchall()]
 
                 roster = Roster(
                     id=row['id'],

@@ -52,6 +52,13 @@ def _seed(db):
     ))
 
 
+def test_system_prompt_carries_todays_date():
+    """The model must be told today's date, or every 'today/this week' tool call
+    queries a guessed (wrong) date and silently misses the real data."""
+    from rosteriq.ai_agent import _system_prompt_now
+    assert date.today().isoformat() in _system_prompt_now()
+
+
 def test_store_helpers_exist_and_return_data():
     db = get_db()
     _seed(db)
