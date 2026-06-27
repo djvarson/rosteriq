@@ -71,6 +71,72 @@ def _created_tables() -> set:
     return created
 
 
+_CREATE_BLOCK_RE = re.compile(
+    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*?)\n\s*\)",
+    re.IGNORECASE | re.DOTALL,
+)
+_INSERT_COLS_RE = re.compile(
+    r"INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)",
+    re.IGNORECASE | re.DOTALL,
+)
+_NON_COLUMN_LEADS = {"PRIMARY", "UNIQUE", "FOREIGN", "CONSTRAINT", "CHECK", "REFERENCES"}
+
+
+def _table_columns() -> dict:
+    """Map table name -> set of column names, parsed from every CREATE TABLE
+    (migrations + inline self-heal DDL)."""
+    cols: dict = {}
+    sources = [open(DATABASE_PY, encoding="utf-8").read()]
+    for path in MIGRATIONS:
+        sources.append(open(path, encoding="utf-8").read())
+    for src in sources:
+        for name, body in _CREATE_BLOCK_RE.findall(src):
+            colset = cols.setdefault(name.lower(), set())
+            for line in body.splitlines():
+                line = line.strip().strip(",")
+                if not line or line.startswith("--"):
+                    continue
+                lead = re.match(r"([a-zA-Z_][a-zA-Z0-9_]*)", line)
+                if not lead or lead.group(1).upper() in _NON_COLUMN_LEADS:
+                    continue
+                colset.add(lead.group(1).lower())
+    return cols
+
+
+def _core_self_heal_tables() -> set:
+    """The core tables PostgresStore ensures at startup (_CORE_SCHEMA_DDL).
+    These have clean, authoritative DDL, so column checks against them are
+    reliable (unlike some feature tables with quoted identifiers)."""
+    db_src = open(DATABASE_PY, encoding="utf-8").read()
+    block = re.search(r"_CORE_SCHEMA_DDL\s*=\s*\[(.*?)\n    \]", db_src, re.DOTALL)
+    assert block, "_CORE_SCHEMA_DDL not found"
+    return {m.lower() for m in re.findall(r'\(\s*"([a-zA-Z_]+)"\s*,', block.group(1))}
+
+
+def test_core_insert_columns_exist_in_table_schema():
+    """Every column a PostgresStore INSERT names (for a core/auth table) must
+    exist in that table's CREATE TABLE. Catches column-name drift like
+    login_attempts.created_at vs .attempted_at — which 500'd every login on real
+    Postgres yet slipped past the MemoryStore-backed suite."""
+    pg_src = _postgres_store_source()
+    cols = _table_columns()
+    core = _core_self_heal_tables()
+    problems = []
+    for table, collist in _INSERT_COLS_RE.findall(pg_src):
+        t = table.lower()
+        if t not in core:
+            continue  # only audit the clean core/auth tables here
+        known = cols.get(t, set())
+        for c in collist.split(","):
+            c = c.strip().lower()
+            if c and c not in known:
+                problems.append(f"{table}.{c}")
+    assert not problems, (
+        "PostgresStore INSERT references columns absent from the table schema "
+        f"(would 500 on real Postgres): {sorted(set(problems))}"
+    )
+
+
 def test_every_referenced_table_has_a_create():
     pg_src = _postgres_store_source()
     referenced = _referenced_tables(pg_src)

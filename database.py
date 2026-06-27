@@ -2862,7 +2862,7 @@ class PostgresStore(BaseStore):
         """Record a login attempt."""
         with self._cursor() as cur:
             cur.execute("""
-                INSERT INTO login_attempts (email, ip_address, success, created_at)
+                INSERT INTO login_attempts (email, ip_address, success, attempted_at)
                 VALUES (%s, %s, %s, %s)
             """, (email, ip_address, success, datetime.utcnow()))
 
@@ -2872,7 +2872,7 @@ class PostgresStore(BaseStore):
             cutoff = datetime.utcnow() - timedelta(minutes=minutes)
             cur.execute("""
                 SELECT COUNT(*) as count FROM login_attempts
-                WHERE ip_address = %s AND success = false AND created_at > %s
+                WHERE ip_address = %s AND success = false AND attempted_at > %s
             """, (ip_address, cutoff))
             row = cur.fetchone()
             return row["count"] if row else 0
@@ -3490,7 +3490,7 @@ class PostgresStore(BaseStore):
         with self._cursor() as cur:
             cur.execute("""
                 DELETE FROM login_attempts
-                WHERE created_at < %s
+                WHERE attempted_at < %s
                 RETURNING id
             """, (before_date,))
             return len(cur.fetchall())
