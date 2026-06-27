@@ -22,8 +22,17 @@ from rosteriq.database import get_db
 from rosteriq.ai_agent import (
     RosterIQAgent,
     generate_insights,
-    GEMINI_API_KEY,
+    llm_configured,
+    LLM_PROVIDER,
+    GEMINI_MODEL,
+    MINIMAX_MODEL,
 )
+
+
+def _active_model() -> Optional[str]:
+    if not llm_configured():
+        return None
+    return MINIMAX_MODEL if LLM_PROVIDER == "minimax" else GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +97,11 @@ async def chat(body: ChatRequest) -> dict:
     to look up employees, shifts, costs, compliance, and more.
     It can also suggest actions (roster generation, shift changes, messaging).
     """
-    if not GEMINI_API_KEY:
+    if not llm_configured():
+        env = "MINIMAX_API_KEY" if LLM_PROVIDER == "minimax" else "GEMINI_API_KEY"
         raise HTTPException(
             status_code=503,
-            detail="AI agent not configured. Set GEMINI_API_KEY environment variable.",
+            detail=f"AI agent not configured. Set the {env} environment variable.",
         )
 
     # Build or restore conversation
@@ -218,8 +228,10 @@ async def execute_action(body: ActionRequest) -> dict:
 @router.get("/status")
 async def ai_status() -> dict:
     """Check if the AI agent is configured and available."""
+    available = llm_configured()
     return {
-        "available": bool(GEMINI_API_KEY),
-        "model": "gemini-2.0-flash" if GEMINI_API_KEY else None,
-        "capabilities": ["chat", "insights", "actions"] if GEMINI_API_KEY else [],
+        "available": available,
+        "provider": LLM_PROVIDER,
+        "model": _active_model(),
+        "capabilities": ["chat", "insights", "actions"] if available else [],
     }

@@ -35,6 +35,24 @@ GEMINI_MODEL = os.environ.get("ROSTERIQ_AI_MODEL", "gemini-2.0-flash")
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 MAX_CONTEXT_TOKENS = 8000  # rough budget for venue context
 
+# Which LLM backend powers the agent: "gemini" (default) or "minimax".
+# MiniMax exposes an OpenAI-compatible Chat Completions API, so the same
+# OpenAI-shaped tool/tool_calls protocol also serves any OpenAI-compatible
+# endpoint (override MINIMAX_API_URL to point elsewhere).
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY", "")
+MINIMAX_MODEL = os.environ.get("MINIMAX_MODEL", "MiniMax-M3")
+MINIMAX_API_URL = os.environ.get(
+    "MINIMAX_API_URL", "https://api.minimax.io/v1/chat/completions"
+)
+
+
+def llm_configured() -> bool:
+    """Whether the selected provider has the credentials it needs."""
+    if LLM_PROVIDER == "minimax":
+        return bool(MINIMAX_API_KEY)
+    return bool(GEMINI_API_KEY)
+
 # Rate-limit / transient-error retry tuning.
 # Gemini free tier is 15 RPM, so 429s are expected under light bursts.
 GEMINI_MAX_RETRIES = 3          # number of retries AFTER the first attempt
@@ -309,6 +327,55 @@ GEMINI_TOOLS = [
         },
     ]}
 ]
+
+
+def _gemini_tools_to_openai(gemini_tools: list) -> list:
+    """Convert the Gemini functionDeclarations schema to the OpenAI tools schema.
+
+    Gemini uses uppercase JSON-Schema type names (OBJECT/STRING/...) and wraps
+    declarations in a ``functionDeclarations`` group; OpenAI (and MiniMax's
+    OpenAI-compatible API) expect lowercase types and ``{"type":"function",
+    "function":{...}}`` entries. Same tool set, different envelope.
+    """
+    type_map = {
+        "OBJECT": "object", "STRING": "string", "BOOLEAN": "boolean",
+        "INTEGER": "integer", "NUMBER": "number", "ARRAY": "array",
+    }
+
+    def conv(schema):
+        if not isinstance(schema, dict):
+            return schema
+        out = {}
+        for k, v in schema.items():
+            if k == "type" and isinstance(v, str):
+                out[k] = type_map.get(v, v.lower())
+            elif k == "properties" and isinstance(v, dict):
+                out[k] = {pk: conv(pv) for pk, pv in v.items()}
+            elif k == "items":
+                out[k] = conv(v)
+            else:
+                out[k] = v
+        return out
+
+    openai_tools = []
+    for group in gemini_tools:
+        for fn in group.get("functionDeclarations", []):
+            params = conv(fn.get("parameters") or {})
+            params.setdefault("type", "object")
+            params.setdefault("properties", {})
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": fn["name"],
+                    "description": fn.get("description", ""),
+                    "parameters": params,
+                },
+            })
+    return openai_tools
+
+
+# Pre-computed once: the 13 tools in OpenAI/MiniMax shape.
+OPENAI_TOOLS = _gemini_tools_to_openai(GEMINI_TOOLS)
 
 
 # ---------------------------------------------------------------------------
@@ -1034,7 +1101,12 @@ class RosterIQAgent:
 
     def __init__(self, venue_id: str, user_id: Optional[str] = None):
         self.context = AgentContext(venue_id, user_id)
-        if not GEMINI_API_KEY:
+        if not llm_configured():
+            if LLM_PROVIDER == "minimax":
+                raise ValueError(
+                    "MINIMAX_API_KEY not configured. Set MINIMAX_API_KEY and "
+                    "LLM_PROVIDER=minimax (model via MINIMAX_MODEL, default MiniMax-M3)."
+                )
             raise ValueError("GEMINI_API_KEY not configured. Get a free key at https://ai.google.dev")
 
     def _convert_messages_to_gemini(self, messages: list[dict]) -> list[dict]:
@@ -1064,6 +1136,9 @@ class RosterIQAgent:
                 "tool_calls": list[dict],  # Tools that were called (for transparency)
             }
         """
+        if LLM_PROVIDER == "minimax":
+            return await self._chat_openai_compatible(messages, max_tool_rounds)
+
         actions = []
         tool_calls_log = []
         gemini_contents = self._convert_messages_to_gemini(messages)
@@ -1125,6 +1200,133 @@ class RosterIQAgent:
 
         # If we exhausted rounds, return what we have
         return {"response": "I've gathered the information but hit my processing limit. Let me know if you need more detail.", "actions": actions, "tool_calls": tool_calls_log}
+
+    async def _chat_openai_compatible(self, messages: list[dict], max_tool_rounds: int = 5) -> dict:
+        """Tool-calling loop against an OpenAI-compatible Chat Completions API
+        (MiniMax). Mirrors chat() but uses OpenAI's tools/tool_calls protocol.
+        Reuses the same execute_tool() handlers — only the wire format differs.
+        """
+        actions: list = []
+        tool_calls_log: list = []
+
+        oai_messages: list = [{"role": "system", "content": SYSTEM_PROMPT}]
+        for msg in messages:
+            role = msg.get("role", "user")
+            if role not in ("user", "assistant", "system"):
+                role = "user"
+            oai_messages.append({"role": role, "content": msg.get("content", "")})
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for _round in range(max_tool_rounds):
+                response = await self._call_minimax(client, oai_messages)
+
+                if "error" in response:
+                    return {"response": f"I'm having trouble connecting to the AI: {response['error']}", "actions": [], "tool_calls": []}
+
+                choices = response.get("choices", [])
+                if not choices:
+                    return {"response": "No response from AI. Please try again.", "actions": actions, "tool_calls": tool_calls_log}
+
+                message = choices[0].get("message", {}) or {}
+                tool_calls = message.get("tool_calls") or []
+
+                if not tool_calls:
+                    # No tool use — return the assistant's text.
+                    return {"response": message.get("content") or "", "actions": actions, "tool_calls": tool_calls_log}
+
+                # The full assistant message (incl. tool_calls) must be appended
+                # to history before the tool results, per the OpenAI contract.
+                oai_messages.append({
+                    "role": "assistant",
+                    "content": message.get("content") or "",
+                    "tool_calls": tool_calls,
+                })
+
+                for tc in tool_calls:
+                    fn = tc.get("function", {}) or {}
+                    tool_name = fn.get("name", "")
+                    try:
+                        tool_args = json.loads(fn.get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        tool_args = {}
+
+                    logger.info(f"AI Agent tool call: {tool_name}({json.dumps(tool_args)[:200]})")
+                    tool_calls_log.append({"tool": tool_name, "input": tool_args})
+
+                    result_str = await self.context.execute_tool(tool_name, tool_args)
+                    try:
+                        result_data = json.loads(result_str)
+                        if isinstance(result_data, dict) and result_data.get("action_required"):
+                            actions.append(result_data)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                    oai_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", ""),
+                        "content": result_str,
+                    })
+
+        return {"response": "I've gathered the information but hit my processing limit. Let me know if you need more detail.", "actions": actions, "tool_calls": tool_calls_log}
+
+    async def _call_minimax(self, client: httpx.AsyncClient, oai_messages: list[dict]) -> dict:
+        """Single call to MiniMax's OpenAI-compatible Chat Completions endpoint.
+
+        Retries transient 429/503 with the shared exponential backoff. On
+        exhaustion or a non-retryable error, returns {"error": <message>}.
+        """
+        payload = {
+            "model": MINIMAX_MODEL,
+            "messages": oai_messages,
+            "tools": OPENAI_TOOLS,
+            "tool_choice": "auto",
+            "max_tokens": 2048,
+            "temperature": 0.7,
+        }
+        headers = {
+            "Authorization": f"Bearer {MINIMAX_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        for attempt in range(GEMINI_MAX_RETRIES + 1):
+            try:
+                resp = await client.post(MINIMAX_API_URL, headers=headers, json=payload)
+            except httpx.TimeoutException:
+                logger.error("MiniMax API timeout")
+                return {"error": "Request timed out"}
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"MiniMax API error: {e}")
+                return {"error": str(e)}
+
+            if resp.status_code == 200:
+                return resp.json()
+
+            if resp.status_code in (429, 503):
+                if attempt < GEMINI_MAX_RETRIES:
+                    delay = self._retry_delay_seconds(resp, attempt)
+                    logger.warning(
+                        f"MiniMax API {resp.status_code} (attempt {attempt + 1}/"
+                        f"{GEMINI_MAX_RETRIES + 1}) — backing off {delay:.1f}s"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error(
+                    f"MiniMax API {resp.status_code} after {GEMINI_MAX_RETRIES + 1} attempts: "
+                    f"{resp.text[:500]}"
+                )
+                return {"error": RATE_LIMIT_MESSAGE}
+
+            error_body = resp.text[:500]
+            logger.error(f"MiniMax API error {resp.status_code}: {error_body}")
+            try:
+                err_json = resp.json()
+                err = err_json.get("error", {})
+                err_msg = (err.get("message") if isinstance(err, dict) else None) or f"API returned {resp.status_code}"
+            except Exception:
+                err_msg = f"API returned {resp.status_code}"
+            return {"error": err_msg}
+
+        return {"error": "Request failed"}
 
     async def _call_gemini(self, client: httpx.AsyncClient, contents: list[dict]) -> dict:
         """Make a single logical API call to Gemini.
