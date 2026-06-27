@@ -10,10 +10,12 @@ sample staff so the AI has real data to reason about.
 """
 
 from datetime import datetime
+from datetime import date, time, timedelta
 from decimal import Decimal
 
 from rosteriq.models import (
     VenueConfig, Employee, EmploymentType, AwardLevel, State,
+    Roster, Shift, ShiftStatus,
 )
 
 DEMO_VENUE_ID = "demo-venue-001"
@@ -93,3 +95,49 @@ def seed_demo_environment(db) -> None:
             for i, (name, role, rate) in enumerate(_DEMO_STAFF, start=1)
         ]
         db.save_employees(employees)
+
+    # A current-week roster with today's shifts, so the AI can answer
+    # labour-cost and roster questions (re-seeds each week as 'today' moves).
+    try:
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        week_end = week_start + timedelta(days=6)
+        has_roster = db.get_rosters_by_date_range(DEMO_VENUE_ID, week_start, week_end)
+    except Exception:
+        has_roster = True  # don't risk duplicate seeding if the lookup fails
+    if not has_roster:
+        # (staff index, role, start, end) — break is 30 min.
+        _SHIFTS = [
+            (1, "floor", time(11, 0), time(19, 0)),
+            (2, "bar", time(15, 0), time(23, 0)),
+            (3, "kitchen", time(10, 0), time(18, 0)),
+            (4, "floor", time(15, 0), time(23, 0)),
+            (5, "bar", time(11, 0), time(19, 0)),
+            (6, "kitchen", time(15, 0), time(23, 0)),
+        ]
+        shifts = []
+        for i, role, st, en in _SHIFTS:
+            paid_hours = (en.hour - st.hour) - 0.5  # minus the 30-min break
+            shifts.append(Shift(
+                id=f"demo-shift-{i:03d}",
+                employee_id=f"demo-staff-{i:03d}",
+                date=today,
+                start_time=st,
+                end_time=en,
+                break_minutes=30,
+                status=ShiftStatus.scheduled,
+                role=role,
+                cost=Decimal(str(round(paid_hours * 32.5, 2))),
+            ))
+        try:
+            db.save_roster(Roster(
+                id="demo-roster-001",
+                venue_id=DEMO_VENUE_ID,
+                week_start=week_start,
+                week_end=week_end,
+                shifts=shifts,
+                total_cost=Decimal(str(round(sum(float(s.cost) for s in shifts), 2))),
+                created_at=datetime.utcnow(),
+            ))
+        except Exception:
+            pass

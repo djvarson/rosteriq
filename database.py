@@ -357,6 +357,55 @@ class BaseStore:
         """
         raise NotImplementedError
 
+    # --- AI agent data helpers -------------------------------------------
+    # The AI agent (ai_agent.py) reads venue data through these date-ranged
+    # helpers. They're concrete here — delegating to the per-store primitives
+    # above — so MemoryStore and PostgresStore both get them without
+    # duplication. Previously the agent called these on the store directly,
+    # they didn't exist, and every such tool silently returned an error.
+
+    def get_shifts(self, venue_id: str, start_date, end_date) -> list:
+        """All shifts for a venue within [start_date, end_date], flattened from
+        the venue's rosters (shifts live inside Roster.shifts)."""
+        shifts = []
+        for roster in (self.get_rosters_by_date_range(venue_id, start_date, end_date) or []):
+            for s in (getattr(roster, "shifts", None) or []):
+                sd = getattr(s, "date", None)
+                if sd is None or (start_date <= sd <= end_date):
+                    shifts.append(s)
+        return shifts
+
+    def get_venue_config(self, venue_id: str):
+        """Alias for get_venue — the AI agent calls it get_venue_config."""
+        return self.get_venue(venue_id)
+
+    def get_reservations(self, venue_id: str, start_date, end_date) -> list:
+        """Reservations for the AI agent, sourced from ingested direct bookings.
+        Returns attribute-accessible objects (the agent reads via getattr)."""
+        from types import SimpleNamespace
+        s = start_date.isoformat() if hasattr(start_date, "isoformat") else str(start_date)
+        e = end_date.isoformat() if hasattr(end_date, "isoformat") else str(end_date)
+        try:
+            rows = self.get_direct_bookings(venue_id, s, e) or []
+        except Exception:
+            rows = []
+        out = []
+        for b in rows:
+            d = b if isinstance(b, dict) else {}
+            out.append(SimpleNamespace(
+                date=d.get("date"),
+                time=d.get("time"),
+                covers=d.get("covers", d.get("party_size")),
+                party_size=d.get("party_size", d.get("covers")),
+                name=d.get("name") or d.get("guest_name") or "",
+            ))
+        return out
+
+    def get_functions(self, venue_id: str, start_date, end_date) -> list:
+        """Private functions / events. No dedicated store yet — degrade
+        gracefully (empty) rather than erroring the agent's events tool."""
+        return []
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:

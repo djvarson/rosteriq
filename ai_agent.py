@@ -415,8 +415,11 @@ class AgentContext:
             entry = {
                 "id": getattr(emp, "id", None) or getattr(emp, "external_id", None),
                 "name": getattr(emp, "name", "Unknown"),
-                "role": getattr(emp, "role", None),
+                # Employees carry skills, not a single role — surface the primary
+                # skill as the role so the agent can reason about who does what.
+                "role": getattr(emp, "role", None) or next(iter(getattr(emp, "skills", None) or []), None),
                 "employment_type": str(getattr(emp, "employment_type", "casual")),
+                "skills": list(getattr(emp, "skills", None) or []),
                 "phone": getattr(emp, "phone", None),
                 "email": getattr(emp, "email", None),
             }
