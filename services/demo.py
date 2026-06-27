@@ -34,29 +34,28 @@ _DEMO_STAFF = [
 def seed_demo_environment(db) -> None:
     """Idempotently seed the demo user, venue, and staff.
 
-    Guarded on the demo user's existence, so it runs its writes once and is a
-    cheap no-op thereafter. Never raises on partial-seed issues — a demo that
-    half-seeds is better than a 500 on the public 'Try Demo' path.
+    Each entity is ensured independently (rather than skip-all-if-the-user-
+    exists) so a previously partial seed self-heals on the next call. Never
+    raises on a single entity — a half-seeded demo beats a 500 on the public
+    'Try Demo' path.
     """
-    try:
-        if db.get_user_by_id(DEMO_USER_ID):
-            return  # already seeded
-    except Exception:
-        pass  # fall through and attempt the seed
-
     now = datetime.utcnow()
 
     # Scoped, non-owner demo user limited to the demo venue.
-    db.save_user({
-        "id": DEMO_USER_ID,
-        "email": DEMO_USER_EMAIL,
-        "name": "Demo User",
-        "password_hash": "",          # login-by-password disabled for the demo user
-        "role": "staff",
-        "is_active": True,
-        "venue_ids": [DEMO_VENUE_ID],
-        "created_at": now,
-    })
+    try:
+        if not db.get_user_by_id(DEMO_USER_ID):
+            db.save_user({
+                "id": DEMO_USER_ID,
+                "email": DEMO_USER_EMAIL,
+                "name": "Demo User",
+                "password_hash": "",      # login-by-password disabled for demo
+                "role": "staff",
+                "is_active": True,
+                "venue_ids": [DEMO_VENUE_ID],
+                "created_at": now,
+            })
+    except Exception:
+        pass
 
     if not db.get_venue(DEMO_VENUE_ID):
         db.save_venue(VenueConfig(
@@ -71,19 +70,26 @@ def seed_demo_environment(db) -> None:
             created_at=now,
         ))
 
-    employees = [
-        Employee(
-            id=f"demo-staff-{i:03d}",
-            venue_id=DEMO_VENUE_ID,
-            name=name,
-            employment_type=EmploymentType.casual,
-            award_level=AwardLevel.level_2,
-            state=State.wa,
-            hourly_base_rate=Decimal(rate),
-            skills=[role],
-            created_at=now,
-            updated_at=now,
-        )
-        for i, (name, role, rate) in enumerate(_DEMO_STAFF, start=1)
-    ]
-    db.save_employees(employees)
+    # Seed staff only if the demo venue has none yet (self-heals a prior
+    # partial seed without duplicating).
+    try:
+        already = db.get_employees(DEMO_VENUE_ID)
+    except Exception:
+        already = []
+    if not already:
+        employees = [
+            Employee(
+                id=f"demo-staff-{i:03d}",
+                venue_id=DEMO_VENUE_ID,
+                name=name,
+                employment_type=EmploymentType.casual,
+                award_level=AwardLevel.level_2,
+                state=State.wa,
+                hourly_base_rate=Decimal(rate),
+                skills=[role],
+                created_at=now,
+                updated_at=now,
+            )
+            for i, (name, role, rate) in enumerate(_DEMO_STAFF, start=1)
+        ]
+        db.save_employees(employees)

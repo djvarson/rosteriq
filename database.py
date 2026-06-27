@@ -2472,7 +2472,7 @@ class PostgresStore(BaseStore):
             """, (
                 emp.id, venue_id, emp.tanda_id, emp.name,
                 emp.employment_type.value, emp.award_level.value,
-                float(emp.hourly_base_rate), emp.skills,
+                float(emp.hourly_base_rate), json.dumps(emp.skills),
                 json.dumps(emp.availability), emp.max_hours_per_week,
                 emp.consecutive_days_limit, emp.phone, emp.email,
                 emp.created_at, emp.updated_at,
