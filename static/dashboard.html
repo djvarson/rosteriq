@@ -7337,8 +7337,8 @@ async function loadUpcomingFunctions() {
 function _getVenueId() {
   if (typeof state.currentVenue === 'object' && state.currentVenue?.id)
     return state.currentVenue.id;
-  if (typeof state.currentVenue === 'string' && state.currentVenue !== 'demo-venue-001')
-    return state.currentVenue;
+  if (typeof state.currentVenue === 'string' && state.currentVenue)
+    return state.currentVenue;  // includes 'demo-venue-001' — the demo now has a real backend venue
   return state.venueId || 'default';
 }
 
