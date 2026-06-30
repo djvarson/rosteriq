@@ -2345,6 +2345,7 @@ class PostgresStore(BaseStore):
                 role TEXT NOT NULL DEFAULT 'staff',
                 api_key_hash TEXT,
                 is_active BOOLEAN DEFAULT true,
+                venue_ids JSONB DEFAULT '[]',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 last_login TIMESTAMP WITH TIME ZONE
             )"""),
@@ -2459,6 +2460,19 @@ class PostgresStore(BaseStore):
                 logger.warning("Core-schema ensure for %s failed: %s", name, e)
         logger.info("Core schema ensured (%d/%d tables present).",
                     created, len(self._CORE_SCHEMA_DDL))
+
+        # Additive columns on tables that may already exist from an earlier
+        # schema (CREATE TABLE IF NOT EXISTS won't add a column to an existing
+        # table). venue_ids persists which venues a non-owner user may access —
+        # without it, staff users get [] and can't reach their own venue.
+        for alter in (
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS venue_ids JSONB DEFAULT '[]'",
+        ):
+            try:
+                with self._cursor() as cur:
+                    cur.execute(alter)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Core-schema column ensure failed: %s", e)
 
     # --- Venues ---
 
@@ -2890,38 +2904,54 @@ class PostgresStore(BaseStore):
         """Save or update a user."""
         with self._cursor() as cur:
             cur.execute("""
-                INSERT INTO users (id, email, password_hash, name, role, api_key_hash, is_active, created_at, last_login)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO users (id, email, password_hash, name, role, api_key_hash, is_active, created_at, last_login, venue_ids)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     email=EXCLUDED.email, password_hash=EXCLUDED.password_hash,
                     name=EXCLUDED.name, role=EXCLUDED.role,
                     api_key_hash=EXCLUDED.api_key_hash, is_active=EXCLUDED.is_active,
-                    last_login=EXCLUDED.last_login
+                    last_login=EXCLUDED.last_login, venue_ids=EXCLUDED.venue_ids
             """, (
                 user.get("id"), user.get("email"), user.get("password_hash"),
                 user.get("name"), user.get("role"), user.get("api_key_hash", ""),
                 user.get("is_active", True), user.get("created_at"), user.get("last_login"),
+                json.dumps(user.get("venue_ids", []) or []),
             ))
+
+    @staticmethod
+    def _normalize_user(row):
+        """Row -> dict with venue_ids guaranteed to be a list (JSONB returns a
+        list already, but be defensive about NULL / legacy string values)."""
+        if row is None:
+            return None
+        u = dict(row)
+        v = u.get("venue_ids")
+        if v is None:
+            u["venue_ids"] = []
+        elif isinstance(v, str):
+            try:
+                u["venue_ids"] = json.loads(v)
+            except Exception:
+                u["venue_ids"] = []
+        return u
 
     def get_user_by_email(self, email):
         """Get user by email."""
         with self._cursor() as cur:
             cur.execute("SELECT * FROM users WHERE email = %s", (email,))
-            row = cur.fetchone()
-            return dict(row) if row else None
+            return self._normalize_user(cur.fetchone())
 
     def get_user_by_id(self, user_id):
         """Get user by ID."""
         with self._cursor() as cur:
             cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-            row = cur.fetchone()
-            return dict(row) if row else None
+            return self._normalize_user(cur.fetchone())
 
     def list_users(self):
         """List all users."""
         with self._cursor() as cur:
             cur.execute("SELECT * FROM users ORDER BY created_at DESC")
-            return [dict(row) for row in cur.fetchall()]
+            return [self._normalize_user(row) for row in cur.fetchall()]
 
     def save_refresh_token(self, token_hash, user_id, expires_at):
         """Save a refresh token."""

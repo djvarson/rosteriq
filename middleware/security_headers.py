@@ -238,9 +238,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
-        # Static assets and docs: can be cached
+        # Static assets and docs: can be cached — EXCEPT HTML shells, which
+        # change with every deploy and aren't content-hashed. Marking those
+        # immutable made users keep a stale UI for up to an hour after a deploy
+        # (and never see fixes without a hard reload). HTML must always
+        # revalidate; other assets (images, fonts, the service worker) cache.
         elif request.url.path.startswith(("/static/", "/docs", "/redoc", "/openapi.json")):
-            response.headers["Cache-Control"] = "public, max-age=3600, immutable"
+            if request.url.path.endswith(".html"):
+                response.headers["Cache-Control"] = "no-cache, must-revalidate"
+            else:
+                response.headers["Cache-Control"] = "public, max-age=3600"
         # Default: no caching
         else:
             response.headers["Cache-Control"] = "no-store"
