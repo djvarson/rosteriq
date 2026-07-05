@@ -361,3 +361,53 @@ class AuthService:
 
 # Convenience instance
 auth_service = AuthService()
+
+
+def ensure_owner_from_env() -> None:
+    """Idempotently seed / promote a platform owner from env vars.
+
+    Register-time bootstrap can only grant ``owner`` to the very first user, so
+    once any user exists (e.g. the seeded demo user) no public signup can become
+    owner. This lets an operator guarantee an owner login out-of-band by setting
+    ``ROSTERIQ_OWNER_EMAIL`` (+ ``ROSTERIQ_OWNER_PASSWORD`` for a fresh account).
+    No-op when the env var is unset; never raises (must not break startup).
+    """
+    import os
+    from uuid import uuid4
+    from rosteriq.database import get_db
+
+    email = os.environ.get("ROSTERIQ_OWNER_EMAIL", "").strip().lower()
+    if not email:
+        return
+    try:
+        db = get_db()
+        existing = db.get_user_by_email(email)
+        if existing:
+            if existing.get("role") != "owner" or not existing.get("is_active"):
+                existing["role"] = "owner"
+                existing["is_active"] = True
+                db.save_user(existing)
+                logger.info("Promoted %s to platform owner (from env).", email)
+            return
+        password = os.environ.get("ROSTERIQ_OWNER_PASSWORD", "").strip()
+        if not password:
+            logger.warning(
+                "ROSTERIQ_OWNER_EMAIL set but ROSTERIQ_OWNER_PASSWORD missing — "
+                "cannot create the owner account."
+            )
+            return
+        db.save_user({
+            "id": str(uuid4()),
+            "email": email,
+            "password_hash": auth_service.hash_password(password),
+            "name": "Platform Owner",
+            "role": "owner",
+            "venue_ids": [],
+            "api_key_hash": "",
+            "is_active": True,
+            "created_at": datetime.utcnow(),
+            "last_login": None,
+        })
+        logger.info("Seeded platform owner %s from env.", email)
+    except Exception as e:  # never break startup over this
+        logger.warning("Owner seed from env failed: %s", e)

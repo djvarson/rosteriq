@@ -1343,6 +1343,15 @@ async def startup_event():
     # Validate environment variables
     _validate_environment()
 
+    # Seed / promote the platform owner from env vars (idempotent; no-op unless
+    # ROSTERIQ_OWNER_EMAIL is set). Guarantees an owner login exists even though
+    # the register-time bootstrap can't grant owner once other users exist.
+    try:
+        from rosteriq.services.auth import ensure_owner_from_env
+        ensure_owner_from_env()
+    except Exception as e:
+        logger.warning("ensure_owner_from_env at startup failed: %s", e)
+
     # Validate configuration on startup
     try:
         config = get_app_config()
