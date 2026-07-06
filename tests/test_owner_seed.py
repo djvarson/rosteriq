@@ -37,6 +37,44 @@ def test_owner_seed_promotes_existing_staff(monkeypatch):
     assert db.get_user_by_email("mgr@venue.com")["role"] == "owner"
 
 
+def test_owner_seed_resets_password_of_existing_account(monkeypatch):
+    """An account that pre-dates the seed (e.g. registered on the old app with a
+    forgotten password) gets its password reset to the env value — the env vars
+    are authoritative break-glass access, so the operator is never locked out."""
+    db = get_db()
+    db.save_user({
+        "id": "u-old", "email": "old-owner@venue.com",
+        "password_hash": auth_service.hash_password("forgotten-old-pass"),
+        "name": "Old", "role": "owner", "is_active": True,
+        "venue_ids": [], "api_key_hash": "",
+        "created_at": datetime.utcnow(), "last_login": None,
+    })
+    monkeypatch.setenv("ROSTERIQ_OWNER_EMAIL", "old-owner@venue.com")
+    monkeypatch.setenv("ROSTERIQ_OWNER_PASSWORD", "NewEnvPass!234")
+    ensure_owner_from_env()
+
+    u = db.get_user_by_email("old-owner@venue.com")
+    assert auth_service.verify_password("NewEnvPass!234", u["password_hash"])
+    assert not auth_service.verify_password("forgotten-old-pass", u["password_hash"])
+
+
+def test_owner_seed_keeps_matching_password_untouched(monkeypatch):
+    db = get_db()
+    original_hash = auth_service.hash_password("SamePass!234")
+    db.save_user({
+        "id": "u-same", "email": "same@venue.com",
+        "password_hash": original_hash,
+        "name": "Same", "role": "owner", "is_active": True,
+        "venue_ids": [], "api_key_hash": "",
+        "created_at": datetime.utcnow(), "last_login": None,
+    })
+    monkeypatch.setenv("ROSTERIQ_OWNER_EMAIL", "same@venue.com")
+    monkeypatch.setenv("ROSTERIQ_OWNER_PASSWORD", "SamePass!234")
+    ensure_owner_from_env()
+    # matching password -> hash left alone (no needless rehash/rotation)
+    assert db.get_user_by_email("same@venue.com")["password_hash"] == original_hash
+
+
 def test_owner_seed_noop_when_unset(monkeypatch):
     monkeypatch.delenv("ROSTERIQ_OWNER_EMAIL", raising=False)
     ensure_owner_from_env()  # must not raise

@@ -381,15 +381,35 @@ def ensure_owner_from_env() -> None:
         return
     try:
         db = get_db()
+        password = os.environ.get("ROSTERIQ_OWNER_PASSWORD", "").strip()
         existing = db.get_user_by_email(email)
         if existing:
+            # The env vars are authoritative break-glass access: promote the
+            # account AND reset its password when one is provided, so the
+            # operator is never locked out by a long-forgotten password on a
+            # pre-existing account (anyone who can set env vars already
+            # controls the deployment, so this grants nothing new).
+            changed = []
             if existing.get("role") != "owner" or not existing.get("is_active"):
                 existing["role"] = "owner"
                 existing["is_active"] = True
+                changed.append("promoted to owner")
+            if password:
+                try:
+                    matches = auth_service.verify_password(
+                        password, existing.get("password_hash") or ""
+                    )
+                except Exception:  # empty/unknown hash format counts as a mismatch
+                    matches = False
+                if not matches:
+                    existing["password_hash"] = auth_service.hash_password(password)
+                    changed.append("password reset from env")
+            if changed:
                 db.save_user(existing)
-                logger.info("Promoted %s to platform owner (from env).", email)
+                logger.info("Owner seed updated %s: %s.", email, ", ".join(changed))
+            else:
+                logger.info("Owner seed: %s already an active owner; no changes.", email)
             return
-        password = os.environ.get("ROSTERIQ_OWNER_PASSWORD", "").strip()
         if not password:
             logger.warning(
                 "ROSTERIQ_OWNER_EMAIL set but ROSTERIQ_OWNER_PASSWORD missing — "
