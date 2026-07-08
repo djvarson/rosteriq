@@ -103,6 +103,7 @@ EXEMPT_PATHS = {
     "/admin",
     "/staff",
     "/login",
+    "/register",
     "/connections",
     "/sw.js",
     "/docs/api",

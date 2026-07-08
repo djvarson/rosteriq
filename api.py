@@ -1594,6 +1594,21 @@ async def login_page():
     return HTMLResponse("<h1>RosterIQ Login</h1><p>Login page not found.</p>")
 
 
+@app.get("/register", tags=["auth"])
+async def register_page():
+    """Registration page — public, like /login (serves static/register.html)."""
+    try:
+        import pathlib
+        page = pathlib.Path(__file__).parent / "static" / "register.html"
+        if page.exists():
+            from fastapi.responses import FileResponse
+            return FileResponse(page, media_type="text/html")
+    except Exception:
+        pass
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/register.html")
+
+
 @app.get("/api/status", response_model=HealthResponse)
 async def api_status():
     """API status endpoint — returns system info as JSON."""

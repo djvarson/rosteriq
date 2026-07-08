@@ -285,9 +285,27 @@ class RosterPublisher:
                     self._log_publication_event(roster_id, venue.id, RosterPublishState.PENDING_REVIEW.value, publisher_id)
                     return result
 
-            # Step 6: Push to Tanda (if configured)
+            # Step 6: Push to Tanda (if configured AND actually connected).
+            # A venue can carry a tanda_org_id without Tanda being connected
+            # (typed during onboarding, or disconnected later). That must NOT
+            # fail the internal publish — only a real, attempted push failing
+            # should. Not-connected degrades to a skipped push.
             tanda_result = None
-            if venue.tanda_org_id:
+            pusher = self._tanda_pusher_for(venue) if venue.tanda_org_id else None
+            if venue.tanda_org_id and pusher is None:
+                logger.warning(
+                    "Venue %s has tanda_org_id %r but Tanda is not connected — "
+                    "publishing internally and skipping the external push.",
+                    venue.id, venue.tanda_org_id,
+                )
+                result.tanda_push_result = {
+                    "success": False,
+                    "skipped": True,
+                    "message": "Tanda not connected — external push skipped",
+                    "shifts_pushed": 0,
+                    "shifts_failed": 0,
+                }
+            elif pusher is not None:
                 logger.info(f"Pushing roster {roster_id} to Tanda (org: {venue.tanda_org_id})")
                 self.transition_state(
                     roster_id,
@@ -297,9 +315,6 @@ class RosterPublisher:
                 result.state = RosterPublishState.PUBLISHING.value
 
                 try:
-                    pusher = self._tanda_pusher_for(venue)
-                    if pusher is None:
-                        raise RuntimeError("Tanda is not connected for this venue")
                     tanda_result = await pusher.push_roster(
                         roster=roster,
                         venue_id=venue.tanda_org_id,

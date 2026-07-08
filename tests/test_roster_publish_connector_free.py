@@ -50,6 +50,36 @@ def test_publish_succeeds_without_integration():
     assert body["state"] == "published"
 
 
+def test_publish_succeeds_with_stale_tanda_org_id():
+    """A venue can carry a tanda_org_id WITHOUT Tanda being connected (typed
+    during onboarding, or disconnected later). Publish must still succeed
+    internally and just skip the external push — it used to hard-fail with
+    'Tanda push error: Tanda is not connected for this venue'."""
+    c = TestClient(app)
+    h = _setup_owner(c)
+    venue_id = "pv-stale-tanda"
+    c.post("/venues", json={
+        "id": venue_id, "name": "PV", "state": "vic", "max_labour_pct": 30,
+        "tanda_org_id": "some-org-never-connected", "created_at": "2026-06-20T00:00:00",
+    }, headers=h)
+    emps = [{
+        "id": f"st{i}", "name": f"E{i}", "employment_type": "full_time",
+        "award_level": "level_1", "state": "vic", "venue_id": venue_id,
+        "hourly_base_rate": "30.00",
+        "created_at": "2025-01-01T00:00:00", "updated_at": "2025-01-01T00:00:00",
+    } for i in range(6)]
+    c.post("/employees/bulk", json=emps, headers=h)
+    rid = c.post("/rosters/generate", json={"venue_id": venue_id, "week_start": "2026-06-22"},
+                 headers=h).json()["id"]
+
+    r = c.post(f"/api/v1/rosters/{rid}/publish", json={"skip_approval": True}, headers=h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success"] is True, body
+    assert body["state"] == "published"
+    assert body["tanda_push_result"]["skipped"] is True
+
+
 def test_republish_published_roster_is_rejected():
     c = TestClient(app)
     h = _setup_owner(c)

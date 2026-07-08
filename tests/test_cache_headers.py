@@ -27,3 +27,15 @@ def test_non_html_static_assets_still_cache():
             assert "max-age" in cc, f"{asset} should be cacheable: {cc}"
             return
     # No asset present in this build — nothing to assert, but don't fail.
+
+
+def test_public_pages_do_not_require_auth():
+    """/login, /register and /connections are public entry points — they must
+    render without a token (register used to 401 at the tenant middleware)."""
+    from fastapi.testclient import TestClient
+    from rosteriq.api import app
+    c = TestClient(app)
+    for path in ("/login", "/register", "/connections"):
+        r = c.get(path)
+        assert r.status_code == 200, f"{path} -> {r.status_code}"
+        assert "<" in r.text[:200], f"{path} did not return HTML"
