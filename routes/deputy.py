@@ -623,6 +623,7 @@ async def sync_employees(body: SyncEmployeesRequest) -> dict:
     try:
         async with _build_adapter(install) as adapter:
             employees = await adapter.get_employees(active_only=body.active_only)
+            rate_review_ids = set(getattr(adapter, "_rate_review_ids", []))
     except DeputyAPIError as e:
         logger.error(f"Deputy employee sync failed for venue {body.venue_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Deputy API error: {e}")
@@ -630,21 +631,24 @@ async def sync_employees(body: SyncEmployeesRequest) -> dict:
     # Persist to database
     saved = 0
     errors = 0
+    rate_review_names = []
     for emp in employees:
         try:
             emp.venue_id = body.venue_id
             db.save_employee(emp)
             saved += 1
+            if emp.id.removeprefix("deputy-") in rate_review_ids:
+                rate_review_names.append(emp.name)
         except Exception as e:
             errors += 1
             logger.warning(
-                f"Failed to save employee {getattr(emp, 'external_id', '?')} "
+                f"Failed to save employee {getattr(emp, 'id', '?')} "
                 f"for venue {body.venue_id}: {e}"
             )
 
     logger.info(
         f"Synced {len(employees)} employees from Deputy for venue {body.venue_id} "
-        f"(saved: {saved}, errors: {errors})"
+        f"(saved: {saved}, errors: {errors}, rate review needed: {len(rate_review_names)})"
     )
     return {
         "status": "success",
@@ -652,6 +656,10 @@ async def sync_employees(body: SyncEmployeesRequest) -> dict:
         "count": len(employees),
         "saved": saved,
         "errors": errors,
+        # Deputy often omits pay rates (they live in EmployeeAgreement). These
+        # staff were imported with a flagged placeholder rate — correct their
+        # hourly rates in Staff before trusting any cost numbers.
+        "rate_review_needed": rate_review_names,
         "employees": [emp.dict() for emp in employees],
     }
 

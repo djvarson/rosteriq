@@ -264,6 +264,9 @@ class DeputyAdapter:
         self._client: Optional[httpx.AsyncClient] = None
         self._rate_limiter = DeputyRateLimiter()
         self._on_token_refresh = on_token_refresh  # callback(credentials) to persist new tokens
+        # Deputy employee ids whose pay rate wasn't provided by the API and got
+        # the flagged DEFAULT_SYNC_RATE placeholder (reset on each get_employees).
+        self._rate_review_ids: List[str] = []
 
     async def __aenter__(self):
         self._client = httpx.AsyncClient(
@@ -471,6 +474,7 @@ class DeputyAdapter:
 
     async def get_employees(self, active_only: bool = True) -> List[Employee]:
         """Fetch all employees from Deputy and map to RosterIQ Employee model."""
+        self._rate_review_ids = []  # fresh per sync
         search_filter = {"Active": 1} if active_only else {}
         data = await self._request_paginated(
             "/resource/Employee/QUERY",
@@ -497,29 +501,48 @@ class DeputyAdapter:
         data = await self._request("GET", f"/resource/Employee/{employee_id}")
         return self._map_employee(data)
 
+    # Placeholder when Deputy provides no pay rate (rates live in
+    # EmployeeAgreement, which the basic Employee resource often omits).
+    # Every such employee is flagged in employees_needing_rate_review so the
+    # sync response / operator can correct rates before trusting cost numbers.
+    DEFAULT_SYNC_RATE = Decimal("30.00")
+
     def _map_employee(self, data: Dict[str, Any]) -> Employee:
-        """Map a Deputy employee record to RosterIQ Employee model."""
+        """Map a Deputy employee record to the RosterIQ Employee model."""
         emp_type = _DEPUTY_EMPLOYMENT_MAP.get(
             data.get("EmpType", 3), EmploymentType.casual
         )
 
-        # Deputy stores hourly rate in EmployeeAgreement, default to 0
-        hourly_rate = Decimal(str(data.get("HourlyRate", 0) or 0))
+        # Deputy stores hourly rate in EmployeeAgreement; the Employee resource
+        # often has no rate. The model requires rate > 0, so use a flagged
+        # placeholder rather than dropping the person from the sync.
+        try:
+            hourly_rate = Decimal(str(data.get("HourlyRate", 0) or 0))
+        except Exception:
+            hourly_rate = Decimal("0")
+        if hourly_rate <= 0:
+            hourly_rate = self.DEFAULT_SYNC_RATE
+            self._rate_review_ids.append(str(data.get("Id", "?")))
 
+        name = " ".join(
+            p for p in (data.get("FirstName", ""), data.get("LastName", "")) if p
+        ).strip() or str(data.get("DisplayName") or f"Deputy employee {data['Id']}")
+
+        now = datetime.utcnow()
+        # Prefix the id so a synced employee can never collide with a manually
+        # created one, and re-syncing the same person upserts (idempotent).
         return Employee(
-            id=str(data["Id"]),
-            external_id=str(data["Id"]),
-            external_source="deputy",
-            first_name=data.get("FirstName", ""),
-            last_name=data.get("LastName", ""),
-            email=data.get("Email", ""),
-            phone=data.get("Phone", ""),
+            id=f"deputy-{data['Id']}",
+            name=name,
+            email=data.get("Email") or None,
+            phone=str(data.get("Phone") or "") or None,
             employment_type=emp_type,
             award_level=AwardLevel.level_1,  # Default, refine from agreement
-            hourly_rate=hourly_rate,
+            state=self.state,
+            hourly_base_rate=hourly_rate,
             skills=self._extract_skills(data),
-            is_active=bool(data.get("Active", True)),
-            venue_id=str(data.get("Company", "")),
+            created_at=now,
+            updated_at=now,
         )
 
     def _extract_skills(self, data: Dict[str, Any]) -> List[str]:
@@ -598,19 +621,29 @@ class DeputyAdapter:
             data.get("ConfirmStatus", 0), ShiftStatus.scheduled
         )
 
+        # Deputy Mealbreak is a datetime-ish value, not minutes — derive minutes
+        # only when it's a plain number; otherwise default to 0 (conservative).
+        raw_break = data.get("Mealbreak", 0)
+        break_minutes = int(raw_break) if isinstance(raw_break, (int, float)) and 0 <= raw_break < 24 * 60 else 0
+
+        raw_cost = data.get("Cost", 0) or 0
+        try:
+            cost = Decimal(str(raw_cost))
+        except Exception:
+            cost = Decimal("0")
+
+        # Prefix the id so a synced shift can never collide with a RosterIQ-
+        # generated one, and re-syncing the same shift upserts (idempotent).
         return Shift(
-            id=str(data["Id"]),
-            external_id=str(data["Id"]),
-            external_source="deputy",
-            employee_id=str(data.get("Employee", "")),
-            venue_id=str(data.get("Company", "")),
-            department=data.get("OperationalUnitName", ""),
-            start_time=start_time,
-            end_time=end_time,
-            break_minutes=int(data.get("Mealbreak", 0) or 0),
+            id=f"deputy-{data['Id']}",
+            employee_id=f"deputy-{data.get('Employee', '')}",
+            date=start_time.date(),
+            start_time=start_time.time(),
+            end_time=end_time.time(),
+            break_minutes=break_minutes,
             status=status,
-            hourly_rate=Decimal(str(data.get("Cost", 0) or 0)),
-            notes=data.get("Comment", ""),
+            role=str(data.get("OperationalUnitName") or "general"),
+            cost=cost if cost > 0 else None,
         )
 
     async def create_shift(
