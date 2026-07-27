@@ -2652,22 +2652,33 @@ class PostgresStore(BaseStore):
 
     def save_roster(self, roster):
         with self._cursor() as cur:
+            # Saving an existing roster id must be a real update — including its
+            # week. (Previously only total_cost updated on conflict, so a
+            # re-saved roster kept its old week_start/week_end forever.)
             cur.execute("""
                 INSERT INTO rosters (id, venue_id, week_start, week_end, total_cost, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET total_cost=EXCLUDED.total_cost
+                ON CONFLICT (id) DO UPDATE SET
+                    venue_id=EXCLUDED.venue_id, week_start=EXCLUDED.week_start,
+                    week_end=EXCLUDED.week_end, total_cost=EXCLUDED.total_cost
             """, (
                 roster.id, roster.venue_id, roster.week_start, roster.week_end,
                 float(roster.total_cost) if roster.total_cost else None,
                 roster.created_at,
             ))
-            # Save shifts
+            # Save shifts — re-saving a shift id updates it (DO NOTHING silently
+            # kept stale dates/times whenever a roster was re-saved).
             for shift in roster.shifts:
                 cur.execute("""
                     INSERT INTO shifts (id, roster_id, employee_id, shift_date, start_time, end_time,
                         break_minutes, status, role, cost, penalty_multiplier)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING
+                    ON CONFLICT (id) DO UPDATE SET
+                        roster_id=EXCLUDED.roster_id, employee_id=EXCLUDED.employee_id,
+                        shift_date=EXCLUDED.shift_date, start_time=EXCLUDED.start_time,
+                        end_time=EXCLUDED.end_time, break_minutes=EXCLUDED.break_minutes,
+                        status=EXCLUDED.status, role=EXCLUDED.role,
+                        cost=EXCLUDED.cost, penalty_multiplier=EXCLUDED.penalty_multiplier
                 """, (
                     shift.id, roster.id, shift.employee_id, shift.date,
                     shift.start_time, shift.end_time, shift.break_minutes,

@@ -45,7 +45,8 @@ def seed_demo_environment(db) -> None:
 
     # Scoped, non-owner demo user limited to the demo venue.
     try:
-        if not db.get_user_by_id(DEMO_USER_ID):
+        existing = db.get_user_by_id(DEMO_USER_ID)
+        if not existing:
             db.save_user({
                 "id": DEMO_USER_ID,
                 "email": DEMO_USER_EMAIL,
@@ -56,6 +57,17 @@ def seed_demo_environment(db) -> None:
                 "venue_ids": [DEMO_VENUE_ID],
                 "created_at": now,
             })
+        elif (
+            existing.get("venue_ids") != [DEMO_VENUE_ID]
+            or existing.get("role") != "staff"
+            or not existing.get("is_active")
+        ):
+            # Self-heal a demo user created before venue_ids persisted (it
+            # otherwise 403s on its own venue) or otherwise drifted.
+            existing["venue_ids"] = [DEMO_VENUE_ID]
+            existing["role"] = "staff"
+            existing["is_active"] = True
+            db.save_user(existing)
     except Exception:
         pass
 
@@ -115,11 +127,15 @@ def seed_demo_environment(db) -> None:
             (5, "bar", time(11, 0), time(19, 0)),
             (6, "kitchen", time(15, 0), time(23, 0)),
         ]
+        # Week-specific ids: each week seeds a FRESH roster (a fixed id used to
+        # collide with last week's rows, leaving the demo stuck on an old week;
+        # past weeks now simply remain as history the AI can reference).
+        wk = week_start.isoformat()
         shifts = []
         for i, role, st, en in _SHIFTS:
             paid_hours = (en.hour - st.hour) - 0.5  # minus the 30-min break
             shifts.append(Shift(
-                id=f"demo-shift-{i:03d}",
+                id=f"demo-shift-{wk}-{i:03d}",
                 employee_id=f"demo-staff-{i:03d}",
                 date=today,
                 start_time=st,
@@ -131,7 +147,7 @@ def seed_demo_environment(db) -> None:
             ))
         try:
             db.save_roster(Roster(
-                id="demo-roster-001",
+                id=f"demo-roster-{wk}",
                 venue_id=DEMO_VENUE_ID,
                 week_start=week_start,
                 week_end=week_end,

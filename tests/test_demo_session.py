@@ -66,3 +66,49 @@ def test_seed_is_idempotent_and_venue_scoped():
     seed_demo_environment(db)  # second call is a no-op
     assert len(db.get_employees(DEMO_VENUE_ID)) == 6
     assert db.get_employees("nonexistent-venue") == []
+
+
+def test_demo_roster_rolls_forward_each_week(monkeypatch):
+    """The demo roster must follow the current week. Fixed ids used to collide
+    with the previous week's rows (roster upsert didn't update the week, shift
+    upsert was DO NOTHING), leaving the demo stuck a month in the past and the
+    AI answering "$0 labour today"."""
+    import datetime as _dt
+    from rosteriq.services import demo as demo_mod
+
+    db = MemoryStore()
+    seed_demo_environment(db)
+    from datetime import date as real_date, timedelta
+    this_monday = real_date.today() - timedelta(days=real_date.today().weekday())
+
+    # Simulate the demo being minted again NEXT week.
+    next_week_today = real_date.today() + timedelta(days=7)
+
+    class _FakeDate(_dt.date):
+        @classmethod
+        def today(cls):
+            return next_week_today
+
+    monkeypatch.setattr(demo_mod, "date", _FakeDate)
+    seed_demo_environment(db)
+
+    next_monday = this_monday + timedelta(days=7)
+    current = db.get_rosters_by_date_range(DEMO_VENUE_ID, next_monday, next_monday + timedelta(days=6))
+    assert current, "no roster seeded for the new current week"
+    assert any(s.date == next_week_today for s in current[0].shifts), \
+        "new week's roster has no shifts dated 'today'"
+
+
+def test_demo_user_venue_ids_backfilled(monkeypatch):
+    """A demo user row created before venue_ids persisted (empty list) 403'd on
+    its own venue. The seeder now self-heals the scoping on existing users."""
+    from datetime import datetime as _dtt
+    db = MemoryStore()
+    db.save_user({
+        "id": DEMO_USER_ID, "email": DEMO_USER_EMAIL, "name": "Demo User",
+        "password_hash": "", "role": "staff", "is_active": True,
+        "venue_ids": [],  # the pre-fix state on production
+        "created_at": _dtt.utcnow(),
+    })
+    seed_demo_environment(db)
+    assert db.get_user_by_id(DEMO_USER_ID)["venue_ids"] == [DEMO_VENUE_ID]
