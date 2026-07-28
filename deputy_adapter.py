@@ -475,7 +475,11 @@ class DeputyAdapter:
     async def get_employees(self, active_only: bool = True) -> List[Employee]:
         """Fetch all employees from Deputy and map to RosterIQ Employee model."""
         self._rate_review_ids = []  # fresh per sync
-        search_filter = {"Active": 1} if active_only else {}
+        # Deputy QUERY search syntax: named clauses of {field, type, data}.
+        # The previous {"Active": 1} shape was silently ignored by Deputy.
+        search_filter = (
+            {"s1": {"field": "Active", "type": "eq", "data": True}} if active_only else {}
+        )
         data = await self._request_paginated(
             "/resource/Employee/QUERY",
             data={
@@ -567,17 +571,18 @@ class DeputyAdapter:
         location_id: Optional[int] = None,
     ) -> List[Shift]:
         """Fetch shifts (rosters) within a date range."""
-        # Deputy's Roster search compares StartTime/EndTime as epoch seconds —
-        # ISO datetime strings are rejected with "Invalid search parameter"
-        # (found in the live rehearsal against a real Deputy install).
+        # Deputy QUERY search uses named clauses of {field, type, data} with
+        # epoch-second values — both discovered in the live rehearsal against a
+        # real install (mongo-style {field: {op: val}} and ISO datetimes are
+        # rejected with "Invalid search parameter").
         start_epoch = int(datetime.combine(start_date, datetime.min.time()).timestamp())
         end_epoch = int(datetime.combine(end_date, datetime.max.time()).timestamp())
         search_filter = {
-            "StartTime": {"ge": start_epoch},
-            "EndTime": {"le": end_epoch},
+            "s1": {"field": "StartTime", "type": "ge", "data": start_epoch},
+            "s2": {"field": "EndTime", "type": "le", "data": end_epoch},
         }
         if location_id:
-            search_filter["OperationalUnit"] = location_id
+            search_filter["s3"] = {"field": "OperationalUnit", "type": "eq", "data": location_id}
 
         data = await self._request_paginated(
             "/resource/Roster/QUERY",
