@@ -567,13 +567,14 @@ class DeputyAdapter:
         location_id: Optional[int] = None,
     ) -> List[Shift]:
         """Fetch shifts (rosters) within a date range."""
+        # Deputy's Roster search compares StartTime/EndTime as epoch seconds —
+        # ISO datetime strings are rejected with "Invalid search parameter"
+        # (found in the live rehearsal against a real Deputy install).
+        start_epoch = int(datetime.combine(start_date, datetime.min.time()).timestamp())
+        end_epoch = int(datetime.combine(end_date, datetime.max.time()).timestamp())
         search_filter = {
-            "StartTime": {
-                "gte": datetime.combine(start_date, datetime.min.time()).isoformat(),
-            },
-            "EndTime": {
-                "lte": datetime.combine(end_date, datetime.max.time()).isoformat(),
-            },
+            "StartTime": {"ge": start_epoch},
+            "EndTime": {"le": end_epoch},
         }
         if location_id:
             search_filter["OperationalUnit"] = location_id

@@ -431,8 +431,9 @@ def _callback_html(success: bool, message: str, detail: str = "") -> HTMLRespons
 
 @router.get("/callback")
 async def oauth_callback(
-    code: str = Query(..., description="Authorization code from Deputy"),
+    code: str = Query("", description="Authorization code from Deputy"),
     state: str = Query("", description="OAuth state parameter carrying venue_id"),
+    error: str = Query("", description="OAuth error code, when the flow failed"),
 ):
     """
     OAuth callback endpoint.
@@ -440,7 +441,20 @@ async def oauth_callback(
     Deputy redirects the user's browser here with ``?code=...&state=...``
     after the owner authorises. Exchanges the code for tokens, saves
     credentials, and returns an HTML page that redirects to the dashboard.
+    On denial/failure Deputy sends ``?error=...`` instead of a code — show a
+    friendly page rather than a raw validation error (code used to be a
+    required param, so error redirects surfaced as an ugly 422 JSON).
     """
+    if error or not code:
+        logger.warning(f"Deputy OAuth callback returned error={error!r} (no code)")
+        return _callback_html(
+            False,
+            "Deputy connection was not completed.",
+            f"Deputy reported: {error or 'no authorization code returned'}. "
+            "You can close this page and try connecting again from the "
+            "Connections page — the paste-a-token method is the most reliable.",
+        )
+
     # Decode venue_id from state parameter
     state_data = _decode_state(state)
     venue_id = state_data.get("venue_id", "")
