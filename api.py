@@ -450,6 +450,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register Deputy routes: {e}")
 
+# Native time clock routes (clock in/out -> timesheets -> variance)
+try:
+    from rosteriq.routes.timeclock import router as timeclock_router
+    app.include_router(timeclock_router)
+    logger.info("Time clock routes registered")
+except ImportError:
+    logger.info("Time clock routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register time clock routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router

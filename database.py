@@ -406,6 +406,31 @@ class BaseStore:
         gracefully (empty) rather than erroring the agent's events tool."""
         return []
 
+    # --- Native time clock (timesheets captured by RosterIQ itself) --------
+
+    def save_timesheet(self, ts: dict) -> None:
+        """Insert or update a timesheet row (dict with id, venue_id,
+        employee_id, work_date, clock_in, clock_out, break_minutes, status)."""
+        raise NotImplementedError
+
+    def get_timesheet(self, ts_id: str):
+        raise NotImplementedError
+
+    def get_open_timesheet(self, venue_id: str, employee_id: str):
+        """The employee's currently-open (not clocked out) timesheet, if any."""
+        raise NotImplementedError
+
+    def get_timesheets(self, venue_id: str, start_date, end_date) -> list:
+        """Timesheets for a venue whose work_date falls in [start, end]."""
+        raise NotImplementedError
+
+    def set_timeclock_pin(self, venue_id: str, employee_id: str, pin_hash: str) -> None:
+        raise NotImplementedError
+
+    def get_timeclock_pin(self, venue_id: str, employee_id: str):
+        """Return the stored pin hash or None."""
+        raise NotImplementedError
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:
@@ -793,6 +818,8 @@ class MemoryStore(BaseStore):
         self._roster_state_history: dict[str, list[dict]] = {}  # roster_id -> transitions
         self._publication_events: list[dict] = []  # roster publication events
         self._push_subscriptions: dict[str, dict] = {}  # Key: user_id
+        self._timesheets: dict[str, dict] = {}  # Key: timesheet id
+        self._timeclock_pins: dict[str, str] = {}  # Key: f"{venue_id}:{employee_id}" -> pin hash
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
         self._experiment_outcomes: dict[str, dict] = {}  # Key: outcome_id
@@ -843,6 +870,37 @@ class MemoryStore(BaseStore):
 
     def list_employees(self):
         return list(self._employees.values())
+
+    # --- Native time clock ---
+
+    def save_timesheet(self, ts):
+        self._timesheets[ts["id"]] = dict(ts)
+
+    def get_timesheet(self, ts_id):
+        return self._timesheets.get(ts_id)
+
+    def get_open_timesheet(self, venue_id, employee_id):
+        for t in self._timesheets.values():
+            if (t.get("venue_id") == venue_id and t.get("employee_id") == employee_id
+                    and not t.get("clock_out")):
+                return t
+        return None
+
+    def get_timesheets(self, venue_id, start_date, end_date):
+        out = []
+        for t in self._timesheets.values():
+            if t.get("venue_id") != venue_id:
+                continue
+            d = t.get("work_date")
+            if d and start_date <= d <= end_date:
+                out.append(t)
+        return sorted(out, key=lambda t: (str(t.get("work_date")), str(t.get("clock_in"))))
+
+    def set_timeclock_pin(self, venue_id, employee_id, pin_hash):
+        self._timeclock_pins[f"{venue_id}:{employee_id}"] = pin_hash
+
+    def get_timeclock_pin(self, venue_id, employee_id):
+        return self._timeclock_pins.get(f"{venue_id}:{employee_id}")
 
     def get_employees(self, venue_id=None):
         """Employees, optionally filtered to one venue. Used by the AI agent's
@@ -2246,6 +2304,32 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "timesheets": """
+            CREATE TABLE IF NOT EXISTS timesheets (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                work_date DATE NOT NULL,
+                clock_in TIMESTAMP WITH TIME ZONE NOT NULL,
+                clock_out TIMESTAMP WITH TIME ZONE,
+                break_minutes INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'open',
+                pin_verified BOOLEAN DEFAULT false,
+                rostered_shift_id TEXT,
+                variance_minutes INTEGER,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "timeclock_pins": """
+            CREATE TABLE IF NOT EXISTS timeclock_pins (
+                venue_id TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                pin_hash TEXT NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (venue_id, employee_id)
+            )
+        """,
     }
 
     def _ensure_table(self, cur, name: str) -> None:
@@ -2545,6 +2629,77 @@ class PostgresStore(BaseStore):
         with self._cursor() as cur:
             cur.execute("SELECT * FROM employees WHERE active = true ORDER BY name")
             return [self._row_to_employee(r) for r in cur.fetchall()]
+
+    # --- Native time clock ---
+
+    def save_timesheet(self, ts):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timesheets")
+            cur.execute("""
+                INSERT INTO timesheets (id, venue_id, employee_id, work_date, clock_in,
+                    clock_out, break_minutes, status, pin_verified, rostered_shift_id,
+                    variance_minutes, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    clock_out=EXCLUDED.clock_out, break_minutes=EXCLUDED.break_minutes,
+                    status=EXCLUDED.status, pin_verified=EXCLUDED.pin_verified,
+                    rostered_shift_id=EXCLUDED.rostered_shift_id,
+                    variance_minutes=EXCLUDED.variance_minutes, updated_at=now()
+            """, (
+                ts["id"], ts["venue_id"], ts["employee_id"], ts["work_date"],
+                ts["clock_in"], ts.get("clock_out"), ts.get("break_minutes", 0),
+                ts.get("status", "open"), ts.get("pin_verified", False),
+                ts.get("rostered_shift_id"), ts.get("variance_minutes"),
+                ts.get("created_at", datetime.utcnow()),
+            ))
+
+    def get_timesheet(self, ts_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timesheets")
+            cur.execute("SELECT * FROM timesheets WHERE id = %s", (ts_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def get_open_timesheet(self, venue_id, employee_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timesheets")
+            cur.execute("""
+                SELECT * FROM timesheets
+                WHERE venue_id = %s AND employee_id = %s AND clock_out IS NULL
+                ORDER BY clock_in DESC LIMIT 1
+            """, (venue_id, employee_id))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def get_timesheets(self, venue_id, start_date, end_date):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timesheets")
+            cur.execute("""
+                SELECT * FROM timesheets
+                WHERE venue_id = %s AND work_date >= %s AND work_date <= %s
+                ORDER BY work_date, clock_in
+            """, (venue_id, start_date, end_date))
+            return [dict(r) for r in cur.fetchall()]
+
+    def set_timeclock_pin(self, venue_id, employee_id, pin_hash):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timeclock_pins")
+            cur.execute("""
+                INSERT INTO timeclock_pins (venue_id, employee_id, pin_hash, updated_at)
+                VALUES (%s, %s, %s, now())
+                ON CONFLICT (venue_id, employee_id) DO UPDATE SET
+                    pin_hash=EXCLUDED.pin_hash, updated_at=now()
+            """, (venue_id, employee_id, pin_hash))
+
+    def get_timeclock_pin(self, venue_id, employee_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timeclock_pins")
+            cur.execute("""
+                SELECT pin_hash FROM timeclock_pins
+                WHERE venue_id = %s AND employee_id = %s
+            """, (venue_id, employee_id))
+            row = cur.fetchone()
+            return row["pin_hash"] if row else None
 
     def get_employees(self, venue_id=None):
         """Active employees, optionally scoped to one venue (AI agent tools)."""
