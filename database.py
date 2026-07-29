@@ -2317,6 +2317,9 @@ class PostgresStore(BaseStore):
                 pin_verified BOOLEAN DEFAULT false,
                 rostered_shift_id TEXT,
                 variance_minutes INTEGER,
+                approved_by TEXT,
+                approved_at TIMESTAMP WITH TIME ZONE,
+                adjustment_note TEXT,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
@@ -2551,6 +2554,9 @@ class PostgresStore(BaseStore):
         # without it, staff users get [] and can't reach their own venue.
         for alter in (
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS venue_ids JSONB DEFAULT '[]'",
+            "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS approved_by TEXT",
+            "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS adjustment_note TEXT",
         ):
             try:
                 with self._cursor() as cur:
@@ -2638,18 +2644,23 @@ class PostgresStore(BaseStore):
             cur.execute("""
                 INSERT INTO timesheets (id, venue_id, employee_id, work_date, clock_in,
                     clock_out, break_minutes, status, pin_verified, rostered_shift_id,
-                    variance_minutes, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    variance_minutes, approved_by, approved_at, adjustment_note,
+                    created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
-                    clock_out=EXCLUDED.clock_out, break_minutes=EXCLUDED.break_minutes,
+                    clock_in=EXCLUDED.clock_in, clock_out=EXCLUDED.clock_out,
+                    break_minutes=EXCLUDED.break_minutes,
                     status=EXCLUDED.status, pin_verified=EXCLUDED.pin_verified,
                     rostered_shift_id=EXCLUDED.rostered_shift_id,
-                    variance_minutes=EXCLUDED.variance_minutes, updated_at=now()
+                    variance_minutes=EXCLUDED.variance_minutes,
+                    approved_by=EXCLUDED.approved_by, approved_at=EXCLUDED.approved_at,
+                    adjustment_note=EXCLUDED.adjustment_note, updated_at=now()
             """, (
                 ts["id"], ts["venue_id"], ts["employee_id"], ts["work_date"],
                 ts["clock_in"], ts.get("clock_out"), ts.get("break_minutes", 0),
                 ts.get("status", "open"), ts.get("pin_verified", False),
                 ts.get("rostered_shift_id"), ts.get("variance_minutes"),
+                ts.get("approved_by"), ts.get("approved_at"), ts.get("adjustment_note"),
                 ts.get("created_at", datetime.utcnow()),
             ))
 

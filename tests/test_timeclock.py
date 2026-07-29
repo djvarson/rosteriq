@@ -143,3 +143,67 @@ def test_unknown_employee_404():
     vid = _setup_venue(c, h, "clock-venue-404")
     r = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "ghost"}, headers=h)
     assert r.status_code == 404
+
+
+def test_review_approve_and_correct():
+    """Manager corrects a punch (note required) and approves; approved sheets
+    appear in the status=approved payroll feed; double-approval rejected."""
+    c = TestClient(app)
+    h = _owner(c)
+    vid = _setup_venue(c, h, "clock-venue-review")
+    today = date.today()
+
+    # Punch in+out
+    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=h)
+    out = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": "clk-emp-1"},
+                 headers=h).json()
+    ts_id = out["timesheet_id"]
+
+    # Correction without a note -> 422
+    bad = c.post(f"/api/clock/timesheets/{ts_id}/review", json={
+        "venue_id": vid, "approve": True,
+        "clock_out": datetime.utcnow().isoformat(),
+    }, headers=h)
+    assert bad.status_code == 422
+
+    # Correct to a clean 4h shift with 30m break, with note -> approved
+    cin = datetime.combine(today, dtime(9, 0))
+    cout = datetime.combine(today, dtime(13, 30))
+    r = c.post(f"/api/clock/timesheets/{ts_id}/review", json={
+        "venue_id": vid, "approve": True,
+        "clock_in": cin.isoformat(), "clock_out": cout.isoformat(),
+        "break_minutes": 30, "note": "Forgot to clock out",
+    }, headers=h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "approved" and body["adjusted"] is True
+    assert body["worked_minutes"] == 240  # 4.5h minus 30m break
+    assert body["approved_by"]
+
+    # Approved feed contains it; open feed does not
+    feed = c.get(f"/api/clock/timesheets?venue_id={vid}&start_date={today}&end_date={today}&status=approved",
+                 headers=h).json()
+    assert feed["count"] == 1
+    assert feed["timesheets"][0]["adjustment_note"] == "Forgot to clock out"
+
+    # Double approval -> 409
+    again = c.post(f"/api/clock/timesheets/{ts_id}/review",
+                   json={"venue_id": vid, "approve": True}, headers=h)
+    assert again.status_code == 409
+
+
+def test_review_rejects_impossible_times():
+    c = TestClient(app)
+    h = _owner(c)
+    vid = _setup_venue(c, h, "clock-venue-review2")
+    today = date.today()
+    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=h)
+    ts_id = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": "clk-emp-1"},
+                   headers=h).json()["timesheet_id"]
+    r = c.post(f"/api/clock/timesheets/{ts_id}/review", json={
+        "venue_id": vid, "approve": True,
+        "clock_in": datetime.combine(today, dtime(15, 0)).isoformat(),
+        "clock_out": datetime.combine(today, dtime(9, 0)).isoformat(),
+        "note": "backwards",
+    }, headers=h)
+    assert r.status_code == 422

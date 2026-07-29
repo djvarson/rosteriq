@@ -22,10 +22,11 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,16 @@ class SetPinRequest(BaseModel):
     employee_id: str
     pin: str = Field(..., min_length=4, max_length=6, pattern=r"^\d{4,6}$",
                      description="4-6 digit PIN")
+
+
+class ReviewRequest(BaseModel):
+    """Manager review of a closed timesheet — optional corrections + approval."""
+    venue_id: str
+    approve: bool = Field(default=True, description="Approve after (optional) corrections")
+    clock_in: Optional[datetime] = Field(default=None, description="Corrected clock-in (UTC)")
+    clock_out: Optional[datetime] = Field(default=None, description="Corrected clock-out (UTC)")
+    break_minutes: Optional[int] = Field(default=None, ge=0, le=480)
+    note: str = Field(default="", max_length=500, description="Why the correction was made")
 
 
 def _hash_pin(venue_id: str, employee_id: str, pin: str) -> str:
@@ -237,11 +248,84 @@ async def set_pin(body: SetPinRequest) -> dict:
     return {"status": "pin_set", "employee": emp.name}
 
 
+@router.post("/timesheets/{ts_id}/review")
+async def review_timesheet(
+    ts_id: str,
+    body: ReviewRequest,
+    user: UserContext = Depends(get_current_user),
+) -> dict:
+    """Manager reviews a closed timesheet: optionally corrects the punch times
+    or break, then approves. Corrections recompute worked time and variance and
+    are recorded with who/when/why — approved time is what payroll exports use."""
+    enforce_venue_access(body.venue_id)
+    db = get_db()
+    ts = db.get_timesheet(ts_id)
+    if not ts or ts.get("venue_id") != body.venue_id:
+        raise HTTPException(status_code=404, detail="Timesheet not found")
+    if not ts.get("clock_out") and not body.clock_out:
+        raise HTTPException(status_code=409, detail="Timesheet is still open — clock the employee out first (or supply a corrected clock_out)")
+    if ts.get("status") == "approved":
+        raise HTTPException(status_code=409, detail="Timesheet is already approved")
+
+    adjusted = False
+    for field in ("clock_in", "clock_out"):
+        val = getattr(body, field)
+        if val is not None:
+            ts[field] = val.replace(tzinfo=None) if getattr(val, "tzinfo", None) else val
+            adjusted = True
+    if body.break_minutes is not None and body.break_minutes != ts.get("break_minutes"):
+        ts["break_minutes"] = body.break_minutes
+        adjusted = True
+    if adjusted and not body.note:
+        raise HTTPException(status_code=422, detail="A note is required when correcting a timesheet")
+
+    # Recompute worked minutes + variance from (possibly corrected) values
+    a, b = ts["clock_in"], ts["clock_out"]
+    a = datetime.fromisoformat(a) if isinstance(a, str) else a
+    b = datetime.fromisoformat(b) if isinstance(b, str) else b
+    if getattr(a, "tzinfo", None) is not None:
+        a = a.replace(tzinfo=None)
+    if getattr(b, "tzinfo", None) is not None:
+        b = b.replace(tzinfo=None)
+    if b <= a:
+        raise HTTPException(status_code=422, detail="clock_out must be after clock_in")
+    worked = max(0, int((b - a).total_seconds() // 60) - int(ts.get("break_minutes") or 0))
+
+    work_date = ts.get("work_date")
+    if isinstance(work_date, str):
+        work_date = date.fromisoformat(work_date[:10])
+    shift = _todays_shift_for(db, body.venue_id, ts["employee_id"], work_date) if work_date else None
+    ts["variance_minutes"] = (worked - _shift_minutes(shift)) if shift else ts.get("variance_minutes")
+
+    if body.approve:
+        ts["status"] = "approved"
+        ts["approved_by"] = user.user_id
+        ts["approved_at"] = datetime.utcnow()
+    if adjusted:
+        ts["adjustment_note"] = body.note
+    ts["clock_in"], ts["clock_out"] = a, b
+    db.save_timesheet(ts)
+
+    logger.info(
+        f"Timesheet {ts_id} reviewed by {user.user_id}: "
+        f"{'adjusted, ' if adjusted else ''}{'approved' if body.approve else 'saved'} ({worked}m)"
+    )
+    return {
+        "status": ts["status"],
+        "timesheet_id": ts_id,
+        "worked_minutes": worked,
+        "variance_minutes": ts.get("variance_minutes"),
+        "adjusted": adjusted,
+        "approved_by": ts.get("approved_by"),
+    }
+
+
 @router.get("/timesheets")
 async def list_timesheets(
     venue_id: str = Query(...),
     start_date: date = Query(...),
     end_date: date = Query(...),
+    status: str = Query("", description="Filter: open | closed | approved"),
 ) -> dict:
     """Timesheets with variance — the feed for payroll export and review."""
     enforce_venue_access(venue_id)
@@ -250,6 +334,8 @@ async def list_timesheets(
     rows = []
     total_minutes = 0
     for t in db.get_timesheets(venue_id, start_date, end_date) or []:
+        if status and t.get("status") != status:
+            continue
         ci, co = t.get("clock_in"), t.get("clock_out")
         worked = None
         if ci and co:
@@ -273,6 +359,8 @@ async def list_timesheets(
             "variance_minutes": t.get("variance_minutes"),
             "status": t.get("status"),
             "pin_verified": t.get("pin_verified", False),
+            "approved_by": t.get("approved_by"),
+            "adjustment_note": t.get("adjustment_note"),
         })
     return {
         "venue_id": venue_id,
