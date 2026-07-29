@@ -2327,6 +2327,10 @@
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
           <span>Staff</span>
         </div>
+        <div class="nav-item" data-page="timesheets">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2h6v4H9z"/><path d="M9 4H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><path d="M9 12l2 2 4-4"/></svg></span>
+          <span>Timesheets</span>
+        </div>
         <div class="nav-item" data-page="compliance">
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
           <span>Compliance</span>
@@ -3395,6 +3399,54 @@
       </div>
 
       <!-- COMPLIANCE PAGE -->
+      <div class="page" id="page-timesheets" data-page="timesheets" style="display: none;">
+        <div class="card" style="margin-bottom:16px;">
+          <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+            <div class="input-group" style="margin:0;">
+              <label>From</label>
+              <input type="date" id="ts-start">
+            </div>
+            <div class="input-group" style="margin:0;">
+              <label>To</label>
+              <input type="date" id="ts-end">
+            </div>
+            <div class="input-group" style="margin:0;">
+              <label>Status</label>
+              <select id="ts-status">
+                <option value="">All</option>
+                <option value="open">Open (still clocked in)</option>
+                <option value="closed">Awaiting approval</option>
+                <option value="approved">Approved</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" onclick="loadTimesheets()">Load</button>
+            <span id="ts-summary" style="color:var(--text-muted); font-size:13px; margin-left:auto;"></span>
+          </div>
+        </div>
+        <div class="card">
+          <div style="overflow-x:auto;">
+            <table class="data-table" style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                  <th style="padding:10px 8px;">Staff</th>
+                  <th style="padding:10px 8px;">Date</th>
+                  <th style="padding:10px 8px;">In</th>
+                  <th style="padding:10px 8px;">Out</th>
+                  <th style="padding:10px 8px;">Break</th>
+                  <th style="padding:10px 8px;">Worked</th>
+                  <th style="padding:10px 8px;">Variance</th>
+                  <th style="padding:10px 8px;">Status</th>
+                  <th style="padding:10px 8px;"></th>
+                </tr>
+              </thead>
+              <tbody id="ts-rows">
+                <tr><td colspan="9" style="padding:24px; text-align:center; color:var(--text-muted);">Pick a date range and Load</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <div class="page" id="page-compliance" data-page="compliance" style="display: none;">
         <div class="page-header">
           <h1 class="page-title">Compliance</h1>
@@ -4585,6 +4637,35 @@
   </div>
 </div>
 
+<div class="modal" id="modal-edit-timesheet">
+  <div class="modal-content">
+    <div class="modal-header">Review Timesheet</div>
+    <div class="modal-body">
+      <p id="ets-who" style="color:var(--text-muted); margin-bottom:14px;"></p>
+      <div class="input-group">
+        <label>Clock in</label>
+        <input type="datetime-local" id="ets-in" step="60">
+      </div>
+      <div class="input-group">
+        <label>Clock out</label>
+        <input type="datetime-local" id="ets-out" step="60">
+      </div>
+      <div class="input-group">
+        <label>Unpaid break (minutes)</label>
+        <input type="number" id="ets-break" min="0" max="480" step="5">
+      </div>
+      <div class="input-group">
+        <label>Correction note (required if you change anything)</label>
+        <input type="text" id="ets-note" placeholder="e.g. Forgot to clock out at close">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-edit-timesheet')">Cancel</button>
+      <button class="btn btn-primary" id="ets-save">Save &amp; Approve</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal-add-employee">
   <div class="modal-content">
     <div class="modal-header">Add Employee</div>
@@ -5389,6 +5470,11 @@ function showPage(pageId) {
   state.currentPage = pageId;
   updatePageTitle(pageId);
 
+  if (pageId === 'timesheets') {
+    initTimesheetDates();
+    loadTimesheets();
+  }
+
   // Focus chat input when navigating to AI Agent page
   if (pageId === 'ai-agent') {
     setTimeout(() => {
@@ -5403,6 +5489,7 @@ function updatePageTitle(pageId) {
     dashboard: 'Dashboard',
     roster: 'Weekly Roster',
     'on-shift': 'On-Shift Operations',
+    timesheets: 'Timesheets',
     staff: 'Staff Management',
     compliance: 'Compliance',
     reports: 'Reports',
@@ -5411,6 +5498,145 @@ function updatePageTitle(pageId) {
   };
   document.getElementById('page-title').textContent = titles[pageId] || 'Dashboard';
 }
+
+// ============================================
+// TIMESHEETS (review & approval)
+// ============================================
+let tsRows = [];
+
+function initTimesheetDates() {
+  const s = document.getElementById('ts-start');
+  const e = document.getElementById('ts-end');
+  if (s.value && e.value) return;
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  s.value = monday.toISOString().slice(0, 10);
+  e.value = today.toISOString().slice(0, 10);
+}
+
+function tsMinutesLabel(mins) {
+  if (mins == null) return '—';
+  const h = Math.floor(Math.abs(mins) / 60), m = Math.abs(mins) % 60;
+  return (mins < 0 ? '-' : '') + h + 'h ' + String(m).padStart(2, '0') + 'm';
+}
+
+function tsTimeLabel(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
+  return d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadTimesheets() {
+  if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
+  initTimesheetDates();
+  const start = document.getElementById('ts-start').value;
+  const end = document.getElementById('ts-end').value;
+  const status = document.getElementById('ts-status').value;
+  try {
+    const data = await fetchAPI('/api/clock/timesheets?venue_id=' + encodeURIComponent(state.currentVenue) +
+      '&start_date=' + start + '&end_date=' + end + (status ? '&status=' + status : ''));
+    tsRows = data.timesheets || [];
+    document.getElementById('ts-summary').textContent =
+      tsRows.length + ' timesheets · ' + tsMinutesLabel(data.total_worked_minutes || 0) + ' total worked';
+    renderTimesheets();
+  } catch (e) {
+    showToast('Failed to load timesheets: ' + e.message, 'error');
+  }
+}
+
+function renderTimesheets() {
+  const tbody = document.getElementById('ts-rows');
+  if (!tsRows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="padding:24px; text-align:center; color:var(--text-muted);">No timesheets in this range — staff clock in at /timeclock</td></tr>';
+    return;
+  }
+  tbody.innerHTML = tsRows.map(function(t, i) {
+    const v = t.variance_minutes;
+    const vColor = v == null ? 'var(--text-muted)' : (Math.abs(v) <= 15 ? 'var(--success)' : (Math.abs(v) <= 45 ? 'var(--brand-blue)' : 'var(--danger)'));
+    const chip = t.status === 'approved'
+      ? '<span style="background:rgba(34,197,94,.15); color:var(--success); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">APPROVED</span>'
+      : (t.status === 'open'
+        ? '<span style="background:rgba(56,189,248,.15); color:#38BDF8; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">ON SHIFT</span>'
+        : '<span style="background:rgba(245,158,11,.15); color:var(--brand-blue); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">TO APPROVE</span>');
+    const actions = t.status === 'closed'
+      ? '<button class="btn btn-primary btn-small" onclick="approveTimesheet(' + i + ')">Approve</button> ' +
+        '<button class="btn btn-secondary btn-small" onclick="openEditTimesheet(' + i + ')">Edit</button>'
+      : (t.status === 'approved' && t.adjustment_note
+        ? '<span title="' + t.adjustment_note.replace(/"/g, '&quot;') + '" style="color:var(--text-muted); font-size:12px; cursor:help;">✎ corrected</span>'
+        : '');
+    return '<tr style="border-top:1px solid var(--border);">' +
+      '<td style="padding:10px 8px; font-weight:600;">' + t.employee_name + (t.pin_verified ? '' : ' <span title="No PIN was set for this punch" style="color:var(--text-muted); font-size:11px;">•unverified</span>') + '</td>' +
+      '<td style="padding:10px 8px;">' + t.work_date + '</td>' +
+      '<td style="padding:10px 8px;">' + tsTimeLabel(t.clock_in) + '</td>' +
+      '<td style="padding:10px 8px;">' + tsTimeLabel(t.clock_out) + '</td>' +
+      '<td style="padding:10px 8px;">' + (t.break_minutes || 0) + 'm</td>' +
+      '<td style="padding:10px 8px; font-weight:600;">' + tsMinutesLabel(t.worked_minutes) + '</td>' +
+      '<td style="padding:10px 8px; color:' + vColor + '; font-weight:600;">' + (v == null ? '—' : (v > 0 ? '+' : '') + tsMinutesLabel(v)) + '</td>' +
+      '<td style="padding:10px 8px;">' + chip + '</td>' +
+      '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function approveTimesheet(i) {
+  const t = tsRows[i];
+  try {
+    await fetchAPI('/api/clock/timesheets/' + t.id + '/review', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: state.currentVenue, approve: true }),
+    });
+    showToast(t.employee_name + ' approved ✓', 'success');
+    loadTimesheets();
+  } catch (e) {
+    showToast('Approve failed: ' + e.message, 'error');
+  }
+}
+
+let etsIndex = null;
+function openEditTimesheet(i) {
+  etsIndex = i;
+  const t = tsRows[i];
+  document.getElementById('ets-who').textContent = t.employee_name + ' — ' + t.work_date;
+  const toLocal = function(iso) {
+    if (!iso) return '';
+    const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
+    const p = function(n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+  };
+  document.getElementById('ets-in').value = toLocal(t.clock_in);
+  document.getElementById('ets-out').value = toLocal(t.clock_out);
+  document.getElementById('ets-break').value = t.break_minutes || 0;
+  document.getElementById('ets-note').value = '';
+  openModal('modal-edit-timesheet');
+}
+
+document.getElementById('ets-save').addEventListener('click', async function() {
+  if (etsIndex == null) return;
+  const t = tsRows[etsIndex];
+  const toUTC = function(localVal) {
+    if (!localVal) return null;
+    return new Date(localVal).toISOString().slice(0, 19);
+  };
+  const body = {
+    venue_id: state.currentVenue,
+    approve: true,
+    clock_in: toUTC(document.getElementById('ets-in').value),
+    clock_out: toUTC(document.getElementById('ets-out').value),
+    break_minutes: parseInt(document.getElementById('ets-break').value || '0', 10),
+    note: document.getElementById('ets-note').value.trim(),
+  };
+  try {
+    const res = await fetchAPI('/api/clock/timesheets/' + t.id + '/review', {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    closeModal('modal-edit-timesheet');
+    showToast(t.employee_name + ' corrected & approved — ' + tsMinutesLabel(res.worked_minutes), 'success');
+    loadTimesheets();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+});
 
 // ============================================
 // CLOCK
