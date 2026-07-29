@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>RosterIQ — Time Clock</title>
+<style>
+  :root {
+    --bg: #0D1117; --card: #161B22; --border: #2A3040;
+    --text: #E6EDF3; --muted: #8B949E; --accent: #F5A623;
+    --green: #22C55E; --red: #EF4444; --blue: #38BDF8;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; min-height: 100vh; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; border-bottom: 1px solid var(--border); }
+  header .brand { font-size: 20px; font-weight: 700; }
+  header .brand span { color: var(--accent); }
+  #clock-now { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #venue-name { color: var(--muted); font-size: 14px; }
+  main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+  .hint { color: var(--muted); text-align: center; margin: 10px 0 20px; font-size: 15px; }
+  #staff-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .staff-card {
+    background: var(--card); border: 2px solid var(--border); border-radius: 16px;
+    padding: 20px 16px; cursor: pointer; text-align: center; transition: transform .08s ease;
+  }
+  .staff-card:active { transform: scale(.97); }
+  .staff-card .name { font-size: 19px; font-weight: 700; margin-bottom: 6px; }
+  .staff-card .roster { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .badge.off  { background: rgba(139,148,158,.15); color: var(--muted); }
+  .badge.on   { background: rgba(34,197,94,.15);  color: var(--green); }
+  .badge.done { background: rgba(56,189,248,.15); color: var(--blue); }
+  .staff-card.on { border-color: var(--green); }
+  /* modal */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.72); display: none; align-items: center; justify-content: center; padding: 16px; }
+  #modal.open { display: flex; }
+  .sheet { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 26px; width: 100%; max-width: 420px; text-align: center; }
+  .sheet h2 { font-size: 24px; margin-bottom: 4px; }
+  .sheet .sub { color: var(--muted); margin-bottom: 18px; font-size: 14px; }
+  #pin-display { font-size: 30px; letter-spacing: 12px; min-height: 44px; margin-bottom: 14px; font-variant-numeric: tabular-nums; }
+  .pinpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+  .pinpad button {
+    font-size: 24px; font-weight: 700; padding: 16px 0; border-radius: 14px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
+  }
+  .pinpad button:active { background: var(--border); }
+  .actions { display: grid; gap: 10px; }
+  .btn { font-size: 18px; font-weight: 700; padding: 16px; border-radius: 14px; border: none; cursor: pointer; }
+  .btn.in  { background: var(--green); color: #04260f; }
+  .btn.out { background: var(--red); color: #fff; }
+  .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  #toast {
+    position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px 26px; font-size: 17px; font-weight: 600; display: none; max-width: 92vw; text-align: center;
+  }
+  #toast.ok { border-color: var(--green); }
+  #toast.err { border-color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="brand">Roster<span>IQ</span> · Time Clock</div>
+    <div id="venue-name"></div>
+  </div>
+  <div id="clock-now">--:--</div>
+</header>
+<main>
+  <p class="hint">Tap your name to clock in or out</p>
+  <div id="staff-grid"></div>
+</main>
+
+<div id="modal">
+  <div class="sheet">
+    <h2 id="m-name"></h2>
+    <div class="sub" id="m-sub"></div>
+    <div id="pin-wrap" style="display:none;">
+      <div id="pin-display"></div>
+      <div class="pinpad" id="pinpad"></div>
+    </div>
+    <div class="actions">
+      <button class="btn in" id="m-action"></button>
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const token = localStorage.getItem('jwt_token') || localStorage.getItem('auth_token');
+if (!token) window.location.href = '/login';
+
+const params = new URLSearchParams(window.location.search);
+let venueId = params.get('venue_id') || localStorage.getItem('clock_venue_id') || '';
+let staff = [], current = null, pin = '';
+
+function fmtTime(d) { return d.toLocaleTimeString('en-AU', {hour: '2-digit', minute: '2-digit'}); }
+setInterval(() => { document.getElementById('clock-now').textContent = fmtTime(new Date()); }, 1000);
+document.getElementById('clock-now').textContent = fmtTime(new Date());
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...(opts.headers || {}) },
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail && body.detail.length ? (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)) : ('Error ' + r.status));
+  return body;
+}
+
+async function resolveVenue() {
+  if (venueId) return;
+  const v = await api('/venues');
+  const items = v.items || v || [];
+  if (items.length) { venueId = items[0].id; localStorage.setItem('clock_venue_id', venueId); }
+}
+
+async function loadBoard() {
+  await resolveVenue();
+  if (!venueId) { toast('No venue found — log into the dashboard first.', false); return; }
+  const b = await api('/api/clock/board?venue_id=' + encodeURIComponent(venueId));
+  document.getElementById('venue-name').textContent = venueId;
+  staff = b.staff || [];
+  const grid = document.getElementById('staff-grid');
+  grid.innerHTML = '';
+  staff.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'staff-card ' + s.state;
+    const label = s.state === 'on' ? 'ON SHIFT' : (s.state === 'done' ? 'DONE TODAY' : 'OFF');
+    card.innerHTML = '<div class="name">' + s.name + '</div>' +
+      '<div class="roster">' + (s.rostered ? ('Rostered ' + s.rostered.start + '–' + s.rostered.end + ' · ' + s.rostered.role) : 'Not rostered today') + '</div>' +
+      '<span class="badge ' + s.state + '">' + label + '</span>';
+    card.onclick = () => openModal(s);
+    grid.appendChild(card);
+  });
+}
+
+function openModal(s) {
+  current = s; pin = '';
+  document.getElementById('m-name').textContent = s.name;
+  const acting = s.state === 'on' ? 'out' : 'in';
+  document.getElementById('m-sub').textContent = s.state === 'on'
+    ? ('Clocked in at ' + (s.clock_in ? new Date(s.clock_in + 'Z').toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'}) : ''))
+    : (s.rostered ? ('Rostered ' + s.rostered.start + '–' + s.rostered.end) : 'Not rostered today');
+  const btn = document.getElementById('m-action');
+  btn.textContent = acting === 'in' ? 'Clock In' : 'Clock Out';
+  btn.className = 'btn ' + acting;
+  btn.onclick = () => punch(acting);
+  const wrap = document.getElementById('pin-wrap');
+  wrap.style.display = s.has_pin ? 'block' : 'none';
+  if (s.has_pin) buildPinpad();
+  document.getElementById('modal').classList.add('open');
+}
+
+function buildPinpad() {
+  const pad = document.getElementById('pinpad');
+  pad.innerHTML = '';
+  ['1','2','3','4','5','6','7','8','9','⌫','0','✓'].forEach(k => {
+    const b = document.createElement('button');
+    b.textContent = k;
+    b.onclick = () => {
+      if (k === '⌫') pin = pin.slice(0, -1);
+      else if (k === '✓') return;
+      else if (pin.length < 6) pin += k;
+      document.getElementById('pin-display').textContent = '•'.repeat(pin.length);
+    };
+    pad.appendChild(b);
+  });
+  document.getElementById('pin-display').textContent = '';
+}
+
+function closeModal() { document.getElementById('modal').classList.remove('open'); current = null; }
+
+async function punch(direction) {
+  if (!current) return;
+  try {
+    const res = await api('/api/clock/' + direction, {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: venueId, employee_id: current.employee_id, pin: pin, break_minutes: 0 }),
+    });
+    closeModal();
+    if (direction === 'in') {
+      toast(res.employee + ' clocked IN ✓', true);
+    } else {
+      const h = Math.floor((res.worked_minutes || 0) / 60), m = (res.worked_minutes || 0) % 60;
+      toast(res.employee + ' clocked OUT ✓ — ' + h + 'h ' + m + 'm worked', true);
+    }
+    loadBoard();
+  } catch (e) {
+    toast(e.message, false);
+  }
+}
+
+let toastTimer = null;
+function toast(msg, ok) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = ok ? 'ok' : 'err';
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 3500);
+}
+
+loadBoard();
+setInterval(loadBoard, 60000);
+</script>
+</body>
+</html>

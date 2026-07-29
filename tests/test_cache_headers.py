@@ -35,7 +35,7 @@ def test_public_pages_do_not_require_auth():
     from fastapi.testclient import TestClient
     from rosteriq.api import app
     c = TestClient(app)
-    for path in ("/login", "/register", "/connections"):
+    for path in ("/login", "/register", "/connections", "/timeclock"):
         r = c.get(path)
         assert r.status_code == 200, f"{path} -> {r.status_code}"
         assert "<" in r.text[:200], f"{path} did not return HTML"

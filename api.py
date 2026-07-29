@@ -1604,6 +1604,23 @@ async def login_page():
     return HTMLResponse("<h1>RosterIQ Login</h1><p>Login page not found.</p>")
 
 
+@app.get("/timeclock", tags=["timeclock"])
+async def timeclock_page():
+    """Time clock kiosk — the tablet-by-the-till face of the native clock.
+    Public route like /login; the page itself requires a venue login token
+    (redirects to /login without one)."""
+    try:
+        import pathlib
+        page = pathlib.Path(__file__).parent / "static" / "timeclock.html"
+        if page.exists():
+            from fastapi.responses import FileResponse
+            return FileResponse(page, media_type="text/html")
+    except Exception:
+        pass
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/timeclock.html")
+
+
 @app.get("/register", tags=["auth"])
 async def register_page():
     """Registration page — public, like /login (serves static/register.html)."""
