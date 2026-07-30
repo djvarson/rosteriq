@@ -470,6 +470,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register checklist routes: {e}")
 
+# Menu costing (ingredients, recipes, live margins)
+try:
+    from rosteriq.routes.menu_costing import router as menu_costing_router
+    app.include_router(menu_costing_router)
+    logger.info("Menu costing routes registered")
+except ImportError:
+    logger.info("Menu costing routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register menu costing routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router

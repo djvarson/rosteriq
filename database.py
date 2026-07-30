@@ -451,6 +451,26 @@ class BaseStore:
     def list_checklist_runs(self, venue_id: str, start_date, end_date) -> list:
         raise NotImplementedError
 
+    # --- Menu costing (ingredients + recipes) ------------------------------
+
+    def save_ingredient(self, ing: dict) -> None:
+        raise NotImplementedError
+
+    def get_ingredient(self, ing_id: str):
+        raise NotImplementedError
+
+    def list_ingredients(self, venue_id: str) -> list:
+        raise NotImplementedError
+
+    def save_recipe(self, recipe: dict) -> None:
+        raise NotImplementedError
+
+    def get_recipe(self, recipe_id: str):
+        raise NotImplementedError
+
+    def list_recipes(self, venue_id: str) -> list:
+        raise NotImplementedError
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:
@@ -842,6 +862,8 @@ class MemoryStore(BaseStore):
         self._timeclock_pins: dict[str, str] = {}  # Key: f"{venue_id}:{employee_id}" -> pin hash
         self._checklist_templates: dict[str, dict] = {}
         self._checklist_runs: dict[str, dict] = {}
+        self._ingredients: dict[str, dict] = {}
+        self._recipes: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
         self._experiment_outcomes: dict[str, dict] = {}  # Key: outcome_id
@@ -953,6 +975,32 @@ class MemoryStore(BaseStore):
             if d and start_date <= d <= end_date:
                 out.append(r)
         return sorted(out, key=lambda r: (str(r.get("run_date")), str(r.get("started_at"))))
+
+    # --- Menu costing ---
+
+    def save_ingredient(self, ing):
+        self._ingredients[ing["id"]] = dict(ing)
+
+    def get_ingredient(self, ing_id):
+        return self._ingredients.get(ing_id)
+
+    def list_ingredients(self, venue_id):
+        return sorted(
+            [i for i in self._ingredients.values() if i.get("venue_id") == venue_id],
+            key=lambda i: i.get("name", ""),
+        )
+
+    def save_recipe(self, recipe):
+        self._recipes[recipe["id"]] = dict(recipe)
+
+    def get_recipe(self, recipe_id):
+        return self._recipes.get(recipe_id)
+
+    def list_recipes(self, venue_id):
+        return sorted(
+            [r for r in self._recipes.values() if r.get("venue_id") == venue_id],
+            key=lambda r: r.get("name", ""),
+        )
 
     def get_employees(self, venue_id=None):
         """Employees, optionally filtered to one venue. Used by the AI agent's
@@ -2414,6 +2462,35 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "ingredients": """
+            CREATE TABLE IF NOT EXISTS ingredients (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                unit TEXT NOT NULL DEFAULT 'each',
+                purchase_size NUMERIC NOT NULL DEFAULT 1,
+                purchase_cost NUMERIC NOT NULL DEFAULT 0,
+                cost_per_unit NUMERIC NOT NULL DEFAULT 0,
+                supplier TEXT,
+                active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "recipes": """
+            CREATE TABLE IF NOT EXISTS recipes (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                category TEXT,
+                sell_price_inc_gst NUMERIC NOT NULL DEFAULT 0,
+                yield_portions NUMERIC NOT NULL DEFAULT 1,
+                items JSONB NOT NULL DEFAULT '[]',
+                active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
     }
 
     def _ensure_table(self, cur, name: str) -> None:
@@ -2871,6 +2948,87 @@ class PostgresStore(BaseStore):
                 ORDER BY run_date, started_at
             """, (venue_id, start_date, end_date))
             return [self._row_to_checklist(r) for r in cur.fetchall()]
+
+    # --- Menu costing ---
+
+    def save_ingredient(self, ing):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "ingredients")
+            cur.execute("""
+                INSERT INTO ingredients (id, venue_id, name, unit, purchase_size, purchase_cost,
+                    cost_per_unit, supplier, active, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    name=EXCLUDED.name, unit=EXCLUDED.unit,
+                    purchase_size=EXCLUDED.purchase_size, purchase_cost=EXCLUDED.purchase_cost,
+                    cost_per_unit=EXCLUDED.cost_per_unit, supplier=EXCLUDED.supplier,
+                    active=EXCLUDED.active, updated_at=now()
+            """, (
+                ing["id"], ing["venue_id"], ing["name"], ing.get("unit", "each"),
+                float(ing.get("purchase_size", 1)), float(ing.get("purchase_cost", 0)),
+                float(ing.get("cost_per_unit", 0)), ing.get("supplier"),
+                ing.get("active", True), ing.get("created_at", datetime.utcnow()),
+            ))
+
+    @staticmethod
+    def _row_to_plain(row, json_fields=()):
+        d = dict(row)
+        for f in json_fields:
+            v = d.get(f)
+            if isinstance(v, str):
+                try:
+                    d[f] = json.loads(v)
+                except Exception:
+                    d[f] = []
+        for k, v in list(d.items()):
+            if hasattr(v, "quantize"):  # Decimal -> float for JSON friendliness
+                d[k] = float(v)
+        return d
+
+    def get_ingredient(self, ing_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "ingredients")
+            cur.execute("SELECT * FROM ingredients WHERE id = %s", (ing_id,))
+            row = cur.fetchone()
+            return self._row_to_plain(row) if row else None
+
+    def list_ingredients(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "ingredients")
+            cur.execute("SELECT * FROM ingredients WHERE venue_id = %s ORDER BY name", (venue_id,))
+            return [self._row_to_plain(r) for r in cur.fetchall()]
+
+    def save_recipe(self, recipe):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "recipes")
+            cur.execute("""
+                INSERT INTO recipes (id, venue_id, name, category, sell_price_inc_gst,
+                    yield_portions, items, active, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    name=EXCLUDED.name, category=EXCLUDED.category,
+                    sell_price_inc_gst=EXCLUDED.sell_price_inc_gst,
+                    yield_portions=EXCLUDED.yield_portions, items=EXCLUDED.items,
+                    active=EXCLUDED.active, updated_at=now()
+            """, (
+                recipe["id"], recipe["venue_id"], recipe["name"], recipe.get("category"),
+                float(recipe.get("sell_price_inc_gst", 0)), float(recipe.get("yield_portions", 1)),
+                json.dumps(recipe.get("items", [])), recipe.get("active", True),
+                recipe.get("created_at", datetime.utcnow()),
+            ))
+
+    def get_recipe(self, recipe_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "recipes")
+            cur.execute("SELECT * FROM recipes WHERE id = %s", (recipe_id,))
+            row = cur.fetchone()
+            return self._row_to_plain(row, json_fields=("items",)) if row else None
+
+    def list_recipes(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "recipes")
+            cur.execute("SELECT * FROM recipes WHERE venue_id = %s ORDER BY name", (venue_id,))
+            return [self._row_to_plain(r, json_fields=("items",)) for r in cur.fetchall()]
 
     def get_employees(self, venue_id=None):
         """Active employees, optionally scoped to one venue (AI agent tools)."""
