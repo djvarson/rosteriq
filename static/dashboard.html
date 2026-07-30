@@ -3454,15 +3454,57 @@
         </div>
 
         <div class="tabs">
-          <button class="tab active" data-tab="break-compliance">Break Compliance</button>
+          <button class="tab active" data-tab="checklists">Daily Checklists</button>
+          <button class="tab" data-tab="break-compliance">Break Compliance</button>
           <button class="tab" data-tab="certifications">Certifications</button>
           <button class="tab" data-tab="awards">Award Rates</button>
           <button class="tab" data-tab="fatigue">Fatigue Alerts</button>
           <button class="tab" data-tab="consecutive">Consecutive Days</button>
         </div>
 
+        <!-- Daily Checklists Tab -->
+        <div class="tab-panel active" id="tab-checklists">
+          <div class="grid-1">
+            <div class="card">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+                <div class="chart-title" style="margin:0;">Today&rsquo;s Checklists</div>
+                <button class="btn btn-secondary btn-small" id="btn-seed-checklists" style="display:none;" onclick="seedChecklists()">Set up standard checklists</button>
+              </div>
+              <div id="ck-board" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:12px;">
+                <div style="color:var(--text-muted); padding:12px;">Loading…</div>
+              </div>
+            </div>
+
+            <div class="card" id="ck-run-card" style="display:none;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <div class="chart-title" style="margin:0;" id="ck-run-title"></div>
+                <span id="ck-run-progress" style="color:var(--text-muted); font-size:13px;"></span>
+              </div>
+              <div id="ck-run-items"></div>
+              <div style="display:flex; gap:10px; margin-top:14px;">
+                <button class="btn btn-primary" id="ck-complete-btn" onclick="completeChecklistRun()">Complete Checklist</button>
+                <button class="btn btn-secondary" onclick="closeChecklistRun()">Close</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="chart-title" style="margin-bottom:10px;">Last 7 Days</div>
+              <div class="table-container">
+                <table class="table">
+                  <thead>
+                    <tr><th>Date</th><th>Checklist</th><th>Status</th><th>Flags</th><th>Flagged readings</th></tr>
+                  </thead>
+                  <tbody id="ck-history">
+                    <tr><td colspan="5" style="color:var(--text-muted);">—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Break Compliance Tab -->
-        <div class="tab-panel active" id="tab-break-compliance">
+        <div class="tab-panel" id="tab-break-compliance">
           <div class="grid-1">
             <div class="card">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -5470,6 +5512,10 @@ function showPage(pageId) {
   state.currentPage = pageId;
   updatePageTitle(pageId);
 
+  if (pageId === 'compliance') {
+    loadChecklistsBoard();
+  }
+
   if (pageId === 'timesheets') {
     initTimesheetDates();
     loadTimesheets();
@@ -5497,6 +5543,166 @@ function updatePageTitle(pageId) {
     settings: 'Settings',
   };
   document.getElementById('page-title').textContent = titles[pageId] || 'Dashboard';
+}
+
+// ============================================
+// COMPLIANCE CHECKLISTS (daily board + runs)
+// ============================================
+let ckRun = null;
+
+async function loadChecklistsBoard() {
+  if (!state.currentVenue) return;
+  try {
+    const data = await fetchAPI('/api/checklists/today?venue_id=' + encodeURIComponent(state.currentVenue));
+    const board = document.getElementById('ck-board');
+    const lists = data.checklists || [];
+    document.getElementById('btn-seed-checklists').style.display = lists.length ? 'none' : 'inline-block';
+    if (!lists.length) {
+      board.innerHTML = '<div style="color:var(--text-muted); padding:12px;">No checklists yet — set up the standard Opening / Closing / Food Safety lists with one click.</div>';
+    } else {
+      board.innerHTML = lists.map(function(c) {
+        const pct = c.item_count ? Math.round((c.done_items / c.item_count) * 100) : 0;
+        const statusChip = c.status === 'complete'
+          ? '<span style="background:rgba(34,197,94,.15); color:var(--success); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">DONE</span>'
+          : (c.status === 'in_progress'
+            ? '<span style="background:rgba(245,158,11,.15); color:var(--brand-blue); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">' + c.done_items + '/' + c.item_count + '</span>'
+            : '<span style="background:rgba(139,148,158,.15); color:var(--text-muted); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">NOT STARTED</span>');
+        const flags = c.flags_count ? '<span style="color:var(--danger); font-size:12px; font-weight:700; margin-left:8px;">⚑ ' + c.flags_count + '</span>' : '';
+        const btnLabel = c.status === 'complete' ? 'View' : (c.status === 'in_progress' ? 'Continue' : 'Start');
+        return '<div class="card" style="margin:0; border:1px solid var(--border); cursor:pointer;" onclick="openChecklistRun(\'' + c.template_id + '\')">' +
+          '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">' +
+          '<strong>' + c.name + '</strong>' + statusChip + '</div>' +
+          '<div style="background:var(--border); height:6px; border-radius:3px; overflow:hidden; margin-bottom:10px;">' +
+          '<div style="width:' + pct + '%; height:100%; background:' + (c.status === 'complete' ? 'var(--success)' : 'var(--brand-blue)') + ';"></div></div>' +
+          '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+          '<span style="color:var(--text-muted); font-size:12px;">' + c.item_count + ' items · ' + c.schedule + flags + '</span>' +
+          '<button class="btn btn-secondary btn-small">' + btnLabel + '</button></div></div>';
+      }).join('');
+    }
+    loadChecklistHistory();
+  } catch (e) {
+    showToast('Checklists failed to load: ' + e.message, 'error');
+  }
+}
+
+async function seedChecklists() {
+  try {
+    const r = await fetchAPI('/api/checklists/templates/seed', {
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue }),
+    });
+    showToast('Standard checklists created: ' + (r.created || []).join(', '), 'success');
+    loadChecklistsBoard();
+  } catch (e) {
+    showToast('Seed failed: ' + e.message, 'error');
+  }
+}
+
+async function openChecklistRun(templateId) {
+  try {
+    const r = await fetchAPI('/api/checklists/runs/start', {
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue, template_id: templateId }),
+    });
+    ckRun = r.run;
+    renderChecklistRun();
+    document.getElementById('ck-run-card').style.display = 'block';
+    document.getElementById('ck-run-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    showToast('Could not open checklist: ' + e.message, 'error');
+  }
+}
+
+function renderChecklistRun() {
+  if (!ckRun) return;
+  document.getElementById('ck-run-title').textContent = ckRun.template_name + ' — ' + ckRun.run_date;
+  const done = (ckRun.items || []).filter(function(i) { return i.done; }).length;
+  document.getElementById('ck-run-progress').textContent = done + '/' + (ckRun.items || []).length + ' done';
+  const complete = ckRun.status === 'complete';
+  document.getElementById('ck-complete-btn').style.display = complete ? 'none' : 'inline-block';
+  document.getElementById('ck-run-items').innerHTML = (ckRun.items || []).map(function(i, idx) {
+    const flag = i.flagged ? '<span style="color:var(--danger); font-weight:700; margin-left:8px;">⚑ out of range</span>' : '';
+    let control = '';
+    if (i.type === 'check') {
+      control = '<input type="checkbox" style="width:22px; height:22px; accent-color:var(--success); cursor:pointer;" ' +
+        (i.done ? 'checked ' : '') + (complete ? 'disabled ' : '') + 'onchange="ckTick(' + idx + ', this.checked)">';
+    } else if (i.type === 'temp') {
+      control = '<span style="display:inline-flex; gap:6px; align-items:center;">' +
+        '<input type="number" step="0.1" style="width:82px; background:var(--sidebar-bg); border:1px solid var(--border); border-radius:8px; padding:7px 9px; color:var(--text-primary);" ' +
+        'value="' + (i.value != null ? i.value : '') + '" ' + (complete ? 'disabled ' : '') + 'id="ck-temp-' + idx + '" placeholder="°C">' +
+        (complete ? '' : '<button class="btn btn-secondary btn-small" onclick="ckTemp(' + idx + ')">Save</button>') + '</span>';
+    } else {
+      control = '<span style="display:inline-flex; gap:6px; align-items:center;">' +
+        '<input type="text" style="width:200px; background:var(--sidebar-bg); border:1px solid var(--border); border-radius:8px; padding:7px 9px; color:var(--text-primary);" ' +
+        'value="' + (i.note || '') + '" ' + (complete ? 'disabled ' : '') + 'id="ck-note-' + idx + '" placeholder="optional note">' +
+        (complete ? '' : '<button class="btn btn-secondary btn-small" onclick="ckNote(' + idx + ')">Save</button>') + '</span>';
+    }
+    const band = (i.type === 'temp' && (i.target_min != null || i.target_max != null))
+      ? '<div style="color:var(--text-muted); font-size:11px;">target ' + (i.target_min != null ? i.target_min : '') + ' to ' + (i.target_max != null ? i.target_max : '') + '°C</div>' : '';
+    return '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:11px 4px; border-top:1px solid var(--border);">' +
+      '<div><div style="font-weight:600;' + (i.done ? ' color:var(--text-muted);' : '') + '">' + i.label + flag + '</div>' + band + '</div>' +
+      '<div>' + control + '</div></div>';
+  }).join('');
+}
+
+async function ckUpdateItem(idx, payload) {
+  const item = ckRun.items[idx];
+  try {
+    const r = await fetchAPI('/api/checklists/runs/' + ckRun.id + '/item', {
+      method: 'POST',
+      body: JSON.stringify(Object.assign({ venue_id: state.currentVenue, item_id: item.id }, payload)),
+    });
+    Object.assign(item, { done: payload.done !== false, value: payload.value != null ? payload.value : item.value, note: payload.note != null ? payload.note : item.note, flagged: r.flagged });
+    if (r.flagged) showToast(item.label + ': reading OUT OF RANGE — flagged for the record', 'warning', 4500);
+    renderChecklistRun();
+    loadChecklistsBoard();
+  } catch (e) {
+    showToast('Could not save item: ' + e.message, 'error');
+  }
+}
+
+function ckTick(idx, checked) { ckUpdateItem(idx, { done: checked }); }
+function ckTemp(idx) {
+  const v = document.getElementById('ck-temp-' + idx).value;
+  if (v === '') { showToast('Enter the temperature first', 'warning'); return; }
+  ckUpdateItem(idx, { done: true, value: parseFloat(v) });
+}
+function ckNote(idx) {
+  ckUpdateItem(idx, { done: true, note: document.getElementById('ck-note-' + idx).value });
+}
+
+async function completeChecklistRun() {
+  try {
+    const r = await fetchAPI('/api/checklists/runs/' + ckRun.id + '/complete', {
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue }),
+    });
+    showToast(ckRun.template_name + ' complete ✓' + (r.flags_count ? ' — ' + r.flags_count + ' flagged reading(s) recorded' : ''), 'success', 4500);
+    closeChecklistRun();
+    loadChecklistsBoard();
+  } catch (e) {
+    showToast(e.message, 'error', 5000);
+  }
+}
+
+function closeChecklistRun() {
+  ckRun = null;
+  document.getElementById('ck-run-card').style.display = 'none';
+}
+
+async function loadChecklistHistory() {
+  try {
+    const end = new Date();
+    const start = new Date(end.getTime() - 6 * 24 * 3600 * 1000);
+    const fmt = function(d) { return d.toISOString().slice(0, 10); };
+    const data = await fetchAPI('/api/checklists/runs?venue_id=' + encodeURIComponent(state.currentVenue) +
+      '&start_date=' + fmt(start) + '&end_date=' + fmt(end));
+    const rows = data.runs || [];
+    document.getElementById('ck-history').innerHTML = rows.length ? rows.slice().reverse().map(function(r) {
+      const flagged = (r.flagged_items || []).map(function(f) { return f.label + ' (' + f.value + '°C)'; }).join('; ');
+      return '<tr><td>' + r.run_date + '</td><td>' + (r.template_name || '') + '</td>' +
+        '<td>' + (r.status === 'complete' ? '✓ complete' : r.status) + '</td>' +
+        '<td style="color:' + (r.flags_count ? 'var(--danger)' : 'var(--text-muted)') + '; font-weight:700;">' + (r.flags_count || 0) + '</td>' +
+        '<td style="color:var(--text-muted); font-size:12px;">' + (flagged || '—') + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" style="color:var(--text-muted);">No runs in the last 7 days</td></tr>';
+  } catch (e) { /* history is non-critical */ }
 }
 
 // ============================================
