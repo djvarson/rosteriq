@@ -471,6 +471,17 @@ class BaseStore:
     def list_recipes(self, venue_id: str) -> list:
         raise NotImplementedError
 
+    # --- Leave / unavailability requests (staff portal) --------------------
+
+    def save_leave_request(self, req: dict) -> None:
+        raise NotImplementedError
+
+    def get_leave_request(self, req_id: str):
+        raise NotImplementedError
+
+    def list_leave_requests(self, venue_id: str) -> list:
+        raise NotImplementedError
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:
@@ -864,6 +875,7 @@ class MemoryStore(BaseStore):
         self._checklist_runs: dict[str, dict] = {}
         self._ingredients: dict[str, dict] = {}
         self._recipes: dict[str, dict] = {}
+        self._leave_requests: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
         self._experiment_outcomes: dict[str, dict] = {}  # Key: outcome_id
@@ -1000,6 +1012,20 @@ class MemoryStore(BaseStore):
         return sorted(
             [r for r in self._recipes.values() if r.get("venue_id") == venue_id],
             key=lambda r: r.get("name", ""),
+        )
+
+    # --- Leave requests ---
+
+    def save_leave_request(self, req):
+        self._leave_requests[req["id"]] = dict(req)
+
+    def get_leave_request(self, req_id):
+        return self._leave_requests.get(req_id)
+
+    def list_leave_requests(self, venue_id):
+        return sorted(
+            [r for r in self._leave_requests.values() if r.get("venue_id") == venue_id],
+            key=lambda r: str(r.get("created_at")), reverse=True,
         )
 
     def get_employees(self, venue_id=None):
@@ -2477,6 +2503,22 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "leave_requests": """
+            CREATE TABLE IF NOT EXISTS leave_requests (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                reason TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                decided_by TEXT,
+                decided_at TIMESTAMP WITH TIME ZONE,
+                decision_note TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "recipes": """
             CREATE TABLE IF NOT EXISTS recipes (
                 id TEXT PRIMARY KEY,
@@ -3029,6 +3071,41 @@ class PostgresStore(BaseStore):
             self._ensure_table(cur, "recipes")
             cur.execute("SELECT * FROM recipes WHERE venue_id = %s ORDER BY name", (venue_id,))
             return [self._row_to_plain(r, json_fields=("items",)) for r in cur.fetchall()]
+
+    # --- Leave requests ---
+
+    def save_leave_request(self, req):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "leave_requests")
+            cur.execute("""
+                INSERT INTO leave_requests (id, venue_id, employee_id, start_date, end_date,
+                    reason, status, decided_by, decided_at, decision_note, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    status=EXCLUDED.status, decided_by=EXCLUDED.decided_by,
+                    decided_at=EXCLUDED.decided_at, decision_note=EXCLUDED.decision_note,
+                    updated_at=now()
+            """, (
+                req["id"], req["venue_id"], req["employee_id"], req["start_date"],
+                req["end_date"], req.get("reason"), req.get("status", "pending"),
+                req.get("decided_by"), req.get("decided_at"), req.get("decision_note"),
+                req.get("created_at", datetime.utcnow()),
+            ))
+
+    def get_leave_request(self, req_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "leave_requests")
+            cur.execute("SELECT * FROM leave_requests WHERE id = %s", (req_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def list_leave_requests(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "leave_requests")
+            cur.execute("""
+                SELECT * FROM leave_requests WHERE venue_id = %s ORDER BY created_at DESC
+            """, (venue_id,))
+            return [dict(r) for r in cur.fetchall()]
 
     def get_employees(self, venue_id=None):
         """Active employees, optionally scoped to one venue (AI agent tools)."""

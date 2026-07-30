@@ -480,6 +480,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register menu costing routes: {e}")
 
+# Staff portal (my roster / my hours / leave requests)
+try:
+    from rosteriq.routes.staff_portal import router as staff_portal_router
+    app.include_router(staff_portal_router)
+    logger.info("Staff portal routes registered")
+except ImportError:
+    logger.info("Staff portal routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register staff portal routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router
