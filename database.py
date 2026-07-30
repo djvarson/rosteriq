@@ -431,6 +431,26 @@ class BaseStore:
         """Return the stored pin hash or None."""
         raise NotImplementedError
 
+    # --- Compliance checklists (opening/closing lists, temp logs) ----------
+
+    def save_checklist_template(self, tpl: dict) -> None:
+        raise NotImplementedError
+
+    def get_checklist_template(self, tpl_id: str):
+        raise NotImplementedError
+
+    def list_checklist_templates(self, venue_id: str) -> list:
+        raise NotImplementedError
+
+    def save_checklist_run(self, run: dict) -> None:
+        raise NotImplementedError
+
+    def get_checklist_run(self, run_id: str):
+        raise NotImplementedError
+
+    def list_checklist_runs(self, venue_id: str, start_date, end_date) -> list:
+        raise NotImplementedError
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:
@@ -820,6 +840,8 @@ class MemoryStore(BaseStore):
         self._push_subscriptions: dict[str, dict] = {}  # Key: user_id
         self._timesheets: dict[str, dict] = {}  # Key: timesheet id
         self._timeclock_pins: dict[str, str] = {}  # Key: f"{venue_id}:{employee_id}" -> pin hash
+        self._checklist_templates: dict[str, dict] = {}
+        self._checklist_runs: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
         self._experiment_outcomes: dict[str, dict] = {}  # Key: outcome_id
@@ -901,6 +923,36 @@ class MemoryStore(BaseStore):
 
     def get_timeclock_pin(self, venue_id, employee_id):
         return self._timeclock_pins.get(f"{venue_id}:{employee_id}")
+
+    # --- Compliance checklists ---
+
+    def save_checklist_template(self, tpl):
+        self._checklist_templates[tpl["id"]] = dict(tpl)
+
+    def get_checklist_template(self, tpl_id):
+        return self._checklist_templates.get(tpl_id)
+
+    def list_checklist_templates(self, venue_id):
+        return sorted(
+            [t for t in self._checklist_templates.values() if t.get("venue_id") == venue_id],
+            key=lambda t: t.get("name", ""),
+        )
+
+    def save_checklist_run(self, run):
+        self._checklist_runs[run["id"]] = dict(run)
+
+    def get_checklist_run(self, run_id):
+        return self._checklist_runs.get(run_id)
+
+    def list_checklist_runs(self, venue_id, start_date, end_date):
+        out = []
+        for r in self._checklist_runs.values():
+            if r.get("venue_id") != venue_id:
+                continue
+            d = r.get("run_date")
+            if d and start_date <= d <= end_date:
+                out.append(r)
+        return sorted(out, key=lambda r: (str(r.get("run_date")), str(r.get("started_at"))))
 
     def get_employees(self, venue_id=None):
         """Employees, optionally filtered to one venue. Used by the AI agent's
@@ -2333,6 +2385,35 @@ class PostgresStore(BaseStore):
                 PRIMARY KEY (venue_id, employee_id)
             )
         """,
+        "checklist_templates": """
+            CREATE TABLE IF NOT EXISTS checklist_templates (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                schedule TEXT NOT NULL DEFAULT 'daily',
+                items JSONB NOT NULL DEFAULT '[]',
+                active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "checklist_runs": """
+            CREATE TABLE IF NOT EXISTS checklist_runs (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                template_id TEXT NOT NULL,
+                template_name TEXT,
+                run_date DATE NOT NULL,
+                started_at TIMESTAMP WITH TIME ZONE,
+                completed_at TIMESTAMP WITH TIME ZONE,
+                completed_by TEXT,
+                status TEXT NOT NULL DEFAULT 'in_progress',
+                items JSONB NOT NULL DEFAULT '[]',
+                flags_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
     }
 
     def _ensure_table(self, cur, name: str) -> None:
@@ -2711,6 +2792,85 @@ class PostgresStore(BaseStore):
             """, (venue_id, employee_id))
             row = cur.fetchone()
             return row["pin_hash"] if row else None
+
+    # --- Compliance checklists ---
+
+    def save_checklist_template(self, tpl):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "checklist_templates")
+            cur.execute("""
+                INSERT INTO checklist_templates (id, venue_id, name, schedule, items, active, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    name=EXCLUDED.name, schedule=EXCLUDED.schedule, items=EXCLUDED.items,
+                    active=EXCLUDED.active, updated_at=now()
+            """, (
+                tpl["id"], tpl["venue_id"], tpl["name"], tpl.get("schedule", "daily"),
+                json.dumps(tpl.get("items", [])), tpl.get("active", True),
+                tpl.get("created_at", datetime.utcnow()),
+            ))
+
+    @staticmethod
+    def _row_to_checklist(row):
+        d = dict(row)
+        for f in ("items",):
+            v = d.get(f)
+            if isinstance(v, str):
+                try:
+                    d[f] = json.loads(v)
+                except Exception:
+                    d[f] = []
+        return d
+
+    def get_checklist_template(self, tpl_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "checklist_templates")
+            cur.execute("SELECT * FROM checklist_templates WHERE id = %s", (tpl_id,))
+            row = cur.fetchone()
+            return self._row_to_checklist(row) if row else None
+
+    def list_checklist_templates(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "checklist_templates")
+            cur.execute("SELECT * FROM checklist_templates WHERE venue_id = %s ORDER BY name", (venue_id,))
+            return [self._row_to_checklist(r) for r in cur.fetchall()]
+
+    def save_checklist_run(self, run):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "checklist_runs")
+            cur.execute("""
+                INSERT INTO checklist_runs (id, venue_id, template_id, template_name, run_date,
+                    started_at, completed_at, completed_by, status, items, flags_count,
+                    created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    completed_at=EXCLUDED.completed_at, completed_by=EXCLUDED.completed_by,
+                    status=EXCLUDED.status, items=EXCLUDED.items,
+                    flags_count=EXCLUDED.flags_count, updated_at=now()
+            """, (
+                run["id"], run["venue_id"], run["template_id"], run.get("template_name"),
+                run["run_date"], run.get("started_at"), run.get("completed_at"),
+                run.get("completed_by"), run.get("status", "in_progress"),
+                json.dumps(run.get("items", [])), run.get("flags_count", 0),
+                run.get("created_at", datetime.utcnow()),
+            ))
+
+    def get_checklist_run(self, run_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "checklist_runs")
+            cur.execute("SELECT * FROM checklist_runs WHERE id = %s", (run_id,))
+            row = cur.fetchone()
+            return self._row_to_checklist(row) if row else None
+
+    def list_checklist_runs(self, venue_id, start_date, end_date):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "checklist_runs")
+            cur.execute("""
+                SELECT * FROM checklist_runs
+                WHERE venue_id = %s AND run_date >= %s AND run_date <= %s
+                ORDER BY run_date, started_at
+            """, (venue_id, start_date, end_date))
+            return [self._row_to_checklist(r) for r in cur.fetchall()]
 
     def get_employees(self, venue_id=None):
         """Active employees, optionally scoped to one venue (AI agent tools)."""

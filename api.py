@@ -460,6 +460,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register time clock routes: {e}")
 
+# Compliance checklists (opening/closing lists, temp logs)
+try:
+    from rosteriq.routes.checklists import router as checklists_router
+    app.include_router(checklists_router)
+    logger.info("Checklist routes registered")
+except ImportError:
+    logger.info("Checklist routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register checklist routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router
