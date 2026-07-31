@@ -510,6 +510,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register inventory routes: {e}")
 
+# Dish sales (sales -> stock depletion -> live food cost)
+try:
+    from rosteriq.routes.dish_sales import router as dish_sales_router
+    app.include_router(dish_sales_router)
+    logger.info("Dish sales routes registered")
+except ImportError:
+    logger.info("Dish sales routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register dish sales routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router

@@ -539,6 +539,14 @@ class BaseStore:
         if the stocktake isn't open or the item isn't in it."""
         raise NotImplementedError
 
+    # --- Dish sales (sales -> stock depletion -> live food cost) -----------
+
+    def save_dish_sale(self, sale: dict) -> None:
+        raise NotImplementedError
+
+    def list_dish_sales(self, venue_id: str, start_date, end_date) -> list:
+        raise NotImplementedError
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:
@@ -937,6 +945,7 @@ class MemoryStore(BaseStore):
         self._announcements: dict[str, dict] = {}
         self._stocktakes: dict[str, dict] = {}
         self._supplier_orders: dict[str, dict] = {}
+        self._dish_sales: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
         self._experiment_outcomes: dict[str, dict] = {}  # Key: outcome_id
@@ -1166,6 +1175,22 @@ class MemoryStore(BaseStore):
                 item["counted"] = float(counted)
                 return True
         return False
+
+    # --- Dish sales ---
+
+    def save_dish_sale(self, sale):
+        self._dish_sales[sale["id"]] = dict(sale)
+
+    def list_dish_sales(self, venue_id, start_date, end_date):
+        out = []
+        for s in self._dish_sales.values():
+            if s.get("venue_id") != venue_id:
+                continue
+            d = s.get("sale_date")
+            d = d if isinstance(d, date) else date.fromisoformat(str(d)[:10])
+            if start_date <= d <= end_date:
+                out.append(s)
+        return sorted(out, key=lambda s: (str(s.get("sale_date")), s.get("recipe_name") or ""))
 
     def get_employees(self, venue_id=None):
         """Employees, optionally filtered to one venue. Used by the AI agent's
@@ -2658,6 +2683,20 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "dish_sales": """
+            CREATE TABLE IF NOT EXISTS dish_sales (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                sale_date DATE NOT NULL,
+                recipe_id TEXT NOT NULL,
+                recipe_name TEXT,
+                qty NUMERIC NOT NULL DEFAULT 0,
+                revenue_inc_gst NUMERIC NOT NULL DEFAULT 0,
+                cogs NUMERIC NOT NULL DEFAULT 0,
+                source TEXT DEFAULT 'manual',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "supplier_orders": """
             CREATE TABLE IF NOT EXISTS supplier_orders (
                 id TEXT PRIMARY KEY,
@@ -3485,6 +3524,31 @@ class PostgresStore(BaseStore):
                 SET stock_qty = COALESCE(stock_qty, 0) + %s, updated_at = now()
                 WHERE id = %s
             """, (float(delta), ingredient_id))
+
+    def save_dish_sale(self, sale):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "dish_sales")
+            cur.execute("""
+                INSERT INTO dish_sales (id, venue_id, sale_date, recipe_id, recipe_name,
+                    qty, revenue_inc_gst, cogs, source, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (
+                sale["id"], sale["venue_id"], sale["sale_date"], sale["recipe_id"],
+                sale.get("recipe_name"), float(sale.get("qty", 0)),
+                float(sale.get("revenue_inc_gst", 0)), float(sale.get("cogs", 0)),
+                sale.get("source", "manual"), sale.get("created_at", datetime.utcnow()),
+            ))
+
+    def list_dish_sales(self, venue_id, start_date, end_date):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "dish_sales")
+            cur.execute("""
+                SELECT * FROM dish_sales
+                WHERE venue_id = %s AND sale_date BETWEEN %s AND %s
+                ORDER BY sale_date, recipe_name
+            """, (venue_id, start_date, end_date))
+            return [self._row_to_plain(r) for r in cur.fetchall()]
 
     def update_stocktake_count(self, st_id, ingredient_id, counted):
         # Rewrites ONLY the matching item's count inside the JSONB array in one
