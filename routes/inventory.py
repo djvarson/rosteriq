@@ -94,7 +94,9 @@ async def stock_list(venue_id: str = Query(...)) -> dict:
     for ing in db.list_ingredients(venue_id) or []:
         if not ing.get("active", True):
             continue
-        stock = float(ing.get("stock_qty") or 0)
+        # round(3): repeated float increments (sales depletion) accumulate
+        # artifacts like -0.8400000000000001 that a venue owner would see
+        stock = round(float(ing.get("stock_qty") or 0), 3)
         par = float(ing.get("par_level") or 0)
         cpu = float(ing.get("cost_per_unit") or 0)
         value = round(stock * cpu, 2)
