@@ -1651,6 +1651,23 @@ async def timeclock_page():
     return RedirectResponse(url="/static/timeclock.html")
 
 
+@app.get("/my", tags=["staff-portal"])
+async def my_portal_page():
+    """Staff portal — mobile-first page for my shifts / my hours / leave.
+    Public route like /login; the page itself requires a login token
+    (redirects to /login without one) and links to an employee by email."""
+    try:
+        import pathlib
+        page = pathlib.Path(__file__).parent / "static" / "my.html"
+        if page.exists():
+            from fastapi.responses import FileResponse
+            return FileResponse(page, media_type="text/html")
+    except Exception:
+        pass
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/my.html")
+
+
 @app.get("/register", tags=["auth"])
 async def register_page():
     """Registration page — public, like /login (serves static/register.html)."""

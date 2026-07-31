@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0F1629">
+  <title>My RosterIQ</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <style>
+    :root {
+      --navy: #0F1629;
+      --card: #1C2436;
+      --card-2: #242E44;
+      --border: #2E3A54;
+      --text: #F2F5FA;
+      --muted: #8A97B0;
+      --blue: #3366FF;
+      --green: #10B981;
+      --amber: #F59E0B;
+      --red: #EF4444;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--navy); color: var(--text); min-height: 100vh;
+      padding-bottom: calc(72px + env(safe-area-inset-bottom));
+    }
+    header {
+      padding: calc(16px + env(safe-area-inset-top)) 20px 14px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .who .hi { font-size: 20px; font-weight: 700; }
+    .who .venue { font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .logout { background: none; border: 1px solid var(--border); color: var(--muted);
+      border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
+    main { padding: 0 16px; max-width: 560px; margin: 0 auto; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 16px; margin-bottom: 12px; }
+    .section-title { font-size: 13px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .06em; margin: 18px 4px 10px; }
+    .empty { text-align: center; color: var(--muted); padding: 28px 12px; font-size: 14px; }
+
+    /* Shift cards */
+    .shift { display: flex; align-items: center; gap: 14px; }
+    .shift + .shift { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+    .shift .date-badge { width: 52px; text-align: center; flex-shrink: 0;
+      background: var(--card-2); border-radius: 10px; padding: 8px 0; }
+    .shift .date-badge .dow { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+    .shift .date-badge .dom { font-size: 20px; font-weight: 700; }
+    .shift .times { font-size: 16px; font-weight: 600; }
+    .shift .meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .badge { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 999px;
+      padding: 3px 9px; }
+    .badge.today { background: rgba(51,102,255,.18); color: #7C9BFF; }
+    .badge.pending { background: rgba(245,158,11,.15); color: var(--amber); }
+    .badge.approved { background: rgba(16,185,129,.15); color: var(--green); }
+    .badge.declined { background: rgba(239,68,68,.15); color: var(--red); }
+    .badge.open { background: rgba(51,102,255,.15); color: #7C9BFF; }
+    .badge.closed { background: rgba(245,158,11,.15); color: var(--amber); }
+
+    /* Hours */
+    .hours-total { font-size: 30px; font-weight: 800; }
+    .hours-total small { font-size: 14px; color: var(--muted); font-weight: 500; }
+    .ts-row { display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+    .ts-row:last-child { border-bottom: none; }
+    .ts-row .d { color: var(--muted); }
+
+    /* Leave form */
+    label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 5px; }
+    input, textarea { width: 100%; background: var(--card-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 10px; padding: 11px 12px; font-size: 15px;
+      font-family: inherit; }
+    input:focus, textarea:focus { outline: none; border-color: var(--blue); }
+    .btn { width: 100%; background: var(--blue); color: #fff; border: none; border-radius: 10px;
+      padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 14px; }
+    .btn:disabled { opacity: .5; }
+    .leave-row { padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+    .leave-row:last-child { border-bottom: none; }
+    .leave-row .dates { font-weight: 600; }
+    .leave-row .note { color: var(--muted); font-size: 13px; margin-top: 3px; }
+
+    /* Tab bar */
+    nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--card);
+      border-top: 1px solid var(--border); display: flex;
+      padding-bottom: env(safe-area-inset-bottom); }
+    nav button { flex: 1; background: none; border: none; color: var(--muted); padding: 10px 0 8px;
+      font-size: 11px; cursor: pointer; display: flex; flex-direction: column; align-items: center;
+      gap: 3px; font-family: inherit; }
+    nav button.active { color: var(--blue); }
+    nav svg { width: 22px; height: 22px; }
+
+    .toast { position: fixed; left: 16px; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom));
+      background: var(--card-2); border: 1px solid var(--border); border-left: 4px solid var(--blue);
+      border-radius: 10px; padding: 12px 14px; font-size: 14px; display: none; z-index: 50;
+      max-width: 528px; margin: 0 auto; }
+    .toast.err { border-left-color: var(--red); }
+    .toast.ok { border-left-color: var(--green); }
+    .nolink { text-align: center; padding: 40px 20px; }
+    .nolink h2 { font-size: 18px; margin-bottom: 10px; }
+    .nolink p { color: var(--muted); font-size: 14px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="who">
+      <div class="hi" id="hi">My RosterIQ</div>
+      <div class="venue" id="venue"></div>
+    </div>
+    <button class="logout" onclick="logout()">Log out</button>
+  </header>
+
+  <main id="main">
+    <div class="empty" id="loading">Loading&hellip;</div>
+
+    <div id="nolink" class="nolink" style="display:none;">
+      <h2>Almost there</h2>
+      <p id="nolink-msg"></p>
+    </div>
+
+    <div id="view-shifts" style="display:none;">
+      <div class="section-title">Next 14 days</div>
+      <div class="card" id="shifts-card"><div class="empty">No shifts loaded</div></div>
+    </div>
+
+    <div id="view-hours" style="display:none;">
+      <div class="section-title">Last 14 days</div>
+      <div class="card">
+        <div class="hours-total" id="hours-total">0<small> hrs worked</small></div>
+      </div>
+      <div class="card" id="hours-card"><div class="empty">No timesheets yet</div></div>
+    </div>
+
+    <div id="view-leave" style="display:none;">
+      <div class="section-title">Request leave</div>
+      <div class="card">
+        <label for="lv-start">First day off</label>
+        <input type="date" id="lv-start">
+        <label for="lv-end">Last day off</label>
+        <input type="date" id="lv-end">
+        <label for="lv-reason">Reason (optional)</label>
+        <textarea id="lv-reason" rows="2" maxlength="300" placeholder="e.g. Family trip"></textarea>
+        <button class="btn" id="lv-submit" onclick="submitLeave()">Request leave</button>
+      </div>
+      <div class="section-title">My requests</div>
+      <div class="card" id="leave-card"><div class="empty">No leave requests yet</div></div>
+    </div>
+  </main>
+
+  <nav id="tabbar" style="display:none;">
+    <button data-view="shifts" class="active" onclick="show('shifts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      Shifts
+    </button>
+    <button data-view="hours" onclick="show('hours')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+      Hours
+    </button>
+    <button data-view="leave" onclick="show('leave')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M2 12c0-5 4-9 10-9M2 12c0 5 4 9 10 9m10-9c0-5-4-9-10-9m10 9c0 5-4 9-10 9M12 3c2.5 2.4 4 5.5 4 9s-1.5 6.6-4 9c-2.5-2.4-4-5.5-4-9s1.5-6.6 4-9z"/></svg>
+      Leave
+    </button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+const token = localStorage.getItem('jwt_token') || localStorage.getItem('auth_token');
+if (!token) window.location.href = '/login';
+
+async function api(path, opts) {
+  opts = opts || {};
+  const res = await fetch(path, {
+    method: opts.method || 'GET',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthenticated'); }
+  const data = await res.json().catch(function () { return {}; });
+  if (!res.ok) {
+    const detail = (data && data.detail) ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : ('Request failed (' + res.status + ')');
+    const e = new Error(detail); e.status = res.status; throw e;
+  }
+  return data;
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+let toastTimer = null;
+function toast(msg, kind) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (kind ? ' ' + kind : '');
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.style.display = 'none'; }, 4500);
+}
+
+function logout() {
+  localStorage.removeItem('jwt_token');
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('jwt_refresh_token');
+  window.location.href = '/login';
+}
+
+function show(view) {
+  ['shifts', 'hours', 'leave'].forEach(function (v) {
+    document.getElementById('view-' + v).style.display = v === view ? 'block' : 'none';
+  });
+  document.querySelectorAll('nav button').forEach(function (b) {
+    b.classList.toggle('active', b.getAttribute('data-view') === view);
+  });
+  if (view === 'shifts') loadShifts();
+  if (view === 'hours') loadHours();
+  if (view === 'leave') loadLeave();
+}
+
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function niceDate(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return DOW[d.getDay()] + ' ' + d.getDate() + '/' + (d.getMonth() + 1);
+}
+
+async function loadShifts() {
+  const card = document.getElementById('shifts-card');
+  try {
+    const data = await api('/api/me/shifts');
+    if (!data.count) {
+      card.innerHTML = '<div class="empty">No shifts rostered in the next 14 days.<br>Check back after the next roster is published.</div>';
+      return;
+    }
+    const todayIso = new Date().toISOString().slice(0, 10);
+    card.innerHTML = data.shifts.map(function (s) {
+      const d = new Date(s.date + 'T00:00:00');
+      const isToday = s.date === todayIso;
+      return '<div class="shift">' +
+        '<div class="date-badge"><div class="dow">' + DOW[d.getDay()] + '</div><div class="dom">' + d.getDate() + '</div></div>' +
+        '<div style="flex:1;">' +
+          '<div class="times">' + esc(s.start) + ' &ndash; ' + esc(s.end) + '</div>' +
+          '<div class="meta">' + esc(s.role || '') + (s.break_minutes ? ' &middot; ' + s.break_minutes + 'm break' : '') + '</div>' +
+        '</div>' +
+        (isToday ? '<span class="badge today">Today</span>' : '') +
+      '</div>';
+    }).join('');
+  } catch (e) {
+    card.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
+}
+
+function fmtMins(m) {
+  if (m == null) return '&mdash;';
+  return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+}
+
+async function loadHours() {
+  const card = document.getElementById('hours-card');
+  try {
+    const data = await api('/api/me/timesheets');
+    const total = data.total_worked_minutes || 0;
+    document.getElementById('hours-total').innerHTML =
+      (total / 60).toFixed(1) + '<small> hrs worked</small>';
+    if (!data.count) {
+      card.innerHTML = '<div class="empty">No punches in the last 14 days.<br>Clock in on the venue tablet and your hours land here.</div>';
+      return;
+    }
+    card.innerHTML = data.timesheets.map(function (t) {
+      return '<div class="ts-row">' +
+        '<span class="d">' + esc(niceDate(String(t.work_date).slice(0, 10))) + '</span>' +
+        '<span>' + fmtMins(t.worked_minutes) + '</span>' +
+        '<span class="badge ' + esc(t.status || 'open') + '">' + esc(t.status || 'open') + '</span>' +
+      '</div>';
+    }).join('');
+  } catch (e) {
+    card.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
+}
+
+async function loadLeave() {
+  const card = document.getElementById('leave-card');
+  try {
+    const data = await api('/api/me/leave');
+    if (!data.count) {
+      card.innerHTML = '<div class="empty">No leave requests yet</div>';
+      return;
+    }
+    card.innerHTML = data.requests.map(function (r) {
+      return '<div class="leave-row">' +
+        '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+          '<span class="dates">' + esc(niceDate(r.start_date)) + ' &rarr; ' + esc(niceDate(r.end_date)) + '</span>' +
+          '<span class="badge ' + esc(r.status) + '">' + esc(r.status) + '</span>' +
+        '</div>' +
+        (r.reason ? '<div class="note">' + esc(r.reason) + '</div>' : '') +
+        (r.decision_note ? '<div class="note">Manager: ' + esc(r.decision_note) + '</div>' : '') +
+      '</div>';
+    }).join('');
+  } catch (e) {
+    card.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
+}
+
+async function submitLeave() {
+  const start = document.getElementById('lv-start').value;
+  const end = document.getElementById('lv-end').value;
+  if (!start || !end) { toast('Pick both dates', 'err'); return; }
+  const btn = document.getElementById('lv-submit');
+  btn.disabled = true;
+  try {
+    await api('/api/me/leave', { method: 'POST', body: {
+      start_date: start, end_date: end,
+      reason: document.getElementById('lv-reason').value.trim(),
+    }});
+    toast('Leave requested — your manager will review it', 'ok');
+    document.getElementById('lv-start').value = '';
+    document.getElementById('lv-end').value = '';
+    document.getElementById('lv-reason').value = '';
+    loadLeave();
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function boot() {
+  try {
+    const prof = await api('/api/me/profile');
+    document.getElementById('loading').style.display = 'none';
+    if (!prof.linked) {
+      document.getElementById('nolink-msg').textContent = prof.message;
+      document.getElementById('nolink').style.display = 'block';
+      return;
+    }
+    document.getElementById('hi').textContent = 'Hi, ' + (prof.name.split(' ')[0] || prof.name);
+    document.getElementById('venue').textContent = prof.venue_name;
+    document.getElementById('tabbar').style.display = 'flex';
+    document.getElementById('view-shifts').style.display = 'block';
+    loadShifts();
+  } catch (e) {
+    document.getElementById('loading').textContent = e.message;
+  }
+}
+boot();
+</script>
+</body>
+</html>

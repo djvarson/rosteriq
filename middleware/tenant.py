@@ -105,6 +105,7 @@ EXEMPT_PATHS = {
     "/login",
     "/register",
     "/timeclock",
+    "/my",
     "/connections",
     "/sw.js",
     "/docs/api",

@@ -145,6 +145,15 @@ def test_leave_lifecycle():
     assert mine["requests"][0]["decision_note"] == "Enjoy!"
 
 
+def test_my_portal_page_serves():
+    """/my is a public page route (auth happens client-side, like /timeclock)."""
+    c = TestClient(app)
+    r = c.get("/my")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "My RosterIQ" in r.text and "/api/me/profile" in r.text
+
+
 def test_manager_leave_endpoints_are_venue_scoped():
     c = TestClient(app)
     owner_h = _register_login(c, f"o{uuid.uuid4().hex[:8]}@x.com")
