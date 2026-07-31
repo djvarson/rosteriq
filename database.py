@@ -2643,7 +2643,7 @@ class PostgresStore(BaseStore):
             CREATE TABLE IF NOT EXISTS venues (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                tanda_org_id TEXT NOT NULL UNIQUE,
+                tanda_org_id TEXT UNIQUE,
                 state TEXT NOT NULL,
                 timezone TEXT NOT NULL DEFAULT 'Australia/Melbourne',
                 min_staff JSONB DEFAULT '{}',
@@ -2846,6 +2846,9 @@ class PostgresStore(BaseStore):
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS adjustment_note TEXT",
             # tanda_org_id is UNIQUE; venues without Tanda must store NULL (which
             # never collides), not '' (which collides on the second venue ever).
+            # The original schema also made it NOT NULL — drop that first or the
+            # NULL writes trade a unique-violation 500 for a not-null 500.
+            "ALTER TABLE venues ALTER COLUMN tanda_org_id DROP NOT NULL",
             "UPDATE venues SET tanda_org_id = NULL WHERE tanda_org_id = ''",
         ):
             try:
