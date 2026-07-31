@@ -140,6 +140,11 @@
       <div class="card" id="hours-card"><div class="empty">No timesheets yet</div></div>
     </div>
 
+    <div id="view-news" style="display:none;">
+      <div class="section-title">From your venue</div>
+      <div class="card" id="news-card"><div class="empty">No announcements yet</div></div>
+    </div>
+
     <div id="view-cover" style="display:none;">
       <div class="section-title">Up for grabs</div>
       <div class="card" id="grabs-card"><div class="empty">Nothing up for grabs right now</div></div>
@@ -173,6 +178,10 @@
     <button data-view="hours" onclick="show('hours')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
       Hours
+    </button>
+    <button data-view="news" onclick="show('news')" style="position:relative;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>
+      News<span id="news-dot" style="display:none; position:absolute; top:6px; right:calc(50% - 16px); width:8px; height:8px; border-radius:50%; background:var(--red);"></span>
     </button>
     <button data-view="cover" onclick="show('cover')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
@@ -226,7 +235,7 @@ function logout() {
 }
 
 function show(view) {
-  ['shifts', 'hours', 'cover', 'leave'].forEach(function (v) {
+  ['shifts', 'hours', 'news', 'cover', 'leave'].forEach(function (v) {
     document.getElementById('view-' + v).style.display = v === view ? 'block' : 'none';
   });
   document.querySelectorAll('nav button').forEach(function (b) {
@@ -234,8 +243,47 @@ function show(view) {
   });
   if (view === 'shifts') loadShifts();
   if (view === 'hours') loadHours();
+  if (view === 'news') loadNews();
   if (view === 'cover') loadCover();
   if (view === 'leave') loadLeave();
+}
+
+async function refreshNewsDot() {
+  try {
+    const data = await api('/api/me/announcements');
+    document.getElementById('news-dot').style.display =
+      (data.unread && data.unread > 0) ? 'block' : 'none';
+  } catch (e) { /* badge is cosmetic */ }
+}
+
+async function loadNews() {
+  const card = document.getElementById('news-card');
+  try {
+    const data = await api('/api/me/announcements');
+    if (!data.count) {
+      card.innerHTML = '<div class="empty">No announcements yet</div>';
+      return;
+    }
+    card.innerHTML = data.announcements.map(function (a) {
+      return '<div class="leave-row">' +
+        '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">' +
+          '<span class="dates">' + (a.pinned ? '&#128204; ' : '') + esc(a.title) + '</span>' +
+          (a.read ? '' : '<span class="badge pending">New</span>') +
+        '</div>' +
+        '<div class="note" style="white-space:pre-wrap;">' + esc(a.body) + '</div>' +
+        '<div class="note">' + esc(String(a.created_at).slice(0, 16).replace('T', ' ')) + '</div>' +
+      '</div>';
+    }).join('');
+    // Opening the tab counts as reading — receipt back to the manager
+    const unread = data.announcements.filter(function (a) { return !a.read; });
+    for (const a of unread) {
+      try { await api('/api/me/announcements/' + encodeURIComponent(a.id) + '/read', { method: 'POST' }); }
+      catch (e) { break; }
+    }
+    document.getElementById('news-dot').style.display = 'none';
+  } catch (e) {
+    card.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
 }
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -431,6 +479,7 @@ async function boot() {
     document.getElementById('tabbar').style.display = 'flex';
     document.getElementById('view-shifts').style.display = 'block';
     loadShifts();
+    refreshNewsDot();
   } catch (e) {
     document.getElementById('loading').textContent = e.message;
   }

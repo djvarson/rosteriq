@@ -63,6 +63,11 @@ class SMSService:
         self._rate_limit_tracker: Dict[str, float] = {}
         self._rate_limit_window_seconds = 300  # 5 minutes
 
+    @property
+    def is_configured(self) -> bool:
+        """True when Twilio creds are present and the client initialised."""
+        return self._is_configured
+
     def _format_phone_number(self, phone: str) -> str:
         """
         Format phone number to E.164 format with +61 Australian prefix.

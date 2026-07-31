@@ -490,6 +490,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register staff portal routes: {e}")
 
+# Communication hub (announcements + SMS fan-out)
+try:
+    from rosteriq.routes.comms import router as comms_router
+    app.include_router(comms_router)
+    logger.info("Communication hub routes registered")
+except ImportError:
+    logger.info("Communication hub routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register communication hub routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router

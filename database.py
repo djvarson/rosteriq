@@ -493,6 +493,17 @@ class BaseStore:
     def list_shift_covers(self, venue_id: str) -> list:
         raise NotImplementedError
 
+    # --- Announcements (communication hub) ---------------------------------
+
+    def save_announcement(self, ann: dict) -> None:
+        raise NotImplementedError
+
+    def get_announcement(self, ann_id: str):
+        raise NotImplementedError
+
+    def list_announcements(self, venue_id: str) -> list:
+        raise NotImplementedError
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:
@@ -888,6 +899,7 @@ class MemoryStore(BaseStore):
         self._recipes: dict[str, dict] = {}
         self._leave_requests: dict[str, dict] = {}
         self._shift_covers: dict[str, dict] = {}
+        self._announcements: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
         self._experiment_outcomes: dict[str, dict] = {}  # Key: outcome_id
@@ -1052,6 +1064,20 @@ class MemoryStore(BaseStore):
         return sorted(
             [c for c in self._shift_covers.values() if c.get("venue_id") == venue_id],
             key=lambda c: str(c.get("created_at")), reverse=True,
+        )
+
+    # --- Announcements ---
+
+    def save_announcement(self, ann):
+        self._announcements[ann["id"]] = dict(ann)
+
+    def get_announcement(self, ann_id):
+        return self._announcements.get(ann_id)
+
+    def list_announcements(self, venue_id):
+        return sorted(
+            [a for a in self._announcements.values() if a.get("venue_id") == venue_id],
+            key=lambda a: (not a.get("pinned"), str(a.get("created_at"))),
         )
 
     def get_employees(self, venue_id=None):
@@ -2565,6 +2591,21 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "announcements": """
+            CREATE TABLE IF NOT EXISTS announcements (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                author_id TEXT,
+                author_name TEXT,
+                pinned BOOLEAN DEFAULT false,
+                sms_result JSONB,
+                read_by JSONB DEFAULT '[]'::jsonb,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "recipes": """
             CREATE TABLE IF NOT EXISTS recipes (
                 id TEXT PRIMARY KEY,
@@ -3186,6 +3227,42 @@ class PostgresStore(BaseStore):
             self._ensure_table(cur, "shift_covers")
             cur.execute("""
                 SELECT * FROM shift_covers WHERE venue_id = %s ORDER BY created_at DESC
+            """, (venue_id,))
+            return [dict(r) for r in cur.fetchall()]
+
+    def save_announcement(self, ann):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "announcements")
+            cur.execute("""
+                INSERT INTO announcements (id, venue_id, title, body, author_id,
+                    author_name, pinned, sms_result, read_by, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    title=EXCLUDED.title, body=EXCLUDED.body, pinned=EXCLUDED.pinned,
+                    sms_result=EXCLUDED.sms_result, read_by=EXCLUDED.read_by,
+                    updated_at=now()
+            """, (
+                ann["id"], ann["venue_id"], ann["title"], ann["body"],
+                ann.get("author_id"), ann.get("author_name"),
+                bool(ann.get("pinned", False)),
+                json.dumps(ann["sms_result"]) if ann.get("sms_result") is not None else None,
+                json.dumps(list(ann.get("read_by") or [])),
+                ann.get("created_at", datetime.utcnow()),
+            ))
+
+    def get_announcement(self, ann_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "announcements")
+            cur.execute("SELECT * FROM announcements WHERE id = %s", (ann_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def list_announcements(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "announcements")
+            cur.execute("""
+                SELECT * FROM announcements WHERE venue_id = %s
+                ORDER BY pinned DESC, created_at DESC
             """, (venue_id,))
             return [dict(r) for r in cur.fetchall()]
 
