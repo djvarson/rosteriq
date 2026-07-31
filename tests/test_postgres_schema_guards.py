@@ -35,6 +35,7 @@ _NON_TABLE_TOKENS = {
     "select", "set", "data", "statements",        # clause fragments
     "rosteriq",                                    # appears in a docstring url
     "feed", "employee", "notification",           # alias words for *_config etc.
+    "jsonb_array_elements",                        # set-returning function, not a table
 }
 
 _TABLE_REF_RE = re.compile(

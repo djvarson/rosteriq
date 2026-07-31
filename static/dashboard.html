@@ -2339,6 +2339,10 @@
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg></span>
           <span>Announcements</span>
         </div>
+        <div class="nav-item" data-page="inventory">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg></span>
+          <span>Inventory</span>
+        </div>
         <div class="nav-item" data-page="compliance">
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
           <span>Compliance</span>
@@ -3546,6 +3550,66 @@
           </div>
         </div>
         <div id="an-list"></div>
+      </div>
+
+      <div class="page" id="page-inventory" data-page="inventory" style="display: none;">
+        <div class="page-header">
+          <h1 class="page-title">Inventory</h1>
+          <p class="page-subtitle">Stock on hand, stocktakes with dollar variance, and below-par supplier ordering — shared with Menu &amp; Costing</p>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Stock value</div>
+              <div style="font-size:22px; font-weight:800;" id="iv-value">—</div></div>
+            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Below par</div>
+              <div style="font-size:22px; font-weight:800;" id="iv-low">—</div></div>
+            <div style="margin-left:auto; display:flex; gap:10px;">
+              <button class="btn btn-secondary" id="iv-st-btn" onclick="startStocktake()">Start stocktake</button>
+              <button class="btn btn-primary" onclick="draftOrders()">Draft supplier orders</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="iv-st-card" style="margin-bottom:16px; display:none;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h3 style="font-size:15px;">Stocktake in progress — count what's actually there</h3>
+            <button class="btn btn-primary btn-small" onclick="completeStocktake()">Complete stocktake</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data-table" style="width:100%; border-collapse:collapse;">
+              <thead><tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                <th style="padding:8px;">Item</th><th style="padding:8px;">Expected</th><th style="padding:8px;">Counted</th></tr></thead>
+              <tbody id="iv-st-rows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <h3 style="font-size:15px; margin-bottom:10px;">Stock on hand</h3>
+          <div style="overflow-x:auto;">
+            <table class="data-table" style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                  <th style="padding:10px 8px;">Item</th>
+                  <th style="padding:10px 8px;">Supplier</th>
+                  <th style="padding:10px 8px;">On hand</th>
+                  <th style="padding:10px 8px;">Par</th>
+                  <th style="padding:10px 8px;">Value</th>
+                  <th style="padding:10px 8px;"></th>
+                  <th style="padding:10px 8px;"></th>
+                </tr>
+              </thead>
+              <tbody id="iv-rows">
+                <tr><td colspan="7" style="padding:24px; text-align:center; color:var(--text-muted);">Add ingredients in Menu &amp; Costing, then set stock and par here</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 style="font-size:15px; margin-bottom:10px;">Supplier orders</h3>
+          <div id="iv-orders"><div style="color:var(--text-muted); text-align:center; padding:18px;">No orders yet — Draft supplier orders builds one per supplier from everything below par</div></div>
+        </div>
       </div>
 
       <div class="page" id="page-compliance" data-page="compliance" style="display: none;">
@@ -5631,6 +5695,10 @@ function showPage(pageId) {
     loadAnnouncements();
   }
 
+  if (pageId === 'inventory') {
+    loadInventory();
+  }
+
   // Focus chat input when navigating to AI Agent page
   if (pageId === 'ai-agent') {
     setTimeout(() => {
@@ -5648,6 +5716,7 @@ function updatePageTitle(pageId) {
     timesheets: 'Timesheets',
     leave: 'Leave & Shift Cover',
     announcements: 'Announcements',
+    inventory: 'Inventory',
     staff: 'Staff Management',
     compliance: 'Compliance',
     reports: 'Reports',
@@ -5944,6 +6013,193 @@ function renderLeaveRequests() {
       '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
       '</tr>';
   }).join('');
+}
+
+// ============================================
+// INVENTORY (stock, stocktakes, supplier orders)
+// ============================================
+let ivRows = [];
+let ivOpenStocktake = null;
+
+async function loadInventory() {
+  if (!state.currentVenue) return;
+  try {
+    const data = await fetchAPI('/api/inventory?venue_id=' + encodeURIComponent(state.currentVenue));
+    ivRows = data.items || [];
+    document.getElementById('iv-value').textContent = formatCurrency(data.total_stock_value || 0);
+    document.getElementById('iv-low').textContent = data.low_count || 0;
+    renderInventory();
+  } catch (e) {
+    showToast('Failed to load inventory: ' + e.message, 'error');
+  }
+  try {
+    const st = await fetchAPI('/api/inventory/stocktakes?venue_id=' + encodeURIComponent(state.currentVenue));
+    ivOpenStocktake = (st.stocktakes || []).find(function(s) { return s.status === 'open'; }) || null;
+    renderStocktake();
+  } catch (e) { /* card stays hidden */ }
+  try {
+    const od = await fetchAPI('/api/inventory/orders?venue_id=' + encodeURIComponent(state.currentVenue));
+    renderOrders(od.orders || []);
+  } catch (e) { /* list stays empty */ }
+}
+
+function renderInventory() {
+  const tbody = document.getElementById('iv-rows');
+  if (!ivRows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:24px; text-align:center; color:var(--text-muted);">Add ingredients in Menu &amp; Costing, then set stock and par here</td></tr>';
+    return;
+  }
+  tbody.innerHTML = ivRows.map(function(r, i) {
+    return '<tr style="border-top:1px solid var(--border);">' +
+      '<td style="padding:10px 8px; font-weight:600;">' + esc(r.name) + ' <span style="color:var(--text-muted); font-size:12px;">(' + esc(r.unit || '') + ')</span></td>' +
+      '<td style="padding:10px 8px; color:var(--text-muted);">' + esc(r.supplier || '—') + '</td>' +
+      '<td style="padding:6px 8px;"><input type="number" min="0" step="0.1" id="iv-stock-' + i + '" value="' + r.stock_qty + '" style="width:80px; padding:6px;"></td>' +
+      '<td style="padding:6px 8px;"><input type="number" min="0" step="0.1" id="iv-par-' + i + '" value="' + r.par_level + '" style="width:80px; padding:6px;"></td>' +
+      '<td style="padding:10px 8px;">' + formatCurrency(r.stock_value || 0) + '</td>' +
+      '<td style="padding:10px 8px;">' + (r.low ? '<span style="background:rgba(239,68,68,.15); color:var(--danger); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">LOW</span>' : '') + '</td>' +
+      '<td style="padding:10px 8px;"><button class="btn btn-secondary btn-small" onclick="saveLevels(' + i + ')">Save</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function saveLevels(i) {
+  const r = ivRows[i];
+  // A blanked field keeps its saved value — clearing a box must never
+  // silently zero real stock.
+  const sv = document.getElementById('iv-stock-' + i).value;
+  const pv = document.getElementById('iv-par-' + i).value;
+  try {
+    await fetchAPI('/api/inventory/levels', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue_id: state.currentVenue, ingredient_id: r.ingredient_id,
+        stock_qty: sv === '' ? r.stock_qty : (parseFloat(sv) || 0),
+        par_level: pv === '' ? r.par_level : (parseFloat(pv) || 0),
+      }),
+    });
+    showToast(r.name + ' saved ✓', 'success');
+    loadInventory();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+function renderStocktake() {
+  const card = document.getElementById('iv-st-card');
+  const btn = document.getElementById('iv-st-btn');
+  if (!ivOpenStocktake) { card.style.display = 'none'; btn.disabled = false; return; }
+  btn.disabled = true;
+  card.style.display = 'block';
+  document.getElementById('iv-st-rows').innerHTML = ivOpenStocktake.items.map(function(it, i) {
+    return '<tr style="border-top:1px solid var(--border);">' +
+      '<td style="padding:8px; font-weight:600;">' + esc(it.name) + ' <span style="color:var(--text-muted); font-size:12px;">(' + esc(it.unit || '') + ')</span></td>' +
+      '<td style="padding:8px; color:var(--text-muted);">' + it.expected + '</td>' +
+      '<td style="padding:6px 8px;"><input type="number" min="0" step="0.1" value="' + (it.counted == null ? '' : it.counted) + '" placeholder="count" style="width:90px; padding:6px;" onchange="stCount(\'' + esc(it.ingredient_id) + '\', this.value)"></td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function startStocktake() {
+  try {
+    await fetchAPI('/api/inventory/stocktake/start', {
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue }),
+    });
+    showToast('Stocktake started — count everything, then Complete', 'success');
+    loadInventory();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function stCount(ingredientId, value) {
+  if (value === '' || value == null) return;
+  try {
+    await fetchAPI('/api/inventory/stocktake/count', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue_id: state.currentVenue, stocktake_id: ivOpenStocktake.id,
+        ingredient_id: ingredientId, counted: parseFloat(value) || 0,
+      }),
+    });
+  } catch (e) {
+    showToast('Count failed: ' + e.message, 'error');
+  }
+}
+
+async function completeStocktake() {
+  if (!window.confirm('Complete the stocktake? Counted items correct stock levels; uncounted items stay as-is and get flagged.')) return;
+  try {
+    const r = await fetchAPI('/api/inventory/stocktake/complete', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: state.currentVenue, stocktake_id: ivOpenStocktake.id }),
+    });
+    const v = r.total_variance_value;
+    showToast('Stocktake complete — variance ' + formatCurrency(v) +
+      (r.uncounted.length ? ' · ' + r.uncounted.length + ' uncounted' : ''),
+      v < 0 ? 'warning' : 'success');
+    loadInventory();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+function renderOrders(orders) {
+  const box = document.getElementById('iv-orders');
+  if (!orders.length) {
+    box.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding:18px;">No orders yet — Draft supplier orders builds one per supplier from everything below par</div>';
+    return;
+  }
+  box.innerHTML = orders.map(function(o) {
+    const chipStyle = {
+      draft: 'background:rgba(56,189,248,.15); color:#38BDF8;',
+      ordered: 'background:rgba(245,158,11,.15); color:var(--brand-blue);',
+      received: 'background:rgba(34,197,94,.15); color:var(--success);',
+      cancelled: 'background:rgba(148,163,184,.15); color:var(--text-muted);',
+    }[o.status] || '';
+    const lines = (o.items || []).map(function(it) {
+      return '<div style="display:flex; justify-content:space-between; font-size:13px; padding:3px 0; color:var(--text-muted);">' +
+        '<span>' + esc(it.name) + ' — ' + it.packs + ' × ' + it.pack_size + esc(it.unit || '') + '</span>' +
+        '<span>' + formatCurrency(it.line_cost || 0) + '</span></div>';
+    }).join('');
+    const actions = o.status === 'draft'
+      ? '<button class="btn btn-primary btn-small" onclick="orderStatus(\'' + esc(o.id) + '\', \'ordered\')">Mark ordered</button> ' +
+        '<button class="btn btn-secondary btn-small" onclick="orderStatus(\'' + esc(o.id) + '\', \'cancelled\')">Cancel</button>'
+      : (o.status === 'ordered'
+        ? '<button class="btn btn-primary btn-small" onclick="orderStatus(\'' + esc(o.id) + '\', \'received\')">Receive (books stock in)</button> ' +
+          '<button class="btn btn-secondary btn-small" onclick="orderStatus(\'' + esc(o.id) + '\', \'cancelled\')">Cancel</button>'
+        : '');
+    return '<div style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px;">' +
+      '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">' +
+        '<div style="font-weight:700;">' + esc(o.supplier || 'Unassigned') + ' <span style="' + chipStyle + ' padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; margin-left:6px;">' + o.status.toUpperCase() + '</span></div>' +
+        '<div style="font-weight:700;">' + formatCurrency(o.total_cost || 0) + '</div>' +
+      '</div>' + lines +
+      '<div style="margin-top:8px;">' + actions + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+async function draftOrders() {
+  try {
+    const r = await fetchAPI('/api/inventory/order/draft', {
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue }),
+    });
+    showToast('Drafted ' + r.orders.length + ' order(s) — review below', 'success');
+    loadInventory();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+async function orderStatus(orderId, status) {
+  try {
+    await fetchAPI('/api/inventory/order/' + orderId + '/status', {
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue, status: status }),
+    });
+    showToast('Order ' + status + (status === 'received' ? ' — stock booked in ✓' : ' ✓'), 'success');
+    loadInventory();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
 }
 
 // ============================================

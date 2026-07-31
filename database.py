@@ -504,6 +504,41 @@ class BaseStore:
     def list_announcements(self, venue_id: str) -> list:
         raise NotImplementedError
 
+    # --- Inventory: stocktakes + supplier orders ---------------------------
+
+    def save_stocktake(self, st: dict) -> None:
+        raise NotImplementedError
+
+    def get_stocktake(self, st_id: str):
+        raise NotImplementedError
+
+    def list_stocktakes(self, venue_id: str) -> list:
+        raise NotImplementedError
+
+    def save_supplier_order(self, order: dict) -> None:
+        raise NotImplementedError
+
+    def get_supplier_order(self, order_id: str):
+        raise NotImplementedError
+
+    def list_supplier_orders(self, venue_id: str) -> list:
+        raise NotImplementedError
+
+    def transition_supplier_order(self, order_id: str, from_status: str,
+                                  to_status: str, stamp_field: Optional[str] = None) -> bool:
+        """Atomically move an order between statuses. Returns False if the
+        order wasn't in from_status (someone else won the race)."""
+        raise NotImplementedError
+
+    def increment_ingredient_stock(self, ingredient_id: str, delta: float) -> None:
+        """Atomic stock adjustment (never read-add-write in route code)."""
+        raise NotImplementedError
+
+    def update_stocktake_count(self, st_id: str, ingredient_id: str, counted: float) -> bool:
+        """Atomically set one item's count on an OPEN stocktake. Returns False
+        if the stocktake isn't open or the item isn't in it."""
+        raise NotImplementedError
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:
@@ -900,6 +935,8 @@ class MemoryStore(BaseStore):
         self._leave_requests: dict[str, dict] = {}
         self._shift_covers: dict[str, dict] = {}
         self._announcements: dict[str, dict] = {}
+        self._stocktakes: dict[str, dict] = {}
+        self._supplier_orders: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
         self._experiment_outcomes: dict[str, dict] = {}  # Key: outcome_id
@@ -1079,6 +1116,56 @@ class MemoryStore(BaseStore):
             [a for a in self._announcements.values() if a.get("venue_id") == venue_id],
             key=lambda a: (not a.get("pinned"), str(a.get("created_at"))),
         )
+
+    # --- Inventory ---
+
+    def save_stocktake(self, st):
+        self._stocktakes[st["id"]] = dict(st)
+
+    def get_stocktake(self, st_id):
+        return self._stocktakes.get(st_id)
+
+    def list_stocktakes(self, venue_id):
+        return sorted(
+            [s for s in self._stocktakes.values() if s.get("venue_id") == venue_id],
+            key=lambda s: str(s.get("started_at")), reverse=True,
+        )
+
+    def save_supplier_order(self, order):
+        self._supplier_orders[order["id"]] = dict(order)
+
+    def get_supplier_order(self, order_id):
+        return self._supplier_orders.get(order_id)
+
+    def list_supplier_orders(self, venue_id):
+        return sorted(
+            [o for o in self._supplier_orders.values() if o.get("venue_id") == venue_id],
+            key=lambda o: str(o.get("created_at")), reverse=True,
+        )
+
+    def transition_supplier_order(self, order_id, from_status, to_status, stamp_field=None):
+        order = self._supplier_orders.get(order_id)
+        if not order or order.get("status") != from_status:
+            return False
+        order["status"] = to_status
+        if stamp_field:
+            order[stamp_field] = datetime.utcnow()
+        return True
+
+    def increment_ingredient_stock(self, ingredient_id, delta):
+        ing = self._ingredients.get(ingredient_id)
+        if ing is not None:
+            ing["stock_qty"] = float(ing.get("stock_qty") or 0) + float(delta)
+
+    def update_stocktake_count(self, st_id, ingredient_id, counted):
+        st = self._stocktakes.get(st_id)
+        if not st or st.get("status") != "open":
+            return False
+        for item in st.get("items", []):
+            if item.get("ingredient_id") == ingredient_id:
+                item["counted"] = float(counted)
+                return True
+        return False
 
     def get_employees(self, venue_id=None):
         """Employees, optionally filtered to one venue. Used by the AI agent's
@@ -2551,7 +2638,37 @@ class PostgresStore(BaseStore):
                 cost_per_unit NUMERIC NOT NULL DEFAULT 0,
                 supplier TEXT,
                 active BOOLEAN DEFAULT true,
+                stock_qty NUMERIC DEFAULT 0,
+                par_level NUMERIC DEFAULT 0,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "stocktakes": """
+            CREATE TABLE IF NOT EXISTS stocktakes (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                items JSONB NOT NULL DEFAULT '[]',
+                started_by TEXT,
+                started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP WITH TIME ZONE,
+                total_variance_value NUMERIC,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "supplier_orders": """
+            CREATE TABLE IF NOT EXISTS supplier_orders (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                supplier TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                items JSONB NOT NULL DEFAULT '[]',
+                total_cost NUMERIC DEFAULT 0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                ordered_at TIMESTAMP WITH TIME ZONE,
+                received_at TIMESTAMP WITH TIME ZONE,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
@@ -2850,6 +2967,8 @@ class PostgresStore(BaseStore):
             # NULL writes trade a unique-violation 500 for a not-null 500.
             "ALTER TABLE venues ALTER COLUMN tanda_org_id DROP NOT NULL",
             "UPDATE venues SET tanda_org_id = NULL WHERE tanda_org_id = ''",
+            "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS stock_qty NUMERIC DEFAULT 0",
+            "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS par_level NUMERIC DEFAULT 0",
         ):
             try:
                 with self._cursor() as cur:
@@ -3094,18 +3213,21 @@ class PostgresStore(BaseStore):
             self._ensure_table(cur, "ingredients")
             cur.execute("""
                 INSERT INTO ingredients (id, venue_id, name, unit, purchase_size, purchase_cost,
-                    cost_per_unit, supplier, active, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    cost_per_unit, supplier, active, stock_qty, par_level, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, unit=EXCLUDED.unit,
                     purchase_size=EXCLUDED.purchase_size, purchase_cost=EXCLUDED.purchase_cost,
                     cost_per_unit=EXCLUDED.cost_per_unit, supplier=EXCLUDED.supplier,
-                    active=EXCLUDED.active, updated_at=now()
+                    active=EXCLUDED.active, stock_qty=EXCLUDED.stock_qty,
+                    par_level=EXCLUDED.par_level, updated_at=now()
             """, (
                 ing["id"], ing["venue_id"], ing["name"], ing.get("unit", "each"),
                 float(ing.get("purchase_size", 1)), float(ing.get("purchase_cost", 0)),
                 float(ing.get("cost_per_unit", 0)), ing.get("supplier"),
-                ing.get("active", True), ing.get("created_at", datetime.utcnow()),
+                ing.get("active", True), float(ing.get("stock_qty", 0) or 0),
+                float(ing.get("par_level", 0) or 0),
+                ing.get("created_at", datetime.utcnow()),
             ))
 
     @staticmethod
@@ -3274,6 +3396,115 @@ class PostgresStore(BaseStore):
                 ORDER BY pinned DESC, created_at DESC
             """, (venue_id,))
             return [dict(r) for r in cur.fetchall()]
+
+    def save_stocktake(self, st):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "stocktakes")
+            cur.execute("""
+                INSERT INTO stocktakes (id, venue_id, status, items, started_by,
+                    started_at, completed_at, total_variance_value, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    status=EXCLUDED.status, items=EXCLUDED.items,
+                    completed_at=EXCLUDED.completed_at,
+                    total_variance_value=EXCLUDED.total_variance_value, updated_at=now()
+            """, (
+                st["id"], st["venue_id"], st.get("status", "open"),
+                json.dumps(st.get("items", [])), st.get("started_by"),
+                st.get("started_at", datetime.utcnow()), st.get("completed_at"),
+                st.get("total_variance_value"),
+                st.get("created_at", datetime.utcnow()),
+            ))
+
+    def get_stocktake(self, st_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "stocktakes")
+            cur.execute("SELECT * FROM stocktakes WHERE id = %s", (st_id,))
+            row = cur.fetchone()
+            return self._row_to_plain(row, json_fields=("items",)) if row else None
+
+    def list_stocktakes(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "stocktakes")
+            cur.execute("""
+                SELECT * FROM stocktakes WHERE venue_id = %s ORDER BY started_at DESC
+            """, (venue_id,))
+            return [self._row_to_plain(r, json_fields=("items",)) for r in cur.fetchall()]
+
+    def save_supplier_order(self, order):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "supplier_orders")
+            cur.execute("""
+                INSERT INTO supplier_orders (id, venue_id, supplier, status, items,
+                    total_cost, created_at, ordered_at, received_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    status=EXCLUDED.status, items=EXCLUDED.items,
+                    total_cost=EXCLUDED.total_cost, ordered_at=EXCLUDED.ordered_at,
+                    received_at=EXCLUDED.received_at, updated_at=now()
+            """, (
+                order["id"], order["venue_id"], order.get("supplier"),
+                order.get("status", "draft"), json.dumps(order.get("items", [])),
+                float(order.get("total_cost", 0) or 0),
+                order.get("created_at", datetime.utcnow()),
+                order.get("ordered_at"), order.get("received_at"),
+            ))
+
+    def get_supplier_order(self, order_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "supplier_orders")
+            cur.execute("SELECT * FROM supplier_orders WHERE id = %s", (order_id,))
+            row = cur.fetchone()
+            return self._row_to_plain(row, json_fields=("items",)) if row else None
+
+    def list_supplier_orders(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "supplier_orders")
+            cur.execute("""
+                SELECT * FROM supplier_orders WHERE venue_id = %s ORDER BY created_at DESC
+            """, (venue_id,))
+            return [self._row_to_plain(r, json_fields=("items",)) for r in cur.fetchall()]
+
+    def transition_supplier_order(self, order_id, from_status, to_status, stamp_field=None):
+        # Conditional UPDATE: only one concurrent caller can win the transition,
+        # so double-receive/double-order clicks can never book stock twice.
+        stamp_sql = f", {stamp_field} = now()" if stamp_field in ("ordered_at", "received_at") else ""
+        with self._cursor() as cur:
+            self._ensure_table(cur, "supplier_orders")
+            cur.execute(f"""
+                UPDATE supplier_orders SET status = %s{stamp_sql}, updated_at = now()
+                WHERE id = %s AND status = %s
+            """, (to_status, order_id, from_status))
+            return cur.rowcount > 0
+
+    def increment_ingredient_stock(self, ingredient_id, delta):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "ingredients")
+            cur.execute("""
+                UPDATE ingredients
+                SET stock_qty = COALESCE(stock_qty, 0) + %s, updated_at = now()
+                WHERE id = %s
+            """, (float(delta), ingredient_id))
+
+    def update_stocktake_count(self, st_id, ingredient_id, counted):
+        # Rewrites ONLY the matching item's count inside the JSONB array in one
+        # statement — concurrent counters on different items can't clobber
+        # each other the way read-modify-write of the whole row would.
+        with self._cursor() as cur:
+            self._ensure_table(cur, "stocktakes")
+            cur.execute("""
+                UPDATE stocktakes SET items = (
+                    SELECT jsonb_agg(
+                        CASE WHEN elem->>'ingredient_id' = %s
+                             THEN jsonb_set(elem, '{counted}', to_jsonb(%s::numeric))
+                             ELSE elem END)
+                    FROM jsonb_array_elements(items) AS elem
+                ), updated_at = now()
+                WHERE id = %s AND status = 'open'
+                  AND items @> %s::jsonb
+            """, (ingredient_id, float(counted), st_id,
+                  json.dumps([{"ingredient_id": ingredient_id}])))
+            return cur.rowcount > 0
 
     def get_employees(self, venue_id=None):
         """Active employees, optionally scoped to one venue (AI agent tools)."""

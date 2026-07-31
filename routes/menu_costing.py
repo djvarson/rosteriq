@@ -164,6 +164,9 @@ async def upsert_ingredient(body: IngredientRequest) -> dict:
             raise HTTPException(status_code=404, detail="Ingredient not found")
     ing_id = body.id or f"ing-{uuid.uuid4().hex[:10]}"
     cost_per_unit = body.purchase_cost / body.purchase_size
+    # A price/pack edit must not wipe the inventory levels set on this
+    # ingredient — carry stock_qty/par_level over from the existing record.
+    prior = db.get_ingredient(ing_id) if body.id else None
     db.save_ingredient({
         "id": ing_id,
         "venue_id": body.venue_id,
@@ -174,6 +177,8 @@ async def upsert_ingredient(body: IngredientRequest) -> dict:
         "cost_per_unit": cost_per_unit,
         "supplier": body.supplier,
         "active": body.active,
+        "stock_qty": float((prior or {}).get("stock_qty") or 0),
+        "par_level": float((prior or {}).get("par_level") or 0),
         "created_at": datetime.utcnow(),
     })
     return {"status": "saved", "ingredient_id": ing_id,

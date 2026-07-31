@@ -500,6 +500,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register communication hub routes: {e}")
 
+# Inventory (stock levels, stocktakes, supplier orders)
+try:
+    from rosteriq.routes.inventory import router as inventory_router
+    app.include_router(inventory_router)
+    logger.info("Inventory routes registered")
+except ImportError:
+    logger.info("Inventory routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register inventory routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router
