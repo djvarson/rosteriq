@@ -20,6 +20,17 @@ Staff routes:
 Manager routes:
     GET  /api/leave           -- venue's leave requests (filter by status)
     POST /api/leave/{id}/decide -- approve / decline with optional note
+
+Shift cover (phase 2 — "I can't work this shift"):
+    POST /api/me/shifts/{shift_id}/cover -- put my shift up for cover
+    GET  /api/me/cover                   -- cover board (up for grabs + mine)
+    POST /api/me/cover/{id}/claim        -- claim a co-worker's shift
+    POST /api/me/cover/{id}/cancel       -- requester withdraws an open/claimed cover
+    GET  /api/cover                      -- manager: venue's cover requests
+    POST /api/cover/{id}/decide          -- manager approve/decline; approval
+                                            REASSIGNS THE SHIFT on the roster —
+                                            the roster is the source of truth,
+                                            never just a status flag.
 """
 
 import logging
@@ -45,6 +56,16 @@ class LeaveRequestBody(BaseModel):
 
 
 class LeaveDecision(BaseModel):
+    venue_id: str
+    approve: bool
+    note: str = Field(default="", max_length=300)
+
+
+class CoverRequestBody(BaseModel):
+    reason: str = Field(default="", max_length=300)
+
+
+class CoverDecision(BaseModel):
     venue_id: str
     approve: bool
     note: str = Field(default="", max_length=300)
@@ -115,6 +136,7 @@ async def my_shifts(user: UserContext = Depends(get_current_user)) -> dict:
             if str(getattr(s, "employee_id", "")) != str(emp.id):
                 continue
             mine.append({
+                "id": s.id,
                 "date": s.date.isoformat(),
                 "day": s.date.strftime("%A"),
                 "start": s.start_time.strftime("%H:%M"),
@@ -211,6 +233,138 @@ async def request_leave(body: LeaveRequestBody,
 
 
 # ---------------------------------------------------------------------------
+# Shift cover — staff side
+# ---------------------------------------------------------------------------
+
+def _find_my_shift(db, venue_id: str, employee_id: str, shift_id: str):
+    """The named future shift, only if it belongs to this employee."""
+    today = date.today()
+    try:
+        shifts = db.get_shifts(venue_id, today, today + timedelta(days=60)) or []
+    except Exception:
+        shifts = []
+    for s in shifts:
+        if getattr(s, "id", None) == shift_id:
+            if str(getattr(s, "employee_id", "")) != str(employee_id):
+                raise HTTPException(status_code=403, detail="You can only offer your own shifts for cover")
+            return s
+    raise HTTPException(status_code=404, detail="Shift not found in your upcoming roster")
+
+
+def _cover_payload(c, emp_names: dict) -> dict:
+    return {
+        "id": c["id"],
+        "shift_id": c["shift_id"],
+        "shift_date": str(c["shift_date"]),
+        "shift_start": c.get("shift_start"),
+        "shift_end": c.get("shift_end"),
+        "role": c.get("role"),
+        "requested_by": c["requested_by"],
+        "requested_by_name": emp_names.get(c["requested_by"], c["requested_by"]),
+        "reason": c.get("reason"),
+        "claimed_by": c.get("claimed_by"),
+        "claimed_by_name": emp_names.get(c.get("claimed_by"), c.get("claimed_by")) if c.get("claimed_by") else None,
+        "status": c.get("status"),
+        "decision_note": c.get("decision_note"),
+    }
+
+
+@router.post("/api/me/shifts/{shift_id}/cover")
+async def offer_shift_for_cover(shift_id: str, body: CoverRequestBody,
+                                user: UserContext = Depends(get_current_user)) -> dict:
+    """Put one of my upcoming shifts up for a co-worker to cover."""
+    db = get_db()
+    emp, vid = _linked_employee(db, user)
+    if not emp:
+        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    shift = _find_my_shift(db, vid, emp.id, shift_id)
+    for c in db.list_shift_covers(vid) or []:
+        if c.get("shift_id") == shift_id and c.get("status") in ("open", "claimed"):
+            raise HTTPException(status_code=409, detail="That shift is already up for cover")
+    cover = {
+        "id": f"cv-{uuid.uuid4().hex[:10]}",
+        "venue_id": vid,
+        "shift_id": shift_id,
+        "shift_date": shift.date,
+        "shift_start": shift.start_time.strftime("%H:%M"),
+        "shift_end": shift.end_time.strftime("%H:%M"),
+        "role": shift.role,
+        "requested_by": emp.id,
+        "reason": body.reason,
+        "claimed_by": None,
+        "status": "open",
+        "created_at": datetime.utcnow(),
+    }
+    db.save_shift_cover(cover)
+    logger.info(f"Cover requested: {emp.name} for shift {shift_id} at {vid}")
+    return {"status": "open", "cover_id": cover["id"]}
+
+
+@router.get("/api/me/cover")
+async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
+    """The cover board: shifts up for grabs at my venue, plus my own requests
+    and anything I've claimed."""
+    db = get_db()
+    emp, vid = _linked_employee(db, user)
+    if not emp:
+        return _no_link_response(user)
+    emp_names = {e.id: e.name for e in (db.get_employees(vid) or [])}
+    covers = db.list_shift_covers(vid) or []
+    up_for_grabs, mine, claimed_by_me = [], [], []
+    for c in covers:
+        p = _cover_payload(c, emp_names)
+        if c.get("requested_by") == emp.id:
+            mine.append(p)
+        elif c.get("claimed_by") == emp.id and c.get("status") in ("claimed", "approved"):
+            claimed_by_me.append(p)
+        elif c.get("status") == "open":
+            up_for_grabs.append(p)
+    return {"linked": True, "up_for_grabs": up_for_grabs, "mine": mine,
+            "claimed_by_me": claimed_by_me}
+
+
+@router.post("/api/me/cover/{cover_id}/claim")
+async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_user)) -> dict:
+    """Claim a co-worker's open shift — goes to the manager for approval."""
+    db = get_db()
+    emp, vid = _linked_employee(db, user)
+    if not emp:
+        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    cover = db.get_shift_cover(cover_id)
+    if not cover or cover.get("venue_id") != vid:
+        raise HTTPException(status_code=404, detail="Cover request not found")
+    if cover.get("requested_by") == emp.id:
+        raise HTTPException(status_code=409, detail="You can't claim your own shift")
+    if cover.get("status") != "open":
+        raise HTTPException(status_code=409, detail=f"This shift is already {cover.get('status')}")
+    cover["claimed_by"] = emp.id
+    cover["status"] = "claimed"
+    db.save_shift_cover(cover)
+    logger.info(f"Cover claimed: {emp.name} claims {cover_id} at {vid}")
+    return {"status": "claimed", "cover_id": cover_id,
+            "message": "Claimed — your manager still needs to approve the change"}
+
+
+@router.post("/api/me/cover/{cover_id}/cancel")
+async def cancel_cover(cover_id: str, user: UserContext = Depends(get_current_user)) -> dict:
+    """Requester withdraws their cover request before it's decided."""
+    db = get_db()
+    emp, vid = _linked_employee(db, user)
+    if not emp:
+        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    cover = db.get_shift_cover(cover_id)
+    if not cover or cover.get("venue_id") != vid:
+        raise HTTPException(status_code=404, detail="Cover request not found")
+    if cover.get("requested_by") != emp.id:
+        raise HTTPException(status_code=403, detail="Only the requester can cancel this")
+    if cover.get("status") not in ("open", "claimed"):
+        raise HTTPException(status_code=409, detail=f"Already {cover.get('status')} — ask your manager")
+    cover["status"] = "cancelled"
+    db.save_shift_cover(cover)
+    return {"status": "cancelled", "cover_id": cover_id}
+
+
+# ---------------------------------------------------------------------------
 # Manager-facing
 # ---------------------------------------------------------------------------
 
@@ -230,6 +384,71 @@ async def venue_leave(venue_id: str = Query(...), status: str = Query("")) -> di
         "reason": r.get("reason"), "status": r.get("status"),
         "decided_by": r.get("decided_by"), "decision_note": r.get("decision_note"),
     } for r in rows]}
+
+
+@router.get("/api/cover")
+async def venue_covers(venue_id: str = Query(...), status: str = Query("")) -> dict:
+    """Manager view of the venue's shift cover requests."""
+    enforce_venue_access(venue_id)
+    db = get_db()
+    emp_names = {e.id: e.name for e in (db.get_employees(venue_id) or [])}
+    rows = db.list_shift_covers(venue_id) or []
+    if status:
+        rows = [c for c in rows if c.get("status") == status]
+    return {"venue_id": venue_id, "count": len(rows),
+            "covers": [_cover_payload(c, emp_names) for c in rows]}
+
+
+def _reassign_shift(db, venue_id: str, shift_id: str, new_employee_id: str) -> bool:
+    """Move the shift to its new owner on the roster itself. Returns False if
+    the shift no longer exists (roster edited since the cover was requested)."""
+    for roster in db.list_rosters() or []:
+        if getattr(roster, "venue_id", None) != venue_id:
+            continue
+        for s in roster.shifts:
+            if s.id == shift_id:
+                s.employee_id = new_employee_id
+                db.save_roster(roster)
+                return True
+    return False
+
+
+@router.post("/api/cover/{cover_id}/decide")
+async def decide_cover(cover_id: str, body: CoverDecision,
+                       user: UserContext = Depends(get_current_user)) -> dict:
+    """Approve (reassigns the shift on the roster) or decline a claimed cover."""
+    enforce_venue_access(body.venue_id)
+    db = get_db()
+    cover = db.get_shift_cover(cover_id)
+    if not cover or cover.get("venue_id") != body.venue_id:
+        raise HTTPException(status_code=404, detail="Cover request not found")
+    if cover.get("status") == "open":
+        raise HTTPException(status_code=409, detail="Nobody has claimed this shift yet")
+    if cover.get("status") != "claimed":
+        raise HTTPException(status_code=409, detail=f"Request is already {cover.get('status')}")
+
+    if body.approve:
+        # The roster is the source of truth — a cover is only approved if the
+        # shift genuinely moves. Fail loud if the roster changed underneath us.
+        if not _reassign_shift(db, body.venue_id, cover["shift_id"], cover["claimed_by"]):
+            raise HTTPException(
+                status_code=409,
+                detail="That shift no longer exists on the roster — it may have "
+                       "been edited or republished. Decline this request instead.")
+        cover["status"] = "approved"
+    else:
+        # Declined: shift stays with the requester; reopen for other claimants
+        cover["status"] = "open"
+        cover["claimed_by"] = None
+    cover["decided_by"] = user.user_id
+    cover["decided_at"] = datetime.utcnow()
+    cover["decision_note"] = body.note
+    if not body.approve:
+        db.save_shift_cover(cover)
+        return {"status": "reopened", "cover_id": cover_id}
+    db.save_shift_cover(cover)
+    logger.info(f"Cover approved: shift {cover['shift_id']} -> {cover['claimed_by']} at {body.venue_id}")
+    return {"status": "approved", "cover_id": cover_id}
 
 
 @router.post("/api/leave/{req_id}/decide")

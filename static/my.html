@@ -96,6 +96,15 @@
       max-width: 528px; margin: 0 auto; }
     .toast.err { border-left-color: var(--red); }
     .toast.ok { border-left-color: var(--green); }
+    .cover-btn { background: none; border: 1px solid var(--border); color: var(--muted);
+      border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+      font-family: inherit; flex-shrink: 0; }
+    .claim-btn { background: var(--blue); border: none; color: #fff; border-radius: 8px;
+      padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+      font-family: inherit; flex-shrink: 0; }
+    .cancel-btn { background: none; border: 1px solid var(--border); color: var(--red);
+      border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+      font-family: inherit; flex-shrink: 0; }
     .nolink { text-align: center; padding: 40px 20px; }
     .nolink h2 { font-size: 18px; margin-bottom: 10px; }
     .nolink p { color: var(--muted); font-size: 14px; line-height: 1.5; }
@@ -131,6 +140,15 @@
       <div class="card" id="hours-card"><div class="empty">No timesheets yet</div></div>
     </div>
 
+    <div id="view-cover" style="display:none;">
+      <div class="section-title">Up for grabs</div>
+      <div class="card" id="grabs-card"><div class="empty">Nothing up for grabs right now</div></div>
+      <div class="section-title">My cover requests</div>
+      <div class="card" id="mycover-card"><div class="empty">You haven't asked for cover</div></div>
+      <div class="section-title">Shifts I'm covering</div>
+      <div class="card" id="claimed-card"><div class="empty">None yet</div></div>
+    </div>
+
     <div id="view-leave" style="display:none;">
       <div class="section-title">Request leave</div>
       <div class="card">
@@ -155,6 +173,10 @@
     <button data-view="hours" onclick="show('hours')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
       Hours
+    </button>
+    <button data-view="cover" onclick="show('cover')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+      Cover
     </button>
     <button data-view="leave" onclick="show('leave')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M2 12c0-5 4-9 10-9M2 12c0 5 4 9 10 9m10-9c0-5-4-9-10-9m10 9c0 5-4 9-10 9M12 3c2.5 2.4 4 5.5 4 9s-1.5 6.6-4 9c-2.5-2.4-4-5.5-4-9s1.5-6.6 4-9z"/></svg>
@@ -204,7 +226,7 @@ function logout() {
 }
 
 function show(view) {
-  ['shifts', 'hours', 'leave'].forEach(function (v) {
+  ['shifts', 'hours', 'cover', 'leave'].forEach(function (v) {
     document.getElementById('view-' + v).style.display = v === view ? 'block' : 'none';
   });
   document.querySelectorAll('nav button').forEach(function (b) {
@@ -212,6 +234,7 @@ function show(view) {
   });
   if (view === 'shifts') loadShifts();
   if (view === 'hours') loadHours();
+  if (view === 'cover') loadCover();
   if (view === 'leave') loadLeave();
 }
 
@@ -240,7 +263,9 @@ async function loadShifts() {
           '<div class="times">' + esc(s.start) + ' &ndash; ' + esc(s.end) + '</div>' +
           '<div class="meta">' + esc(s.role || '') + (s.break_minutes ? ' &middot; ' + s.break_minutes + 'm break' : '') + '</div>' +
         '</div>' +
-        (isToday ? '<span class="badge today">Today</span>' : '') +
+        (isToday
+          ? '<span class="badge today">Today</span>'
+          : '<button class="cover-btn" onclick="offerCover(\'' + esc(s.id) + '\', \'' + esc(s.date) + ' ' + esc(s.start) + '\')">Can&rsquo;t work?</button>') +
       '</div>';
     }).join('');
   } catch (e) {
@@ -297,6 +322,76 @@ async function loadLeave() {
   } catch (e) {
     card.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
   }
+}
+
+async function offerCover(shiftId, label) {
+  const reason = window.prompt('Put your ' + label + ' shift up for a co-worker to cover?\nOptional reason (your manager sees this):', '');
+  if (reason === null) return;
+  try {
+    await api('/api/me/shifts/' + encodeURIComponent(shiftId) + '/cover',
+      { method: 'POST', body: { reason: reason.trim() } });
+    toast('Shift is up for grabs — needs a claim, then manager approval', 'ok');
+    show('cover');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+function coverRow(c, extra) {
+  return '<div class="leave-row">' +
+    '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">' +
+      '<div>' +
+        '<div class="dates">' + esc(niceDate(c.shift_date)) + ' &middot; ' + esc(c.shift_start) + '&ndash;' + esc(c.shift_end) + '</div>' +
+        '<div class="note">' + esc(c.role || '') + ' &middot; ' + esc(c.requested_by_name) +
+          (c.reason ? ' &middot; ' + esc(c.reason) : '') + '</div>' +
+        (c.claimed_by_name ? '<div class="note">Claimed by ' + esc(c.claimed_by_name) + '</div>' : '') +
+        (c.decision_note ? '<div class="note">Manager: ' + esc(c.decision_note) + '</div>' : '') +
+      '</div>' +
+      (extra || '<span class="badge ' + esc(c.status) + '">' + esc(c.status) + '</span>') +
+    '</div>' +
+  '</div>';
+}
+
+async function loadCover() {
+  try {
+    const data = await api('/api/me/cover');
+    const grabs = document.getElementById('grabs-card');
+    grabs.innerHTML = (data.up_for_grabs && data.up_for_grabs.length)
+      ? data.up_for_grabs.map(function (c) {
+          return coverRow(c, '<button class="claim-btn" onclick="claimCover(\'' + esc(c.id) + '\')">I&rsquo;ll take it</button>');
+        }).join('')
+      : '<div class="empty">Nothing up for grabs right now</div>';
+    const mine = document.getElementById('mycover-card');
+    mine.innerHTML = (data.mine && data.mine.length)
+      ? data.mine.map(function (c) {
+          const cancel = (c.status === 'open' || c.status === 'claimed')
+            ? ' <button class="cancel-btn" onclick="cancelCover(\'' + esc(c.id) + '\')">Withdraw</button>' : '';
+          return coverRow(c, '<span style="display:flex; align-items:center; gap:6px;"><span class="badge ' + esc(c.status) + '">' + esc(c.status) + '</span>' + cancel + '</span>');
+        }).join('')
+      : '<div class="empty">You haven&rsquo;t asked for cover</div>';
+    const claimed = document.getElementById('claimed-card');
+    claimed.innerHTML = (data.claimed_by_me && data.claimed_by_me.length)
+      ? data.claimed_by_me.map(function (c) { return coverRow(c); }).join('')
+      : '<div class="empty">None yet</div>';
+  } catch (e) {
+    document.getElementById('grabs-card').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
+}
+
+async function claimCover(id) {
+  try {
+    const r = await api('/api/me/cover/' + encodeURIComponent(id) + '/claim', { method: 'POST' });
+    toast(r.message || 'Claimed', 'ok');
+    loadCover();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function cancelCover(id) {
+  try {
+    await api('/api/me/cover/' + encodeURIComponent(id) + '/cancel', { method: 'POST' });
+    toast('Withdrawn — the shift is still yours', 'ok');
+    loadCover();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 async function submitLeave() {

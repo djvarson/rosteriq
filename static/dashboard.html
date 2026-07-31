@@ -3453,8 +3453,31 @@
 
       <div class="page" id="page-leave" data-page="leave" style="display: none;">
         <div class="page-header">
-          <h1 class="page-title">Leave Requests</h1>
-          <p class="page-subtitle">Staff request leave at <strong>/my</strong> on their phone — approve or decline here</p>
+          <h1 class="page-title">Leave &amp; Shift Cover</h1>
+          <p class="page-subtitle">Staff request leave and offer shifts for cover at <strong>/my</strong> on their phone — approve or decline here</p>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h3 style="font-size:15px;">Shift cover requests</h3>
+            <span id="cv-summary" style="color:var(--text-muted); font-size:13px;"></span>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data-table" style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                  <th style="padding:10px 8px;">Shift</th>
+                  <th style="padding:10px 8px;">Who can't work</th>
+                  <th style="padding:10px 8px;">Reason</th>
+                  <th style="padding:10px 8px;">Claimed by</th>
+                  <th style="padding:10px 8px;">Status</th>
+                  <th style="padding:10px 8px;"></th>
+                </tr>
+              </thead>
+              <tbody id="cv-rows">
+                <tr><td colspan="6" style="padding:24px; text-align:center; color:var(--text-muted);">No cover requests</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
         <div class="card" style="margin-bottom:16px;">
           <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
@@ -5569,6 +5592,7 @@ function showPage(pageId) {
 
   if (pageId === 'leave') {
     loadLeaveRequests();
+    loadCoverRequests();
   }
 
   // Focus chat input when navigating to AI Agent page
@@ -5586,7 +5610,7 @@ function updatePageTitle(pageId) {
     roster: 'Weekly Roster',
     'on-shift': 'On-Shift Operations',
     timesheets: 'Timesheets',
-    leave: 'Leave Requests',
+    leave: 'Leave & Shift Cover',
     staff: 'Staff Management',
     compliance: 'Compliance',
     reports: 'Reports',
@@ -5883,6 +5907,71 @@ function renderLeaveRequests() {
       '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
       '</tr>';
   }).join('');
+}
+
+let cvRows = [];
+
+async function loadCoverRequests() {
+  if (!state.currentVenue) return;
+  try {
+    const data = await fetchAPI('/api/cover?venue_id=' + encodeURIComponent(state.currentVenue));
+    cvRows = data.covers || [];
+    const claimed = cvRows.filter(function(c) { return c.status === 'claimed'; }).length;
+    document.getElementById('cv-summary').textContent =
+      cvRows.length + ' requests' + (claimed ? ' · ' + claimed + ' ready to approve' : '');
+    renderCoverRequests();
+  } catch (e) {
+    showToast('Failed to load cover requests: ' + e.message, 'error');
+  }
+}
+
+function renderCoverRequests() {
+  const tbody = document.getElementById('cv-rows');
+  if (!cvRows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:24px; text-align:center; color:var(--text-muted);">No cover requests — staff offer shifts from /my</td></tr>';
+    return;
+  }
+  tbody.innerHTML = cvRows.map(function(c, i) {
+    const chipStyle = {
+      approved: 'background:rgba(34,197,94,.15); color:var(--success);',
+      claimed: 'background:rgba(245,158,11,.15); color:var(--brand-blue);',
+      open: 'background:rgba(56,189,248,.15); color:#38BDF8;',
+      cancelled: 'background:rgba(148,163,184,.15); color:var(--text-muted);',
+    }[c.status] || 'background:rgba(148,163,184,.15); color:var(--text-muted);';
+    const chip = '<span style="' + chipStyle + ' padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">' +
+      (c.status === 'claimed' ? 'READY TO APPROVE' : c.status.toUpperCase()) + '</span>';
+    const actions = c.status === 'claimed'
+      ? '<button class="btn btn-primary btn-small" onclick="decideCover(' + i + ', true)">Approve swap</button> ' +
+        '<button class="btn btn-secondary btn-small" onclick="decideCover(' + i + ', false)">Decline</button>'
+      : '';
+    return '<tr style="border-top:1px solid var(--border);">' +
+      '<td style="padding:10px 8px; font-weight:600;">' + esc(c.shift_date) + ' ' + esc(c.shift_start || '') + '–' + esc(c.shift_end || '') + (c.role ? ' · ' + esc(c.role) : '') + '</td>' +
+      '<td style="padding:10px 8px;">' + esc(c.requested_by_name) + '</td>' +
+      '<td style="padding:10px 8px; color:var(--text-muted);">' + esc(c.reason || '—') + '</td>' +
+      '<td style="padding:10px 8px;">' + esc(c.claimed_by_name || '—') + '</td>' +
+      '<td style="padding:10px 8px;">' + chip + '</td>' +
+      '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function decideCover(i, approve) {
+  const c = cvRows[i];
+  const verb = approve
+    ? 'Approve: ' + c.claimed_by_name + ' covers ' + c.requested_by_name + '\'s shift on ' + c.shift_date + '?\nThe roster will be updated.'
+    : 'Decline this claim? The shift stays with ' + c.requested_by_name + ' and reopens for others.';
+  const note = window.prompt(verb + '\nOptional note:', '');
+  if (note === null) return;
+  try {
+    await fetchAPI('/api/cover/' + c.id + '/decide', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: state.currentVenue, approve: approve, note: note.trim() }),
+    });
+    showToast(approve ? 'Swap approved — roster updated ✓' : 'Declined — request reopened', 'success');
+    loadCoverRequests();
+  } catch (e) {
+    showToast('Decision failed: ' + e.message, 'error');
+  }
 }
 
 async function decideLeave(i, approve) {

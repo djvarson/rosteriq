@@ -482,6 +482,17 @@ class BaseStore:
     def list_leave_requests(self, venue_id: str) -> list:
         raise NotImplementedError
 
+    # --- Shift cover requests (staff portal phase 2) -----------------------
+
+    def save_shift_cover(self, cover: dict) -> None:
+        raise NotImplementedError
+
+    def get_shift_cover(self, cover_id: str):
+        raise NotImplementedError
+
+    def list_shift_covers(self, venue_id: str) -> list:
+        raise NotImplementedError
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:
@@ -876,6 +887,7 @@ class MemoryStore(BaseStore):
         self._ingredients: dict[str, dict] = {}
         self._recipes: dict[str, dict] = {}
         self._leave_requests: dict[str, dict] = {}
+        self._shift_covers: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
         self._experiment_outcomes: dict[str, dict] = {}  # Key: outcome_id
@@ -1026,6 +1038,20 @@ class MemoryStore(BaseStore):
         return sorted(
             [r for r in self._leave_requests.values() if r.get("venue_id") == venue_id],
             key=lambda r: str(r.get("created_at")), reverse=True,
+        )
+
+    # --- Shift covers ---
+
+    def save_shift_cover(self, cover):
+        self._shift_covers[cover["id"]] = dict(cover)
+
+    def get_shift_cover(self, cover_id):
+        return self._shift_covers.get(cover_id)
+
+    def list_shift_covers(self, venue_id):
+        return sorted(
+            [c for c in self._shift_covers.values() if c.get("venue_id") == venue_id],
+            key=lambda c: str(c.get("created_at")), reverse=True,
         )
 
     def get_employees(self, venue_id=None):
@@ -2519,6 +2545,26 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "shift_covers": """
+            CREATE TABLE IF NOT EXISTS shift_covers (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                shift_id TEXT NOT NULL,
+                shift_date DATE NOT NULL,
+                shift_start TEXT,
+                shift_end TEXT,
+                role TEXT,
+                requested_by TEXT NOT NULL,
+                reason TEXT,
+                claimed_by TEXT,
+                status TEXT NOT NULL DEFAULT 'open',
+                decided_by TEXT,
+                decided_at TIMESTAMP WITH TIME ZONE,
+                decision_note TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "recipes": """
             CREATE TABLE IF NOT EXISTS recipes (
                 id TEXT PRIMARY KEY,
@@ -3104,6 +3150,42 @@ class PostgresStore(BaseStore):
             self._ensure_table(cur, "leave_requests")
             cur.execute("""
                 SELECT * FROM leave_requests WHERE venue_id = %s ORDER BY created_at DESC
+            """, (venue_id,))
+            return [dict(r) for r in cur.fetchall()]
+
+    def save_shift_cover(self, cover):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "shift_covers")
+            cur.execute("""
+                INSERT INTO shift_covers (id, venue_id, shift_id, shift_date, shift_start,
+                    shift_end, role, requested_by, reason, claimed_by, status,
+                    decided_by, decided_at, decision_note, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    claimed_by=EXCLUDED.claimed_by, status=EXCLUDED.status,
+                    decided_by=EXCLUDED.decided_by, decided_at=EXCLUDED.decided_at,
+                    decision_note=EXCLUDED.decision_note, updated_at=now()
+            """, (
+                cover["id"], cover["venue_id"], cover["shift_id"], cover["shift_date"],
+                cover.get("shift_start"), cover.get("shift_end"), cover.get("role"),
+                cover["requested_by"], cover.get("reason"), cover.get("claimed_by"),
+                cover.get("status", "open"), cover.get("decided_by"),
+                cover.get("decided_at"), cover.get("decision_note"),
+                cover.get("created_at", datetime.utcnow()),
+            ))
+
+    def get_shift_cover(self, cover_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "shift_covers")
+            cur.execute("SELECT * FROM shift_covers WHERE id = %s", (cover_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def list_shift_covers(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "shift_covers")
+            cur.execute("""
+                SELECT * FROM shift_covers WHERE venue_id = %s ORDER BY created_at DESC
             """, (venue_id,))
             return [dict(r) for r in cur.fetchall()]
 
