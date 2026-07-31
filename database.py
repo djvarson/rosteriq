@@ -2844,6 +2844,9 @@ class PostgresStore(BaseStore):
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS approved_by TEXT",
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE",
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS adjustment_note TEXT",
+            # tanda_org_id is UNIQUE; venues without Tanda must store NULL (which
+            # never collides), not '' (which collides on the second venue ever).
+            "UPDATE venues SET tanda_org_id = NULL WHERE tanda_org_id = ''",
         ):
             try:
                 with self._cursor() as cur:
@@ -2864,7 +2867,10 @@ class PostgresStore(BaseStore):
                     max_labour_pct=EXCLUDED.max_labour_pct, pos_system=EXCLUDED.pos_system,
                     updated_at=now()
             """, (
-                venue.id, venue.name, venue.tanda_org_id, venue.state.value,
+                # Empty tanda_org_id -> NULL: the column is UNIQUE and most venues
+                # don't use Tanda, so "" would collide on the second venue ever
+                # created (the production onboarding 500 found in preflight).
+                venue.id, venue.name, venue.tanda_org_id or None, venue.state.value,
                 venue.timezone, json.dumps(venue.min_staff),
                 float(venue.max_labour_pct), venue.pos_system, venue.created_at,
             ))
@@ -2882,7 +2888,7 @@ class PostgresStore(BaseStore):
 
     def _row_to_venue(self, row):
         return VenueConfig(
-            id=row["id"], name=row["name"], tanda_org_id=row["tanda_org_id"],
+            id=row["id"], name=row["name"], tanda_org_id=row["tanda_org_id"] or "",
             state=State(row["state"]), timezone=row["timezone"],
             min_staff=row["min_staff"] if isinstance(row["min_staff"], dict) else json.loads(row["min_staff"]),
             max_labour_pct=float(row["max_labour_pct"]),
