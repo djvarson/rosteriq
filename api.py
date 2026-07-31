@@ -1247,6 +1247,27 @@ async def value_error_handler(request: Request, exc: ValueError):
     )
 
 
+try:
+    from rosteriq.services.tenant_isolation import IsolationViolation as _IsolationViolation
+
+    @app.exception_handler(_IsolationViolation)
+    async def isolation_violation_handler(request: Request, exc: Exception):
+        """Cross-tenant access is a clean 403, never a 500."""
+        logger.warning(f"Isolation violation: {exc}")
+        return RIQJSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "You do not have access to this venue.",
+                    "status": 403,
+                }
+            },
+        )
+except ImportError:
+    pass
+
+
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle unexpected exceptions with generic message (don't leak internals)."""
@@ -2001,7 +2022,29 @@ async def staff_portal():
 
 @app.post("/venues")
 async def create_venue(venue: VenueConfig):
-    _store["venues"][venue.id] = venue
+    # First-venue bootstrap: a signed-in user creating a BRAND-NEW venue id
+    # becomes that venue's manager. Existing venues stay protected — touching
+    # one you don't own is a 403, and you gain access only to the venue you
+    # just created (self-serve onboarding without weakening isolation).
+    _tenant = get_tenant_context_optional()
+    if _tenant is not None and not _tenant.is_owner and venue.id not in _tenant.venue_ids:
+        _raw = getattr(_db, "_store", _db)  # unscoped store for the bootstrap write
+        if _raw.get_venue(venue.id) is not None:
+            raise HTTPException(status_code=403, detail="You do not have access to this venue")
+        _raw.save_venue(venue)
+        _user = _raw.get_user_by_id(_tenant.user_id)
+        if _user:
+            _vids = list(_user.get("venue_ids") or [])
+            if venue.id not in _vids:
+                _vids.append(venue.id)
+            _user["venue_ids"] = _vids
+            if _user.get("role") == "staff":
+                _user["role"] = "manager"
+            _raw.save_user(_user)
+        _tenant.venue_ids.append(venue.id)
+        logger.info(f"First-venue bootstrap: user {_tenant.user_id} created and now manages {venue.id}")
+    else:
+        _store["venues"][venue.id] = venue
 
     # Invalidate venue cache
     if get_cache_manager:
