@@ -11,17 +11,20 @@ Endpoints:
 - GET /api/payroll/history — export history
 """
 
+import csv
+import io
 import logging
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_access
-from rosteriq.models import State
+from rosteriq.models import Shift, ShiftStatus, State
 from rosteriq.services.payroll_export import (
     PayrollExporter, PayrollBatch, PayrollStatus
 )
@@ -197,6 +200,144 @@ async def prepare_payroll_batch(
     except Exception as e:
         logger.error(f"Error preparing payroll batch: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _parse_dt(v):
+    if isinstance(v, datetime):
+        return v.replace(tzinfo=None)
+    return datetime.fromisoformat(str(v).replace("Z", "+00:00")).replace(tzinfo=None)
+
+
+@router.post("/prepare-actuals", response_model=PayrollBatchResponse)
+async def prepare_payroll_from_timesheets(
+    request: PreparePayrollRequest,
+    db=Depends(get_db),
+):
+    """
+    Prepare a payroll batch from APPROVED timesheets — actual punched time,
+    not the rostered plan.
+
+    Fail-loud by design: if any timesheet in the period is still open
+    (someone's clocked in) or closed-but-unapproved, the batch is refused
+    with each one named. Approve everything on the Timesheets page first —
+    payroll built on unreviewed punches is how venues get burned.
+    """
+    enforce_venue_access(request.venue_id)
+    venue = db.get_venue(request.venue_id)
+    if not venue:
+        raise HTTPException(status_code=404, detail=f"Venue {request.venue_id} not found")
+
+    sheets = db.get_timesheets(request.venue_id, request.period_start,
+                               request.period_end) or []
+    if not sheets:
+        raise HTTPException(
+            status_code=422,
+            detail="No timesheets in this period — staff clock in at /timeclock, "
+                   "and approved punches become payroll.")
+
+    employees = {e.id: e for e in (db.get_employees(request.venue_id) or [])}
+    blockers = []
+    for t in sheets:
+        status = t.get("status")
+        if status in ("approved",):
+            continue
+        emp_name = getattr(employees.get(t.get("employee_id")), "name", t.get("employee_id"))
+        label = "still clocked in" if status == "open" else "awaiting approval"
+        blockers.append(f"{emp_name} on {t.get('work_date')} ({label})")
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail="Payroll uses approved timesheets only — sort these first: "
+                   + "; ".join(sorted(blockers)))
+
+    shifts = []
+    for t in sheets:
+        ci, co = _parse_dt(t["clock_in"]), _parse_dt(t["clock_out"])
+        shifts.append(Shift(
+            id=str(t.get("id")),
+            employee_id=str(t.get("employee_id")),
+            date=ci.date(),
+            start_time=ci.time(),
+            end_time=co.time(),
+            break_minutes=int(t.get("break_minutes") or 0),
+            status=ShiftStatus.completed,
+            role="",
+        ))
+
+    exporter = PayrollExporter(db)
+    batch = exporter.prepare_timesheet_data(
+        venue_id=request.venue_id,
+        period_start=request.period_start,
+        period_end=request.period_end,
+        state=request.state,
+        shifts=shifts,
+        employees=employees,
+    )
+    errors = exporter.validate_batch(batch)
+    db.save_payroll_batch(batch.to_dict())
+    logger.info(f"Payroll batch {batch.batch_id} prepared from {len(shifts)} "
+                f"approved timesheets at {request.venue_id}")
+
+    return PayrollBatchResponse(
+        batch_id=batch.batch_id,
+        venue_id=batch.venue_id,
+        period_start=batch.period_start,
+        period_end=batch.period_end,
+        status=batch.status.value,
+        employee_count=len(batch.employees),
+        total_gross=str(batch.total_gross),
+        total_super=str(batch.total_super),
+        validation_errors=errors,
+        created_at=batch.created_at.isoformat(),
+    )
+
+
+@router.get("/batch/{batch_id}/csv")
+async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
+    """The accountant's file: one row per employee with hours and gross
+    broken down, plus a totals row. Opens straight into Excel or imports
+    into Xero as a payroll worksheet."""
+    enforce_venue_access(venue_id)
+    db = get_db()
+    batch = db.get_payroll_batch(batch_id)
+    if not batch or batch.get("venue_id") != venue_id:
+        raise HTTPException(status_code=404, detail="Payroll batch not found")
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([f"RosterIQ payroll batch {batch['batch_id']}",
+                f"period {batch['period_start']} to {batch['period_end']}",
+                "basis: approved timesheets / rostered shifts as prepared",
+                "NOT a payment file — review with your payroll advisor"])
+    w.writerow([])
+    w.writerow(["Employee", "Ordinary hours", "Ordinary rate", "Ordinary gross",
+                "Penalty hours detail", "Penalty gross", "Overtime hours",
+                "Overtime gross", "Allowances", "Total gross", "Super (11.5%)",
+                "Total incl super"])
+    for e in batch.get("employees", []):
+        penalty_detail = "; ".join(
+            f"{p['penalty_type']} {p['hours']}h x{p['multiplier']}"
+            for p in e.get("penalty_entries", []))
+        w.writerow([
+            e.get("name"), e.get("ordinary_hours"), e.get("ordinary_rate"),
+            e.get("ordinary_gross"), penalty_detail, e.get("penalty_gross"),
+            e.get("overtime_hours"), e.get("overtime_amount"),
+            e.get("allowances_total"), e.get("total_gross"),
+            e.get("super_amount"), e.get("total_with_super"),
+        ])
+    w.writerow([])
+    w.writerow(["TOTALS", batch.get("total_ordinary_hours"), "",
+                batch.get("total_ordinary_gross"), "", batch.get("total_penalty_gross"),
+                batch.get("total_overtime_hours"), batch.get("total_overtime_gross"),
+                batch.get("total_allowances"), batch.get("total_gross"),
+                batch.get("total_super"), ""])
+
+    return PlainTextResponse(
+        buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition":
+                 f"attachment; filename=payroll-{batch['period_start']}-to-{batch['period_end']}.csv"},
+    )
 
 
 @router.get("/batch/{batch_id}", response_model=PayrollBatchResponse)

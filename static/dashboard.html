@@ -3461,6 +3461,16 @@
             </table>
           </div>
         </div>
+        <div class="card" style="margin-top:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+              <h3 style="font-size:15px;">Payroll prep — approved punches only</h3>
+              <p style="color:var(--text-muted); font-size:13px; margin-top:4px;">Builds the pay-period batch from approved timesheets (actual worked time, award-priced) and downloads the accountant's CSV. Anything unapproved blocks it, by name.</p>
+            </div>
+            <button class="btn btn-primary" onclick="preparePayroll()">Prepare payroll for this range</button>
+          </div>
+          <div id="pp-result" style="margin-top:10px;"></div>
+        </div>
       </div>
 
       <div class="page" id="page-leave" data-page="leave" style="display: none;">
@@ -7019,6 +7029,58 @@ async function decideLeave(i, approve) {
   } catch (e) {
     showToast('Decision failed: ' + e.message, 'error');
   }
+}
+
+async function preparePayroll() {
+  if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
+  const start = document.getElementById('ts-start').value;
+  const end = document.getElementById('ts-end').value;
+  if (!start || !end) { showToast('Set the From/To range above first', 'warning'); return; }
+  const box = document.getElementById('pp-result');
+  box.innerHTML = '<div style="color:var(--text-muted);">Pricing approved punches through the award engine…</div>';
+  try {
+    const venue = await fetchAPI('/venues/' + encodeURIComponent(state.currentVenue));
+    const batch = await fetchAPI('/api/payroll/prepare-actuals', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue_id: state.currentVenue, period_start: start, period_end: end,
+        state: venue.state || 'nsw',
+      }),
+    });
+    const errs = (batch.validation_errors || []).length
+      ? '<div style="color:var(--danger); font-size:13px; margin-top:6px;">⚠ ' + batch.validation_errors.map(esc).join('<br>⚠ ') + '</div>'
+      : '';
+    box.innerHTML =
+      '<div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">' +
+        '<div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Staff</div><div style="font-size:20px; font-weight:800;">' + batch.employee_count + '</div></div>' +
+        '<div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Gross</div><div style="font-size:20px; font-weight:800;">' + formatCurrency(parseFloat(batch.total_gross)) + '</div></div>' +
+        '<div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Super</div><div style="font-size:20px; font-weight:800;">' + formatCurrency(parseFloat(batch.total_super)) + '</div></div>' +
+        '<a class="btn btn-secondary" style="margin-left:auto;" href="/api/payroll/batch/' + esc(batch.batch_id) + '/csv?venue_id=' + encodeURIComponent(state.currentVenue) + '" onclick="return downloadPayrollCsv(event, \'' + esc(batch.batch_id) + '\')">Download accountant CSV</a>' +
+      '</div>' +
+      '<div style="color:var(--text-muted); font-size:12px; margin-top:8px;">Figures are prepared for review — RosterIQ never pays anyone. Have your payroll advisor sign off award rates before running pays.</div>' +
+      errs;
+  } catch (e) {
+    box.innerHTML = '<div style="color:var(--danger); font-size:13px;">' + esc(e.message) + '</div>';
+  }
+}
+
+async function downloadPayrollCsv(ev, batchId) {
+  ev.preventDefault();
+  try {
+    const res = await fetch('/api/payroll/batch/' + batchId + '/csv?venue_id=' + encodeURIComponent(state.currentVenue), {
+      headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('jwt_token') || localStorage.getItem('auth_token')) },
+    });
+    if (!res.ok) throw new Error('Download failed (' + res.status + ')');
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (res.headers.get('content-disposition') || '').split('filename=')[1] || 'payroll.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+  return false;
 }
 
 async function approveTimesheet(i) {
