@@ -5420,7 +5420,9 @@ class PostgresStore(BaseStore):
             """, (batch_id,))
             row = cur.fetchone()
             if row:
-                return json.loads(row["data"])
+                # JSONB columns come back already parsed; TEXT comes back raw
+                data = row["data"]
+                return data if isinstance(data, dict) else json.loads(data)
         return None
 
     def list_payroll_batches(self, venue_id: str) -> list[dict]:
@@ -5434,7 +5436,9 @@ class PostgresStore(BaseStore):
             """, (venue_id,))
             results = []
             for row in cur.fetchall():
-                results.append(json.loads(row["data"]))
+                # JSONB columns come back already parsed; TEXT comes back raw
+                data = row["data"]
+                results.append(data if isinstance(data, (dict, list)) else json.loads(data))
             return results
 
     def save_payroll_export(self, export: dict) -> None:
@@ -5466,7 +5470,9 @@ class PostgresStore(BaseStore):
             """, (venue_id, limit))
             results = []
             for row in cur.fetchall():
-                results.append(json.loads(row["data"]))
+                # JSONB columns come back already parsed; TEXT comes back raw
+                data = row["data"]
+                results.append(data if isinstance(data, (dict, list)) else json.loads(data))
             return results
 
     # --- Notification Preferences ---
@@ -5571,7 +5577,9 @@ class PostgresStore(BaseStore):
             cur.execute(query, params)
             results = []
             for row in cur.fetchall():
-                results.append(json.loads(row["data"]))
+                # JSONB columns come back already parsed; TEXT comes back raw
+                data = row["data"]
+                results.append(data if isinstance(data, (dict, list)) else json.loads(data))
             return results
 
     # --- Roster publishing state machine ---
@@ -5661,7 +5669,9 @@ class PostgresStore(BaseStore):
             """, (roster_id,))
             results = []
             for row in cur.fetchall():
-                results.append(json.loads(row["data"]))
+                # JSONB columns come back already parsed; TEXT comes back raw
+                data = row["data"]
+                results.append(data if isinstance(data, (dict, list)) else json.loads(data))
             return results
 
     # --- Push Notifications ---
