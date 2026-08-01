@@ -3569,8 +3569,27 @@
               <div style="font-size:22px; font-weight:800;" id="iv-low">—</div></div>
             <div style="margin-left:auto; display:flex; gap:10px;">
               <button class="btn btn-secondary" id="iv-st-btn" onclick="startStocktake()">Start stocktake</button>
+              <button class="btn btn-secondary" onclick="openInvoiceEntry()">Enter invoice</button>
               <button class="btn btn-primary" onclick="draftOrders()">Draft supplier orders</button>
             </div>
+          </div>
+        </div>
+
+        <div class="card" id="iv-inv-card" style="margin-bottom:16px; display:none;">
+          <h3 style="font-size:15px; margin-bottom:10px;">Enter supplier invoice — actual delivery beats the order every time</h3>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px;">
+            <div class="input-group" style="margin:0;"><label>Supplier</label><input type="text" id="si-supplier" style="width:140px;"></div>
+            <div class="input-group" style="margin:0;"><label>Invoice #</label><input type="text" id="si-number" style="width:110px;"></div>
+            <div class="input-group" style="margin:0;"><label>Date</label><input type="date" id="si-date"></div>
+            <div class="input-group" style="margin:0;"><label>Fulfils order</label>
+              <select id="si-order" style="width:200px;" onchange="siPrefillFromOrder()"><option value="">— none —</option></select></div>
+          </div>
+          <div id="si-lines"></div>
+          <div style="display:flex; gap:8px; margin-top:10px;">
+            <button class="btn btn-secondary btn-small" onclick="siAddLine()">+ Line</button>
+            <span style="margin-left:auto;"></span>
+            <button class="btn btn-secondary btn-small" onclick="document.getElementById('iv-inv-card').style.display='none'">Cancel</button>
+            <button class="btn btn-primary btn-small" onclick="saveInvoice()">Book it in</button>
           </div>
         </div>
 
@@ -3613,6 +3632,11 @@
         <div class="card" style="margin-bottom:16px;">
           <h3 style="font-size:15px; margin-bottom:10px;">Supplier orders</h3>
           <div id="iv-orders"><div style="color:var(--text-muted); text-align:center; padding:18px;">No orders yet — Draft supplier orders builds one per supplier from everything below par</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <h3 style="font-size:15px; margin-bottom:10px;">Invoices entered</h3>
+          <div id="iv-invoices"><div style="color:var(--text-muted); text-align:center; padding:18px;">None yet — Enter invoice books deliveries in at actual quantities and updates prices when they move</div></div>
         </div>
 
         <div class="card">
@@ -6488,6 +6512,8 @@ async function savePrice(i) {
 // ============================================
 let ivRows = [];
 let ivOpenStocktake = null;
+let ivOrders = [];
+let siLines = [];
 
 async function loadInventory() {
   if (!state.currentVenue) return;
@@ -6507,7 +6533,12 @@ async function loadInventory() {
   } catch (e) { /* card stays hidden */ }
   try {
     const od = await fetchAPI('/api/inventory/orders?venue_id=' + encodeURIComponent(state.currentVenue));
-    renderOrders(od.orders || []);
+    ivOrders = od.orders || [];
+    renderOrders(ivOrders);
+  } catch (e) { /* list stays empty */ }
+  try {
+    const iv = await fetchAPI('/api/inventory/invoices?venue_id=' + encodeURIComponent(state.currentVenue));
+    renderInvoices(iv.invoices || []);
   } catch (e) { /* list stays empty */ }
 }
 
@@ -6642,6 +6673,121 @@ function renderOrders(orders) {
         '<div style="font-weight:700;">' + formatCurrency(o.total_cost || 0) + '</div>' +
       '</div>' + lines +
       '<div style="margin-top:8px;">' + actions + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// --- Supplier invoice entry ---
+function siIngredientOptions(selectedId) {
+  return ivRows.map(function(r) {
+    return '<option value="' + esc(r.ingredient_id) + '"' + (r.ingredient_id === selectedId ? ' selected' : '') + '>' +
+      esc(r.name) + '</option>';
+  }).join('');
+}
+
+function siRenderLines() {
+  document.getElementById('si-lines').innerHTML = siLines.map(function(l, i) {
+    return '<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">' +
+      '<select id="si-ing-' + i + '" style="flex:1; padding:6px;">' + siIngredientOptions(l.ingredient_id) + '</select>' +
+      '<input type="number" id="si-packs-' + i + '" min="0.01" step="1" value="' + (l.packs || '') + '" placeholder="packs" style="width:90px; padding:6px;">' +
+      '<input type="number" id="si-cost-' + i + '" min="0" step="0.01" value="' + (l.pack_cost == null ? '' : l.pack_cost) + '" placeholder="$/pack (opt)" style="width:110px; padding:6px;">' +
+      '<button class="btn btn-secondary btn-small" onclick="siRemoveLine(' + i + ')">×</button>' +
+    '</div>';
+  }).join('') || '<div style="color:var(--text-muted); font-size:13px;">Add the delivered lines — leave $/pack blank to keep the stored price</div>';
+}
+
+function siCollectLines() {
+  return siLines.map(function(_, i) {
+    const cost = document.getElementById('si-cost-' + i).value;
+    return {
+      ingredient_id: document.getElementById('si-ing-' + i).value,
+      packs: parseFloat(document.getElementById('si-packs-' + i).value),
+      pack_cost: cost === '' ? null : parseFloat(cost),
+    };
+  });
+}
+
+function siAddLine() {
+  siLines = siCollectLines();
+  siLines.push({ ingredient_id: (ivRows[0] || {}).ingredient_id, packs: '', pack_cost: null });
+  siRenderLines();
+}
+
+function siRemoveLine(i) {
+  siLines = siCollectLines();
+  siLines.splice(i, 1);
+  siRenderLines();
+}
+
+function openInvoiceEntry() {
+  if (!ivRows.length) { showToast('Add ingredients in Menu & Sales first', 'warning'); return; }
+  const sel = document.getElementById('si-order');
+  const ordered = ivOrders.filter(function(o) { return o.status === 'ordered'; });
+  sel.innerHTML = '<option value="">— none —</option>' + ordered.map(function(o) {
+    return '<option value="' + esc(o.id) + '">' + esc(o.supplier || 'Unassigned') + ' · ' + formatCurrency(o.total_cost || 0) + '</option>';
+  }).join('');
+  document.getElementById('si-supplier').value = '';
+  document.getElementById('si-number').value = '';
+  document.getElementById('si-date').value = new Date().toISOString().slice(0, 10);
+  siLines = [{ ingredient_id: (ivRows[0] || {}).ingredient_id, packs: '', pack_cost: null }];
+  siRenderLines();
+  document.getElementById('iv-inv-card').style.display = 'block';
+}
+
+function siPrefillFromOrder() {
+  const oid = document.getElementById('si-order').value;
+  if (!oid) return;
+  const order = ivOrders.find(function(o) { return o.id === oid; });
+  if (!order) return;
+  document.getElementById('si-supplier').value = order.supplier || '';
+  siLines = (order.items || []).map(function(it) {
+    return { ingredient_id: it.ingredient_id, packs: it.packs, pack_cost: null };
+  });
+  siRenderLines();
+}
+
+async function saveInvoice() {
+  const number = document.getElementById('si-number').value.trim();
+  if (!number) { showToast('Invoice number is needed (that is the duplicate guard)', 'warning'); return; }
+  const lines = siCollectLines().filter(function(l) { return l.ingredient_id && l.packs > 0; });
+  if (!lines.length) { showToast('Add at least one delivered line', 'warning'); return; }
+  try {
+    const r = await fetchAPI('/api/inventory/invoice', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue_id: state.currentVenue,
+        supplier: document.getElementById('si-supplier').value.trim(),
+        invoice_number: number,
+        invoice_date: document.getElementById('si-date').value || null,
+        order_id: document.getElementById('si-order').value,
+        lines: lines,
+      }),
+    });
+    let msg = 'Invoice booked — ' + formatCurrency(r.total) + ' in';
+    if (r.price_changes.length) msg += ' · ' + r.price_changes.length + ' price change(s), menu recosted';
+    if (r.order_closed) msg += ' · order closed';
+    showToast(msg, r.price_changes.length ? 'warning' : 'success');
+    document.getElementById('iv-inv-card').style.display = 'none';
+    loadInventory();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+function renderInvoices(invoices) {
+  const box = document.getElementById('iv-invoices');
+  if (!invoices.length) {
+    box.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding:18px;">None yet — Enter invoice books deliveries in at actual quantities and updates prices when they move</div>';
+    return;
+  }
+  box.innerHTML = invoices.slice(0, 8).map(function(v) {
+    const changes = (v.price_changes || []).map(function(p) {
+      return esc(p.name) + ' ' + formatCurrency(p.old_pack_cost) + '→' + formatCurrency(p.new_pack_cost);
+    }).join(', ');
+    return '<div style="display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; flex-wrap:wrap;">' +
+      '<span style="font-weight:600;">' + esc(v.invoice_number) + ' · ' + esc(v.supplier || 'Unassigned') + '</span>' +
+      '<span style="color:var(--text-muted);">' + (changes ? '⚠ ' + changes : 'no price changes') + '</span>' +
+      '<span style="font-weight:700;">' + formatCurrency(v.total || 0) + '</span>' +
     '</div>';
   }).join('');
 }

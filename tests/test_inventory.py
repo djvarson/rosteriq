@@ -302,6 +302,92 @@ def test_usage_report_theoretical_vs_actual():
     assert report["total_variance_value"] == 20.0
 
 
+def test_invoice_books_actuals_updates_prices_and_closes_order():
+    """Order 2 packs; supplier delivers 3 at a higher price: invoice books the
+    ACTUAL 3, updates the price (recosting the menu), closes the order once."""
+    c = TestClient(app)
+    h = _owner(c)
+    vid = _venue(c, h, "inv-venue-inv")
+    ing = _ingredient(c, h, vid, "Chicken")   # 5kg packs @ $50 -> $10/kg
+    c.post("/api/inventory/levels", json={
+        "venue_id": vid, "ingredient_id": ing, "stock_qty": 2, "par_level": 10}, headers=h)
+    order_id = c.post("/api/inventory/order/draft", json={"venue_id": vid},
+                      headers=h).json()["orders"][0]["order_id"]
+    c.post(f"/api/inventory/order/{order_id}/status", json={
+        "venue_id": vid, "status": "ordered"}, headers=h)
+
+    r = c.post("/api/inventory/invoice", json={
+        "venue_id": vid, "supplier": "Acme Foods", "invoice_number": "INV-1001",
+        "order_id": order_id,
+        "lines": [{"ingredient_id": ing, "packs": 3, "pack_cost": 60}],
+    }, headers=h)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["total"] == 180.0                      # 3 packs * $60
+    assert out["stock_booked"][ing] == 15.0           # 3 * 5kg, ACTUALS not order's 2
+    assert out["order_closed"] is True
+    assert out["price_changes"][0]["old_pack_cost"] == 50.0
+    assert out["price_changes"][0]["new_pack_cost"] == 60.0
+
+    # Stock booked once (2 + 15), price rippled to cost_per_unit
+    inv = c.get(f"/api/inventory?venue_id={vid}", headers=h).json()
+    assert inv["items"][0]["stock_qty"] == 17.0
+    assert inv["items"][0]["cost_per_unit"] == 12.0   # $60 / 5kg
+
+    # Order shows received; receiving it again is refused (no double-booking)
+    orders = c.get(f"/api/inventory/orders?venue_id={vid}", headers=h).json()
+    assert orders["orders"][0]["status"] == "received"
+    assert c.post(f"/api/inventory/order/{order_id}/status", json={
+        "venue_id": vid, "status": "received"}, headers=h).status_code == 409
+
+    # Same invoice number again -> 409
+    assert c.post("/api/inventory/invoice", json={
+        "venue_id": vid, "supplier": "Acme Foods", "invoice_number": "inv-1001",
+        "lines": [{"ingredient_id": ing, "packs": 1}],
+    }, headers=h).status_code == 409
+
+    # History records it with the price change
+    hist = c.get(f"/api/inventory/invoices?venue_id={vid}", headers=h).json()
+    assert hist["count"] == 1 and hist["invoices"][0]["invoice_number"] == "INV-1001"
+    assert hist["invoices"][0]["price_changes"][0]["new_pack_cost"] == 60.0
+
+
+def test_invoice_guards():
+    """Unknown ingredient 422; open stocktake blocks entry; standalone invoice
+    (no order) books stock at the stored price."""
+    c = TestClient(app)
+    h = _owner(c)
+    vid = _venue(c, h, "inv-venue-invg")
+    ing = _ingredient(c, h, vid, "Beans", size=1, cost=30)
+
+    assert c.post("/api/inventory/invoice", json={
+        "venue_id": vid, "invoice_number": "X-1",
+        "lines": [{"ingredient_id": "ghost", "packs": 1}],
+    }, headers=h).status_code == 422
+
+    st = c.post("/api/inventory/stocktake/start", json={"venue_id": vid},
+                headers=h).json()["stocktake_id"]
+    blocked = c.post("/api/inventory/invoice", json={
+        "venue_id": vid, "invoice_number": "X-2",
+        "lines": [{"ingredient_id": ing, "packs": 1}],
+    }, headers=h)
+    assert blocked.status_code == 409
+    c.post("/api/inventory/stocktake/count", json={
+        "venue_id": vid, "stocktake_id": st, "ingredient_id": ing, "counted": 0}, headers=h)
+    c.post("/api/inventory/stocktake/complete", json={
+        "venue_id": vid, "stocktake_id": st}, headers=h)
+
+    # Standalone entry, no pack_cost given -> stored price, no price change
+    out = c.post("/api/inventory/invoice", json={
+        "venue_id": vid, "invoice_number": "X-3",
+        "lines": [{"ingredient_id": ing, "packs": 2}],
+    }, headers=h).json()
+    assert out["total"] == 60.0 and out["price_changes"] == []
+    assert out["order_closed"] is False
+    inv = c.get(f"/api/inventory?venue_id={vid}", headers=h).json()
+    assert inv["items"][0]["stock_qty"] == 2.0
+
+
 def test_inventory_is_venue_scoped():
     c = TestClient(app)
     h = _owner(c)

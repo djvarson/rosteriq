@@ -547,6 +547,14 @@ class BaseStore:
     def list_dish_sales(self, venue_id: str, start_date, end_date) -> list:
         raise NotImplementedError
 
+    # --- Supplier invoices (receive against actuals + price updates) -------
+
+    def save_supplier_invoice(self, inv: dict) -> None:
+        raise NotImplementedError
+
+    def list_supplier_invoices(self, venue_id: str) -> list:
+        raise NotImplementedError
+
     # --- POS item mapping + import dedup -----------------------------------
 
     def save_pos_item_map(self, m: dict) -> None:
@@ -963,6 +971,7 @@ class MemoryStore(BaseStore):
         self._stocktakes: dict[str, dict] = {}
         self._supplier_orders: dict[str, dict] = {}
         self._dish_sales: dict[str, dict] = {}
+        self._supplier_invoices: dict[str, dict] = {}
         self._pos_item_maps: dict[str, dict] = {}
         self._import_batches: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
@@ -1194,6 +1203,17 @@ class MemoryStore(BaseStore):
                 item["counted"] = float(counted)
                 return True
         return False
+
+    # --- Supplier invoices ---
+
+    def save_supplier_invoice(self, inv):
+        self._supplier_invoices[inv["id"]] = dict(inv)
+
+    def list_supplier_invoices(self, venue_id):
+        return sorted(
+            [i for i in self._supplier_invoices.values() if i.get("venue_id") == venue_id],
+            key=lambda i: str(i.get("created_at")), reverse=True,
+        )
 
     # --- Dish sales ---
 
@@ -2722,6 +2742,20 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "supplier_invoices": """
+            CREATE TABLE IF NOT EXISTS supplier_invoices (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                supplier TEXT,
+                invoice_number TEXT NOT NULL,
+                invoice_date DATE,
+                order_id TEXT,
+                items JSONB NOT NULL DEFAULT '[]',
+                total NUMERIC DEFAULT 0,
+                price_changes JSONB DEFAULT '[]',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "dish_sales": """
             CREATE TABLE IF NOT EXISTS dish_sales (
                 id TEXT PRIMARY KEY,
@@ -3584,6 +3618,31 @@ class PostgresStore(BaseStore):
                 SET stock_qty = COALESCE(stock_qty, 0) + %s, updated_at = now()
                 WHERE id = %s
             """, (float(delta), ingredient_id))
+
+    def save_supplier_invoice(self, inv):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "supplier_invoices")
+            cur.execute("""
+                INSERT INTO supplier_invoices (id, venue_id, supplier, invoice_number,
+                    invoice_date, order_id, items, total, price_changes, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (
+                inv["id"], inv["venue_id"], inv.get("supplier"), inv["invoice_number"],
+                inv.get("invoice_date"), inv.get("order_id"),
+                json.dumps(inv.get("items", [])), float(inv.get("total", 0) or 0),
+                json.dumps(inv.get("price_changes", [])),
+                inv.get("created_at", datetime.utcnow()),
+            ))
+
+    def list_supplier_invoices(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "supplier_invoices")
+            cur.execute("""
+                SELECT * FROM supplier_invoices WHERE venue_id = %s ORDER BY created_at DESC
+            """, (venue_id,))
+            return [self._row_to_plain(r, json_fields=("items", "price_changes"))
+                    for r in cur.fetchall()]
 
     def save_dish_sale(self, sale):
         with self._cursor() as cur:

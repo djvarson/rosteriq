@@ -26,8 +26,8 @@ Routes (all venue-scoped):
 import logging
 import math
 import uuid
-from datetime import date, datetime
-from typing import Optional
+from datetime import date as dt_date, datetime
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -70,6 +70,22 @@ class OrderDraftBody(BaseModel):
 class OrderStatusBody(BaseModel):
     venue_id: str
     status: str = Field(..., pattern=r"^(ordered|received|cancelled)$")
+
+
+class InvoiceLine(BaseModel):
+    ingredient_id: str
+    packs: float = Field(..., gt=0, le=10000, description="Packs actually delivered")
+    pack_cost: Optional[float] = Field(default=None, ge=0,
+                                       description="Price per pack on the invoice; omit to keep the stored price")
+
+
+class InvoiceBody(BaseModel):
+    venue_id: str
+    supplier: str = Field(default="", max_length=120)
+    invoice_number: str = Field(..., min_length=1, max_length=80)
+    invoice_date: Optional[dt_date] = None
+    order_id: str = Field(default="", description="Optional: the ordered order this delivery fulfils")
+    lines: List[InvoiceLine] = Field(..., min_length=1, max_length=200)
 
 
 def _ingredient_or_404(db, venue_id: str, ingredient_id: str) -> dict:
@@ -372,6 +388,128 @@ async def set_order_status(order_id: str, body: OrderStatusBody) -> dict:
                 float(item.get("packs", 0)) * float(item.get("pack_size", 0)))
     logger.info(f"Supplier order {order_id} -> {body.status} at {body.venue_id}")
     return {"status": body.status, "order_id": order_id}
+
+
+@router.post("/invoice")
+async def enter_invoice(body: InvoiceBody) -> dict:
+    """Receive stock against the supplier's ACTUAL invoice.
+
+    - Books in the packs actually delivered (not what the order hoped for).
+    - A changed pack price updates the ingredient and recosts every menu
+      margin instantly; each change is reported old -> new.
+    - Optionally closes the linked ordered order (without double-booking —
+      the invoice's quantities are the truth, the order's are ignored).
+    - Same invoice number from the same supplier twice is refused.
+    """
+    enforce_venue_access(body.venue_id)
+    db = get_db()
+
+    # A delivery landing mid-stocktake corrupts the count — same guard as receive
+    for st in db.list_stocktakes(body.venue_id) or []:
+        if st.get("status") == "open":
+            raise HTTPException(
+                status_code=409,
+                detail="A stocktake is open — complete it before entering a delivery.")
+
+    norm_num = body.invoice_number.strip().lower()
+    for prev in db.list_supplier_invoices(body.venue_id) or []:
+        if (str(prev.get("invoice_number", "")).strip().lower() == norm_num
+                and (prev.get("supplier") or "") == body.supplier):
+            raise HTTPException(status_code=409,
+                                detail=f"Invoice {body.invoice_number} from this supplier "
+                                       "is already entered")
+
+    ingredients = {i["id"]: i for i in (db.list_ingredients(body.venue_id) or [])}
+    unknown = [l.ingredient_id for l in body.lines if l.ingredient_id not in ingredients]
+    if unknown:
+        raise HTTPException(status_code=422,
+                            detail=f"Unknown ingredient(s): {', '.join(unknown)}")
+
+    order = None
+    if body.order_id:
+        order = db.get_supplier_order(body.order_id)
+        if not order or order.get("venue_id") != body.venue_id:
+            raise HTTPException(status_code=404, detail="Linked order not found")
+        if order.get("status") != "ordered":
+            raise HTTPException(status_code=409,
+                                detail=f"Linked order is {order.get('status')}, not ordered")
+
+    items = []
+    price_changes = []
+    total = 0.0
+    for line in body.lines:
+        ing = ingredients[line.ingredient_id]
+        pack_size = float(ing.get("purchase_size") or 1) or 1
+        stored_cost = float(ing.get("purchase_cost") or 0)
+        pack_cost = stored_cost if line.pack_cost is None else float(line.pack_cost)
+        line_total = round(line.packs * pack_cost, 2)
+        total += line_total
+        items.append({
+            "ingredient_id": ing["id"], "name": ing["name"], "unit": ing.get("unit"),
+            "packs": line.packs, "pack_size": pack_size,
+            "pack_cost": pack_cost, "line_total": line_total,
+        })
+        if line.pack_cost is not None and round(pack_cost, 4) != round(stored_cost, 4):
+            price_changes.append({
+                "ingredient_id": ing["id"], "name": ing["name"],
+                "old_pack_cost": stored_cost, "new_pack_cost": pack_cost,
+            })
+            ing["purchase_cost"] = pack_cost
+            ing["cost_per_unit"] = pack_cost / pack_size
+            db.save_ingredient(ing)
+
+    # Close the linked order FIRST (atomic transition) so a double-submit
+    # can't book the same delivery twice via order + invoice paths.
+    if order is not None:
+        if not db.transition_supplier_order(body.order_id, "ordered", "received",
+                                            "received_at"):
+            raise HTTPException(status_code=409,
+                                detail="Order was already received — refresh and retry")
+
+    for item in items:
+        db.increment_ingredient_stock(item["ingredient_id"],
+                                      float(item["packs"]) * float(item["pack_size"]))
+
+    inv = {
+        "id": f"si-{uuid.uuid4().hex[:10]}",
+        "venue_id": body.venue_id,
+        "supplier": body.supplier,
+        "invoice_number": body.invoice_number.strip(),
+        "invoice_date": body.invoice_date,
+        "order_id": body.order_id or None,
+        "items": items,
+        "total": round(total, 2),
+        "price_changes": price_changes,
+        "created_at": datetime.utcnow(),
+    }
+    db.save_supplier_invoice(inv)
+    logger.info(f"Invoice {inv['invoice_number']} entered at {body.venue_id}: "
+                f"${inv['total']}, {len(price_changes)} price changes")
+    return {
+        "status": "entered",
+        "invoice_id": inv["id"],
+        "total": inv["total"],
+        "stock_booked": {i["ingredient_id"]: round(i["packs"] * i["pack_size"], 3)
+                         for i in items},
+        "price_changes": price_changes,
+        "order_closed": bool(order),
+    }
+
+
+@router.get("/invoices")
+async def invoice_history(venue_id: str = Query(...)) -> dict:
+    enforce_venue_access(venue_id)
+    db = get_db()
+    rows = db.list_supplier_invoices(venue_id) or []
+    return {"venue_id": venue_id, "count": len(rows), "invoices": [{
+        "id": i["id"], "supplier": i.get("supplier"),
+        "invoice_number": i.get("invoice_number"),
+        "invoice_date": str(i.get("invoice_date")) if i.get("invoice_date") else None,
+        "order_id": i.get("order_id"), "total": i.get("total"),
+        "price_changes": i.get("price_changes", []),
+        "items": i.get("items", []),
+        "created_at": str(i.get("created_at")),
+    } for i in rows]}
 
 
 @router.get("/usage")
