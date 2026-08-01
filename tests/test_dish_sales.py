@@ -117,6 +117,79 @@ def test_summary_aggregates_and_food_cost_pct():
     assert bad.status_code == 422
 
 
+def test_import_auto_map_explicit_map_and_unmapped_honesty():
+    """POS names matching recipes auto-map; strangers come back unmapped;
+    an explicit mapping fixes them; nothing is silently dropped."""
+    c = TestClient(app)
+    h = _owner(c)
+    vid = _venue(c, h, "ds-venue-imp")
+    ing, recipe = _setup_menu(c, h, vid)
+
+    r = c.post("/api/sales/import", json={
+        "venue_id": vid, "rows": [
+            {"item_name": "  CHICKEN  bowl ", "qty": 3},   # auto-maps (case/space)
+            {"item_name": "Mystery Special", "qty": 2},     # unknown
+        ],
+    }, headers=h)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["status"] == "imported" and out["recorded_lines"] == 1
+    assert out["auto_mapped"] == ["CHICKEN  bowl"]
+    assert out["unmapped"] == [{"item_name": "Mystery Special", "qty": 2.0}]
+    assert out["total_revenue_inc_gst"] == 33.0             # 3 * $11
+
+    # Map the stranger to the recipe, re-import just the remainder
+    m = c.post("/api/sales/mapping", json={
+        "venue_id": vid, "item_name": "Mystery Special", "recipe_id": recipe,
+    }, headers=h)
+    assert m.status_code == 200 and m.json()["recipe_name"] == "Chicken Bowl"
+    r2 = c.post("/api/sales/import", json={
+        "venue_id": vid, "rows": [{"item_name": "Mystery Special", "qty": 2}],
+    }, headers=h).json()
+    assert r2["recorded_lines"] == 1 and r2["unmapped"] == []
+
+    # Mapping list shows both; removing one works
+    maps = c.get(f"/api/sales/mapping?venue_id={vid}", headers=h).json()
+    assert maps["count"] == 2
+    c.post("/api/sales/mapping", json={
+        "venue_id": vid, "item_name": "Mystery Special", "recipe_id": "",
+    }, headers=h)
+    assert c.get(f"/api/sales/mapping?venue_id={vid}", headers=h).json()["count"] == 1
+
+    # Summary sees all 5 sold
+    s = c.get(f"/api/sales/summary?venue_id={vid}", headers=h).json()
+    assert s["by_recipe"][0]["qty"] == 5.0
+
+
+def test_import_duplicate_batch_refused():
+    """Uploading the same product-mix twice must not double-deplete stock."""
+    c = TestClient(app)
+    h = _owner(c)
+    vid = _venue(c, h, "ds-venue-dup")
+    ing, _recipe = _setup_menu(c, h, vid)
+    c.post("/api/inventory/levels", json={
+        "venue_id": vid, "ingredient_id": ing, "stock_qty": 5, "par_level": 1}, headers=h)
+
+    rows = {"venue_id": vid, "rows": [{"item_name": "Chicken Bowl", "qty": 4}]}
+    assert c.post("/api/sales/import", json=rows, headers=h).status_code == 200
+    dup = c.post("/api/sales/import", json=rows, headers=h)
+    assert dup.status_code == 409
+
+    inv = c.get(f"/api/inventory?venue_id={vid}", headers=h).json()
+    assert inv["items"][0]["stock_qty"] == 4.0   # 5 - 1kg, depleted ONCE
+
+    # Nothing-matched imports don't burn the batch: unknown-only upload, then
+    # map it, then the same upload again succeeds
+    unk = {"venue_id": vid, "rows": [{"item_name": "Loaded Fries", "qty": 2}]}
+    first = c.post("/api/sales/import", json=unk, headers=h).json()
+    assert first["status"] == "nothing_imported"
+    c.post("/api/sales/mapping", json={
+        "venue_id": vid, "item_name": "Loaded Fries",
+        "recipe_id": c.get(f"/api/menu/costing?venue_id={vid}", headers=h).json()["recipes"][0]["id"],
+    }, headers=h)
+    assert c.post("/api/sales/import", json=unk, headers=h).json()["status"] == "imported"
+
+
 def test_sales_are_venue_scoped():
     c = TestClient(app)
     h = _owner(c)

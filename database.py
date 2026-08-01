@@ -547,6 +547,23 @@ class BaseStore:
     def list_dish_sales(self, venue_id: str, start_date, end_date) -> list:
         raise NotImplementedError
 
+    # --- POS item mapping + import dedup -----------------------------------
+
+    def save_pos_item_map(self, m: dict) -> None:
+        raise NotImplementedError
+
+    def list_pos_item_maps(self, venue_id: str) -> list:
+        raise NotImplementedError
+
+    def delete_pos_item_map(self, venue_id: str, normalized_name: str) -> None:
+        raise NotImplementedError
+
+    def save_import_batch(self, batch: dict) -> None:
+        raise NotImplementedError
+
+    def get_import_batch(self, batch_id: str):
+        raise NotImplementedError
+
     def get_revenue_snapshots(
         self, venue_id: str, start_date: date, end_date: date
     ) -> list[dict]:
@@ -946,6 +963,8 @@ class MemoryStore(BaseStore):
         self._stocktakes: dict[str, dict] = {}
         self._supplier_orders: dict[str, dict] = {}
         self._dish_sales: dict[str, dict] = {}
+        self._pos_item_maps: dict[str, dict] = {}
+        self._import_batches: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
         self._experiments: dict[str, dict] = {}  # Key: experiment_id
         self._experiment_outcomes: dict[str, dict] = {}  # Key: outcome_id
@@ -1191,6 +1210,26 @@ class MemoryStore(BaseStore):
             if start_date <= d <= end_date:
                 out.append(s)
         return sorted(out, key=lambda s: (str(s.get("sale_date")), s.get("recipe_name") or ""))
+
+    # --- POS item maps + import batches ---
+
+    def save_pos_item_map(self, m):
+        self._pos_item_maps[f"{m['venue_id']}:{m['normalized_name']}"] = dict(m)
+
+    def list_pos_item_maps(self, venue_id):
+        return sorted(
+            [m for m in self._pos_item_maps.values() if m.get("venue_id") == venue_id],
+            key=lambda m: m.get("normalized_name", ""),
+        )
+
+    def delete_pos_item_map(self, venue_id, normalized_name):
+        self._pos_item_maps.pop(f"{venue_id}:{normalized_name}", None)
+
+    def save_import_batch(self, batch):
+        self._import_batches[batch["id"]] = dict(batch)
+
+    def get_import_batch(self, batch_id):
+        return self._import_batches.get(batch_id)
 
     def get_employees(self, venue_id=None):
         """Employees, optionally filtered to one venue. Used by the AI agent's
@@ -2697,6 +2736,27 @@ class PostgresStore(BaseStore):
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "pos_item_maps": """
+            CREATE TABLE IF NOT EXISTS pos_item_maps (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                normalized_name TEXT NOT NULL,
+                display_name TEXT,
+                recipe_id TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "sales_import_batches": """
+            CREATE TABLE IF NOT EXISTS sales_import_batches (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                sale_date DATE,
+                row_count INTEGER,
+                revenue NUMERIC,
+                imported_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "supplier_orders": """
             CREATE TABLE IF NOT EXISTS supplier_orders (
                 id TEXT PRIMARY KEY,
@@ -3549,6 +3609,57 @@ class PostgresStore(BaseStore):
                 ORDER BY sale_date, recipe_name
             """, (venue_id, start_date, end_date))
             return [self._row_to_plain(r) for r in cur.fetchall()]
+
+    def save_pos_item_map(self, m):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "pos_item_maps")
+            cur.execute("""
+                INSERT INTO pos_item_maps (id, venue_id, normalized_name, display_name,
+                    recipe_id, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    recipe_id=EXCLUDED.recipe_id, display_name=EXCLUDED.display_name,
+                    updated_at=now()
+            """, (
+                f"{m['venue_id']}:{m['normalized_name']}", m["venue_id"],
+                m["normalized_name"], m.get("display_name"), m["recipe_id"],
+                m.get("created_at", datetime.utcnow()),
+            ))
+
+    def list_pos_item_maps(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "pos_item_maps")
+            cur.execute("""
+                SELECT * FROM pos_item_maps WHERE venue_id = %s ORDER BY normalized_name
+            """, (venue_id,))
+            return [dict(r) for r in cur.fetchall()]
+
+    def delete_pos_item_map(self, venue_id, normalized_name):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "pos_item_maps")
+            cur.execute("DELETE FROM pos_item_maps WHERE id = %s",
+                        (f"{venue_id}:{normalized_name}",))
+
+    def save_import_batch(self, batch):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sales_import_batches")
+            cur.execute("""
+                INSERT INTO sales_import_batches (id, venue_id, sale_date, row_count,
+                    revenue, imported_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (
+                batch["id"], batch["venue_id"], batch.get("sale_date"),
+                batch.get("row_count", 0), float(batch.get("revenue", 0) or 0),
+                batch.get("imported_at", datetime.utcnow()),
+            ))
+
+    def get_import_batch(self, batch_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sales_import_batches")
+            cur.execute("SELECT * FROM sales_import_batches WHERE id = %s", (batch_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
 
     def update_stocktake_count(self, st_id, ingredient_id, counted):
         # Rewrites ONLY the matching item's count inside the JSONB array in one

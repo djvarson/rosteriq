@@ -3686,6 +3686,25 @@
           </div>
         </div>
 
+        <div class="card" style="margin-bottom:16px;">
+          <h3 style="font-size:15px; margin-bottom:6px;">Import POS sales</h3>
+          <p style="font-size:13px; color:var(--text-muted); margin-bottom:10px;">
+            Export the day's <strong>product mix</strong> from any POS (item name + quantity), paste it here — one
+            <code>Item name, qty</code> per line. Names matching your dishes map themselves; strangers come back
+            for a one-click mapping that's remembered. The same batch can never be imported twice.
+          </p>
+          <textarea id="pi-text" rows="4" placeholder="Chicken Parmigiana, 14&#10;Bowl of Chips, 22&#10;Flat White, 61" style="width:100%;"></textarea>
+          <div style="display:flex; gap:10px; align-items:flex-end; margin-top:8px; flex-wrap:wrap;">
+            <div class="input-group" style="margin:0;">
+              <label>Sales date</label>
+              <input type="date" id="pi-date">
+            </div>
+            <button class="btn btn-primary" onclick="importPosSales()">Import</button>
+            <span id="pi-summary" style="color:var(--text-muted); font-size:13px;"></span>
+          </div>
+          <div id="pi-unmapped" style="margin-top:10px;"></div>
+        </div>
+
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <h3 style="font-size:15px;">Ingredients &amp; supplier prices</h3>
@@ -6317,6 +6336,85 @@ async function saveRecipe() {
     loadMenuPage();
   } catch (e) {
     showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+// --- POS sales import ---
+let piUnmapped = [];
+
+function piParseRows() {
+  return document.getElementById('pi-text').value.split('\n')
+    .map(function(line) { return line.trim(); })
+    .filter(Boolean)
+    .map(function(line) {
+      // "Item name, qty" — qty is the LAST comma field so names may contain commas
+      const idx = line.lastIndexOf(',');
+      if (idx < 1) return null;
+      const qty = parseFloat(line.slice(idx + 1).trim());
+      const name = line.slice(0, idx).trim().replace(/^"|"$/g, '');
+      if (!name || !(qty > 0)) return null;
+      return { item_name: name, qty: qty };
+    })
+    .filter(Boolean);
+}
+
+async function importPosSales(rowsOverride) {
+  const rows = rowsOverride || piParseRows();
+  if (!rows.length) { showToast('Paste product-mix lines first: Item name, qty', 'warning'); return; }
+  const body = { venue_id: state.currentVenue, rows: rows };
+  const d = document.getElementById('pi-date').value;
+  if (d) body.sale_date = d;
+  try {
+    const r = await fetchAPI('/api/sales/import', { method: 'POST', body: JSON.stringify(body) });
+    piUnmapped = r.unmapped || [];
+    if (r.status === 'imported') {
+      document.getElementById('pi-summary').textContent =
+        r.recorded_lines + ' items imported · revenue ' + formatCurrency(r.total_revenue_inc_gst) +
+        ' · COGS ' + formatCurrency(r.total_cogs) +
+        (r.negative_stock_warning.length ? ' · NEGATIVE stock: ' + r.negative_stock_warning.join(', ') : '');
+      showToast('Imported — stock depleted, food cost updated ✓' +
+        (piUnmapped.length ? ' (' + piUnmapped.length + ' items need mapping below)' : ''),
+        piUnmapped.length ? 'warning' : 'success');
+      if (!rowsOverride) document.getElementById('pi-text').value = '';
+      loadMenuPage();
+    } else {
+      document.getElementById('pi-summary').textContent = 'Nothing imported yet — map the items below';
+      showToast(r.message, 'warning');
+    }
+    piRenderUnmapped();
+  } catch (e) {
+    showToast('Import failed: ' + e.message, 'error');
+  }
+}
+
+function piRenderUnmapped() {
+  const box = document.getElementById('pi-unmapped');
+  if (!piUnmapped.length) { box.innerHTML = ''; return; }
+  const options = msRecipes.map(function(r) {
+    return '<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>';
+  }).join('');
+  box.innerHTML = '<div style="font-size:13px; font-weight:600; margin-bottom:6px;">Unmapped POS items — pick the matching dish:</div>' +
+    piUnmapped.map(function(u, i) {
+      return '<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">' +
+        '<span style="min-width:180px; font-size:13px;">' + esc(u.item_name) + ' <span style="color:var(--text-muted);">× ' + u.qty + '</span></span>' +
+        '<select id="pi-map-' + i + '" style="flex:1; max-width:260px; padding:6px;">' + options + '</select>' +
+        '<button class="btn btn-secondary btn-small" onclick="piMapAndImport(' + i + ')">Map &amp; import</button>' +
+      '</div>';
+    }).join('');
+}
+
+async function piMapAndImport(i) {
+  const u = piUnmapped[i];
+  const recipeId = document.getElementById('pi-map-' + i).value;
+  try {
+    await fetchAPI('/api/sales/mapping', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: state.currentVenue, item_name: u.item_name, recipe_id: recipeId }),
+    });
+    piUnmapped.splice(i, 1);
+    await importPosSales([{ item_name: u.item_name, qty: u.qty }]);
+  } catch (e) {
+    showToast('Mapping failed: ' + e.message, 'error');
   }
 }
 
