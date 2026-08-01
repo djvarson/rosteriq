@@ -26,7 +26,7 @@ Routes (all venue-scoped):
 import logging
 import math
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -372,6 +372,117 @@ async def set_order_status(order_id: str, body: OrderStatusBody) -> dict:
                 float(item.get("packs", 0)) * float(item.get("pack_size", 0)))
     logger.info(f"Supplier order {order_id} -> {body.status} at {body.venue_id}")
     return {"status": body.status, "order_id": order_id}
+
+
+@router.get("/usage")
+async def usage_report(venue_id: str = Query(...)) -> dict:
+    """Theoretical vs actual usage between the two most recent completed
+    stocktakes — where the money actually leaks.
+
+        actual      = opening count + deliveries received - closing count
+        theoretical = what the recorded sales SHOULD have used (via recipes)
+        variance    = actual - theoretical  (positive = unexplained loss:
+                      waste, over-portioning, shrinkage)
+
+    Theoretical usage is computed against CURRENT recipes; if a recipe
+    changed mid-period the attribution shifts slightly — the report says so
+    rather than pretending otherwise.
+    """
+    enforce_venue_access(venue_id)
+    from rosteriq.routes.menu_costing import _qty_in_unit  # shared unit conversion
+    db = get_db()
+
+    completed = [s for s in (db.list_stocktakes(venue_id) or [])
+                 if s.get("status") == "completed" and s.get("completed_at")]
+    if len(completed) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail="Usage needs two completed stocktakes to compare — run your "
+                   "next stocktake and this report unlocks.")
+    completed.sort(key=lambda s: str(s.get("completed_at")))
+    opening_st, closing_st = completed[-2], completed[-1]
+
+    def _counts(st):
+        return {i["ingredient_id"]: float(i["counted"])
+                for i in st.get("items", []) if i.get("counted") is not None}
+
+    opening = _counts(opening_st)
+    closing = _counts(closing_st)
+
+    def _ts(v):
+        if isinstance(v, datetime):
+            return v.replace(tzinfo=None)
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00")).replace(tzinfo=None)
+
+    start_ts, end_ts = _ts(opening_st["completed_at"]), _ts(closing_st["completed_at"])
+
+    # Deliveries received in the window
+    received: dict = {}
+    for order in db.list_supplier_orders(venue_id) or []:
+        if order.get("status") != "received" or not order.get("received_at"):
+            continue
+        rts = _ts(order["received_at"])
+        if not (start_ts < rts <= end_ts):
+            continue
+        for item in order.get("items", []):
+            received[item["ingredient_id"]] = received.get(item["ingredient_id"], 0.0) + \
+                float(item.get("packs", 0)) * float(item.get("pack_size", 0))
+
+    # Theoretical usage from recorded sales (dates within the window's days)
+    ingredients = {i["id"]: i for i in (db.list_ingredients(venue_id) or [])}
+    recipes = {r["id"]: r for r in (db.list_recipes(venue_id) or [])}
+    theoretical: dict = {}
+    for sale in db.list_dish_sales(venue_id, start_ts.date(), end_ts.date()) or []:
+        recipe = recipes.get(sale.get("recipe_id"))
+        if not recipe:
+            continue
+        yield_portions = float(recipe.get("yield_portions", 1)) or 1
+        for item in recipe.get("items", []):
+            ing = ingredients.get(item.get("ingredient_id"))
+            if not ing:
+                continue
+            try:
+                per_portion = _qty_in_unit(
+                    float(item.get("qty", 0)), item.get("unit"), ing.get("unit", "each"),
+                ) / yield_portions
+            except HTTPException:
+                continue
+            theoretical[ing["id"]] = theoretical.get(ing["id"], 0.0) + \
+                per_portion * float(sale.get("qty") or 0)
+
+    rows = []
+    total_variance_value = 0.0
+    for ing_id in sorted(set(opening) & set(closing)):
+        ing = ingredients.get(ing_id)
+        if not ing:
+            continue
+        actual = opening[ing_id] + received.get(ing_id, 0.0) - closing[ing_id]
+        theo = theoretical.get(ing_id, 0.0)
+        variance = actual - theo
+        cpu = float(ing.get("cost_per_unit") or 0)
+        variance_value = round(variance * cpu, 2)
+        total_variance_value += variance_value
+        rows.append({
+            "ingredient_id": ing_id,
+            "name": ing.get("name"),
+            "unit": ing.get("unit"),
+            "opening": round(opening[ing_id], 3),
+            "received": round(received.get(ing_id, 0.0), 3),
+            "closing": round(closing[ing_id], 3),
+            "actual_usage": round(actual, 3),
+            "theoretical_usage": round(theo, 3),
+            "variance": round(variance, 3),
+            "variance_value": variance_value,
+        })
+    rows.sort(key=lambda r: -r["variance_value"])
+    return {
+        "venue_id": venue_id,
+        "from": start_ts.isoformat(),
+        "to": end_ts.isoformat(),
+        "basis": "current recipes",
+        "total_variance_value": round(total_variance_value, 2),
+        "items": rows,
+    }
 
 
 @router.get("/orders")

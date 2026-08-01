@@ -246,6 +246,62 @@ def test_price_edit_preserves_stock_levels():
     assert row["cost_per_unit"] == 12.0  # new price flowed through
 
 
+def test_usage_report_theoretical_vs_actual():
+    """Opening 10kg + received 5kg - closing 10kg = 5kg actual; sales say
+    3kg theoretical -> 2kg unexplained = $20 waste at $10/kg."""
+    c = TestClient(app)
+    h = _owner(c)
+    vid = _venue(c, h, "inv-venue-usage")
+    ing = _ingredient(c, h, vid, "Chicken")   # $10/kg, 5kg packs
+    recipe = c.post("/api/menu/recipes", json={
+        "venue_id": vid, "name": "Chicken Bowl", "sell_price_inc_gst": 11.0,
+        "items": [{"ingredient_id": ing, "qty": 250, "unit": "g"}],
+    }, headers=h).json()["recipe_id"]
+
+    # Not enough stocktakes yet -> honest 422
+    assert c.get(f"/api/inventory/usage?venue_id={vid}", headers=h).status_code == 422
+
+    # Opening stocktake: 10kg counted (par 12: after the 3kg sale below,
+    # stock 7 -> needed 5 -> exactly one 5kg pack gets ordered)
+    c.post("/api/inventory/levels", json={
+        "venue_id": vid, "ingredient_id": ing, "stock_qty": 10, "par_level": 12}, headers=h)
+    st1 = c.post("/api/inventory/stocktake/start", json={"venue_id": vid},
+                 headers=h).json()["stocktake_id"]
+    c.post("/api/inventory/stocktake/count", json={
+        "venue_id": vid, "stocktake_id": st1, "ingredient_id": ing, "counted": 10}, headers=h)
+    c.post("/api/inventory/stocktake/complete", json={
+        "venue_id": vid, "stocktake_id": st1}, headers=h)
+
+    # In the window: sell 12 bowls (3kg theoretical), receive 1 pack (5kg)
+    c.post("/api/sales/record", json={
+        "venue_id": vid, "items": [{"recipe_id": recipe, "qty": 12}]}, headers=h)
+    order_id = c.post("/api/inventory/order/draft", json={"venue_id": vid},
+                      headers=h).json()["orders"][0]["order_id"]
+    c.post(f"/api/inventory/order/{order_id}/status", json={
+        "venue_id": vid, "status": "ordered"}, headers=h)
+    c.post(f"/api/inventory/order/{order_id}/status", json={
+        "venue_id": vid, "status": "received"}, headers=h)
+
+    # Closing stocktake: 10kg counted (12 in system: 10-3+5; 2kg walked out)
+    st2 = c.post("/api/inventory/stocktake/start", json={"venue_id": vid},
+                 headers=h).json()["stocktake_id"]
+    c.post("/api/inventory/stocktake/count", json={
+        "venue_id": vid, "stocktake_id": st2, "ingredient_id": ing, "counted": 10}, headers=h)
+    c.post("/api/inventory/stocktake/complete", json={
+        "venue_id": vid, "stocktake_id": st2}, headers=h)
+
+    r = c.get(f"/api/inventory/usage?venue_id={vid}", headers=h)
+    assert r.status_code == 200, r.text
+    report = r.json()
+    row = report["items"][0]
+    assert row["opening"] == 10.0 and row["received"] == 5.0 and row["closing"] == 10.0
+    assert row["actual_usage"] == 5.0
+    assert row["theoretical_usage"] == 3.0
+    assert row["variance"] == 2.0
+    assert row["variance_value"] == 20.0      # 2kg * $10
+    assert report["total_variance_value"] == 20.0
+
+
 def test_inventory_is_venue_scoped():
     c = TestClient(app)
     h = _owner(c)

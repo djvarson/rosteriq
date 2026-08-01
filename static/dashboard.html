@@ -3610,9 +3610,17 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" style="margin-bottom:16px;">
           <h3 style="font-size:15px; margin-bottom:10px;">Supplier orders</h3>
           <div id="iv-orders"><div style="color:var(--text-muted); text-align:center; padding:18px;">No orders yet — Draft supplier orders builds one per supplier from everything below par</div></div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
+            <h3 style="font-size:15px;">Usage &amp; waste — theoretical vs actual</h3>
+            <button class="btn btn-secondary btn-small" onclick="loadUsage()">Run report</button>
+          </div>
+          <div id="iv-usage"><div style="color:var(--text-muted); text-align:center; padding:18px;">Needs two completed stocktakes: what the sales say you used vs what actually left the shelf — the gap, valued in dollars, is your waste and shrinkage</div></div>
         </div>
       </div>
 
@@ -3638,7 +3646,25 @@
         <div class="card" style="margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
             <h3 style="font-size:15px;">Menu — costed live from ingredient prices</h3>
-            <button class="btn btn-primary btn-small" onclick="recordSales()">Record today's sales</button>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-secondary btn-small" onclick="openRecipeBuilder()">New dish</button>
+              <button class="btn btn-primary btn-small" onclick="recordSales()">Record today's sales</button>
+            </div>
+          </div>
+          <div id="rb-card" style="display:none; border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:14px;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px;">
+              <div class="input-group" style="margin:0;"><label>Dish name</label><input type="text" id="rb-name" placeholder="Chicken Parmigiana" style="width:180px;"></div>
+              <div class="input-group" style="margin:0;"><label>Category</label><input type="text" id="rb-category" placeholder="Mains" style="width:110px;"></div>
+              <div class="input-group" style="margin:0;"><label>Sell $ (inc GST)</label><input type="number" id="rb-price" min="0.01" step="0.5" style="width:110px;"></div>
+              <div class="input-group" style="margin:0;"><label>Portions/batch</label><input type="number" id="rb-yield" min="0.1" step="1" value="1" style="width:100px;"></div>
+            </div>
+            <div id="rb-lines"></div>
+            <div style="display:flex; gap:8px; margin-top:10px;">
+              <button class="btn btn-secondary btn-small" onclick="rbAddLine()">+ Ingredient</button>
+              <span style="margin-left:auto;"></span>
+              <button class="btn btn-secondary btn-small" onclick="closeRecipeBuilder()">Cancel</button>
+              <button class="btn btn-primary btn-small" id="rb-save" onclick="saveRecipe()">Save dish</button>
+            </div>
           </div>
           <div style="overflow-x:auto;">
             <table class="data-table" style="width:100%; border-collapse:collapse;">
@@ -3650,10 +3676,11 @@
                   <th style="padding:10px 8px;">Margin (ex GST)</th>
                   <th style="padding:10px 8px;">Food cost</th>
                   <th style="padding:10px 8px;">Sold today</th>
+                  <th style="padding:10px 8px;"></th>
                 </tr>
               </thead>
               <tbody id="ms-rows">
-                <tr><td colspan="6" style="padding:24px; text-align:center; color:var(--text-muted);">No menu yet — Seed starter menu gives you three costed dishes to play with</td></tr>
+                <tr><td colspan="7" style="padding:24px; text-align:center; color:var(--text-muted);">No menu yet — Seed starter menu gives you three costed dishes to play with</td></tr>
               </tbody>
             </table>
           </div>
@@ -6133,7 +6160,7 @@ async function loadMenuPage() {
 function renderMenuRows() {
   const tbody = document.getElementById('ms-rows');
   if (!msRecipes.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:24px; text-align:center; color:var(--text-muted);">No menu yet — Seed starter menu gives you three costed dishes to play with</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:24px; text-align:center; color:var(--text-muted);">No menu yet — Seed starter menu gives you three costed dishes to play with</td></tr>';
     return;
   }
   tbody.innerHTML = msRecipes.map(function(r, i) {
@@ -6147,6 +6174,7 @@ function renderMenuRows() {
       '<td style="padding:10px 8px;">' + formatCurrency(r.margin_per_portion || 0) + '</td>' +
       '<td style="padding:10px 8px;">' + fcChip + '</td>' +
       '<td style="padding:6px 8px;"><input type="number" min="0" step="1" id="ms-qty-' + i + '" placeholder="0" style="width:70px; padding:6px;"></td>' +
+      '<td style="padding:6px 8px;"><button class="btn btn-secondary btn-small" onclick="openRecipeBuilder(' + i + ')">Edit</button></td>' +
       '</tr>';
   }).join('');
 }
@@ -6184,6 +6212,111 @@ async function recordSales() {
     loadMenuPage();
   } catch (e) {
     showToast('Record failed: ' + e.message, 'error');
+  }
+}
+
+// --- Recipe builder ---
+let rbEditingId = null;
+let rbLines = [];
+
+function rbIngredientOptions(selectedId) {
+  return msIngredients.map(function(g) {
+    return '<option value="' + esc(g.id) + '"' + (g.id === selectedId ? ' selected' : '') + '>' +
+      esc(g.name) + ' (' + esc(g.unit || '') + ')</option>';
+  }).join('');
+}
+
+function rbRenderLines() {
+  document.getElementById('rb-lines').innerHTML = rbLines.map(function(l, i) {
+    return '<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">' +
+      '<select id="rb-ing-' + i + '" style="flex:1; padding:6px;">' + rbIngredientOptions(l.ingredient_id) + '</select>' +
+      '<input type="number" id="rb-qty-' + i + '" min="0.001" step="0.5" value="' + (l.qty || '') + '" placeholder="qty" style="width:90px; padding:6px;">' +
+      '<select id="rb-unit-' + i + '" style="width:80px; padding:6px;">' +
+        ['g','kg','ml','l','each'].map(function(u) { return '<option' + (u === l.unit ? ' selected' : '') + '>' + u + '</option>'; }).join('') +
+      '</select>' +
+      '<button class="btn btn-secondary btn-small" onclick="rbRemoveLine(' + i + ')">×</button>' +
+    '</div>';
+  }).join('') || '<div style="color:var(--text-muted); font-size:13px;">Add the ingredients that go into one batch</div>';
+}
+
+function rbCollectLines() {
+  return rbLines.map(function(_, i) {
+    return {
+      ingredient_id: document.getElementById('rb-ing-' + i).value,
+      qty: parseFloat(document.getElementById('rb-qty-' + i).value),
+      unit: document.getElementById('rb-unit-' + i).value,
+    };
+  });
+}
+
+function rbAddLine() {
+  rbLines = rbCollectLines().map(function(l) { return { ingredient_id: l.ingredient_id, qty: isNaN(l.qty) ? '' : l.qty, unit: l.unit }; });
+  rbLines.push({ ingredient_id: (msIngredients[0] || {}).id, qty: '', unit: (msIngredients[0] || {}).unit || 'g' });
+  rbRenderLines();
+}
+
+function rbRemoveLine(i) {
+  rbLines = rbCollectLines().map(function(l) { return { ingredient_id: l.ingredient_id, qty: isNaN(l.qty) ? '' : l.qty, unit: l.unit }; });
+  rbLines.splice(i, 1);
+  rbRenderLines();
+}
+
+function openRecipeBuilder(i) {
+  if (!msIngredients.length) { showToast('Add at least one ingredient first', 'warning'); return; }
+  const card = document.getElementById('rb-card');
+  card.style.display = 'block';
+  if (i == null) {
+    rbEditingId = null;
+    document.getElementById('rb-name').value = '';
+    document.getElementById('rb-category').value = '';
+    document.getElementById('rb-price').value = '';
+    document.getElementById('rb-yield').value = '1';
+    rbLines = [{ ingredient_id: msIngredients[0].id, qty: '', unit: msIngredients[0].unit || 'g' }];
+  } else {
+    const r = msRecipes[i];
+    rbEditingId = r.id;
+    document.getElementById('rb-name').value = r.name || '';
+    document.getElementById('rb-category').value = r.category || '';
+    document.getElementById('rb-price').value = r.sell_price_inc_gst || '';
+    document.getElementById('rb-yield').value = r.yield_portions || 1;
+    rbLines = (r.lines || []).map(function(l) {
+      return { ingredient_id: l.ingredient_id, qty: l.qty, unit: l.unit || 'g' };
+    });
+    if (!rbLines.length) rbLines = [{ ingredient_id: msIngredients[0].id, qty: '', unit: 'g' }];
+  }
+  rbRenderLines();
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeRecipeBuilder() {
+  document.getElementById('rb-card').style.display = 'none';
+  rbEditingId = null;
+}
+
+async function saveRecipe() {
+  const name = document.getElementById('rb-name').value.trim();
+  const price = parseFloat(document.getElementById('rb-price').value);
+  const yieldP = parseFloat(document.getElementById('rb-yield').value) || 1;
+  const items = rbCollectLines().filter(function(l) { return l.ingredient_id && l.qty > 0; });
+  if (!name || !(price > 0)) { showToast('Dish name and sell price are needed', 'warning'); return; }
+  if (!items.length) { showToast('Add at least one ingredient line with a quantity', 'warning'); return; }
+  try {
+    const r = await fetchAPI('/api/menu/recipes', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue_id: state.currentVenue, id: rbEditingId, name: name,
+        category: document.getElementById('rb-category').value.trim(),
+        sell_price_inc_gst: price, yield_portions: yieldP, items: items,
+      }),
+    });
+    const cst = r.costing;
+    showToast(name + ' saved — cost ' + formatCurrency(cst.cost_per_portion) +
+      '/portion, food cost ' + cst.food_cost_pct + '%' +
+      (cst.flagged ? ' — ABOVE the 35% target' : ''), cst.flagged ? 'warning' : 'success');
+    closeRecipeBuilder();
+    loadMenuPage();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
   }
 }
 
@@ -6413,6 +6546,41 @@ function renderOrders(orders) {
       '<div style="margin-top:8px;">' + actions + '</div>' +
     '</div>';
   }).join('');
+}
+
+async function loadUsage() {
+  const box = document.getElementById('iv-usage');
+  try {
+    const r = await fetchAPI('/api/inventory/usage?venue_id=' + encodeURIComponent(state.currentVenue));
+    if (!r.items.length) {
+      box.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding:18px;">No overlapping counted items between the last two stocktakes</div>';
+      return;
+    }
+    const rows = r.items.map(function(it) {
+      const vColor = it.variance_value > 0 ? 'var(--danger)' : (it.variance_value < 0 ? 'var(--brand-blue)' : 'var(--text-muted)');
+      return '<tr style="border-top:1px solid var(--border);">' +
+        '<td style="padding:8px; font-weight:600;">' + esc(it.name) + ' <span style="color:var(--text-muted); font-size:12px;">(' + esc(it.unit || '') + ')</span></td>' +
+        '<td style="padding:8px;">' + it.opening + '</td>' +
+        '<td style="padding:8px;">' + it.received + '</td>' +
+        '<td style="padding:8px;">' + it.closing + '</td>' +
+        '<td style="padding:8px;">' + it.actual_usage + '</td>' +
+        '<td style="padding:8px;">' + it.theoretical_usage + '</td>' +
+        '<td style="padding:8px; color:' + vColor + '; font-weight:700;">' + (it.variance > 0 ? '+' : '') + it.variance + ' (' + formatCurrency(it.variance_value) + ')</td>' +
+        '</tr>';
+    }).join('');
+    box.innerHTML =
+      '<div style="margin-bottom:8px; font-size:13px; color:var(--text-muted);">' +
+        esc(String(r.from).slice(0, 16).replace('T', ' ')) + ' → ' + esc(String(r.to).slice(0, 16).replace('T', ' ')) +
+        ' · unexplained variance total: <strong style="color:' + (r.total_variance_value > 0 ? 'var(--danger)' : 'var(--success)') + ';">' +
+        formatCurrency(r.total_variance_value) + '</strong> (positive = waste/shrinkage; basis: ' + esc(r.basis) + ')</div>' +
+      '<div style="overflow-x:auto;"><table class="data-table" style="width:100%; border-collapse:collapse;">' +
+      '<thead><tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">' +
+      '<th style="padding:8px;">Item</th><th style="padding:8px;">Opening</th><th style="padding:8px;">Received</th>' +
+      '<th style="padding:8px;">Closing</th><th style="padding:8px;">Actual use</th><th style="padding:8px;">Should be</th>' +
+      '<th style="padding:8px;">Variance</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  } catch (e) {
+    box.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding:18px;">' + esc(e.message) + '</div>';
+  }
 }
 
 async function draftOrders() {
