@@ -2064,6 +2064,11 @@ async def create_venue(venue: VenueConfig):
         _tenant.venue_ids.append(venue.id)
         logger.info(f"First-venue bootstrap: user {_tenant.user_id} created and now manages {venue.id}")
     else:
+        # Fail closed: this branch is only reachable authenticated today
+        # (middleware sets the context), but if /venues were ever added to
+        # EXEMPT_PATHS a None tenant would mean an unauthenticated overwrite.
+        if _tenant is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
         _store["venues"][venue.id] = venue
 
     # Invalidate venue cache

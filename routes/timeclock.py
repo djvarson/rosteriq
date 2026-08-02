@@ -226,7 +226,7 @@ async def clock_out(body: PunchRequest) -> dict:
     })
     db.save_timesheet(ts)
     logger.info(f"Clock OUT: {emp.name} at {body.venue_id} — {worked_minutes}m worked, variance={variance}")
-    return {
+    out = {
         "status": "clocked_out",
         "timesheet_id": ts["id"],
         "employee": emp.name,
@@ -235,6 +235,13 @@ async def clock_out(body: PunchRequest) -> dict:
         "break_minutes": body.break_minutes,
         "variance_minutes": variance,
     }
+    # An immediate in/out is almost always a mispunch — never block it (the
+    # punch is a fact), but say so, and the review queue will show it anyway.
+    if worked_minutes < 5:
+        out["warning"] = (f"Only {worked_minutes} minutes worked — likely an "
+                          "accidental punch. A manager can correct or approve "
+                          "it on the Timesheets page.")
+    return out
 
 
 @router.post("/pin")

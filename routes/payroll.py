@@ -312,24 +312,29 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
     w.writerow([])
     w.writerow(["Employee", "Ordinary hours", "Ordinary rate", "Ordinary gross",
                 "Penalty hours detail", "Penalty gross", "Overtime hours",
-                "Overtime gross", "Allowances", "Total gross", "Super (11.5%)",
-                "Total incl super"])
+                "Overtime gross", "Allowance detail", "Allowances", "Total gross",
+                "Super (11.5%)", "Total incl super"])
     for e in batch.get("employees", []):
         penalty_detail = "; ".join(
             f"{p['penalty_type']} {p['hours']}h x{p['multiplier']}"
             for p in e.get("penalty_entries", []))
+        # Every allowance dollar is NAMED — an accountant should never have to
+        # guess what a $15.09 line is.
+        allowance_detail = "; ".join(
+            f"{a['allowance_type']} ${a['amount']}"
+            for a in e.get("allowances", []))
         w.writerow([
             e.get("name"), e.get("ordinary_hours"), e.get("ordinary_rate"),
             e.get("ordinary_gross"), penalty_detail, e.get("penalty_gross"),
             e.get("overtime_hours"), e.get("overtime_amount"),
-            e.get("allowances_total"), e.get("total_gross"),
+            allowance_detail, e.get("allowances_total"), e.get("total_gross"),
             e.get("super_amount"), e.get("total_with_super"),
         ])
     w.writerow([])
     w.writerow(["TOTALS", batch.get("total_ordinary_hours"), "",
                 batch.get("total_ordinary_gross"), "", batch.get("total_penalty_gross"),
                 batch.get("total_overtime_hours"), batch.get("total_overtime_gross"),
-                batch.get("total_allowances"), batch.get("total_gross"),
+                "", batch.get("total_allowances"), batch.get("total_gross"),
                 batch.get("total_super"), ""])
 
     return PlainTextResponse(
