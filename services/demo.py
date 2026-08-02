@@ -157,3 +157,117 @@ def seed_demo_environment(db) -> None:
             ))
         except Exception:
             pass
+
+    _seed_demo_showcase(db, now)
+
+
+def _seed_demo_showcase(db, now) -> None:
+    """Dress the newer Venue OS pillars so no demo page opens on an empty
+    state: announcements with read receipts, a pending leave request, an open
+    shift-cover, stock/par levels, and recent dish sales. Every block is
+    guarded (seed only when that pillar is empty) and best-effort — a partial
+    showcase beats a broken Try Demo."""
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+    wk = week_start.isoformat()
+
+    # Announcements + read receipts (Announcements page / News tab beat)
+    try:
+        if not db.list_announcements(DEMO_VENUE_ID):
+            db.save_announcement({
+                "id": "demo-ann-001", "venue_id": DEMO_VENUE_ID,
+                "title": "Welcome to The Brass Monkey on RosterIQ",
+                "body": "Rosters, hours, leave and shift swaps all live in /my "
+                        "on your phone. Ask a manager if your email isn't linked yet.",
+                "author_id": DEMO_USER_ID, "author_name": "Management",
+                "pinned": True, "sms_result": None,
+                "read_by": ["demo-staff-001", "demo-staff-002",
+                            "demo-staff-003", "demo-staff-005"],
+                "created_at": now,
+            })
+            db.save_announcement({
+                "id": "demo-ann-002", "venue_id": DEMO_VENUE_ID,
+                "title": "New winter menu starts Monday",
+                "body": "Tasting for all kitchen staff Sunday 3pm — paid hour.",
+                "author_id": DEMO_USER_ID, "author_name": "Management",
+                "pinned": False, "sms_result": None,
+                "read_by": ["demo-staff-003", "demo-staff-006"],
+                "created_at": now,
+            })
+    except Exception:
+        pass
+
+    # One pending leave request (Leave page approve-it-live beat)
+    try:
+        if not db.list_leave_requests(DEMO_VENUE_ID):
+            db.save_leave_request({
+                "id": "demo-leave-001", "venue_id": DEMO_VENUE_ID,
+                "employee_id": "demo-staff-004",
+                "start_date": today + timedelta(days=9),
+                "end_date": today + timedelta(days=11),
+                "reason": "Sister's wedding in Margaret River",
+                "status": "pending", "created_at": now,
+            })
+    except Exception:
+        pass
+
+    # One open shift-cover for today's bar shift (Cover board beat)
+    try:
+        if not db.list_shift_covers(DEMO_VENUE_ID):
+            db.save_shift_cover({
+                "id": "demo-cover-001", "venue_id": DEMO_VENUE_ID,
+                "shift_id": f"demo-shift-{wk}-002",
+                "shift_date": today, "shift_start": "15:00", "shift_end": "23:00",
+                "role": "bar", "requested_by": "demo-staff-002",
+                "reason": "Uni exam tomorrow morning",
+                "claimed_by": None, "status": "open", "created_at": now,
+            })
+    except Exception:
+        pass
+
+    # Stock + par levels on existing ingredients, ONE deliberately below par
+    # (Inventory low-badge + order-draft beat). Never clobbers real numbers.
+    try:
+        ingredients = db.list_ingredients(DEMO_VENUE_ID) or []
+        untouched = [i for i in ingredients
+                     if not float(i.get("stock_qty") or 0)
+                     and not float(i.get("par_level") or 0)]
+        if ingredients and len(untouched) == len(ingredients):
+            for idx, ing in enumerate(sorted(ingredients, key=lambda i: i["name"])):
+                pack = float(ing.get("purchase_size") or 1) or 1
+                ing["par_level"] = round(pack * 2, 3)
+                # First item runs low so the LOW badge and order draft demo work
+                ing["stock_qty"] = round(pack * (0.6 if idx == 0 else 2.5), 3)
+                db.save_ingredient(ing)
+    except Exception:
+        pass
+
+    # Recent dish sales so Menu & Sales chips show real revenue / food cost.
+    # Rows only — no stock depletion, so the shelf numbers above stay put.
+    try:
+        recent = db.list_dish_sales(DEMO_VENUE_ID, today - timedelta(days=7), today)
+        recipes = db.list_recipes(DEMO_VENUE_ID) or []
+        if recipes and not recent:
+            from rosteriq.routes.menu_costing import _cost_recipe
+            ings = {i["id"]: i for i in (db.list_ingredients(DEMO_VENUE_ID) or [])}
+            qtys = [14, 22, 61]
+            for day_offset in (1, 2):
+                sale_day = today - timedelta(days=day_offset)
+                for n, recipe in enumerate(recipes[:3]):
+                    costing = _cost_recipe(recipe, ings)
+                    qty = qtys[n % len(qtys)] - day_offset * 2
+                    db.save_dish_sale({
+                        "id": f"demo-sale-{sale_day.isoformat()}-{n}",
+                        "venue_id": DEMO_VENUE_ID,
+                        "sale_date": sale_day,
+                        "recipe_id": recipe["id"],
+                        "recipe_name": recipe.get("name"),
+                        "qty": qty,
+                        "revenue_inc_gst": round(
+                            float(costing["sell_price_inc_gst"]) * qty, 2),
+                        "cogs": round(float(costing["cost_per_portion"]) * qty, 2),
+                        "source": "manual",
+                        "created_at": now,
+                    })
+    except Exception:
+        pass

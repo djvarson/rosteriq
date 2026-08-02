@@ -1349,6 +1349,19 @@ async def log_routes():
     logger.info(f"RosterIQ started: {len(routes)} routes registered")
 
 
+@app.on_event("startup")
+async def seed_demo_on_boot():
+    """Keep the public demo venue dressed (staff, roster, announcements,
+    leave, cover, stock, sales) from the moment a deploy lands — the seeder
+    is idempotent and best-effort, so this can never block boot."""
+    try:
+        from rosteriq.services.demo import seed_demo_environment
+        seed_demo_environment(get_db())
+        logger.info("Demo environment ensured at startup")
+    except Exception as e:
+        logger.warning(f"Demo seed at startup skipped: {e}")
+
+
 def _validate_environment():
     """Validate required environment variables at startup.
 
