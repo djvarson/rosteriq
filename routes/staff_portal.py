@@ -72,8 +72,13 @@ class CoverDecision(BaseModel):
 
 
 def _linked_employee(db, user: UserContext):
-    """Find the employee record matching this user's email, searching the
-    venues the user can access (owners search all venues)."""
+    """Find the employee record matching this user's email.
+
+    Searches the venues the user can access first (owners search all). If a
+    self-registered staff member has NO venue access yet, the manager putting
+    their email on an employee record IS the authorisation — so we search all
+    venues by email and durably grant that venue on first match. Without this,
+    staff who sign themselves up are stuck at linked:false forever."""
     email = (user.email or "").strip().lower()
     if not email:
         return None, None
@@ -85,6 +90,30 @@ def _linked_employee(db, user: UserContext):
         for emp in db.get_employees(vid) or []:
             if (getattr(emp, "email", "") or "").strip().lower() == email:
                 return emp, vid
+
+    if not user.is_owner:
+        for venue in db.list_venues() or []:
+            vid = getattr(venue, "id", None)
+            if not vid or vid in venue_ids:
+                continue
+            for emp in db.get_employees(vid) or []:
+                if (getattr(emp, "email", "") or "").strip().lower() == email:
+                    # Auto-link: grant this venue to the user record so every
+                    # later request (and the tenant middleware) sees it.
+                    try:
+                        rec = db.get_user_by_id(user.user_id)
+                        if rec is not None:
+                            vids = list(rec.get("venue_ids") or [])
+                            if vid not in vids:
+                                vids.append(vid)
+                                rec["venue_ids"] = vids
+                                db.save_user(rec)
+                                logger.info(
+                                    f"Staff auto-link: {email} -> employee "
+                                    f"{emp.id} at {vid}")
+                    except Exception as e:
+                        logger.warning(f"Staff auto-link grant failed for {email}: {e}")
+                    return emp, vid
     return None, None
 
 

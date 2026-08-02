@@ -161,13 +161,14 @@ async def process_webhook_event(
             logger.warning("Invalid webhook signature")
             raise HTTPException(status_code=401, detail="Invalid signature")
     else:
-        # No secret configured. In PRODUCTION this is unsafe (any caller could
-        # forge events), so fail CLOSED and reject. Outside production we keep
-        # the warn-and-accept dev behaviour for local/testing convenience.
-        if os.environ.get("ENVIRONMENT") == "production":
+        # No secret configured. Fail CLOSED unless this is EXPLICITLY a dev/test
+        # environment — an unset ENVIRONMENT (the common deploy mistake) must
+        # never leave the forge-an-event door open in production.
+        if os.environ.get("ENVIRONMENT", "").lower() not in ("development", "dev", "test", "local"):
             logger.error(
-                "TANDA_WEBHOOK_SECRET not set in production — rejecting inbound "
-                "webhook (cannot verify signature)."
+                "TANDA_WEBHOOK_SECRET not set — rejecting inbound webhook "
+                "(cannot verify signature; set the secret, or ENVIRONMENT="
+                "development for local testing)."
             )
             raise HTTPException(
                 status_code=503,
@@ -175,7 +176,7 @@ async def process_webhook_event(
             )
         logger.warning(
             "TANDA_WEBHOOK_SECRET not set — inbound webhook signatures are NOT "
-            "verified. Set it in production to prevent forged webhook events."
+            "verified (dev mode). Set it in production to prevent forged events."
         )
 
     # Extract payload
@@ -292,9 +293,11 @@ async def receive_webhook(
     # (rather than letting forgeable, unsigned payloads through). Processing
     # happens in a background task that returns 200 to the client, so the
     # rejection has to be enforced here on the request path.
-    if not webhook_secret and os.environ.get("ENVIRONMENT") == "production":
+    if not webhook_secret and os.environ.get("ENVIRONMENT", "").lower() not in (
+            "development", "dev", "test", "local"):
         logger.error(
-            "TANDA_WEBHOOK_SECRET not set in production — rejecting inbound webhook."
+            "TANDA_WEBHOOK_SECRET not set — rejecting inbound webhook "
+            "(fail closed; unset ENVIRONMENT is treated as production)."
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -335,11 +338,15 @@ async def webhook_status() -> Dict[str, Any]:
     """
     try:
         from rosteriq.services.tanda_webhook_manager import get_webhook_manager
-    except ImportError:
+        manager = get_webhook_manager()
+        subscriptions = manager.get_all_subscriptions()
+    except HTTPException:
+        raise
+    except Exception as e:
+        # An unconfigured/unreachable webhook manager is an expected state,
+        # not a server error — report it as unavailable, never a 500.
+        logger.warning(f"Webhook status unavailable: {e}")
         raise HTTPException(status_code=503, detail="Webhook manager not available")
-
-    manager = get_webhook_manager()
-    subscriptions = manager.get_all_subscriptions()
 
     return {
         "status": "ok",

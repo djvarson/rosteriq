@@ -2386,6 +2386,29 @@ async def _ensure_week_forecasts(venue, week_start):
     return generated
 
 
+def _approved_leave_map(venue_id: str) -> dict:
+    """employee_id -> [(start, end)] of APPROVED leave, for roster generation."""
+    out: dict = {}
+    try:
+        for r in _db.list_leave_requests(venue_id) or []:
+            if r.get("status") != "approved":
+                continue
+            rs, re_ = r.get("start_date"), r.get("end_date")
+            rs = rs if isinstance(rs, date) else date.fromisoformat(str(rs)[:10])
+            re_ = re_ if isinstance(re_, date) else date.fromisoformat(str(re_)[:10])
+            out.setdefault(str(r.get("employee_id")), []).append((rs, re_))
+    except Exception as e:
+        logger.warning(f"Leave lookup failed for {venue_id}: {e}")
+    return out
+
+
+def _venue_employees(venue_id: str) -> list:
+    """ONLY this venue's employees — roster generation must never see (or
+    schedule) another tenant's staff."""
+    return [e for e in _store["employees"].values()
+            if getattr(e, "venue_id", None) == venue_id]
+
+
 @app.post("/rosters/generate")
 async def generate_roster(req: GenerateRosterRequest):
     enforce_venue_access(req.venue_id)
@@ -2393,9 +2416,9 @@ async def generate_roster(req: GenerateRosterRequest):
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")
 
-    employees = list(_store["employees"].values())
+    employees = _venue_employees(req.venue_id)
     if not employees:
-        raise HTTPException(400, "No employees loaded")
+        raise HTTPException(400, "No employees loaded for this venue")
 
     # Auto-generate cold-start forecasts if the venue has none for this week, so a
     # brand-new venue (no history) can still produce a first roster.
@@ -2408,6 +2431,22 @@ async def generate_roster(req: GenerateRosterRequest):
     roster = generate_weekly_roster(
         req.week_start, forecasts, employees, venue, req.covers_per_staff
     )
+
+    # Approved leave wins over the generator: drop any shift that lands on a
+    # day the employee has approved off, and say so rather than hiding it.
+    leave_map = _approved_leave_map(req.venue_id)
+    removed_for_leave = []
+    if leave_map:
+        kept = []
+        for s in roster.shifts:
+            spans = leave_map.get(str(s.employee_id), [])
+            if any(rs <= s.date <= re_ for rs, re_ in spans):
+                removed_for_leave.append(
+                    f"{s.employee_id} on {s.date.isoformat()}")
+            else:
+                kept.append(s)
+        if removed_for_leave:
+            roster.shifts = kept
 
     _store["rosters"][roster.id] = roster
 
@@ -2460,7 +2499,12 @@ async def generate_daily(req: DailyRosterRequest):
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")
 
-    employees = list(_store["employees"].values())
+    leave_map = _approved_leave_map(req.venue_id)
+    employees = [
+        e for e in _venue_employees(req.venue_id)
+        if not any(rs <= req.target_date <= re_
+                   for rs, re_ in leave_map.get(str(e.id), []))
+    ]
     forecasts = [
         f for f in _store["forecasts"]
         if f.venue_id == req.venue_id and f.date == req.target_date
@@ -2652,17 +2696,19 @@ async def recommend_decision(req: DecisionRequest):
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")
 
-    # Get today's active shifts
+    # Get today's active shifts — THIS venue's rosters only
     today = date.today()
     active_shifts = []
     for roster in _store["rosters"].values():
+        if getattr(roster, "venue_id", None) != req.venue_id:
+            continue
         for shift in roster.shifts:
             if shift.date == today and shift.status in (
                 ShiftStatus.scheduled, ShiftStatus.confirmed, ShiftStatus.in_progress
             ):
                 active_shifts.append(shift)
 
-    employees = list(_store["employees"].values())
+    employees = _venue_employees(req.venue_id)
     available = [e for e in employees if e.id not in {s.employee_id for s in active_shifts}]
 
     result = make_decision(

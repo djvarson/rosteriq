@@ -25,6 +25,21 @@ from rosteriq.models import (
 
 logger = logging.getLogger(__name__)
 
+
+def _jsonb(value, default=None):
+    """Tolerant JSON-column read. psycopg2 returns JSONB columns ALREADY
+    parsed (dict/list) while TEXT columns come back raw — json.loads() on a
+    parsed value raises TypeError and 500s in production while MemoryStore
+    tests stay green. Every JSON column read must go through this."""
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 
@@ -4222,7 +4237,7 @@ class PostgresStore(BaseStore):
             row = cur.fetchone()
             if row and row.get("state_data"):
                 if isinstance(row["state_data"], str):
-                    return json.loads(row["state_data"])
+                    return _jsonb(row["state_data"])
                 return row["state_data"]
         return None
 
@@ -5026,7 +5041,7 @@ class PostgresStore(BaseStore):
                     "venue_id": row['venue_id'],
                     "date": row['date'],
                     "metric_type": row['metric_type'],
-                    "value": json.loads(row['value']),
+                    "value": _jsonb(row['value']),
                     "created_at": row['created_at'],
                 })
 
@@ -5093,7 +5108,7 @@ class PostgresStore(BaseStore):
 
             row = cur.fetchone()
             if row:
-                return json.loads(row[0])
+                return _jsonb(row["config"])
             return None
 
     def delete_theme(self, venue_id: str) -> None:
@@ -5212,7 +5227,7 @@ class PostgresStore(BaseStore):
             """, (employee_id,))
             row = cur.fetchone()
             if row:
-                return json.loads(row['profile_data'])
+                return _jsonb(row['profile_data'])
             return None
 
     def list_preference_profiles(self, venue_id: str) -> list[dict]:
@@ -5224,7 +5239,7 @@ class PostgresStore(BaseStore):
                 WHERE profile_data->>'venue_id' = %s
                 ORDER BY updated_at DESC
             """, (venue_id,))
-            return [json.loads(row['profile_data']) for row in cur.fetchall()]
+            return [_jsonb(row['profile_data']) for row in cur.fetchall()]
 
 
     # --- A/B Testing ---
@@ -5497,7 +5512,7 @@ class PostgresStore(BaseStore):
             """, (user_id,))
             row = cur.fetchone()
             if row:
-                return json.loads(row["preferences"])
+                return _jsonb(row["preferences"])
         return None
 
     # --- Approval Workflow ---
@@ -5547,7 +5562,7 @@ class PostgresStore(BaseStore):
             """, (request_id,))
             row = cur.fetchone()
             if row:
-                return json.loads(row["data"])
+                return _jsonb(row["data"])
         return None
 
     def list_approval_requests(
@@ -5696,7 +5711,7 @@ class PostgresStore(BaseStore):
             """, (user_id,))
             row = cur.fetchone()
             if row:
-                return json.loads(row["subscription_data"])
+                return _jsonb(row["subscription_data"])
         return None
 
     def delete_push_subscription(self, user_id: str) -> None:
@@ -5716,7 +5731,7 @@ class PostgresStore(BaseStore):
             """, (venue_id,))
             results = []
             for row in cur.fetchall():
-                results.append(json.loads(row["subscription_data"]))
+                results.append(_jsonb(row["subscription_data"]))
             return results
 
 
@@ -5747,7 +5762,7 @@ class PostgresStore(BaseStore):
             """, (venue_id,))
             row = cur.fetchone()
             if row:
-                return json.loads(row['model_data'])
+                return _jsonb(row['model_data'])
         return None
 
     def save_revenue_actual(self, venue_id: str, date: str, revenue: dict) -> None:
@@ -5783,7 +5798,7 @@ class PostgresStore(BaseStore):
             """, (venue_id, start, end))
             results = []
             for row in cur.fetchall():
-                record = json.loads(row['revenue_data'])
+                record = _jsonb(row['revenue_data'])
                 record['venue_id'] = row['venue_id']
                 record['date'] = row['date'].isoformat() if hasattr(row['date'], 'isoformat') else row['date']
                 results.append(record)
@@ -5926,7 +5941,7 @@ class PostgresStore(BaseStore):
                 "start_time": row["start_time"].isoformat() if hasattr(row["start_time"], "isoformat") else str(row["start_time"]),
                 "end_time": row["end_time"].isoformat() if hasattr(row["end_time"], "isoformat") else str(row["end_time"]),
                 "role_required": row["role_required"],
-                "skills_required": json.loads(row["skills_required"]) if row["skills_required"] else [],
+                "skills_required": _jsonb(row["skills_required"], []),
                 "min_rate": str(row["min_rate"]),
                 "max_rate": str(row["max_rate"]) if row["max_rate"] else None,
                 "posted_by": row["posted_by"],
@@ -5954,7 +5969,7 @@ class PostgresStore(BaseStore):
                     "start_time": row["start_time"].isoformat() if hasattr(row["start_time"], "isoformat") else str(row["start_time"]),
                     "end_time": row["end_time"].isoformat() if hasattr(row["end_time"], "isoformat") else str(row["end_time"]),
                     "role_required": row["role_required"],
-                    "skills_required": json.loads(row["skills_required"]) if row["skills_required"] else [],
+                    "skills_required": _jsonb(row["skills_required"], []),
                     "min_rate": str(row["min_rate"]),
                     "max_rate": str(row["max_rate"]) if row["max_rate"] else None,
                     "posted_by": row["posted_by"],

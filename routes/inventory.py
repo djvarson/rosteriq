@@ -26,7 +26,7 @@ Routes (all venue-scoped):
 import logging
 import math
 import uuid
-from datetime import date as dt_date, datetime
+from datetime import date as dt_date, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -554,11 +554,27 @@ async def usage_report(venue_id: str = Query(...)) -> dict:
 
     start_ts, end_ts = _ts(opening_st["completed_at"]), _ts(closing_st["completed_at"])
 
-    # Deliveries received in the window
+    # Deliveries received in the window. What was BOOKED is the truth:
+    # invoices book actual delivered packs (which may differ from the order),
+    # so invoiced deliveries are valued from the invoice, and only orders
+    # received WITHOUT an invoice are valued from their own lines — never
+    # both, or a short delivery shows up as phantom shrinkage.
     received: dict = {}
+    invoiced_order_ids = set()
+    for inv in db.list_supplier_invoices(venue_id) or []:
+        its = _ts(inv.get("created_at"))
+        if inv.get("order_id"):
+            invoiced_order_ids.add(inv["order_id"])
+        if not (start_ts < its <= end_ts):
+            continue
+        for item in inv.get("items", []):
+            received[item["ingredient_id"]] = received.get(item["ingredient_id"], 0.0) + \
+                float(item.get("packs", 0)) * float(item.get("pack_size", 0))
     for order in db.list_supplier_orders(venue_id) or []:
         if order.get("status") != "received" or not order.get("received_at"):
             continue
+        if order.get("id") in invoiced_order_ids:
+            continue  # already counted at invoice actuals
         rts = _ts(order["received_at"])
         if not (start_ts < rts <= end_ts):
             continue
@@ -570,7 +586,13 @@ async def usage_report(venue_id: str = Query(...)) -> dict:
     ingredients = {i["id"]: i for i in (db.list_ingredients(venue_id) or [])}
     recipes = {r["id"]: r for r in (db.list_recipes(venue_id) or [])}
     theoretical: dict = {}
-    for sale in db.list_dish_sales(venue_id, start_ts.date(), end_ts.date()) or []:
+    # Sales are date-stamped, stocktakes are time-stamped. For multi-day
+    # windows the opening-count day is EXCLUDED (count-at-close convention) so
+    # sales rung up before the opening count can't leak into the window; a
+    # same-day window keeps its day.
+    sales_from = start_ts.date() if end_ts.date() == start_ts.date() \
+        else start_ts.date() + timedelta(days=1)
+    for sale in db.list_dish_sales(venue_id, sales_from, end_ts.date()) or []:
         recipe = recipes.get(sale.get("recipe_id"))
         if not recipe:
             continue
@@ -617,7 +639,9 @@ async def usage_report(venue_id: str = Query(...)) -> dict:
         "venue_id": venue_id,
         "from": start_ts.isoformat(),
         "to": end_ts.isoformat(),
-        "basis": "current recipes",
+        "basis": "current recipes; invoiced deliveries at booked actuals; "
+                 "sales matched by calendar day (opening day excluded on "
+                 "multi-day windows, count-at-close convention)",
         "total_variance_value": round(total_variance_value, 2),
         "items": rows,
     }

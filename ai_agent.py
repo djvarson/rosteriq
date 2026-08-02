@@ -15,6 +15,7 @@ import os
 import json
 import asyncio
 import logging
+import re
 from datetime import date, datetime, timedelta
 from typing import Optional, AsyncGenerator
 from enum import Enum
@@ -25,6 +26,22 @@ from rosteriq.database import get_db
 from rosteriq.models import Employee, Shift, State
 
 logger = logging.getLogger(__name__)
+
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Remove reasoning-model internals (<think>...</think>) before the text
+    reaches users or conversation history. MiniMax-M3 emits these inline; a
+    venue owner should never see the model talking to itself. An unclosed
+    <think> with no visible text after it would blank the reply — in that
+    case fall through to the raw text minus the opening tag."""
+    if "<think>" not in (text or "").lower():
+        return text
+    stripped = _THINK_RE.sub("", text).strip()
+    if stripped:
+        return stripped
+    return re.sub(r"</?think>", "", text, flags=re.IGNORECASE).strip()
 
 # ---------------------------------------------------------------------------
 # Config
@@ -1247,16 +1264,17 @@ class RosterIQAgent:
 
                 message = choices[0].get("message", {}) or {}
                 tool_calls = message.get("tool_calls") or []
+                content = _strip_reasoning(message.get("content") or "")
 
                 if not tool_calls:
                     # No tool use — return the assistant's text.
-                    return {"response": message.get("content") or "", "actions": actions, "tool_calls": tool_calls_log}
+                    return {"response": content, "actions": actions, "tool_calls": tool_calls_log}
 
                 # The full assistant message (incl. tool_calls) must be appended
                 # to history before the tool results, per the OpenAI contract.
                 oai_messages.append({
                     "role": "assistant",
-                    "content": message.get("content") or "",
+                    "content": content,
                     "tool_calls": tool_calls,
                 })
 
@@ -1438,7 +1456,7 @@ class RosterIQAgent:
         for part in parts:
             if "text" in part:
                 texts.append(part["text"])
-        return "\n".join(texts) if texts else "I've processed your request."
+        return _strip_reasoning("\n".join(texts)) if texts else "I've processed your request."
 
 
 # ---------------------------------------------------------------------------

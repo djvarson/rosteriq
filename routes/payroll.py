@@ -682,11 +682,13 @@ async def reconcile_payroll(
 
 @router.get("/history", response_model=List[ExportResultResponse])
 async def get_payroll_export_history(
-    venue_id: Optional[str] = Query(None),
+    venue_id: str = Query(..., description="Venue to list export history for"),
     limit: int = Query(20, ge=1, le=100),
     db=Depends(get_db),
 ):
-    """Get export history for venue."""
+    """Get export history for venue. Venue-scoped like every other payroll
+    route — payroll data is the last place a cross-tenant read is acceptable."""
+    enforce_venue_access(venue_id)
     try:
         # Mock implementation
         return []

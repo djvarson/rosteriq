@@ -39,6 +39,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.models import Roster, Employee
 from rosteriq.auth import get_current_user
 from rosteriq.services.auto_scheduler import (
@@ -228,12 +229,9 @@ async def generate_schedule(
         if not venue:
             raise HTTPException(status_code=404, detail=f"Venue {venue_id} not found")
 
-        # Verify user has access to venue
-        if venue_id not in current_user.venue_ids:
-            raise HTTPException(
-                status_code=403,
-                detail="Access denied to this venue",
-            )
+        # Verify user has access to venue (owners pass; staff/managers are
+        # limited to their venues — the raw venue_ids check locked owners out)
+        enforce_venue_access(venue_id)
 
         # Parse week_start
         try:
@@ -299,9 +297,8 @@ async def preview_schedule(
         if not venue:
             raise HTTPException(status_code=404, detail=f"Venue {venue_id} not found")
 
-        # Verify user has access
-        if venue_id not in current_user.venue_ids:
-            raise HTTPException(status_code=403, detail="Access denied")
+        # Verify user has access (owners pass)
+        enforce_venue_access(venue_id)
 
         # Parse date
         try:
@@ -355,9 +352,8 @@ async def fill_gaps(
         if not roster:
             raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
 
-        # Verify user has access to venue
-        if venue_id not in current_user.venue_ids:
-            raise HTTPException(status_code=403, detail="Access denied")
+        # Verify user has access (owners pass)
+        enforce_venue_access(venue_id)
 
         # Fill gaps
         scheduler = AutoScheduler(db)
@@ -410,9 +406,8 @@ async def get_hiring_suggestions(
         if not venue:
             raise HTTPException(status_code=404, detail=f"Venue {venue_id} not found")
 
-        # Verify user has access
-        if venue_id not in current_user.venue_ids:
-            raise HTTPException(status_code=403, detail="Access denied")
+        # Verify user has access (owners pass)
+        enforce_venue_access(venue_id)
 
         # Parse date
         try:

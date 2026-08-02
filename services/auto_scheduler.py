@@ -128,7 +128,10 @@ class AutoScheduler:
         """
         self.db = db or get_db()
         self.conflict_detector = ConflictDetector()
-        self.availability_resolver = AvailabilityResolver(self.db)
+        # AvailabilityResolver resolves its own db via get_db() — its
+        # constructor takes no arguments (passing db here crashed every
+        # auto-schedule call with a TypeError masked as a generic 500).
+        self.availability_resolver = AvailabilityResolver()
 
     def generate_week(
         self,
@@ -505,18 +508,22 @@ class AutoScheduler:
         end_hour: int,
     ) -> Shift:
         """Create a Shift object."""
+        # A demand window ending at midnight arrives as end_hour 24, which
+        # time() rejects — represent it as 23:59 (overnight shifts are out of
+        # scope for the template generator; this keeps the last hour staffed).
         start_time_obj = time(hour=start_hour, minute=0)
-        end_time_obj = time(hour=end_hour, minute=0)
+        end_time_obj = time(hour=23, minute=59) if end_hour >= 24 \
+            else time(hour=end_hour, minute=0)
 
         # Determine break duration
-        shift_duration_hours = end_hour - start_hour
+        shift_duration_hours = min(end_hour, 24) - start_hour
         if shift_duration_hours >= 6:
             break_minutes = 30
         else:
             break_minutes = 0
 
         # Calculate cost (simplified)
-        day_type = get_day_type(shift_date)
+        day_type = get_day_type(shift_date, employee.state)
         penalty_mult = get_penalty_multiplier(employee.employment_type, day_type)
         base_cost = Decimal(str(employee.hourly_base_rate)) * Decimal(str(shift_duration_hours - break_minutes / 60.0))
         cost = base_cost * penalty_mult

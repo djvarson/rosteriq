@@ -645,7 +645,8 @@ class PayrollExporter:
         if not batch.employees:
             errors.append("Batch has no employees")
 
-        if batch.period_start >= batch.period_end:
+        # A single-day period (start == end) is a legitimate pay run
+        if batch.period_start > batch.period_end:
             errors.append("Period start must be before period end")
 
         for emp in batch.employees:
