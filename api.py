@@ -561,6 +561,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register staff import routes: {e}")
 
+# Roster import (paste a shift export from any program)
+try:
+    from rosteriq.routes.roster_import import router as roster_import_router
+    app.include_router(roster_import_router)
+    logger.info("Roster import routes registered")
+except ImportError:
+    logger.info("Roster import routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register roster import routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router

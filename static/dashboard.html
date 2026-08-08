@@ -3078,6 +3078,17 @@
 
         <div id="roster-coverage-banner" style="display:none; margin-bottom:14px; padding:12px 16px; border-radius:12px; font-size:14px; font-weight:600;"></div>
 
+        <div id="roster-import-card" style="display:none; margin-bottom:14px; border:1px solid var(--brand-blue); border-radius:10px; padding:14px;">
+          <div style="font-weight:600; margin-bottom:4px;">Import your existing roster — no live connection</div>
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">Export your published roster from Deputy, Tanda, or a spreadsheet and paste it below (import your staff first so shifts can be matched). Columns matched automatically: Name/Email, Date, Start, End, Role, Break.</div>
+          <textarea id="roster-import-text" rows="6" placeholder="Paste your exported roster (with a header row)…" style="width:100%; font-family:monospace; font-size:12px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); color:var(--text-primary);"></textarea>
+          <div style="display:flex; gap:8px; margin-top:10px; align-items:center;">
+            <button class="btn btn-primary btn-small" onclick="runRosterImport()">Import roster</button>
+            <button class="btn btn-secondary btn-small" onclick="document.getElementById('roster-import-card').style.display='none'">Cancel</button>
+            <span id="roster-import-result" style="font-size:12px; color:var(--text-muted); margin-left:auto;"></span>
+          </div>
+        </div>
+
         <div class="grid-1">
           <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -3087,6 +3098,7 @@
               <div>
                 <button class="btn btn-primary btn-small" id="btn-prev-week">← Previous</button>
                 <button class="btn btn-secondary btn-small" id="btn-next-week">Next →</button>
+                <button class="btn btn-secondary btn-small" onclick="openRosterImport()" title="Paste a roster export from Deputy, Tanda, or a spreadsheet">Import roster</button>
                 <button class="btn btn-primary btn-small" id="btn-roster-generate" onclick="openModal('modal-generate-roster')">Generate Roster</button>
                 <span style="display:inline-block; width:1px; height:20px; background:#2A3040; margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterPDF()" title="Download PDF for printing">PDF</button>
@@ -8562,6 +8574,34 @@ function getCurrentVenueState() {
   const s = venue && venue.state ? String(venue.state).toLowerCase() : 'vic';
   const valid = ['nsw','vic','qld','sa','wa','tas','nt','act'];
   return valid.includes(s) ? s : 'vic';
+}
+
+function openRosterImport() {
+  if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
+  document.getElementById('roster-import-text').value = '';
+  document.getElementById('roster-import-result').textContent = '';
+  document.getElementById('roster-import-card').style.display = 'block';
+}
+
+async function runRosterImport() {
+  const content = document.getElementById('roster-import-text').value.trim();
+  if (!content) { showToast('Paste your roster export first', 'warning'); return; }
+  const res = document.getElementById('roster-import-result');
+  res.textContent = 'Importing…';
+  try {
+    const r = await fetchAPI('/api/setup/import-roster', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: state.currentVenue, content: content }),
+    });
+    let msg = r.shifts_imported + ' shifts across ' + r.weeks + ' week(s)';
+    if (r.skipped_count) msg += ', ' + r.skipped_count + ' skipped';
+    res.textContent = msg;
+    showToast(msg, r.shifts_imported ? 'success' : 'warning');
+    if (r.shifts_imported && typeof loadVenueData === 'function') loadVenueData();
+  } catch (e) {
+    res.textContent = '';
+    showToast('Import failed: ' + e.message, 'error');
+  }
 }
 
 function openStaffImport() {
