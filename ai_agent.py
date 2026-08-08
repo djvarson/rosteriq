@@ -342,6 +342,32 @@ GEMINI_TOOLS = [
                 },
             },
         },
+        {
+            "name": "get_business_snapshot",
+            "description": "The headline operating numbers for a period: net sales (ex-GST), rostered labour cost and labour %, food cost and food-cost %, and PRIME COST % (labour + food as a share of sales — the number that makes or breaks a venue, target 60-65%). Use this for 'how are we tracking', 'what's our prime cost', 'are we profitable this week'.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "start_date": {"type": "STRING", "description": "Start date YYYY-MM-DD. Defaults to 7 days ago."},
+                    "end_date": {"type": "STRING", "description": "End date YYYY-MM-DD. Defaults to today."},
+                },
+            },
+        },
+        {
+            "name": "get_menu_performance",
+            "description": "Menu costing: each dish's cost per portion, sell price, margin, and food-cost %, worst offenders first, plus which dishes are flagged above the food-cost target. Use for 'which dishes lose money', 'what's my worst margin', 'how's the menu costed'.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
+        {
+            "name": "get_inventory_status",
+            "description": "Current stock on hand: total stock value, which ingredients are below par (need ordering), and their suppliers. Use for 'what do I need to order', 'what's low', 'how much stock do we have'.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
+        {
+            "name": "get_pending_approvals",
+            "description": "Everything waiting on a manager decision: pending leave requests (who, dates, reason) and open shift-cover requests (who can't work which shift). Use for 'what needs my approval', 'any leave requests', 'who needs cover'.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
     ]}
 ]
 
@@ -391,7 +417,7 @@ def _gemini_tools_to_openai(gemini_tools: list) -> list:
     return openai_tools
 
 
-# Pre-computed once: the 13 tools in OpenAI/MiniMax shape.
+# Pre-computed once: the full tool set in OpenAI/MiniMax shape.
 OPENAI_TOOLS = _gemini_tools_to_openai(GEMINI_TOOLS)
 
 
@@ -1119,6 +1145,119 @@ class AgentContext:
             result["message"] = f"Borderline — monitor closely. {'; '.join(reasons) if reasons else 'No strong signals either way.'}."
 
         return result
+
+    # --- Kitchen money loop + approvals (this reasons over the same engines
+    #     the dashboard uses, so the AI and the screens never disagree) -----
+
+    async def _tool_get_business_snapshot(self, params: dict) -> dict:
+        from rosteriq.routes.menu_costing import GST_RATE
+        today = date.today()
+        try:
+            end = date.fromisoformat(params["end_date"]) if params.get("end_date") else today
+        except Exception:
+            end = today
+        try:
+            start = date.fromisoformat(params["start_date"]) if params.get("start_date") else end - timedelta(days=6)
+        except Exception:
+            start = end - timedelta(days=6)
+
+        sales = self.db.list_dish_sales(self.venue_id, start, end) or []
+        rev_inc = sum(float(s.get("revenue_inc_gst") or 0) for s in sales)
+        cogs = sum(float(s.get("cogs") or 0) for s in sales)
+        net = rev_inc / (1 + GST_RATE)
+
+        labour = 0.0
+        try:
+            for roster in (self.db.get_rosters_by_date_range(self.venue_id, start, end) or []):
+                for sh in roster.shifts:
+                    if start <= sh.date <= end and sh.cost is not None:
+                        labour += float(sh.cost)
+        except Exception:
+            pass
+
+        def pct(part):
+            return round(part / net * 100, 1) if net > 0 else None
+        prime = labour + cogs
+        return {
+            "period": f"{start.isoformat()} to {end.isoformat()}",
+            "net_sales_ex_gst": round(net, 2),
+            "revenue_inc_gst": round(rev_inc, 2),
+            "labour_cost_rostered": round(labour, 2),
+            "labour_pct": pct(labour),
+            "food_cost": round(cogs, 2),
+            "food_cost_pct": pct(cogs),
+            "prime_cost_pct": pct(prime),
+            "prime_cost_target": "60-65% is healthy for AU hospitality",
+            "note": "Labour is rostered (planned) cost; net sales exclude GST.",
+        }
+
+    async def _tool_get_menu_performance(self, params: dict) -> dict:
+        from rosteriq.routes.menu_costing import _cost_recipe
+        ings = {i["id"]: i for i in (self.db.list_ingredients(self.venue_id) or [])}
+        recipes = self.db.list_recipes(self.venue_id) or []
+        costed = [_cost_recipe(r, ings) for r in recipes]
+        costed.sort(key=lambda c: -(c.get("food_cost_pct") or 0))
+        flagged = [c["name"] for c in costed if c.get("flagged")]
+        return {
+            "dish_count": len(costed),
+            "flagged_over_target": flagged,
+            "dishes": [{
+                "name": c["name"],
+                "cost_per_portion": c["cost_per_portion"],
+                "sell_price_inc_gst": c["sell_price_inc_gst"],
+                "margin_per_portion": c["margin_per_portion"],
+                "food_cost_pct": c["food_cost_pct"],
+                "flagged": c["flagged"],
+            } for c in costed[:15]],
+        }
+
+    async def _tool_get_inventory_status(self, params: dict) -> dict:
+        rows = self.db.list_ingredients(self.venue_id) or []
+        total_value = 0.0
+        low = []
+        for ing in rows:
+            if not ing.get("active", True):
+                continue
+            stock = float(ing.get("stock_qty") or 0)
+            par = float(ing.get("par_level") or 0)
+            cpu = float(ing.get("cost_per_unit") or 0)
+            total_value += stock * cpu
+            if par > 0 and stock < par:
+                low.append({
+                    "name": ing["name"], "on_hand": round(stock, 3),
+                    "par": round(par, 3), "unit": ing.get("unit"),
+                    "supplier": ing.get("supplier") or "Unassigned",
+                })
+        low.sort(key=lambda x: x["name"])
+        return {
+            "total_stock_value": round(total_value, 2),
+            "below_par_count": len(low),
+            "below_par_items": low,
+        }
+
+    async def _tool_get_pending_approvals(self, params: dict) -> dict:
+        emp_names = {e.id: e.name for e in (self.db.get_employees(self.venue_id) or [])}
+        leave = [{
+            "employee": emp_names.get(r.get("employee_id"), r.get("employee_id")),
+            "start_date": str(r.get("start_date")), "end_date": str(r.get("end_date")),
+            "reason": r.get("reason"),
+        } for r in (self.db.list_leave_requests(self.venue_id) or [])
+            if r.get("status") == "pending"]
+        covers = [{
+            "requested_by": emp_names.get(c.get("requested_by"), c.get("requested_by")),
+            "shift_date": str(c.get("shift_date")),
+            "shift": f"{c.get('shift_start')}-{c.get('shift_end')}",
+            "role": c.get("role"), "reason": c.get("reason"),
+            "claimed_by": emp_names.get(c.get("claimed_by")) if c.get("claimed_by") else None,
+            "status": c.get("status"),
+        } for c in (self.db.list_shift_covers(self.venue_id) or [])
+            if c.get("status") in ("open", "claimed")]
+        return {
+            "pending_leave_count": len(leave),
+            "pending_leave": leave,
+            "open_cover_count": len(covers),
+            "shift_cover": covers,
+        }
 
 
 # ---------------------------------------------------------------------------
