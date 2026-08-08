@@ -551,6 +551,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register setup wizard routes: {e}")
 
+# Staff import (paste/CSV export from any program — no live connection)
+try:
+    from rosteriq.routes.staff_import import router as staff_import_router
+    app.include_router(staff_import_router)
+    logger.info("Staff import routes registered")
+except ImportError:
+    logger.info("Staff import routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register staff import routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router
