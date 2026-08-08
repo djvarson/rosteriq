@@ -48,6 +48,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["staff-portal"])
 
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday",
+             "friday", "saturday", "sunday"]
+
 
 class LeaveRequestBody(BaseModel):
     start_date: date
@@ -59,6 +62,29 @@ class LeaveDecision(BaseModel):
     venue_id: str
     approve: bool
     note: str = Field(default="", max_length=300)
+
+
+class DayAvailability(BaseModel):
+    status: str = Field(..., pattern=r"^(available|unavailable|partial)$")
+    ranges: list = Field(default_factory=list,
+                         description="For 'partial': [{start:'HH:MM', end:'HH:MM'}]")
+
+
+class AvailabilityBody(BaseModel):
+    # weekday name -> DayAvailability; only supplied days are changed
+    days: dict = Field(..., description="e.g. {'monday': {'status':'unavailable'}}")
+
+
+def _parse_hhmm(v: str) -> int:
+    """'HH:MM' -> hour int, validating range; raises 422 on garbage."""
+    try:
+        h, m = str(v).split(":")[:2] if ":" in str(v) else (v, "0")
+        hi = int(h)
+        if not (0 <= hi <= 23):
+            raise ValueError
+        return hi
+    except Exception:
+        raise HTTPException(status_code=422, detail=f"Bad time '{v}' — use HH:MM (00:00–23:00)")
 
 
 class CoverRequestBody(BaseModel):
@@ -259,6 +285,75 @@ async def request_leave(body: LeaveRequestBody,
     db.save_leave_request(req)
     logger.info(f"Leave requested: {emp.name} {body.start_date}..{body.end_date} at {vid}")
     return {"status": "requested", "request_id": req["id"]}
+
+
+# ---------------------------------------------------------------------------
+# Availability — staff set when they can/can't work; the roster generator
+# already honours employee.availability, so this closes that loop from /my.
+#   day absent from dict  -> available all day
+#   day present, ranges [] -> unavailable all day
+#   day present, ranges    -> available only in those windows
+# ---------------------------------------------------------------------------
+
+@router.get("/api/me/availability")
+async def my_availability(user: UserContext = Depends(get_current_user)) -> dict:
+    db = get_db()
+    emp, vid = _linked_employee(db, user)
+    if not emp:
+        return _no_link_response(user)
+    avail = getattr(emp, "availability", {}) or {}
+    days = []
+    for d in _WEEKDAYS:
+        if d not in avail:
+            days.append({"day": d, "status": "available", "ranges": []})
+        elif not avail[d]:
+            days.append({"day": d, "status": "unavailable", "ranges": []})
+        else:
+            days.append({"day": d, "status": "partial", "ranges": avail[d]})
+    return {"linked": True, "days": days}
+
+
+@router.post("/api/me/availability")
+async def set_my_availability(body: AvailabilityBody,
+                              user: UserContext = Depends(get_current_user)) -> dict:
+    db = get_db()
+    emp, vid = _linked_employee(db, user)
+    if not emp:
+        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+
+    avail = dict(getattr(emp, "availability", {}) or {})
+    for day, spec in (body.days or {}).items():
+        d = str(day).strip().lower()
+        if d not in _WEEKDAYS:
+            raise HTTPException(status_code=422, detail=f"Unknown day '{day}'")
+        status = str((spec or {}).get("status", "")).lower()
+        if status == "available":
+            avail.pop(d, None)
+        elif status == "unavailable":
+            avail[d] = []
+        elif status == "partial":
+            ranges = (spec or {}).get("ranges") or []
+            if not ranges:
+                raise HTTPException(status_code=422,
+                                    detail=f"{d}: 'partial' needs at least one time range")
+            clean = []
+            for r in ranges:
+                start = str(r.get("start", "")).strip()
+                end = str(r.get("end", "")).strip()
+                if _parse_hhmm(start) >= _parse_hhmm(end):
+                    raise HTTPException(status_code=422,
+                                        detail=f"{d}: range start {start} must be before end {end}")
+                clean.append({"start": start, "end": end})
+            avail[d] = clean
+        else:
+            raise HTTPException(status_code=422,
+                                detail=f"{d}: status must be available / unavailable / partial")
+
+    emp.availability = avail
+    emp.updated_at = datetime.utcnow()
+    db.save_employee(emp)
+    logger.info(f"Availability updated: {emp.name} at {vid}")
+    return {"status": "saved", "days_set": list((body.days or {}).keys())}
 
 
 # ---------------------------------------------------------------------------
