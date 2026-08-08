@@ -3055,6 +3055,8 @@
           <p class="page-subtitle">Manage staff schedules and shift allocations</p>
         </div>
 
+        <div id="roster-coverage-banner" style="display:none; margin-bottom:14px; padding:12px 16px; border-radius:12px; font-size:14px; font-weight:600;"></div>
+
         <div class="grid-1">
           <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -8279,10 +8281,41 @@ document.getElementById('btn-modal-generate').addEventListener('click', async ()
     showSuccess('#page-dashboard', 'Roster generated successfully!');
     closeModal('modal-generate-roster');
     loadVenueData();
+    if (result && result.id) checkRosterCoverage(result.id, coversPerStaff);
   } catch (error) {
     showError('#page-dashboard', 'Failed to generate roster: ' + error.message);
   }
 });
+
+// Coverage banner: after generating, show whether the roster actually covers
+// forecast demand at each day's peak — so nobody publishes a short-staffed day.
+async function checkRosterCoverage(rosterId, coversPerStaff) {
+  const banner = document.getElementById('roster-coverage-banner');
+  if (!banner) return;
+  try {
+    const cov = await fetchAPI('/rosters/' + encodeURIComponent(rosterId) +
+      '/coverage?covers_per_staff=' + (coversPerStaff || 15));
+    if (cov.fully_covered === null) {
+      banner.style.display = 'none';
+      return;
+    }
+    banner.style.display = 'block';
+    if (cov.fully_covered) {
+      banner.style.background = 'rgba(34,197,94,.12)';
+      banner.style.color = 'var(--success)';
+      banner.innerHTML = '✓ Fully covered — every day meets its forecast peak demand.';
+    } else {
+      const short = (cov.days || []).filter(function(d) { return d.gap > 0; })
+        .map(function(d) { return d.day + ' (' + d.gap + ' short at ' + d.peak_hour + ')'; });
+      banner.style.background = 'rgba(239,68,68,.12)';
+      banner.style.color = 'var(--danger)';
+      banner.innerHTML = '⚠ ' + cov.total_missing_staff + ' shift(s) short of forecast demand — ' +
+        esc(short.join(', ')) + '. Add cover before publishing.';
+    }
+  } catch (e) {
+    banner.style.display = 'none';
+  }
+}
 
 // ----- Add Employee -----
 function getCurrentVenueState() {
