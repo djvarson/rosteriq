@@ -71,18 +71,27 @@ def seed_demo_environment(db) -> None:
     except Exception:
         pass
 
-    if not db.get_venue(DEMO_VENUE_ID):
+    _demo_min_staff = {"floor": 1, "bar": 1, "kitchen": 1}  # a 3-body floor the demo roster meets
+    _existing_venue = db.get_venue(DEMO_VENUE_ID)
+    if not _existing_venue:
         db.save_venue(VenueConfig(
             id=DEMO_VENUE_ID,
             name="The Brass Monkey",
             tanda_org_id="demo-org-001",
             state=State.wa,
             timezone="Australia/Perth",
-            min_staff={"floor": 2, "bar": 1, "kitchen": 2},
+            min_staff=_demo_min_staff,
             max_labour_pct=30.0,
             pos_system="demo",
             created_at=now,
         ))
+    elif getattr(_existing_venue, "min_staff", None) != _demo_min_staff:
+        # Heal an earlier min_staff that the thin demo roster couldn't meet.
+        try:
+            _existing_venue.min_staff = _demo_min_staff
+            db.save_venue(_existing_venue)
+        except Exception:
+            pass
 
     # Seed staff only if the demo venue has none yet (self-heals a prior
     # partial seed without duplicating).
@@ -299,14 +308,18 @@ def _seed_demo_showcase(db, now) -> None:
     # so coverage demos as a reassuring "fully covered". Seeded only if today
     # has no forecast, so it self-refreshes as the calendar moves.
     try:
-        existing_fc = db.get_forecasts(DEMO_VENUE_ID, today, today) or []
-        if not existing_fc:
-            # A sports-pub game-day surge, seeded ONLY for the mid-afternoon
-            # window the demo roster actually staffs 5-6 deep (min_staff floor
-            # is 5, and the roster runs 3 outside 15:00-18:00) — so coverage
-            # is honestly "fully covered" at EVERY forecast hour, not just the
-            # single busiest one. Peak 15:00 (85 covers) needs 6, exactly met.
-            curve = {15: 85, 16: 78, 17: 70, 18: 55}
+        # Full trading-day curve, tuned so the demo roster covers EVERY hour
+        # (per-hour check, not just the busiest): quiet 11-14 and 19-22 need 3
+        # (=coverage 3), a mid-afternoon game-day surge 15-18 that the 5-6
+        # rostered staff meet, peak 15:00 needing 6. Seeded authoritatively
+        # (upsert by venue/date/hour/model_version) so it overwrites any
+        # earlier demo curve rather than leaving stale hours behind.
+        curve = {11: 30, 12: 30, 13: 30, 14: 30, 15: 85, 16: 78,
+                 17: 70, 18: 55, 19: 30, 20: 30, 21: 30, 22: 30}
+        target = {(today, hr, float(cov)) for hr, cov in curve.items()}
+        have = {(f.date, f.hour, float(f.predicted_covers))
+                for f in (db.get_forecasts(DEMO_VENUE_ID, today, today) or [])}
+        if not target.issubset(have):  # idempotent: skip once it already matches
             db.add_forecasts([
                 DemandForecast(
                     id=f"demo-fc-{today.isoformat()}-{hr}",

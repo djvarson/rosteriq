@@ -1278,7 +1278,14 @@ class MemoryStore(BaseStore):
         return self._employees.get(employee_id)
 
     def add_forecasts(self, forecasts):
-        self._forecasts.extend(forecasts)
+        # Upsert by (venue, date, hour, model_version) to match PostgresStore's
+        # ON CONFLICT — re-seeding a day replaces its rows rather than stacking
+        # duplicates (the store-divergence class that has bitten this repo).
+        def key(f):
+            return (f.venue_id, f.date, f.hour, getattr(f, "model_version", ""))
+        incoming = {key(f): f for f in forecasts}
+        self._forecasts = [f for f in self._forecasts if key(f) not in incoming]
+        self._forecasts.extend(incoming.values())
 
     def get_forecasts(self, venue_id=None, start_date=None, end_date=None):
         results = self._forecasts
