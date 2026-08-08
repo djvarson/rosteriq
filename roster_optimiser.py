@@ -522,6 +522,65 @@ def generate_daily_roster(
     return day_shifts
 
 
+def compute_coverage_gaps(
+    roster: Roster,
+    weekly_forecasts: list[DemandForecast],
+    covers_per_staff: float = DEFAULT_COVERS_PER_STAFF,
+    min_staff_by_role: dict = None,
+) -> dict:
+    """Compare demand against the roster at each day's PEAK hour and report
+    where the roster falls short — so a manager never publishes a
+    quietly-understaffed day (the risk that grew the moment staff could mark
+    themselves unavailable).
+
+    For each day: required staff at the busiest forecast hour vs the number of
+    rostered staff whose shift actually covers that hour. A positive gap is a
+    shortfall the manager must see.
+    """
+    gaps = []
+    fully_covered = True
+    by_day_forecasts: dict = {}
+    for f in weekly_forecasts:
+        by_day_forecasts.setdefault(f.date, []).append(f)
+
+    for day, day_fcs in sorted(by_day_forecasts.items()):
+        required_by_hour = calculate_required_staff(day_fcs, covers_per_staff, min_staff_by_role)
+        if not required_by_hour:
+            continue
+        peak_hour = max(required_by_hour, key=lambda h: required_by_hour[h])
+        required = required_by_hour[peak_hour]
+
+        rostered = 0
+        for s in roster.shifts:
+            if s.date != day:
+                continue
+            start_h = s.start_time.hour
+            end_h = s.end_time.hour if s.end_time.hour > start_h else s.end_time.hour + 24
+            if start_h <= peak_hour < end_h:
+                rostered += 1
+
+        gap = required - rostered
+        if gap > 0:
+            fully_covered = False
+        gaps.append({
+            "date": day.isoformat(),
+            "day": day.strftime("%A"),
+            "peak_hour": f"{peak_hour:02d}:00",
+            "required": required,
+            "rostered": rostered,
+            "gap": max(0, gap),
+            "status": "short" if gap > 0 else "covered",
+        })
+
+    shortfalls = [g for g in gaps if g["gap"] > 0]
+    return {
+        "fully_covered": fully_covered,
+        "shortfall_count": len(shortfalls),
+        "total_missing_staff": sum(g["gap"] for g in shortfalls),
+        "days": gaps,
+    }
+
+
 def generate_weekly_roster(
     week_start: date,
     weekly_forecasts: list[DemandForecast],

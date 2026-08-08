@@ -40,6 +40,7 @@ from rosteriq.roster_optimiser import (
     generate_weekly_roster, generate_daily_roster,
     analyse_roster, suggest_improvements,
     calculate_required_staff, identify_peak_periods,
+    compute_coverage_gaps,
     DEFAULT_COVERS_PER_STAFF,
 )
 from rosteriq.cost_calculator import (
@@ -2491,6 +2492,33 @@ async def generate_roster(req: GenerateRosterRequest):
         logger.warning(f"Failed to broadcast roster update: {e}")
 
     return roster
+
+
+@app.get("/rosters/{roster_id}/coverage")
+async def roster_coverage(roster_id: str, covers_per_staff: float = Query(DEFAULT_COVERS_PER_STAFF)):
+    """Where does this roster fall short of forecast demand? Peak-hour
+    required-vs-rostered per day, so a manager never publishes a quietly
+    understaffed day — especially now that staff can mark themselves off."""
+    roster = _store["rosters"].get(roster_id)
+    if not roster:
+        raise HTTPException(404, f"Roster {roster_id} not found")
+    enforce_venue_access(getattr(roster, "venue_id", None))
+    try:
+        forecasts = _db.get_forecasts(
+            roster.venue_id, roster.week_start, roster.week_end) or []
+    except Exception:
+        forecasts = []
+    if not forecasts:
+        return {"roster_id": roster_id, "venue_id": roster.venue_id,
+                "fully_covered": None, "shortfall_count": 0,
+                "message": "No demand forecast for this week — can't assess coverage.",
+                "days": []}
+    venue = _store["venues"].get(roster.venue_id)
+    min_staff = getattr(venue, "min_staff", None) if venue else None
+    result = compute_coverage_gaps(roster, forecasts, covers_per_staff, min_staff)
+    result["roster_id"] = roster_id
+    result["venue_id"] = roster.venue_id
+    return result
 
 
 class GenerateForecastRequest(BaseModel):

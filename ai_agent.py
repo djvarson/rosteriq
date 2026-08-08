@@ -368,6 +368,11 @@ GEMINI_TOOLS = [
             "description": "Everything waiting on a manager decision: pending leave requests (who, dates, reason) and open shift-cover requests (who can't work which shift). Use for 'what needs my approval', 'any leave requests', 'who needs cover'.",
             "parameters": {"type": "OBJECT", "properties": {}},
         },
+        {
+            "name": "get_roster_coverage",
+            "description": "Check the current/latest roster against forecast demand: which days are SHORT-STAFFED at their peak hour and by how many people. Use for 'am I covered this week', 'any understaffed shifts', 'do I have enough people on Saturday'.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
     ]}
 ]
 
@@ -1258,6 +1263,25 @@ class AgentContext:
             "open_cover_count": len(covers),
             "shift_cover": covers,
         }
+
+    async def _tool_get_roster_coverage(self, params: dict) -> dict:
+        from rosteriq.roster_optimiser import compute_coverage_gaps
+        rosters = [r for r in (self.db.list_rosters() or [])
+                   if getattr(r, "venue_id", None) == self.venue_id]
+        if not rosters:
+            return {"message": "No roster generated yet for this venue."}
+        roster = max(rosters, key=lambda r: r.week_start)
+        try:
+            forecasts = self.db.get_forecasts(
+                self.venue_id, roster.week_start, roster.week_end) or []
+        except Exception:
+            forecasts = []
+        if not forecasts:
+            return {"week_of": roster.week_start.isoformat(),
+                    "message": "No demand forecast for this week — can't assess coverage."}
+        result = compute_coverage_gaps(roster, forecasts)
+        result["week_of"] = roster.week_start.isoformat()
+        return result
 
 
 # ---------------------------------------------------------------------------

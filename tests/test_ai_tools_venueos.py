@@ -35,7 +35,8 @@ def _tool_names():
 def test_new_venueos_tools_are_registered():
     names = _tool_names()
     for t in ("get_business_snapshot", "get_menu_performance",
-              "get_inventory_status", "get_pending_approvals"):
+              "get_inventory_status", "get_pending_approvals",
+              "get_roster_coverage"):
         assert t in names, f"{t} not registered in GEMINI_TOOLS"
 
 
