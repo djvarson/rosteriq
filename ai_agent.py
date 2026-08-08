@@ -373,6 +373,11 @@ GEMINI_TOOLS = [
             "description": "Check the current/latest roster against forecast demand: which days are SHORT-STAFFED at their peak hour and by how many people. Use for 'am I covered this week', 'any understaffed shifts', 'do I have enough people on Saturday'.",
             "parameters": {"type": "OBJECT", "properties": {}},
         },
+        {
+            "name": "get_daily_briefing",
+            "description": "The morning brief: everything that needs the manager's attention today in one shot — prime cost trend, today's staffing + coverage, pending leave/cover approvals, below-par stock, and over-target dishes, plus an 'attention' list. Use for 'what do I need to know today', 'brief me', 'what needs my attention', 'good morning'.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
     ]}
 ]
 
@@ -1282,6 +1287,15 @@ class AgentContext:
         result = compute_coverage_gaps(roster, forecasts)
         result["week_of"] = roster.week_start.isoformat()
         return result
+
+    async def _tool_get_daily_briefing(self, params: dict) -> dict:
+        # Reuse the exact briefing engine the endpoint serves, so the AI's
+        # "brief me" and the dashboard card never diverge.
+        from rosteriq.routes.briefing import daily_briefing
+        try:
+            return await daily_briefing(venue_id=self.venue_id)
+        except Exception as e:
+            return {"error": str(e)}
 
 
 # ---------------------------------------------------------------------------

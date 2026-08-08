@@ -531,6 +531,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register business snapshot routes: {e}")
 
+# Daily briefing (morning operational summary / future SMS payload)
+try:
+    from rosteriq.routes.briefing import router as briefing_router
+    app.include_router(briefing_router)
+    logger.info("Daily briefing routes registered")
+except ImportError:
+    logger.info("Daily briefing routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register daily briefing routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router

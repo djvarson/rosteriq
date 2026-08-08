@@ -2420,6 +2420,15 @@
           <p class="page-subtitle">Real-time venue insights and rostering metrics</p>
         </div>
 
+        <!-- TODAY BRIEFING (what needs attention this morning) -->
+        <div class="card" id="briefing-card" style="margin-bottom:16px; display:none;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+            <h3 style="font-size:15px; margin:0;">Today</h3>
+            <span id="briefing-date" style="color:var(--text-muted); font-size:12px;"></span>
+          </div>
+          <div id="briefing-body"></div>
+        </div>
+
         <!-- BUSINESS SNAPSHOT (prime cost — the morning number) -->
         <div class="card" id="snapshot-card" style="margin-bottom:20px;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
@@ -5863,6 +5872,7 @@ function showPage(pageId) {
   updatePageTitle(pageId);
 
   if (pageId === 'dashboard') {
+    loadBriefing();
     loadSnapshot();
   }
 
@@ -6208,6 +6218,45 @@ function renderLeaveRequests() {
       '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
       '</tr>';
   }).join('');
+}
+
+// ============================================
+// TODAY BRIEFING (morning attention list)
+// ============================================
+async function loadBriefing() {
+  const vid = (typeof state.currentVenue === 'object' && state.currentVenue?.id)
+    ? state.currentVenue.id : state.currentVenue;
+  if (!vid) return;
+  const card = document.getElementById('briefing-card');
+  const body = document.getElementById('briefing-body');
+  if (!card || !body) return;
+  try {
+    const b = await fetchAPI('/api/briefing?venue_id=' + encodeURIComponent(vid));
+    card.style.display = 'block';
+    document.getElementById('briefing-date').textContent =
+      new Date(b.date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+    const cov = b.today && b.today.coverage;
+    const covLine = cov
+      ? (cov.fully_covered
+        ? '<span style="color:var(--success);">✓ covered</span>'
+        : '<span style="color:var(--danger);">⚠ ' + cov.total_missing_staff + ' short</span>')
+      : '';
+    let html = '<div style="display:flex; gap:18px; flex-wrap:wrap; font-size:13px; color:var(--text-muted); margin-bottom:10px;">' +
+      '<span><strong style="color:var(--text-primary);">' + (b.today ? b.today.staff_rostered : 0) + '</strong> on today ' + covLine + '</span>' +
+      '<span><strong style="color:var(--text-primary);">' + (b.prime_cost_pct_7d == null ? '—' : b.prime_cost_pct_7d + '%') + '</strong> prime cost (7d)</span>' +
+      '<span><strong style="color:var(--text-primary);">' + formatCurrency(b.kitchen.stock_value) + '</strong> stock on hand</span>' +
+      '</div>';
+    if (b.all_clear) {
+      html += '<div style="color:var(--success); font-weight:600;">✓ All clear — nothing needs your attention right now.</div>';
+    } else {
+      html += '<ul style="margin:0; padding-left:18px;">' +
+        b.attention.map(function(a) { return '<li style="padding:2px 0;">' + esc(a) + '</li>'; }).join('') +
+        '</ul>';
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    card.style.display = 'none';
+  }
 }
 
 // ============================================
