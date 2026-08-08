@@ -21,7 +21,9 @@ from rosteriq.ai_agent import RosterIQAgent, _gemini_tools_to_openai, GEMINI_TOO
 
 def test_gemini_tools_convert_to_openai_schema():
     tools = _gemini_tools_to_openai(GEMINI_TOOLS)
-    assert len(tools) == 13
+    # One OpenAI tool per Gemini function declaration; grows as tools are added.
+    declared = sum(len(g.get("functionDeclarations", [])) for g in GEMINI_TOOLS)
+    assert len(tools) == declared >= 13
     blob = json.dumps(tools)
     # uppercase Gemini types must be gone
     assert "OBJECT" not in blob and "STRING" not in blob and "BOOLEAN" not in blob
