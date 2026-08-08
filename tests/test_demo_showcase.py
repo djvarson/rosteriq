@@ -65,18 +65,19 @@ def test_showcase_dresses_stock_and_sales_when_menu_exists():
     assert low == ["Cheese"]  # first alphabetically runs low
     assert float(ings["Chicken"]["stock_qty"]) == 12.5  # 5 * 2.5, healthy
 
-    # Sales rows for the last two days, revenue/cogs from real costing
-    sales = db.list_dish_sales(DEMO_VENUE_ID,
-                               date.today() - timedelta(days=7), date.today())
-    assert len(sales) == 2  # one recipe x two days, seeded once
+    # Sales cover the last three days INCLUDING today (where the demo roster's
+    # labour sits), one recipe x three days, priced from real costing
+    today = date.today()
+    sales = db.list_dish_sales(DEMO_VENUE_ID, today - timedelta(days=7), today)
+    assert len(sales) == 3
+    sale_days = {str(s["sale_date"])[:10] for s in sales}
+    assert today.isoformat() in sale_days  # snapshot/summary always show today
     s = sales[0]
     assert s["revenue_inc_gst"] == round(22.0 * s["qty"], 2)
     assert s["cogs"] == round(2.5 * s["qty"], 2)  # 250g @ $10/kg
 
-    # A third run with data present changes nothing
-    before = len(db.list_dish_sales(DEMO_VENUE_ID,
-                                    date.today() - timedelta(days=7), date.today()))
+    # A third run with data present changes nothing (per-day idempotent)
+    before = len(db.list_dish_sales(DEMO_VENUE_ID, today - timedelta(days=7), today))
     seed_demo_environment(db)
-    after = len(db.list_dish_sales(DEMO_VENUE_ID,
-                                   date.today() - timedelta(days=7), date.today()))
+    after = len(db.list_dish_sales(DEMO_VENUE_ID, today - timedelta(days=7), today))
     assert before == after

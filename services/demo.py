@@ -242,20 +242,27 @@ def _seed_demo_showcase(db, now) -> None:
     except Exception:
         pass
 
-    # Recent dish sales so Menu & Sales chips show real revenue / food cost.
+    # Recent dish sales so Menu & Sales + the Business snapshot always show
+    # live trade. Seeded PER DAY for the last three days (incl. today, where
+    # the demo roster's labour sits) and guarded per-day, so as the calendar
+    # advances yesterday self-refreshes and the numbers never go stale — a
+    # fixed-date seed drifts out of the trailing window and leaves labour
+    # standing against $0 sales, which is the opposite of the demo you want.
     # Rows only — no stock depletion, so the shelf numbers above stay put.
     try:
-        recent = db.list_dish_sales(DEMO_VENUE_ID, today - timedelta(days=7), today)
         recipes = db.list_recipes(DEMO_VENUE_ID) or []
-        if recipes and not recent:
+        if recipes:
             from rosteriq.routes.menu_costing import _cost_recipe
             ings = {i["id"]: i for i in (db.list_ingredients(DEMO_VENUE_ID) or [])}
-            qtys = [14, 22, 61]
-            for day_offset in (1, 2):
+            qtys = [61, 22, 14]  # flat whites move more than parmys
+            for day_offset in (0, 1, 2):
                 sale_day = today - timedelta(days=day_offset)
+                existing = db.list_dish_sales(DEMO_VENUE_ID, sale_day, sale_day) or []
+                if existing:
+                    continue  # this day already has trade — leave it
                 for n, recipe in enumerate(recipes[:3]):
                     costing = _cost_recipe(recipe, ings)
-                    qty = qtys[n % len(qtys)] - day_offset * 2
+                    qty = max(4, qtys[n % len(qtys)] - day_offset * 3)
                     db.save_dish_sale({
                         "id": f"demo-sale-{sale_day.isoformat()}-{n}",
                         "venue_id": DEMO_VENUE_ID,
