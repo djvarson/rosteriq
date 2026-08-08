@@ -92,6 +92,49 @@ def test_availability_roundtrip_and_validation():
         headers=staff_h).status_code == 422
 
 
+def test_manager_team_availability_view():
+    c = TestClient(app)
+    owner_h = _register_login(c, f"o{uuid.uuid4().hex[:8]}@x.com")
+    staff_email = f"s{uuid.uuid4().hex[:8]}@x.com"
+    vid = "av-venue-team"
+    _setup(c, owner_h, vid, staff_email)
+    # A second, fully-available employee
+    c.post("/employees", json={
+        "id": f"{vid}-emp2", "name": "Always Free", "employment_type": "casual",
+        "award_level": "level_2", "state": "wa", "venue_id": vid,
+        "hourly_base_rate": "31.50",
+        "created_at": "2026-07-01T00:00:00", "updated_at": "2026-07-01T00:00:00",
+    }, headers=owner_h)
+
+    staff_h = _register_login(c, staff_email)
+    _scope_staff(c, staff_email, vid)
+    c.post("/api/me/availability", json={"days": {
+        "monday": {"status": "unavailable"},
+        "friday": {"status": "partial", "ranges": [{"start": "17:00", "end": "23:00"}]},
+    }}, headers=staff_h)
+
+    team = c.get(f"/api/availability?venue_id={vid}", headers=owner_h).json()
+    assert team["count"] == 2
+    # Constrained staff sort first
+    first = team["staff"][0]
+    assert first["name"] == "Avail Tester"
+    assert first["days"]["monday"] == "unavailable"
+    assert first["days"]["friday"] == "partial"
+    assert first["days"]["tuesday"] == "available"
+    assert set(first["constrained_days"]) == {"mon", "fri"}
+    free = [s for s in team["staff"] if s["name"] == "Always Free"][0]
+    assert free["constrained_days"] == []
+
+    # Venue scoped
+    outsider = _register_login(c, f"z{uuid.uuid4().hex[:8]}@x.com")
+    db = get_db()
+    rec = db.get_user_by_email([u["email"] for u in db.list_users()
+                                if u["email"].startswith("z")][0])
+    rec["venue_ids"] = ["elsewhere"]; rec["role"] = "manager"; db.save_user(rec)
+    outsider = _register_login(c, rec["email"])
+    assert c.get(f"/api/availability?venue_id={vid}", headers=outsider).status_code == 403
+
+
 def test_unlinked_user_gets_honest_message():
     c = TestClient(app)
     stranger_h = _register_login(c, f"x{uuid.uuid4().hex[:8]}@x.com")

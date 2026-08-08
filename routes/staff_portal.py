@@ -510,6 +510,37 @@ async def venue_leave(venue_id: str = Query(...), status: str = Query("")) -> di
     } for r in rows]}
 
 
+@router.get("/api/availability")
+async def team_availability(venue_id: str = Query(...)) -> dict:
+    """Manager view: the whole team's weekly availability at a glance, so a
+    manager knows who's off before building the roster. Same source the
+    generator reads (employee.availability)."""
+    enforce_venue_access(venue_id)
+    db = get_db()
+    rows = []
+    for emp in (db.get_employees(venue_id) or []):
+        avail = getattr(emp, "availability", {}) or {}
+        days = {}
+        constrained = []
+        for d in _WEEKDAYS:
+            if d not in avail:
+                days[d] = "available"
+            elif not avail[d]:
+                days[d] = "unavailable"
+                constrained.append(d[:3])
+            else:
+                days[d] = "partial"
+                constrained.append(d[:3])
+        rows.append({
+            "employee_id": emp.id,
+            "name": emp.name,
+            "days": days,
+            "constrained_days": constrained,  # non-fully-available days
+        })
+    rows.sort(key=lambda r: (-len(r["constrained_days"]), r["name"]))
+    return {"venue_id": venue_id, "count": len(rows), "staff": rows}
+
+
 @router.get("/api/cover")
 async def venue_covers(venue_id: str = Query(...), status: str = Query("")) -> dict:
     """Manager view of the venue's shift cover requests."""

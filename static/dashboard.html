@@ -3496,6 +3496,15 @@
         </div>
         <div class="card" style="margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h3 style="font-size:15px;">Team availability this week</h3>
+            <span style="color:var(--text-muted); font-size:12px;">Set by staff in /my · the roster honours it</span>
+          </div>
+          <div style="overflow-x:auto;" id="team-avail-wrap">
+            <div style="color:var(--text-muted); padding:14px; text-align:center;">Loading&hellip;</div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <h3 style="font-size:15px;">Shift cover requests</h3>
             <span id="cv-summary" style="color:var(--text-muted); font-size:13px;"></span>
           </div>
@@ -5869,6 +5878,7 @@ function showPage(pageId) {
   if (pageId === 'leave') {
     loadLeaveRequests();
     loadCoverRequests();
+    loadTeamAvailability();
   }
 
   if (pageId === 'announcements') {
@@ -7006,6 +7016,50 @@ async function togglePin(i) {
     loadAnnouncements();
   } catch (e) {
     showToast('Pin failed: ' + e.message, 'error');
+  }
+}
+
+async function loadTeamAvailability() {
+  if (!state.currentVenue) return;
+  const wrap = document.getElementById('team-avail-wrap');
+  if (!wrap) return;
+  try {
+    const data = await fetchAPI('/api/availability?venue_id=' + encodeURIComponent(state.currentVenue));
+    if (!data.staff || !data.staff.length) {
+      wrap.innerHTML = '<div style="color:var(--text-muted); padding:14px; text-align:center;">No staff yet</div>';
+      return;
+    }
+    const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+    const dot = function(status) {
+      const map = {
+        available: ['#22c55e', '✓'],
+        unavailable: ['#ef4444', '✕'],
+        partial: ['#f59e0b', '◐'],
+      };
+      const m = map[status] || map.available;
+      return '<td style="text-align:center; padding:7px 6px; color:' + m[0] + '; font-weight:700;" title="' + status + '">' + m[1] + '</td>';
+    };
+    let html = '<table class="data-table" style="width:100%; border-collapse:collapse; font-size:13px;">' +
+      '<thead><tr style="color:var(--text-muted); font-size:11px; text-transform:uppercase;">' +
+      '<th style="text-align:left; padding:7px 8px;">Staff</th>' +
+      days.map(function(d){ return '<th style="padding:7px 6px;">' + d.slice(0,3) + '</th>'; }).join('') +
+      '</tr></thead><tbody>';
+    data.staff.forEach(function(s) {
+      html += '<tr style="border-top:1px solid var(--border);">' +
+        '<td style="padding:7px 8px; font-weight:600;">' + esc(s.name) +
+        (s.constrained_days.length ? '' : ' <span style="color:var(--text-muted); font-weight:400; font-size:11px;">(all week)</span>') +
+        '</td>' +
+        days.map(function(d){ return dot(s.days[d]); }).join('') +
+        '</tr>';
+    });
+    html += '</tbody></table>' +
+      '<div style="color:var(--text-muted); font-size:11px; margin-top:6px;">' +
+      '<span style="color:#22c55e;">✓</span> available &nbsp; ' +
+      '<span style="color:#f59e0b;">◐</span> partial hours &nbsp; ' +
+      '<span style="color:#ef4444;">✕</span> unavailable</div>';
+    wrap.innerHTML = html;
+  } catch (e) {
+    wrap.innerHTML = '<div style="color:var(--text-muted); padding:14px; text-align:center;">' + esc(e.message) + '</div>';
   }
 }
 
