@@ -265,6 +265,31 @@ def _seed_demo_showcase(db, now) -> None:
     except Exception:
         pass
 
+    # A couple of waste entries so the Inventory waste chip + report demo.
+    # Rows only (no stock depletion) so the shelf numbers above stay put.
+    try:
+        ingredients = db.list_ingredients(DEMO_VENUE_ID) or []
+        if ingredients and not db.list_waste_entries(
+                DEMO_VENUE_ID, today - timedelta(days=7), today):
+            for n, (offset, reason, frac) in enumerate([
+                    (1, "spoiled", 0.25), (3, "prep_waste", 0.15)]):
+                ing = ingredients[n % len(ingredients)]
+                cpu = float(ing.get("cost_per_unit") or 0)
+                pack = float(ing.get("purchase_size") or 1) or 1
+                qty = round(pack * frac, 3)
+                db.save_waste_entry({
+                    "id": f"demo-waste-{(today - timedelta(days=offset)).isoformat()}-{n}",
+                    "venue_id": DEMO_VENUE_ID,
+                    "ingredient_id": ing["id"], "ingredient_name": ing["name"],
+                    "waste_date": today - timedelta(days=offset),
+                    "qty": qty, "unit": ing.get("unit"),
+                    "reason": reason, "value": round(qty * cpu, 2),
+                    "note": "", "logged_by": DEMO_USER_ID,
+                    "created_at": now,
+                })
+    except Exception:
+        pass
+
     # Recent dish sales so Menu & Sales + the Business snapshot always show
     # live trade. Seeded PER DAY for the last three days (incl. today, where
     # the demo roster's labour sits) and guarded per-day, so as the calendar

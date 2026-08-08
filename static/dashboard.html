@@ -3611,8 +3611,11 @@
               <div style="font-size:22px; font-weight:800;" id="iv-value">—</div></div>
             <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Below par</div>
               <div style="font-size:22px; font-weight:800;" id="iv-low">—</div></div>
+            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Waste (30d)</div>
+              <div style="font-size:22px; font-weight:800; color:var(--danger);" id="iv-waste">—</div></div>
             <div style="margin-left:auto; display:flex; gap:10px;">
               <button class="btn btn-secondary" id="iv-st-btn" onclick="startStocktake()">Start stocktake</button>
+              <button class="btn btn-secondary" onclick="openWasteEntry()">Log waste</button>
               <button class="btn btn-secondary" onclick="openInvoiceEntry()">Enter invoice</button>
               <button class="btn btn-primary" onclick="draftOrders()">Draft supplier orders</button>
             </div>
@@ -3634,6 +3637,26 @@
             <span style="margin-left:auto;"></span>
             <button class="btn btn-secondary btn-small" onclick="document.getElementById('iv-inv-card').style.display='none'">Cancel</button>
             <button class="btn btn-primary btn-small" onclick="saveInvoice()">Book it in</button>
+          </div>
+        </div>
+
+        <div class="card" id="iv-waste-card" style="margin-bottom:16px; display:none;">
+          <h3 style="font-size:15px; margin-bottom:10px;">Log waste — depletes stock and books the loss</h3>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+            <div class="input-group" style="margin:0;"><label>Ingredient</label>
+              <select id="wl-ing" style="width:180px;"></select></div>
+            <div class="input-group" style="margin:0;"><label>Qty</label>
+              <input type="number" id="wl-qty" min="0.001" step="0.1" style="width:90px;"></div>
+            <div class="input-group" style="margin:0;"><label>Unit</label>
+              <select id="wl-unit" style="width:80px;"><option value="">(stock unit)</option><option>g</option><option>kg</option><option>ml</option><option>l</option><option>each</option></select></div>
+            <div class="input-group" style="margin:0;"><label>Reason</label>
+              <select id="wl-reason" style="width:150px;">
+                <option value="spoiled">Spoiled</option><option value="expired">Expired</option>
+                <option value="dropped">Dropped</option><option value="over_portioned">Over-portioned</option>
+                <option value="prep_waste">Prep waste</option><option value="other">Other</option></select></div>
+            <div class="input-group" style="margin:0; flex:1;"><label>Note</label><input type="text" id="wl-note" maxlength="300" placeholder="optional"></div>
+            <button class="btn btn-secondary btn-small" onclick="document.getElementById('iv-waste-card').style.display='none'">Cancel</button>
+            <button class="btn btn-primary btn-small" onclick="saveWaste()">Log it</button>
           </div>
         </div>
 
@@ -6669,6 +6692,48 @@ async function loadInventory() {
     const iv = await fetchAPI('/api/inventory/invoices?venue_id=' + encodeURIComponent(state.currentVenue));
     renderInvoices(iv.invoices || []);
   } catch (e) { /* list stays empty */ }
+  try {
+    const w = await fetchAPI('/api/inventory/waste?venue_id=' + encodeURIComponent(state.currentVenue));
+    document.getElementById('iv-waste').textContent = formatCurrency(w.total_waste_value || 0);
+  } catch (e) { /* chip stays dashed */ }
+}
+
+function openWasteEntry() {
+  if (!ivRows.length) { showToast('Add ingredients in Menu & Sales first', 'warning'); return; }
+  const sel = document.getElementById('wl-ing');
+  sel.innerHTML = ivRows.map(function(r) {
+    return '<option value="' + esc(r.ingredient_id) + '">' + esc(r.name) + '</option>';
+  }).join('');
+  document.getElementById('wl-qty').value = '';
+  document.getElementById('wl-unit').value = '';
+  document.getElementById('wl-reason').value = 'spoiled';
+  document.getElementById('wl-note').value = '';
+  document.getElementById('iv-waste-card').style.display = 'block';
+}
+
+async function saveWaste() {
+  const qty = parseFloat(document.getElementById('wl-qty').value);
+  if (!(qty > 0)) { showToast('Enter a quantity', 'warning'); return; }
+  try {
+    const r = await fetchAPI('/api/inventory/waste', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue_id: state.currentVenue,
+        ingredient_id: document.getElementById('wl-ing').value,
+        qty: qty,
+        unit: document.getElementById('wl-unit').value || null,
+        reason: document.getElementById('wl-reason').value,
+        note: document.getElementById('wl-note').value.trim(),
+      }),
+    });
+    let msg = r.ingredient + ' waste logged — ' + formatCurrency(r.value) + ' off the books';
+    if (r.negative_stock_warning) msg += ' · stock now NEGATIVE, check your counts';
+    showToast(msg, r.negative_stock_warning ? 'warning' : 'success');
+    document.getElementById('iv-waste-card').style.display = 'none';
+    loadInventory();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
 }
 
 function renderInventory() {

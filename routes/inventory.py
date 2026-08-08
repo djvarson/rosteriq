@@ -21,6 +21,8 @@ Routes (all venue-scoped):
     POST /api/inventory/order/draft        -- draft orders for below-par stock
     POST /api/inventory/order/{id}/status  -- draft -> ordered -> received
     GET  /api/inventory/orders             -- order history
+    POST /api/inventory/waste              -- log spoiled/dropped stock (depletes)
+    GET  /api/inventory/waste              -- waste log + $ by reason
 """
 
 import logging
@@ -86,6 +88,18 @@ class InvoiceBody(BaseModel):
     invoice_date: Optional[dt_date] = None
     order_id: str = Field(default="", description="Optional: the ordered order this delivery fulfils")
     lines: List[InvoiceLine] = Field(..., min_length=1, max_length=200)
+
+
+_WASTE_REASONS = {"spoiled", "expired", "dropped", "over_portioned", "prep_waste", "other"}
+
+
+class WasteBody(BaseModel):
+    venue_id: str
+    ingredient_id: str
+    qty: float = Field(..., gt=0, le=100000, description="Amount wasted, in the unit below")
+    unit: Optional[str] = Field(default=None, description="Defaults to the ingredient's unit")
+    reason: str = Field(..., description="spoiled / expired / dropped / over_portioned / prep_waste / other")
+    note: str = Field(default="", max_length=300)
 
 
 def _ingredient_or_404(db, venue_id: str, ingredient_id: str) -> dict:
@@ -510,6 +524,91 @@ async def invoice_history(venue_id: str = Query(...)) -> dict:
         "items": i.get("items", []),
         "created_at": str(i.get("created_at")),
     } for i in rows]}
+
+
+@router.post("/waste")
+async def log_waste(body: WasteBody) -> dict:
+    """Record spoiled/dropped/expired stock: depletes the ingredient and books
+    the dollar loss, so the shelf stays accurate and waste is quantified
+    separately from the theoretical usage the stocktake variance infers."""
+    enforce_venue_access(body.venue_id)
+    if body.reason not in _WASTE_REASONS:
+        raise HTTPException(status_code=422,
+                            detail=f"reason must be one of: {', '.join(sorted(_WASTE_REASONS))}")
+    db = get_db()
+    ing = _ingredient_or_404(db, body.venue_id, body.ingredient_id)
+
+    # Convert the wasted amount into the ingredient's stock unit (g->kg etc.),
+    # reusing the same converter the recipe costing uses.
+    from rosteriq.routes.menu_costing import _qty_in_unit
+    stock_unit = ing.get("unit", "each")
+    qty_in_stock_unit = _qty_in_unit(float(body.qty), body.unit, stock_unit)
+    cpu = float(ing.get("cost_per_unit") or 0)
+    value = round(qty_in_stock_unit * cpu, 2)
+
+    db.increment_ingredient_stock(body.ingredient_id, -qty_in_stock_unit)
+    after = db.get_ingredient(body.ingredient_id)
+    tenant = get_tenant_context_optional()
+    entry = {
+        "id": f"wl-{uuid.uuid4().hex[:10]}",
+        "venue_id": body.venue_id,
+        "ingredient_id": ing["id"],
+        "ingredient_name": ing.get("name"),
+        "waste_date": dt_date.today(),
+        "qty": round(qty_in_stock_unit, 3),
+        "unit": stock_unit,
+        "reason": body.reason,
+        "value": value,
+        "note": body.note,
+        "logged_by": tenant.user_id if tenant else None,
+        "created_at": datetime.utcnow(),
+    }
+    db.save_waste_entry(entry)
+    logger.info(f"Waste logged at {body.venue_id}: {ing.get('name')} "
+                f"{qty_in_stock_unit}{stock_unit} ({body.reason}) = ${value}")
+    result = {
+        "status": "logged", "waste_id": entry["id"],
+        "ingredient": ing.get("name"), "value": value,
+        "stock_after": round(float((after or {}).get("stock_qty") or 0), 3),
+    }
+    if after is not None and float(after.get("stock_qty") or 0) < 0:
+        result["negative_stock_warning"] = ing.get("name")
+    return result
+
+
+@router.get("/waste")
+async def waste_report(venue_id: str = Query(...),
+                       start_date: Optional[dt_date] = Query(None),
+                       end_date: Optional[dt_date] = Query(None)) -> dict:
+    """Waste log for a period (default last 30 days): total $ wasted, a
+    breakdown by reason, and the entries — the number that shames a kitchen
+    into tighter prep."""
+    enforce_venue_access(venue_id)
+    db = get_db()
+    end = end_date or dt_date.today()
+    start = start_date or (end - timedelta(days=30))
+    if start > end:
+        raise HTTPException(status_code=422, detail="start_date is after end_date")
+    rows = db.list_waste_entries(venue_id, start, end) or []
+    by_reason: dict = {}
+    total = 0.0
+    for w in rows:
+        v = float(w.get("value") or 0)
+        total += v
+        by_reason[w.get("reason")] = round(by_reason.get(w.get("reason"), 0.0) + v, 2)
+    return {
+        "venue_id": venue_id,
+        "from": start.isoformat(), "to": end.isoformat(),
+        "total_waste_value": round(total, 2),
+        "by_reason": [{"reason": k, "value": v}
+                      for k, v in sorted(by_reason.items(), key=lambda kv: -kv[1])],
+        "entries": [{
+            "id": w["id"], "ingredient": w.get("ingredient_name"),
+            "qty": w.get("qty"), "unit": w.get("unit"),
+            "reason": w.get("reason"), "value": w.get("value"),
+            "note": w.get("note"), "date": str(w.get("waste_date")),
+        } for w in rows],
+    }
 
 
 @router.get("/usage")

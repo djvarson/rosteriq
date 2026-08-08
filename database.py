@@ -570,6 +570,14 @@ class BaseStore:
     def list_supplier_invoices(self, venue_id: str) -> list:
         raise NotImplementedError
 
+    # --- Wastage log (record spoiled/dropped stock) ------------------------
+
+    def save_waste_entry(self, entry: dict) -> None:
+        raise NotImplementedError
+
+    def list_waste_entries(self, venue_id: str, start_date, end_date) -> list:
+        raise NotImplementedError
+
     # --- POS item mapping + import dedup -----------------------------------
 
     def save_pos_item_map(self, m: dict) -> None:
@@ -987,6 +995,7 @@ class MemoryStore(BaseStore):
         self._supplier_orders: dict[str, dict] = {}
         self._dish_sales: dict[str, dict] = {}
         self._supplier_invoices: dict[str, dict] = {}
+        self._waste_log: dict[str, dict] = {}
         self._pos_item_maps: dict[str, dict] = {}
         self._import_batches: dict[str, dict] = {}
         self._themes: dict[str, dict] = {}  # Key: venue_id
@@ -1229,6 +1238,22 @@ class MemoryStore(BaseStore):
             [i for i in self._supplier_invoices.values() if i.get("venue_id") == venue_id],
             key=lambda i: str(i.get("created_at")), reverse=True,
         )
+
+    # --- Wastage log ---
+
+    def save_waste_entry(self, entry):
+        self._waste_log[entry["id"]] = dict(entry)
+
+    def list_waste_entries(self, venue_id, start_date, end_date):
+        out = []
+        for w in self._waste_log.values():
+            if w.get("venue_id") != venue_id:
+                continue
+            d = w.get("waste_date")
+            d = d if isinstance(d, date) else date.fromisoformat(str(d)[:10])
+            if start_date <= d <= end_date:
+                out.append(w)
+        return sorted(out, key=lambda w: str(w.get("created_at")), reverse=True)
 
     # --- Dish sales ---
 
@@ -2750,6 +2775,22 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "waste_log": """
+            CREATE TABLE IF NOT EXISTS waste_log (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                ingredient_id TEXT NOT NULL,
+                ingredient_name TEXT,
+                waste_date DATE NOT NULL,
+                qty NUMERIC NOT NULL DEFAULT 0,
+                unit TEXT,
+                reason TEXT,
+                value NUMERIC NOT NULL DEFAULT 0,
+                note TEXT,
+                logged_by TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "stocktakes": """
             CREATE TABLE IF NOT EXISTS stocktakes (
                 id TEXT PRIMARY KEY,
@@ -3665,6 +3706,33 @@ class PostgresStore(BaseStore):
             """, (venue_id,))
             return [self._row_to_plain(r, json_fields=("items", "price_changes"))
                     for r in cur.fetchall()]
+
+    def save_waste_entry(self, entry):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "waste_log")
+            cur.execute("""
+                INSERT INTO waste_log (id, venue_id, ingredient_id, ingredient_name,
+                    waste_date, qty, unit, reason, value, note, logged_by, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (
+                entry["id"], entry["venue_id"], entry["ingredient_id"],
+                entry.get("ingredient_name"), entry["waste_date"],
+                float(entry.get("qty", 0) or 0), entry.get("unit"),
+                entry.get("reason"), float(entry.get("value", 0) or 0),
+                entry.get("note"), entry.get("logged_by"),
+                entry.get("created_at", datetime.utcnow()),
+            ))
+
+    def list_waste_entries(self, venue_id, start_date, end_date):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "waste_log")
+            cur.execute("""
+                SELECT * FROM waste_log
+                WHERE venue_id = %s AND waste_date BETWEEN %s AND %s
+                ORDER BY created_at DESC
+            """, (venue_id, start_date, end_date))
+            return [self._row_to_plain(r) for r in cur.fetchall()]
 
     def save_dish_sale(self, sale):
         with self._cursor() as cur:

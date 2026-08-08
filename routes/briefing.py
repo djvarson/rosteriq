@@ -134,6 +134,17 @@ async def daily_briefing(venue_id: str = Query(...)) -> dict:
     if flagged_dishes:
         attention.append(f"{flagged_dishes} dish(es) over the food-cost target — review pricing.")
 
+    # Waste in the last 7 days — flag it if it's material vs net sales (>2%)
+    waste_7d = 0.0
+    try:
+        waste_7d = round(sum(float(w.get("value") or 0)
+                             for w in (db.list_waste_entries(venue_id, week_ago, today) or [])), 2)
+    except Exception:
+        pass
+    if net > 0 and waste_7d > 0.02 * net:
+        attention.append(f"${waste_7d:.0f} of waste logged this week "
+                         f"({round(waste_7d / net * 100, 1)}% of sales) — tighten prep.")
+
     return {
         "venue_id": venue_id,
         "date": today.isoformat(),
@@ -147,7 +158,8 @@ async def daily_briefing(venue_id: str = Query(...)) -> dict:
         "approvals": {"pending_leave": pending_leave, "open_covers": open_covers},
         "kitchen": {"stock_value": round(stock_value, 2),
                     "below_par_count": below_par,
-                    "flagged_dishes": flagged_dishes},
+                    "flagged_dishes": flagged_dishes,
+                    "waste_7d": waste_7d},
         "attention": attention,
         "all_clear": len(attention) == 0,
     }
