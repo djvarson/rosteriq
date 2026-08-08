@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from rosteriq.models import (
     VenueConfig, Employee, EmploymentType, AwardLevel, State,
-    Roster, Shift, ShiftStatus,
+    Roster, Shift, ShiftStatus, DemandForecast,
 )
 
 DEMO_VENUE_ID = "demo-venue-001"
@@ -276,5 +276,31 @@ def _seed_demo_showcase(db, now) -> None:
                         "source": "manual",
                         "created_at": now,
                     })
+    except Exception:
+        pass
+
+    # Today's demand forecast so the coverage check (and the AI's
+    # get_roster_coverage tool) have something to assess against — the demo
+    # roster puts 6 staff on today, tuned here to comfortably cover the peak
+    # so coverage demos as a reassuring "fully covered". Seeded only if today
+    # has no forecast, so it self-refreshes as the calendar moves.
+    try:
+        existing_fc = db.get_forecasts(DEMO_VENUE_ID, today, today) or []
+        if not existing_fc:
+            # A sports pub on game day peaks pre-game (mid-afternoon), which is
+            # where the demo roster is thickest (6 on at 15:00) — so coverage
+            # demos as a clean "fully covered". At 15 covers/staff the 15:00
+            # peak (90) needs 6, exactly covered; every other hour needs <=5.
+            curve = {11: 25, 12: 50, 13: 60, 14: 78, 15: 90, 16: 80,
+                     17: 58, 18: 48, 19: 70, 20: 55, 21: 38, 22: 24}
+            db.add_forecasts([
+                DemandForecast(
+                    id=f"demo-fc-{today.isoformat()}-{hr}",
+                    venue_id=DEMO_VENUE_ID, date=today, hour=hr,
+                    predicted_covers=float(cov), confidence=0.85,
+                    model_version="demo-seed",
+                )
+                for hr, cov in curve.items()
+            ])
     except Exception:
         pass

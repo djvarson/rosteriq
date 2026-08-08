@@ -29,6 +29,18 @@ def test_showcase_seeds_every_pillar_idempotently():
     week_start = date.today() - timedelta(days=date.today().weekday())
     assert covers[0]["shift_id"] == f"demo-shift-{week_start.isoformat()}-002"
 
+    # Today's forecast is seeded so the coverage feature has demand to assess,
+    # and the demo roster (6 on mid-afternoon) covers the pre-game peak
+    from rosteriq.roster_optimiser import compute_coverage_gaps
+    today = date.today()
+    fcs = db.get_forecasts(DEMO_VENUE_ID, today, today)
+    assert fcs, "demo should seed today's forecast for coverage"
+    rosters = [r for r in db.list_rosters() if r.venue_id == DEMO_VENUE_ID]
+    if rosters:
+        cov = compute_coverage_gaps(max(rosters, key=lambda r: r.week_start), fcs)
+        today_row = [d for d in cov["days"] if d["date"] == today.isoformat()]
+        assert today_row and today_row[0]["status"] == "covered"
+
     # No ingredients in a fresh store -> stock/sales blocks skip WITHOUT error
     assert db.list_ingredients(DEMO_VENUE_ID) == []
     assert db.list_dish_sales(DEMO_VENUE_ID,
