@@ -3835,6 +3835,16 @@
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <h3 style="font-size:15px;">Ingredients &amp; supplier prices</h3>
+            <button class="btn btn-secondary btn-small" onclick="openIngredientImport()" title="Paste a product/price list export">Import from export</button>
+          </div>
+          <div id="ing-import-card" style="display:none; border:1px solid var(--brand-blue); border-radius:10px; padding:14px; margin-bottom:12px;">
+            <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">Paste a product or supplier price-list export (columns like Product, Unit, Pack Size, Cost, Supplier are matched automatically; units like "Kilogram"/"Litre" are normalised).</div>
+            <textarea id="ing-import-text" rows="5" placeholder="Paste your exported ingredient / price list here…" style="width:100%; font-family:monospace; font-size:12px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); color:var(--text-primary);"></textarea>
+            <div style="display:flex; gap:8px; margin-top:8px; align-items:center;">
+              <button class="btn btn-primary btn-small" onclick="runIngredientImport()">Import ingredients</button>
+              <button class="btn btn-secondary btn-small" onclick="document.getElementById('ing-import-card').style.display='none'">Cancel</button>
+              <span id="ing-import-result" style="font-size:12px; color:var(--text-muted); margin-left:auto;"></span>
+            </div>
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
             <div class="input-group" style="margin:0;"><label>Name</label><input type="text" id="mi-name" placeholder="Chicken breast" style="width:150px;"></div>
@@ -8574,6 +8584,37 @@ function getCurrentVenueState() {
   const s = venue && venue.state ? String(venue.state).toLowerCase() : 'vic';
   const valid = ['nsw','vic','qld','sa','wa','tas','nt','act'];
   return valid.includes(s) ? s : 'vic';
+}
+
+function openIngredientImport() {
+  if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
+  document.getElementById('ing-import-text').value = '';
+  document.getElementById('ing-import-result').textContent = '';
+  document.getElementById('ing-import-card').style.display = 'block';
+}
+
+async function runIngredientImport() {
+  const content = document.getElementById('ing-import-text').value.trim();
+  if (!content) { showToast('Paste your ingredient list first', 'warning'); return; }
+  const res = document.getElementById('ing-import-result');
+  res.textContent = 'Importing…';
+  try {
+    const r = await fetchAPI('/api/setup/import-ingredients', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: state.currentVenue, content: content }),
+    });
+    let msg = r.created_count + ' ingredients imported';
+    if (r.skipped_count) msg += ', ' + r.skipped_count + ' skipped';
+    res.textContent = msg;
+    showToast(msg, r.created_count ? 'success' : 'warning');
+    if (r.created_count) {
+      document.getElementById('ing-import-text').value = '';
+      loadMenuPage();
+    }
+  } catch (e) {
+    res.textContent = '';
+    showToast('Import failed: ' + e.message, 'error');
+  }
 }
 
 function openRosterImport() {

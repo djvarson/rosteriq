@@ -571,6 +571,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register roster import routes: {e}")
 
+# Ingredient import (paste a product/price-list export from any program)
+try:
+    from rosteriq.routes.ingredient_import import router as ingredient_import_router
+    app.include_router(ingredient_import_router)
+    logger.info("Ingredient import routes registered")
+except ImportError:
+    logger.info("Ingredient import routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register ingredient import routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router
