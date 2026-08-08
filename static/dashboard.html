@@ -2420,6 +2420,20 @@
           <p class="page-subtitle">Real-time venue insights and rostering metrics</p>
         </div>
 
+        <!-- BUSINESS SNAPSHOT (prime cost — the morning number) -->
+        <div class="card" id="snapshot-card" style="margin-bottom:20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <h3 style="font-size:15px;">Business snapshot</h3>
+              <p style="color:var(--text-muted); font-size:12px; margin-top:2px;">Last 7 days · net sales are ex-GST · labour is rostered (planning view)</p>
+            </div>
+            <span id="snap-prime-chip" style="font-size:13px; font-weight:700;"></span>
+          </div>
+          <div id="snap-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px;">
+            <div style="color:var(--text-muted);">Loading…</div>
+          </div>
+        </div>
+
         <!-- ALERTS SECTION (Top Priority) -->
         <div class="dash-section" id="section-alerts" data-section="alerts">
           <div class="dash-section-header" onclick="toggleSection('alerts')">
@@ -5837,6 +5851,10 @@ function showPage(pageId) {
   state.currentPage = pageId;
   updatePageTitle(pageId);
 
+  if (pageId === 'dashboard') {
+    loadSnapshot();
+  }
+
   if (pageId === 'compliance') {
     loadChecklistsBoard();
   }
@@ -6178,6 +6196,46 @@ function renderLeaveRequests() {
       '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
       '</tr>';
   }).join('');
+}
+
+// ============================================
+// BUSINESS SNAPSHOT (prime cost — the morning number)
+// ============================================
+async function loadSnapshot() {
+  const vid = (typeof state.currentVenue === 'object' && state.currentVenue?.id)
+    ? state.currentVenue.id : state.currentVenue;
+  if (!vid) return;
+  const grid = document.getElementById('snap-grid');
+  const chip = document.getElementById('snap-prime-chip');
+  try {
+    const s = await fetchAPI('/api/snapshot?venue_id=' + encodeURIComponent(vid));
+    const pct = function(v) { return v == null ? '—' : v + '%'; };
+    const bandColor = {
+      healthy: 'var(--success)', watch: 'var(--brand-blue)',
+      high: 'var(--danger)', no_sales: 'var(--text-muted)',
+    }[s.prime_cost_band] || 'var(--text-muted)';
+    const bandLabel = {
+      healthy: 'Healthy', watch: 'Watch', high: 'High — trim labour or lift price',
+      no_sales: 'No sales recorded yet',
+    }[s.prime_cost_band] || '';
+    chip.textContent = s.prime_cost_pct == null ? '' : ('Prime cost ' + s.prime_cost_pct + '% · ' + bandLabel);
+    chip.style.color = bandColor;
+    const cell = function(label, value, sub) {
+      return '<div style="background:var(--card-2,#242E44); border:1px solid var(--border); border-radius:12px; padding:14px;">' +
+        '<div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;">' + label + '</div>' +
+        '<div style="font-size:22px; font-weight:800; margin-top:4px;">' + value + '</div>' +
+        (sub ? '<div style="font-size:12px; color:var(--text-muted); margin-top:2px;">' + sub + '</div>' : '') +
+        '</div>';
+    };
+    grid.innerHTML =
+      cell('Net sales (ex GST)', formatCurrency(s.net_sales), formatCurrency(s.revenue_inc_gst) + ' inc') +
+      cell('Labour (rostered)', formatCurrency(s.labour), pct(s.labour_pct) + ' of sales') +
+      cell('Food cost', formatCurrency(s.cogs), pct(s.food_cost_pct) + ' of sales') +
+      cell('<span style="color:' + bandColor + '">Prime cost</span>', '<span style="color:' + bandColor + '">' + pct(s.prime_cost_pct) + '</span>', 'labour + food') +
+      cell('Gross profit', formatCurrency(s.gross_profit), 'after labour & food');
+  } catch (e) {
+    grid.innerHTML = '<div style="color:var(--text-muted);">' + esc(e.message) + '</div>';
+  }
 }
 
 // ============================================

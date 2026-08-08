@@ -520,6 +520,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register dish sales routes: {e}")
 
+# Business snapshot (labour % / food cost % / prime cost %)
+try:
+    from rosteriq.routes.snapshot import router as snapshot_router
+    app.include_router(snapshot_router)
+    logger.info("Business snapshot routes registered")
+except ImportError:
+    logger.info("Business snapshot routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register business snapshot routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router
