@@ -108,16 +108,24 @@ def seed_demo_environment(db) -> None:
         ]
         db.save_employees(employees)
 
-    # A current-week roster with today's shifts, so the AI can answer
-    # labour-cost and roster questions (re-seeds each week as 'today' moves).
+    # Starter menu (ingredients + recipes) so Menu & Sales, inventory and the
+    # snapshot are never empty — previously only seeded if someone manually
+    # POSTed /api/menu/seed, so a fresh deploy demoed blank.
+    try:
+        from rosteriq.routes.menu_costing import seed_starter_menu
+        seed_starter_menu(db, DEMO_VENUE_ID)
+    except Exception:
+        pass
+
+    # Day-rolling roster: ensure THIS week's roster has shifts dated TODAY, so
+    # the on-shift board, coverage, and briefing always show a staffed today —
+    # not just on the day the week was first seeded (the drift that made
+    # coverage show phantom shortfalls later in the week).
     try:
         today = date.today()
         week_start = today - timedelta(days=today.weekday())
         week_end = week_start + timedelta(days=6)
-        has_roster = db.get_rosters_by_date_range(DEMO_VENUE_ID, week_start, week_end)
-    except Exception:
-        has_roster = True  # don't risk duplicate seeding if the lookup fails
-    if not has_roster:
+        wk = week_start.isoformat()
         # (staff index, role, start, end) — break is 30 min.
         _SHIFTS = [
             (1, "floor", time(11, 0), time(19, 0)),
@@ -127,36 +135,31 @@ def seed_demo_environment(db) -> None:
             (5, "bar", time(11, 0), time(19, 0)),
             (6, "kitchen", time(15, 0), time(23, 0)),
         ]
-        # Week-specific ids: each week seeds a FRESH roster (a fixed id used to
-        # collide with last week's rows, leaving the demo stuck on an old week;
-        # past weeks now simply remain as history the AI can reference).
-        wk = week_start.isoformat()
-        shifts = []
-        for i, role, st, en in _SHIFTS:
-            paid_hours = (en.hour - st.hour) - 0.5  # minus the 30-min break
-            shifts.append(Shift(
-                id=f"demo-shift-{wk}-{i:03d}",
-                employee_id=f"demo-staff-{i:03d}",
-                date=today,
-                start_time=st,
-                end_time=en,
-                break_minutes=30,
-                status=ShiftStatus.scheduled,
-                role=role,
-                cost=Decimal(str(round(paid_hours * 32.5, 2))),
-            ))
-        try:
+        existing = db.get_roster(f"demo-roster-{wk}")
+        have_today = bool(existing) and any(s.date == today for s in existing.shifts)
+        if not have_today:
+            new_shifts = []
+            for i, role, st, en in _SHIFTS:
+                paid_hours = (en.hour - st.hour) - 0.5
+                new_shifts.append(Shift(
+                    id=f"demo-shift-{today.isoformat()}-{i:03d}",
+                    employee_id=f"demo-staff-{i:03d}",
+                    date=today, start_time=st, end_time=en,
+                    break_minutes=30, status=ShiftStatus.scheduled, role=role,
+                    cost=Decimal(str(round(paid_hours * 32.5, 2))),
+                ))
+            all_shifts = (list(existing.shifts) if existing else []) + new_shifts
             db.save_roster(Roster(
                 id=f"demo-roster-{wk}",
                 venue_id=DEMO_VENUE_ID,
                 week_start=week_start,
                 week_end=week_end,
-                shifts=shifts,
-                total_cost=Decimal(str(round(sum(float(s.cost) for s in shifts), 2))),
+                shifts=all_shifts,
+                total_cost=Decimal(str(round(sum(float(s.cost or 0) for s in all_shifts), 2))),
                 created_at=datetime.utcnow(),
             ))
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     _seed_demo_showcase(db, now)
 
@@ -197,9 +200,16 @@ def _seed_demo_showcase(db, now) -> None:
     except Exception:
         pass
 
-    # One pending leave request (Leave page approve-it-live beat)
+    # One pending leave request (Leave page approve-it-live beat). Refresh the
+    # SAME record when its dates fall into the past, so the demo never shows a
+    # "pending" leave for a date that's already gone.
     try:
-        if not db.list_leave_requests(DEMO_VENUE_ID):
+        lv = db.get_leave_request("demo-leave-001")
+        lv_start = None
+        if lv:
+            s = lv.get("start_date")
+            lv_start = s if isinstance(s, date) else date.fromisoformat(str(s)[:10])
+        if not lv or lv_start < today:
             db.save_leave_request({
                 "id": "demo-leave-001", "venue_id": DEMO_VENUE_ID,
                 "employee_id": "demo-staff-004",
@@ -211,12 +221,16 @@ def _seed_demo_showcase(db, now) -> None:
     except Exception:
         pass
 
-    # One open shift-cover for today's bar shift (Cover board beat)
+    # One open shift-cover for TODAY's bar shift (Cover board beat). Keyed to
+    # today's shift so it never orphans onto a shift that no longer exists.
     try:
-        if not db.list_shift_covers(DEMO_VENUE_ID):
+        today_bar_shift = f"demo-shift-{today.isoformat()}-002"
+        covers = db.list_shift_covers(DEMO_VENUE_ID) or []
+        if not any(c.get("shift_id") == today_bar_shift and c.get("status") == "open"
+                   for c in covers):
             db.save_shift_cover({
-                "id": "demo-cover-001", "venue_id": DEMO_VENUE_ID,
-                "shift_id": f"demo-shift-{wk}-002",
+                "id": f"demo-cover-{today.isoformat()}", "venue_id": DEMO_VENUE_ID,
+                "shift_id": today_bar_shift,
                 "shift_date": today, "shift_start": "15:00", "shift_end": "23:00",
                 "role": "bar", "requested_by": "demo-staff-002",
                 "reason": "Uni exam tomorrow morning",
@@ -287,12 +301,12 @@ def _seed_demo_showcase(db, now) -> None:
     try:
         existing_fc = db.get_forecasts(DEMO_VENUE_ID, today, today) or []
         if not existing_fc:
-            # A sports pub on game day peaks pre-game (mid-afternoon), which is
-            # where the demo roster is thickest (6 on at 15:00) — so coverage
-            # demos as a clean "fully covered". At 15 covers/staff the 15:00
-            # peak (90) needs 6, exactly covered; every other hour needs <=5.
-            curve = {11: 25, 12: 50, 13: 60, 14: 78, 15: 90, 16: 80,
-                     17: 58, 18: 48, 19: 70, 20: 55, 21: 38, 22: 24}
+            # A sports-pub game-day surge, seeded ONLY for the mid-afternoon
+            # window the demo roster actually staffs 5-6 deep (min_staff floor
+            # is 5, and the roster runs 3 outside 15:00-18:00) — so coverage
+            # is honestly "fully covered" at EVERY forecast hour, not just the
+            # single busiest one. Peak 15:00 (85 covers) needs 6, exactly met.
+            curve = {15: 85, 16: 78, 17: 70, 18: 55}
             db.add_forecasts([
                 DemandForecast(
                     id=f"demo-fc-{today.isoformat()}-{hr}",

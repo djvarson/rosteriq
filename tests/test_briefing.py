@@ -83,6 +83,60 @@ def test_briefing_surfaces_everything_that_needs_attention():
     assert b["kitchen"]["flagged_dishes"] == 1
 
 
+def test_briefing_counts_uncosted_labour_and_survives_bad_recipe():
+    """Two regressions: (1) a shift with no cached cost still counts toward
+    labour/prime (was silently dropped -> fail-silent low prime cost); (2) a
+    recipe with a bad unit conversion doesn't crash the whole briefing."""
+    from datetime import time as dtime, timedelta
+    from rosteriq.models import Roster, Shift, ShiftStatus
+
+    c = TestClient(app)
+    h = _owner(c)
+    vid = _venue(c, h, "br-venue-labour")
+
+    # Sales so net > 0
+    ing = c.post("/api/menu/ingredients", json={
+        "venue_id": vid, "name": "Beans", "unit": "kg",
+        "purchase_size": 1, "purchase_cost": 10,
+    }, headers=h).json()["ingredient_id"]
+    recipe = c.post("/api/menu/recipes", json={
+        "venue_id": vid, "name": "Bowl", "sell_price_inc_gst": 11.0,
+        "items": [{"ingredient_id": ing, "qty": 100, "unit": "g"}],
+    }, headers=h).json()["recipe_id"]
+    c.post("/api/sales/record", json={
+        "venue_id": vid, "items": [{"recipe_id": recipe, "qty": 100}],
+    }, headers=h)
+
+    # A rostered shift with cost=None (uncosted) — must still count as labour
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+    db = get_db()
+    db.save_roster(Roster(
+        id="br-roster", venue_id=vid, week_start=week_start,
+        week_end=week_start + timedelta(days=6),
+        shifts=[Shift(id="br-s1", employee_id=f"{vid}-emp", date=today,
+                      start_time=dtime(9, 0), end_time=dtime(17, 0), break_minutes=0,
+                      status=ShiftStatus.scheduled, role="floor", cost=None)],
+        total_cost=None, created_at=datetime(2026, 7, 1),
+    ))
+    # A recipe whose unit can't convert (g into an 'each' ingredient)
+    bad_ing = c.post("/api/menu/ingredients", json={
+        "venue_id": vid, "name": "Eggs", "unit": "each",
+        "purchase_size": 12, "purchase_cost": 6,
+    }, headers=h).json()["ingredient_id"]
+    db.save_recipe({
+        "id": "br-badrcp", "venue_id": vid, "name": "Bad Dish",
+        "sell_price_inc_gst": 10.0, "yield_portions": 1, "active": True,
+        "items": [{"ingredient_id": bad_ing, "qty": 100, "unit": "g"}],  # g -> each
+    })
+
+    r = c.get(f"/api/briefing?venue_id={vid}", headers=h)
+    assert r.status_code == 200, r.text          # did NOT crash on the bad recipe
+    b = r.json()
+    # 8h * $30 = $240 labour counted despite cost=None
+    assert b["prime_cost_pct_7d"] is not None and b["prime_cost_pct_7d"] > 20
+
+
 def test_briefing_is_venue_scoped():
     c = TestClient(app)
     h = _owner(c)

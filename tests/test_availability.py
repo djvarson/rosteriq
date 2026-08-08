@@ -78,7 +78,17 @@ def test_availability_roundtrip_and_validation():
            headers=staff_h)
     assert "monday" not in get_db().get_employee(f"{vid}-emp").availability
 
-    # Validation: bad day, bad time, inverted range, partial-with-no-ranges
+    # An intra-hour window (17:30–17:45) is VALID and must be accepted
+    ok = c.post("/api/me/availability", json={"days": {
+        "wednesday": {"status": "partial", "ranges": [{"start": "17:30", "end": "17:45"}]}}},
+        headers=staff_h)
+    assert ok.status_code == 200, ok.text
+    wed = [d for d in c.get("/api/me/availability", headers=staff_h).json()["days"]
+           if d["day"] == "wednesday"][0]
+    assert wed["ranges"] == [{"start": "17:30", "end": "17:45"}]
+
+    # Validation: bad day, bad time, inverted range, partial-with-no-ranges,
+    # and a MALFORMED shape (must be a clean 422 from pydantic, not a 500)
     assert c.post("/api/me/availability", json={"days": {"funday": {"status": "available"}}},
                   headers=staff_h).status_code == 422
     assert c.post("/api/me/availability", json={"days": {
@@ -89,6 +99,13 @@ def test_availability_roundtrip_and_validation():
         headers=staff_h).status_code == 422
     assert c.post("/api/me/availability", json={"days": {
         "friday": {"status": "partial", "ranges": []}}},
+        headers=staff_h).status_code == 422
+    # Malformed: day value is a string, not an object
+    assert c.post("/api/me/availability", json={"days": {"monday": "unavailable"}},
+                  headers=staff_h).status_code == 422
+    # Malformed: range is a string, not {start,end}
+    assert c.post("/api/me/availability", json={"days": {
+        "friday": {"status": "partial", "ranges": ["17:00-21:00"]}}},
         headers=staff_h).status_code == 422
 
 
@@ -166,3 +183,13 @@ def test_roster_generator_honours_unavailable_day():
     emp.availability = {}  # fully available
     ok2, _ = _is_employee_available(emp, d, 9, 17, existing_shifts=[], weekly_hours=0.0)
     assert ok2 is True
+
+    # Partial window honoured to the MINUTE: available 17:30-21:30, a 17:00
+    # shift starts before the window -> not available (old hour-truncation
+    # wrongly allowed it).
+    emp.availability = {"monday": [{"start": "17:30", "end": "21:30"}]}
+    ok3, reason3 = _is_employee_available(emp, d, 17, 21, existing_shifts=[], weekly_hours=0.0)
+    assert ok3 is False and "available" in reason3.lower()
+    # A shift fully inside the window is fine
+    ok4, _ = _is_employee_available(emp, d, 18, 21, existing_shifts=[], weekly_hours=0.0)
+    assert ok4 is True

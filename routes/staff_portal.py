@@ -64,27 +64,37 @@ class LeaveDecision(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
+class TimeRange(BaseModel):
+    start: str = Field(..., description="HH:MM")
+    end: str = Field(..., description="HH:MM")
+
+
 class DayAvailability(BaseModel):
     status: str = Field(..., pattern=r"^(available|unavailable|partial)$")
-    ranges: list = Field(default_factory=list,
-                         description="For 'partial': [{start:'HH:MM', end:'HH:MM'}]")
+    ranges: list[TimeRange] = Field(default_factory=list,
+                                    description="For 'partial': [{start:'HH:MM', end:'HH:MM'}]")
 
 
 class AvailabilityBody(BaseModel):
-    # weekday name -> DayAvailability; only supplied days are changed
-    days: dict = Field(..., description="e.g. {'monday': {'status':'unavailable'}}")
+    # weekday name -> DayAvailability; only supplied days are changed. Typed so
+    # a malformed shape (e.g. {"monday": "unavailable"}) is a clean 422 from
+    # pydantic, not a 500 from the handler assuming a dict.
+    days: dict[str, DayAvailability] = Field(
+        ..., description="e.g. {'monday': {'status':'unavailable'}}")
 
 
 def _parse_hhmm(v: str) -> int:
-    """'HH:MM' -> hour int, validating range; raises 422 on garbage."""
+    """'HH:MM' -> MINUTES since midnight (not just the hour — so a window like
+    17:30–17:45 is comparable). Raises 422 on garbage."""
     try:
-        h, m = str(v).split(":")[:2] if ":" in str(v) else (v, "0")
-        hi = int(h)
-        if not (0 <= hi <= 23):
+        s = str(v)
+        h, m = (s.split(":")[:2] if ":" in s else (s, "0"))
+        hi, mi = int(h), int(m)
+        if not (0 <= hi <= 23 and 0 <= mi <= 59):
             raise ValueError
-        return hi
+        return hi * 60 + mi
     except Exception:
-        raise HTTPException(status_code=422, detail=f"Bad time '{v}' — use HH:MM (00:00–23:00)")
+        raise HTTPException(status_code=422, detail=f"Bad time '{v}' — use HH:MM (00:00–23:59)")
 
 
 class CoverRequestBody(BaseModel):
@@ -326,28 +336,25 @@ async def set_my_availability(body: AvailabilityBody,
         d = str(day).strip().lower()
         if d not in _WEEKDAYS:
             raise HTTPException(status_code=422, detail=f"Unknown day '{day}'")
-        status = str((spec or {}).get("status", "")).lower()
+        status = spec.status.lower()  # pydantic already validated the enum
         if status == "available":
             avail.pop(d, None)
         elif status == "unavailable":
             avail[d] = []
-        elif status == "partial":
-            ranges = (spec or {}).get("ranges") or []
-            if not ranges:
+        else:  # partial
+            if not spec.ranges:
                 raise HTTPException(status_code=422,
                                     detail=f"{d}: 'partial' needs at least one time range")
             clean = []
-            for r in ranges:
-                start = str(r.get("start", "")).strip()
-                end = str(r.get("end", "")).strip()
+            for r in spec.ranges:
+                start = r.start.strip()
+                end = r.end.strip()
+                # Minute-precise: 17:30–17:45 is valid; 17:00–17:00 is not.
                 if _parse_hhmm(start) >= _parse_hhmm(end):
                     raise HTTPException(status_code=422,
                                         detail=f"{d}: range start {start} must be before end {end}")
                 clean.append({"start": start, "end": end})
             avail[d] = clean
-        else:
-            raise HTTPException(status_code=422,
-                                detail=f"{d}: status must be available / unavailable / partial")
 
     emp.availability = avail
     emp.updated_at = datetime.utcnow()

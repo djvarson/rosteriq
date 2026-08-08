@@ -192,6 +192,19 @@ def _employee_cost_score(
     return (type_cost * multiplier) + overtime_penalty + (fairness * 0.3)
 
 
+def _hhmm_to_minutes(value, default_minutes: int) -> int:
+    """'HH:MM' (or 'HH') -> minutes since midnight; default on garbage
+    (fail-open, matching the prior 'can't parse = assume available')."""
+    try:
+        s = str(value)
+        if ":" in s:
+            h, m = s.split(":")[:2]
+            return int(h) * 60 + int(m)
+        return int(s) * 60
+    except (ValueError, TypeError):
+        return default_minutes
+
+
 def _is_employee_available(
     employee: Employee,
     target_date: date,
@@ -246,21 +259,21 @@ def _is_employee_available(
         if rest_hours < 10:
             return False, f"Only {rest_hours}h rest (need 10h minimum)"
 
-    # Check availability schedule (if provided)
+    # Check availability schedule (if provided). Compare in MINUTES so a
+    # window like 17:30–21:30 is honoured to the minute — the old hour-only
+    # truncation rostered staff outside the window they set.
     if employee.availability:
         day_name = target_date.strftime("%A").lower()
         if day_name in employee.availability:
             ranges = employee.availability[day_name]
+            shift_start_min = start_hour * 60
+            shift_end_min = end_hour * 60
             available = False
             for r in ranges:
-                try:
-                    avail_start = int(str(r.get("start", "0")).split(":")[0])
-                    avail_end = int(str(r.get("end", "23")).split(":")[0])
-                    if avail_start <= start_hour and avail_end >= end_hour:
-                        available = True
-                        break
-                except (ValueError, TypeError):
-                    available = True  # Can't parse = assume available
+                avail_start = _hhmm_to_minutes(r.get("start"), 0)
+                avail_end = _hhmm_to_minutes(r.get("end"), 24 * 60)
+                if avail_start <= shift_start_min and avail_end >= shift_end_min:
+                    available = True
                     break
             if not available:
                 return False, "Not available at this time"
@@ -522,21 +535,48 @@ def generate_daily_roster(
     return day_shifts
 
 
+def _rostered_coverage_by_cell(roster: Roster) -> dict:
+    """Map (date, hour) -> number of rostered staff working that clock hour.
+
+    A shift covers every whole clock-hour it touches, handled correctly for:
+    overnight shifts (23:00–03:00 covers hour 23 of its date AND 00–02 of the
+    NEXT date — so a post-midnight demand hour is attributed to the right day),
+    sub-hour shifts (09:15–09:45 covers only hour 9, never 24 hours), and
+    zero-length shifts (cover nothing). This replaces the old start<=h<end
+    hour test that mis-scored all three cases.
+    """
+    from collections import defaultdict
+    cells: dict = defaultdict(int)
+    for s in roster.shifts:
+        start_dt = datetime.combine(s.date, s.start_time)
+        end_dt = datetime.combine(s.date, s.end_time)
+        if s.end_time < s.start_time:          # crosses midnight
+            end_dt += timedelta(days=1)
+        elif s.end_time == s.start_time:        # zero-length -> covers nothing
+            continue
+        cur = start_dt.replace(minute=0, second=0, microsecond=0)
+        while cur < end_dt:
+            cells[(cur.date(), cur.hour)] += 1
+            cur += timedelta(hours=1)
+    return cells
+
+
 def compute_coverage_gaps(
     roster: Roster,
     weekly_forecasts: list[DemandForecast],
     covers_per_staff: float = DEFAULT_COVERS_PER_STAFF,
     min_staff_by_role: dict = None,
 ) -> dict:
-    """Compare demand against the roster at each day's PEAK hour and report
-    where the roster falls short — so a manager never publishes a
-    quietly-understaffed day (the risk that grew the moment staff could mark
-    themselves unavailable).
+    """Compare demand against the roster at EVERY forecast hour and report the
+    worst-covered hour per day — so a manager never publishes a quietly
+    understaffed day. Checking only the single busiest hour (the old
+    behaviour) missed a roster that was fine at lunch but short at dinner.
 
-    For each day: required staff at the busiest forecast hour vs the number of
-    rostered staff whose shift actually covers that hour. A positive gap is a
-    shortfall the manager must see.
+    Per day: for each forecast hour, required staff (demand + venue floor) vs
+    rostered staff actually working that hour; a day is SHORT if ANY hour is
+    short, and the reported hour is the one with the largest gap.
     """
+    cells = _rostered_coverage_by_cell(roster)
     gaps = []
     fully_covered = True
     by_day_forecasts: dict = {}
@@ -547,29 +587,29 @@ def compute_coverage_gaps(
         required_by_hour = calculate_required_staff(day_fcs, covers_per_staff, min_staff_by_role)
         if not required_by_hour:
             continue
-        peak_hour = max(required_by_hour, key=lambda h: required_by_hour[h])
-        required = required_by_hour[peak_hour]
-
-        rostered = 0
-        for s in roster.shifts:
-            if s.date != day:
-                continue
-            start_h = s.start_time.hour
-            end_h = s.end_time.hour if s.end_time.hour > start_h else s.end_time.hour + 24
-            if start_h <= peak_hour < end_h:
-                rostered += 1
-
-        gap = required - rostered
-        if gap > 0:
+        # Worst hour = largest shortfall; tie-break to the busiest hour so the
+        # reported hour is the most meaningful one.
+        worst = None
+        for hour in sorted(required_by_hour):
+            required = required_by_hour[hour]
+            rostered = cells.get((day, hour), 0)
+            gap = required - rostered
+            key = (gap, required)
+            if worst is None or key > worst["_key"]:
+                worst = {"_key": key, "hour": hour, "required": required,
+                         "rostered": rostered, "gap": gap}
+        if worst is None:
+            continue
+        if worst["gap"] > 0:
             fully_covered = False
         gaps.append({
             "date": day.isoformat(),
             "day": day.strftime("%A"),
-            "peak_hour": f"{peak_hour:02d}:00",
-            "required": required,
-            "rostered": rostered,
-            "gap": max(0, gap),
-            "status": "short" if gap > 0 else "covered",
+            "peak_hour": f"{worst['hour']:02d}:00",
+            "required": worst["required"],
+            "rostered": worst["rostered"],
+            "gap": max(0, worst["gap"]),
+            "status": "short" if worst["gap"] > 0 else "covered",
         })
 
     shortfalls = [g for g in gaps if g["gap"] > 0]

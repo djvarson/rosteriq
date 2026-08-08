@@ -35,17 +35,22 @@ async def daily_briefing(venue_id: str = Query(...)) -> dict:
     rev_inc = sum(float(s.get("revenue_inc_gst") or 0) for s in sales)
     cogs = sum(float(s.get("cogs") or 0) for s in sales)
     net = rev_inc / (1 + GST_RATE)
-    labour_7d = 0.0
+    # Use the SAME labour source as the snapshot (falls back to paid-hours ×
+    # base rate when a shift's cost isn't cached) — summing only cost-bearing
+    # shifts would silently understate prime cost and suppress the alert.
+    from rosteriq.routes.snapshot import _labour_by_day
+    labour_failed = False
     try:
-        for roster in (db.get_rosters_by_date_range(venue_id, week_ago, today) or []):
-            for sh in roster.shifts:
-                if week_ago <= sh.date <= today and sh.cost is not None:
-                    labour_7d += float(sh.cost)
-    except Exception:
-        pass
-    prime_pct = round((labour_7d + cogs) / net * 100, 1) if net > 0 else None
+        labour_7d = round(sum((_labour_by_day(db, venue_id, week_ago, today) or {}).values()), 2)
+    except Exception as e:
+        logger.warning(f"Briefing labour calc failed for {venue_id}: {e}")
+        labour_7d = 0.0
+        labour_failed = True
+    prime_pct = round((labour_7d + cogs) / net * 100, 1) if (net > 0 and not labour_failed) else None
     if prime_pct is not None and prime_pct > 65:
         attention.append(f"Prime cost is {prime_pct}% (target ≤65%) — trim labour or lift price.")
+    elif labour_failed:
+        attention.append("Couldn't calculate labour/prime cost — check the dashboard.")
 
     # --- Today: roster + coverage ----------------------------------------
     today_rosters = []
@@ -65,12 +70,19 @@ async def daily_briefing(venue_id: str = Query(...)) -> dict:
 
     coverage = None
     try:
-        rosters = [r for r in (db.list_rosters() or []) if getattr(r, "venue_id", None) == venue_id]
-        if rosters:
-            latest = max(rosters, key=lambda r: r.week_start)
-            fcs = db.get_forecasts(venue_id, latest.week_start, latest.week_end) or []
+        # The roster that COVERS today (week_start <= today <= week_end), not
+        # merely the one with the latest week_start — otherwise a
+        # next-week roster hides today's shortfall.
+        candidates = [r for r in (db.list_rosters() or [])
+                      if getattr(r, "venue_id", None) == venue_id
+                      and r.week_start <= today <= r.week_end]
+        if candidates:
+            active = max(candidates, key=lambda r: r.week_start)
+            fcs = db.get_forecasts(venue_id, active.week_start, active.week_end) or []
             if fcs:
-                cov = compute_coverage_gaps(latest, fcs)
+                venue = db.get_venue(venue_id)
+                min_staff = getattr(venue, "min_staff", None) if venue else None
+                cov = compute_coverage_gaps(active, fcs, min_staff_by_role=min_staff)
                 today_row = [d for d in cov["days"] if d["date"] == today.isoformat()]
                 coverage = {
                     "fully_covered": cov["fully_covered"],
@@ -83,6 +95,7 @@ async def daily_briefing(venue_id: str = Query(...)) -> dict:
                         f"Today is {t['gap']} short at {t['peak_hour']} — arrange cover.")
     except Exception as e:
         logger.warning(f"Briefing coverage failed for {venue_id}: {e}")
+        attention.append("Couldn't verify today's coverage — check the roster.")
 
     # --- Approvals waiting ------------------------------------------------
     pending_leave = len([r for r in (db.list_leave_requests(venue_id) or [])
@@ -110,7 +123,12 @@ async def daily_briefing(venue_id: str = Query(...)) -> dict:
     ings_by_id = {i["id"]: i for i in ingredients}
     flagged_dishes = 0
     for recipe in (db.list_recipes(venue_id) or []):
-        c = _cost_recipe(recipe, ings_by_id)
+        # One recipe with a bad unit conversion must not sink the whole
+        # briefing — skip it, don't 422 the entire morning brief.
+        try:
+            c = _cost_recipe(recipe, ings_by_id)
+        except Exception:
+            continue
         if c.get("flagged"):
             flagged_dishes += 1
     if flagged_dishes:

@@ -282,19 +282,18 @@ _SEED_RECIPES = [
 ]
 
 
-@router.post("/seed")
-async def seed_menu(body: SeedRequest) -> dict:
-    """Idempotent starter ingredients + recipes (skips names that exist)."""
-    enforce_venue_access(body.venue_id)
-    db = get_db()
-    existing_ing = {i.get("name"): i for i in (db.list_ingredients(body.venue_id) or [])}
+def seed_starter_menu(db, venue_id: str) -> dict:
+    """Idempotent starter ingredients + recipes (skips names that exist).
+    Shared by the /seed route and the demo seeder so the demo's Menu & Sales,
+    inventory and snapshot are never empty on a fresh deploy."""
+    existing_ing = {i.get("name"): i for i in (db.list_ingredients(venue_id) or [])}
     created_i = []
     for d in _SEED_INGREDIENTS:
         if d["name"] in existing_ing:
             continue
         ing = {
             "id": f"ing-{uuid.uuid4().hex[:10]}",
-            "venue_id": body.venue_id,
+            "venue_id": venue_id,
             "name": d["name"], "unit": d["unit"],
             "purchase_size": d["purchase_size"], "purchase_cost": d["purchase_cost"],
             "cost_per_unit": d["purchase_cost"] / d["purchase_size"],
@@ -304,14 +303,14 @@ async def seed_menu(body: SeedRequest) -> dict:
         existing_ing[d["name"]] = ing
         created_i.append(d["name"])
 
-    existing_rcp = {r.get("name") for r in (db.list_recipes(body.venue_id) or [])}
+    existing_rcp = {r.get("name") for r in (db.list_recipes(venue_id) or [])}
     created_r = []
     for d in _SEED_RECIPES:
         if d["name"] in existing_rcp:
             continue
         db.save_recipe({
             "id": f"rcp-{uuid.uuid4().hex[:10]}",
-            "venue_id": body.venue_id,
+            "venue_id": venue_id,
             "name": d["name"], "category": d["category"],
             "sell_price_inc_gst": d["sell_price_inc_gst"], "yield_portions": 1,
             "items": [{"ingredient_id": existing_ing[n]["id"], "qty": q, "unit": u}
@@ -320,3 +319,10 @@ async def seed_menu(body: SeedRequest) -> dict:
         })
         created_r.append(d["name"])
     return {"status": "seeded", "ingredients_created": created_i, "recipes_created": created_r}
+
+
+@router.post("/seed")
+async def seed_menu(body: SeedRequest) -> dict:
+    """Idempotent starter ingredients + recipes (skips names that exist)."""
+    enforce_venue_access(body.venue_id)
+    return seed_starter_menu(get_db(), body.venue_id)

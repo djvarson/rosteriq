@@ -1,95 +1,81 @@
 """
-Demo showcase seeding: every new pillar gets sample data, seeding twice never
-duplicates, and existing (real) numbers are never clobbered.
+Demo showcase seeding: every pillar gets sample data (menu, stock, sales,
+roster, forecast, leave, cover, announcements), seeding twice never
+duplicates, coverage is honestly green, and staleness self-refreshes.
 """
 
 from datetime import date, timedelta
 
 from rosteriq.database import MemoryStore
 from rosteriq.services.demo import seed_demo_environment, DEMO_VENUE_ID
+from rosteriq.roster_optimiser import compute_coverage_gaps
+from rosteriq.routes.snapshot import _labour_by_day
 
 
 def test_showcase_seeds_every_pillar_idempotently():
     db = MemoryStore()
     seed_demo_environment(db)
     seed_demo_environment(db)  # second run must not duplicate anything
+    today = date.today()
 
     anns = db.list_announcements(DEMO_VENUE_ID)
     assert len(anns) == 2
     pinned = [a for a in anns if a.get("pinned")]
     assert len(pinned) == 1 and len(pinned[0]["read_by"]) == 4
 
-    leave = db.list_leave_requests(DEMO_VENUE_ID)
-    assert len(leave) == 1 and leave[0]["status"] == "pending"
-    assert leave[0]["start_date"] > date.today()  # always future, week-rolling
+    # Leave: exactly one pending, always a FUTURE date (self-refreshes)
+    leave = [l for l in db.list_leave_requests(DEMO_VENUE_ID) if l["status"] == "pending"]
+    assert len(leave) == 1
+    ls = leave[0]["start_date"]
+    ls = ls if isinstance(ls, date) else date.fromisoformat(str(ls)[:10])
+    assert ls >= today
 
-    covers = db.list_shift_covers(DEMO_VENUE_ID)
-    assert len(covers) == 1 and covers[0]["status"] == "open"
-    # The cover points at a shift that genuinely exists in this week's roster
-    week_start = date.today() - timedelta(days=date.today().weekday())
-    assert covers[0]["shift_id"] == f"demo-shift-{week_start.isoformat()}-002"
+    # Cover: open, and points at a shift that genuinely exists TODAY
+    covers = [c for c in db.list_shift_covers(DEMO_VENUE_ID) if c["status"] == "open"]
+    assert covers
+    roster = max([r for r in db.list_rosters() if r.venue_id == DEMO_VENUE_ID],
+                 key=lambda r: r.week_start)
+    shift_ids = {s.id for s in roster.shifts}
+    assert all(c["shift_id"] in shift_ids for c in covers)
 
-    # Today's forecast is seeded so the coverage feature has demand to assess,
-    # and the demo roster (6 on mid-afternoon) covers the pre-game peak
-    from rosteriq.roster_optimiser import compute_coverage_gaps
-    today = date.today()
-    fcs = db.get_forecasts(DEMO_VENUE_ID, today, today)
-    assert fcs, "demo should seed today's forecast for coverage"
-    rosters = [r for r in db.list_rosters() if r.venue_id == DEMO_VENUE_ID]
-    if rosters:
-        cov = compute_coverage_gaps(max(rosters, key=lambda r: r.week_start), fcs)
-        today_row = [d for d in cov["days"] if d["date"] == today.isoformat()]
-        assert today_row and today_row[0]["status"] == "covered"
+    # Menu seeded server-side (no manual /api/menu/seed needed)
+    assert len(db.list_ingredients(DEMO_VENUE_ID)) >= 3
+    assert len(db.list_recipes(DEMO_VENUE_ID)) == 3
 
-    # No ingredients in a fresh store -> stock/sales blocks skip WITHOUT error
-    assert db.list_ingredients(DEMO_VENUE_ID) == []
-    assert db.list_dish_sales(DEMO_VENUE_ID,
-                              date.today() - timedelta(days=7), date.today()) == []
-
-
-def test_showcase_dresses_stock_and_sales_when_menu_exists():
-    db = MemoryStore()
-    # A costed mini-menu exists BEFORE the seed (mirrors production, where the
-    # demo menu was seeded earlier)
-    db.save_ingredient({
-        "id": "demo-ing-1", "venue_id": DEMO_VENUE_ID, "name": "Chicken",
-        "unit": "kg", "purchase_size": 5, "purchase_cost": 50,
-        "cost_per_unit": 10, "active": True, "stock_qty": 0, "par_level": 0,
-    })
-    db.save_ingredient({
-        "id": "demo-ing-2", "venue_id": DEMO_VENUE_ID, "name": "Cheese",
-        "unit": "kg", "purchase_size": 2, "purchase_cost": 30,
-        "cost_per_unit": 15, "active": True, "stock_qty": 0, "par_level": 0,
-    })
-    db.save_recipe({
-        "id": "demo-rcp-1", "venue_id": DEMO_VENUE_ID, "name": "Chicken Melt",
-        "sell_price_inc_gst": 22.0, "yield_portions": 1, "active": True,
-        "items": [{"ingredient_id": "demo-ing-1", "qty": 250, "unit": "g"}],
-    })
-
-    seed_demo_environment(db)
-    seed_demo_environment(db)
-
-    # Stock/pars set once: exactly one item below par (the LOW-badge beat)
-    ings = {i["name"]: i for i in db.list_ingredients(DEMO_VENUE_ID)}
-    low = [n for n, i in ings.items()
-           if float(i["stock_qty"]) < float(i["par_level"])]
-    assert low == ["Cheese"]  # first alphabetically runs low
-    assert float(ings["Chicken"]["stock_qty"]) == 12.5  # 5 * 2.5, healthy
-
-    # Sales cover the last three days INCLUDING today (where the demo roster's
-    # labour sits), one recipe x three days, priced from real costing
-    today = date.today()
+    # Sales seeded across recent days -> the snapshot shows real trade
     sales = db.list_dish_sales(DEMO_VENUE_ID, today - timedelta(days=7), today)
-    assert len(sales) == 3
-    sale_days = {str(s["sale_date"])[:10] for s in sales}
-    assert today.isoformat() in sale_days  # snapshot/summary always show today
-    s = sales[0]
-    assert s["revenue_inc_gst"] == round(22.0 * s["qty"], 2)
-    assert s["cogs"] == round(2.5 * s["qty"], 2)  # 250g @ $10/kg
+    assert sales and today.isoformat() in {str(s["sale_date"])[:10] for s in sales}
 
-    # A third run with data present changes nothing (per-day idempotent)
-    before = len(db.list_dish_sales(DEMO_VENUE_ID, today - timedelta(days=7), today))
+    # Today is staffed and coverage is honestly fully covered at EVERY hour
+    assert sum(1 for s in roster.shifts if s.date == today) == 6
+    fcs = db.get_forecasts(DEMO_VENUE_ID, roster.week_start, roster.week_end)
+    venue = db.get_venue(DEMO_VENUE_ID)
+    cov = compute_coverage_gaps(roster, fcs, min_staff_by_role=venue.min_staff)
+    assert cov["fully_covered"] is True
+
+    # A plausible prime cost (labour + food over net sales), not absurd
+    rev = sum(float(s["revenue_inc_gst"]) for s in sales)
+    cogs = sum(float(s["cogs"]) for s in sales)
+    net = rev / 1.1
+    lab = sum(_labour_by_day(db, DEMO_VENUE_ID, today - timedelta(days=7), today).values())
+    prime = (lab + cogs) / net * 100
+    assert 40 <= prime <= 80, f"demo prime cost {prime:.0f}% looks off"
+
+
+def test_showcase_seed_is_stable_across_runs():
+    db = MemoryStore()
     seed_demo_environment(db)
-    after = len(db.list_dish_sales(DEMO_VENUE_ID, today - timedelta(days=7), today))
-    assert before == after
+    today = date.today()
+
+    def counts():
+        return (
+            len(db.list_announcements(DEMO_VENUE_ID)),
+            len(db.list_dish_sales(DEMO_VENUE_ID, today - timedelta(days=7), today)),
+            len(db.get_forecasts(DEMO_VENUE_ID, today, today)),
+            len(db.list_ingredients(DEMO_VENUE_ID)),
+        )
+
+    before = counts()
+    seed_demo_environment(db)
+    seed_demo_environment(db)
+    assert counts() == before  # fully idempotent on the same day

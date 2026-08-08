@@ -1176,14 +1176,11 @@ class AgentContext:
         cogs = sum(float(s.get("cogs") or 0) for s in sales)
         net = rev_inc / (1 + GST_RATE)
 
-        labour = 0.0
-        try:
-            for roster in (self.db.get_rosters_by_date_range(self.venue_id, start, end) or []):
-                for sh in roster.shifts:
-                    if start <= sh.date <= end and sh.cost is not None:
-                        labour += float(sh.cost)
-        except Exception:
-            pass
+        # Same labour source as /api/snapshot (hours × rate fallback for
+        # uncosted shifts) so the AI never states a different prime cost than
+        # the dashboard the owner is looking at.
+        from rosteriq.routes.snapshot import _labour_by_day
+        labour = round(sum((_labour_by_day(self.db, self.venue_id, start, end) or {}).values()), 2)
 
         def pct(part):
             return round(part / net * 100, 1) if net > 0 else None
@@ -1284,7 +1281,9 @@ class AgentContext:
         if not forecasts:
             return {"week_of": roster.week_start.isoformat(),
                     "message": "No demand forecast for this week — can't assess coverage."}
-        result = compute_coverage_gaps(roster, forecasts)
+        venue = self.db.get_venue(self.venue_id)
+        min_staff = getattr(venue, "min_staff", None) if venue else None
+        result = compute_coverage_gaps(roster, forecasts, min_staff_by_role=min_staff)
         result["week_of"] = roster.week_start.isoformat()
         return result
 
