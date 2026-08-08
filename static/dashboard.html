@@ -2420,6 +2420,18 @@
           <p class="page-subtitle">Real-time venue insights and rostering metrics</p>
         </div>
 
+        <!-- SETUP WIZARD (first-run guided onboarding; hides when complete) -->
+        <div class="card" id="setup-card" style="margin-bottom:16px; display:none; border:1px solid var(--brand-blue);">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+            <h3 style="font-size:15px; margin:0;">Get your venue set up</h3>
+            <span id="setup-progress" style="font-size:13px; color:var(--text-muted);"></span>
+          </div>
+          <div style="height:6px; background:var(--border); border-radius:999px; overflow:hidden; margin-bottom:12px;">
+            <div id="setup-bar" style="height:100%; width:0%; background:var(--brand-blue); transition:width .3s;"></div>
+          </div>
+          <div id="setup-steps"></div>
+        </div>
+
         <!-- TODAY BRIEFING (what needs attention this morning) -->
         <div class="card" id="briefing-card" style="margin-bottom:16px; display:none;">
           <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
@@ -5895,6 +5907,7 @@ function showPage(pageId) {
   updatePageTitle(pageId);
 
   if (pageId === 'dashboard') {
+    loadSetupWizard();
     loadBriefing();
     loadSnapshot();
   }
@@ -6241,6 +6254,52 @@ function renderLeaveRequests() {
       '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
       '</tr>';
   }).join('');
+}
+
+// ============================================
+// SETUP WIZARD (first-run onboarding)
+// ============================================
+const SETUP_PAGE = {
+  'Staff': 'staff', 'Menu & Sales': 'menu', 'Inventory': 'inventory',
+  'Roster': 'roster', 'Connections': null,
+};
+
+async function loadSetupWizard() {
+  const vid = (typeof state.currentVenue === 'object' && state.currentVenue?.id)
+    ? state.currentVenue.id : state.currentVenue;
+  const card = document.getElementById('setup-card');
+  if (!card || !vid) return;
+  try {
+    const s = await fetchAPI('/api/setup?venue_id=' + encodeURIComponent(vid));
+    // Hide once the required steps are all done — don't nag an established venue
+    if (s.complete) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    document.getElementById('setup-progress').textContent =
+      s.steps_done + ' of ' + s.steps_total + ' done';
+    document.getElementById('setup-bar').style.width = s.percent + '%';
+    document.getElementById('setup-steps').innerHTML = s.steps.map(function(step) {
+      const icon = step.done
+        ? '<span style="color:var(--success); font-weight:800;">✓</span>'
+        : '<span style="color:var(--text-muted);">○</span>';
+      const page = SETUP_PAGE[step.cta];
+      const isNext = s.next_step && s.next_step.key === step.key;
+      const cta = (!step.done && page)
+        ? '<button class="btn btn-primary btn-small" onclick="showPage(\'' + page + '\')">' + esc(step.cta) + ' →</button>'
+        : (!step.done && step.cta === 'Connections'
+            ? '<button class="btn btn-secondary btn-small" onclick="window.open(\'/connections\',\'_blank\')">Connections →</button>'
+            : '');
+      return '<div style="display:flex; align-items:center; gap:12px; padding:9px 0; border-top:1px solid var(--border);' +
+        (isNext ? ' background:rgba(51,102,255,.06);' : '') + '">' +
+        '<span style="font-size:16px; width:18px; text-align:center;">' + icon + '</span>' +
+        '<div style="flex:1;">' +
+          '<div style="font-weight:600;">' + esc(step.label) + (step.optional ? ' <span style="color:var(--text-muted); font-weight:400; font-size:12px;">(optional)</span>' : '') + '</div>' +
+          '<div style="font-size:12px; color:var(--text-muted);">' + esc(step.detail) + '</div>' +
+        '</div>' + cta +
+      '</div>';
+    }).join('');
+  } catch (e) {
+    card.style.display = 'none';
+  }
 }
 
 // ============================================

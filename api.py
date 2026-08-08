@@ -541,6 +541,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register daily briefing routes: {e}")
 
+# First-run setup wizard (guided venue onboarding)
+try:
+    from rosteriq.routes.setup_wizard import router as setup_wizard_router
+    app.include_router(setup_wizard_router)
+    logger.info("Setup wizard routes registered")
+except ImportError:
+    logger.info("Setup wizard routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register setup wizard routes: {e}")
+
 # HumanForce integration routes
 try:
     from rosteriq.routes.humanforce import router as humanforce_router

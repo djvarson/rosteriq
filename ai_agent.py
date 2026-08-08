@@ -378,6 +378,11 @@ GEMINI_TOOLS = [
             "description": "The morning brief: everything that needs the manager's attention today in one shot — prime cost trend, today's staffing + coverage, pending leave/cover approvals, below-par stock, and over-target dishes, plus an 'attention' list. Use for 'what do I need to know today', 'brief me', 'what needs my attention', 'good morning'.",
             "parameters": {"type": "OBJECT", "properties": {}},
         },
+        {
+            "name": "get_setup_status",
+            "description": "First-run setup progress: which onboarding steps are done (add staff, set up menu, set stock levels, generate a roster, connect Deputy) and what's next. Use for 'what do I still need to set up', 'am I ready to go', 'how do I get started', 'what's left to configure'.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
     ]}
 ]
 
@@ -1293,6 +1298,13 @@ class AgentContext:
         from rosteriq.routes.briefing import daily_briefing
         try:
             return await daily_briefing(venue_id=self.venue_id)
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def _tool_get_setup_status(self, params: dict) -> dict:
+        from rosteriq.routes.setup_wizard import setup_status
+        try:
+            return await setup_status(venue_id=self.venue_id)
         except Exception as e:
             return {"error": str(e)}
 
