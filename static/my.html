@@ -263,7 +263,7 @@ async function loadAvailability() {
     const byDay = {};
     data.days.forEach(function (d) { byDay[d.day] = d; });
     card.innerHTML =
-      '<div style="font-size:13px; color:var(--muted); margin-bottom:10px;">Tap a day to toggle. The roster won’t book you on days you mark unavailable.</div>' +
+      '<div style="font-size:13px; color:var(--muted); margin-bottom:10px;">Tap a day to toggle, or ⏱ to set the hours you can work. The roster respects this.</div>' +
       AVAIL_DAYS.map(function (d) {
         const st = (byDay[d] || {}).status || 'available';
         const partial = st === 'partial';
@@ -272,12 +272,32 @@ async function loadAvailability() {
           ? ((byDay[d].ranges || []).map(function (r) { return r.start + '–' + r.end; }).join(', ') || 'Set hours')
           : (unavail ? 'Unavailable' : 'Available');
         const color = unavail ? 'var(--red)' : (partial ? 'var(--amber)' : 'var(--green)');
-        return '<div style="display:flex; justify-content:space-between; align-items:center; padding:11px 0; border-bottom:1px solid var(--border);">' +
-          '<span style="font-weight:600;">' + dayShort(d) + '</span>' +
-          '<button onclick="toggleAvail(\'' + d + '\',\'' + st + '\')" ' +
-            'style="background:none; border:1px solid var(--border); border-radius:999px; padding:6px 14px; ' +
-            'font-size:13px; font-weight:600; color:' + color + '; cursor:pointer; font-family:inherit;">' +
-            esc(label) + '</button>' +
+        const firstRange = partial && (byDay[d].ranges || [])[0] ? byDay[d].ranges[0] : { start: '17:00', end: '23:00' };
+        return '<div style="border-bottom:1px solid var(--border);">' +
+          '<div style="display:flex; justify-content:space-between; align-items:center; padding:11px 0; gap:8px;">' +
+            '<span style="font-weight:600;">' + dayShort(d) + '</span>' +
+            '<span style="display:flex; gap:6px; align-items:center;">' +
+              '<button onclick="toggleAvail(\'' + d + '\',\'' + st + '\')" ' +
+                'style="background:none; border:1px solid var(--border); border-radius:999px; padding:6px 14px; ' +
+                'font-size:13px; font-weight:600; color:' + color + '; cursor:pointer; font-family:inherit;">' +
+                esc(label) + '</button>' +
+              '<button onclick="openHours(\'' + d + '\')" title="Only available at certain times" ' +
+                'style="background:none; border:1px solid var(--border); border-radius:999px; padding:6px 10px; ' +
+                'font-size:13px; color:var(--muted); cursor:pointer; font-family:inherit;">⏱</button>' +
+            '</span>' +
+          '</div>' +
+          '<div id="hours-' + d + '" style="display:none; padding:0 0 12px 0;">' +
+            '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">' +
+              '<span style="font-size:13px; color:var(--muted);">I can work</span>' +
+              '<input type="time" id="hours-start-' + d + '" value="' + esc(firstRange.start) + '" ' +
+                'style="background:var(--card-2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:7px; font-family:inherit;">' +
+              '<span style="color:var(--muted);">to</span>' +
+              '<input type="time" id="hours-end-' + d + '" value="' + esc(firstRange.end) + '" ' +
+                'style="background:var(--card-2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:7px; font-family:inherit;">' +
+              '<button onclick="saveHours(\'' + d + '\')" style="background:var(--blue); border:none; color:#fff; ' +
+                'border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;">Save</button>' +
+            '</div>' +
+          '</div>' +
         '</div>';
       }).join('');
   } catch (e) {
@@ -285,9 +305,27 @@ async function loadAvailability() {
   }
 }
 
+function openHours(day) {
+  const el = document.getElementById('hours-' + day);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveHours(day) {
+  const start = document.getElementById('hours-start-' + day).value;
+  const end = document.getElementById('hours-end-' + day).value;
+  if (!start || !end) { toast('Pick both times', 'err'); return; }
+  try {
+    await api('/api/me/availability', { method: 'POST', body: { days: (function () {
+      const o = {}; o[day] = { status: 'partial', ranges: [{ start: start, end: end }] }; return o;
+    })() } });
+    toast(dayShort(day) + ': available ' + start + '–' + end, 'ok');
+    loadAvailability();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 async function toggleAvail(day, current) {
-  // Mobile toggle cycles Available <-> Unavailable; partial (specific hours)
-  // is set from the desktop manager view / API and shown here read-as-is.
+  // Tap: available/partial -> unavailable, unavailable -> available.
+  // Specific hours are set with the ⏱ editor.
   const next = current === 'unavailable' ? 'available' : 'unavailable';
   try {
     await api('/api/me/availability', { method: 'POST', body: { days: (function () {

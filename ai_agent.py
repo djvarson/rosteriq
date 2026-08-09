@@ -671,7 +671,19 @@ class AgentContext:
 
         emp_count = len(employees) if employees else 0
         shift_count = len(week_shifts) if week_shifts else 0
-        total_hours = sum(getattr(s, "hours", 0) or 0 for s in (week_shifts or []))
+
+        def _paid_hours(s) -> float:
+            # Shift has no 'hours' field — derive paid time from the punches
+            # (overnight-aware, minus unpaid break). The old getattr(s,'hours')
+            # silently reported 0 for every shift.
+            start = datetime.combine(s.date, s.start_time)
+            end = datetime.combine(s.date, s.end_time)
+            if end <= start:
+                end += timedelta(days=1)
+            mins = (end - start).total_seconds() / 60 - int(getattr(s, "break_minutes", 0) or 0)
+            return max(0.0, mins / 60)
+
+        total_hours = sum(_paid_hours(s) for s in (week_shifts or []))
         total_cost = sum(float(getattr(s, "cost", 0) or 0) for s in (week_shifts or []))
 
         return {

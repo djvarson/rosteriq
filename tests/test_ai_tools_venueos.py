@@ -115,3 +115,9 @@ async def test_snapshot_menu_inventory_approvals_tools_ground_in_real_data():
     assert appr["pending_leave_count"] == 1
     assert appr["pending_leave"][0]["employee"] == "Ada Cook"
     assert appr["pending_leave"][0]["reason"] == "Family trip"
+
+    # Venue stats derives hours from shift times (Shift has no 'hours' field —
+    # the old getattr(s,'hours') silently reported 0 for every roster)
+    stats = json.loads(await ctx.execute_tool("get_venue_stats", {}))
+    assert stats["shifts_this_week"] >= 1
+    assert stats["hours_this_week"] == 8.0  # 09:00-17:00, no break
