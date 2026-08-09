@@ -7526,6 +7526,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
   item.addEventListener('click', (e) => {
     const page = e.currentTarget.getAttribute('data-page');
     showPage(page);
+    closeMobileMenu(); // width-guarded: only closes the drawer at <=768px
   });
 });
 
