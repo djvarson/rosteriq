@@ -303,6 +303,7 @@
 
     .hamburger {
       display: none;
+      flex-direction: column;
       width: 36px;
       height: 36px;
       border: none;
@@ -1170,25 +1171,30 @@
         font-size: 12px;
       }
 
-      /* Top bar adjustments */
+      /* Top bar: one compact row — hamburger + page name left, clock right.
+         min-width:100% on the halves forced a wrap into two half-empty rows. */
       .top-bar {
-        padding: 12px 16px;
-        flex-wrap: wrap;
+        padding: 10px 16px;
         gap: 12px;
       }
 
       .top-bar-left {
         flex: 1;
-        min-width: 100%;
+        min-width: 0;
       }
 
       .top-bar-right {
-        flex: 1;
-        min-width: 100%;
+        flex: 0 0 auto;
       }
 
       .top-bar-title {
-        font-size: 12px;
+        display: block;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary, #e2e8f0);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       /* Card adjustments */
@@ -1392,16 +1398,8 @@
         width: 220px;
       }
 
-      .top-bar {
-        flex-direction: column;
-      }
-
-      .top-bar-left,
-      .top-bar-right {
-        min-width: auto;
-        width: 100%;
-      }
-
+      /* Keep the single-row header on phones too — the clock is hidden at
+         this width, so hamburger + page name fit comfortably. */
       .page-title {
         font-size: 18px;
       }
