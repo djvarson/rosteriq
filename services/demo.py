@@ -126,10 +126,11 @@ def seed_demo_environment(db) -> None:
     except Exception:
         pass
 
-    # Day-rolling roster: ensure THIS week's roster has shifts dated TODAY, so
-    # the on-shift board, coverage, and briefing always show a staffed today —
-    # not just on the day the week was first seeded (the drift that made
-    # coverage show phantom shortfalls later in the week).
+    # Day-rolling roster: ensure shifts exist for TODAY and the prior two
+    # days — the SAME days the sales seed covers — so labour and revenue
+    # always describe the same trading days and the prime cost reads like a
+    # real venue (labour on days without sales made the demo look like a
+    # failing business at 85%+ prime cost).
     try:
         today = date.today()
         week_start = today - timedelta(days=today.weekday())
@@ -145,18 +146,25 @@ def seed_demo_environment(db) -> None:
             (6, "kitchen", time(15, 0), time(23, 0)),
         ]
         existing = db.get_roster(f"demo-roster-{wk}")
-        have_today = bool(existing) and any(s.date == today for s in existing.shifts)
-        if not have_today:
-            new_shifts = []
+        have_days = {s.date for s in existing.shifts} if existing else set()
+        # Only days inside THIS week's roster window (a prior day in last
+        # week would violate the Mon-Sun roster validator).
+        want_days = [d for d in (today - timedelta(days=o) for o in (0, 1, 2))
+                     if week_start <= d <= week_end]
+        new_shifts = []
+        for d in want_days:
+            if d in have_days:
+                continue
             for i, role, st, en in _SHIFTS:
                 paid_hours = (en.hour - st.hour) - 0.5
                 new_shifts.append(Shift(
-                    id=f"demo-shift-{today.isoformat()}-{i:03d}",
+                    id=f"demo-shift-{d.isoformat()}-{i:03d}",
                     employee_id=f"demo-staff-{i:03d}",
-                    date=today, start_time=st, end_time=en,
+                    date=d, start_time=st, end_time=en,
                     break_minutes=30, status=ShiftStatus.scheduled, role=role,
                     cost=Decimal(str(round(paid_hours * 32.5, 2))),
                 ))
+        if new_shifts:
             all_shifts = (list(existing.shifts) if existing else []) + new_shifts
             db.save_roster(Roster(
                 id=f"demo-roster-{wk}",
@@ -302,24 +310,37 @@ def _seed_demo_showcase(db, now) -> None:
         if recipes:
             from rosteriq.routes.menu_costing import _cost_recipe
             ings = {i["id"]: i for i in (db.list_ingredients(DEMO_VENUE_ID) or [])}
-            qtys = [61, 22, 14]  # flat whites move more than parmys
+            # Target-based, per-day convergent: bring each of the last three
+            # trading days (the SAME days the roster seeds labour for) up to
+            # ~$5,300 inc GST, so $1,462.50/day of labour reads as a healthy
+            # ~30% labour / ~50% prime cost — not a failing venue. Whatever a
+            # day already holds, it tops up toward the target then stops, so
+            # re-seeding never inflates and stale small-scale days self-heal.
+            mix = {"Chicken Parmigiana": 0.63, "Bowl of Chips": 0.20, "Flat White": 0.17}
+            by_name = {r.get("name"): r for r in recipes}
+            target = 5300.0
             for day_offset in (0, 1, 2):
                 sale_day = today - timedelta(days=day_offset)
                 existing = db.list_dish_sales(DEMO_VENUE_ID, sale_day, sale_day) or []
-                if existing:
-                    continue  # this day already has trade — leave it
-                for n, recipe in enumerate(recipes[:3]):
+                have = sum(float(s.get("revenue_inc_gst") or 0) for s in existing)
+                deficit = target - have
+                if deficit < 300:
+                    continue  # this day already trades at scale
+                for n, (name, frac) in enumerate(sorted(mix.items())):
+                    recipe = by_name.get(name)
+                    if not recipe:
+                        continue
                     costing = _cost_recipe(recipe, ings)
-                    qty = max(4, qtys[n % len(qtys)] - day_offset * 3)
+                    price = float(costing["sell_price_inc_gst"]) or 1
+                    qty = max(1, round(deficit * frac / price))
                     db.save_dish_sale({
-                        "id": f"demo-sale-{sale_day.isoformat()}-{n}",
+                        "id": f"demo-sale-{sale_day.isoformat()}-t{n}",
                         "venue_id": DEMO_VENUE_ID,
                         "sale_date": sale_day,
                         "recipe_id": recipe["id"],
                         "recipe_name": recipe.get("name"),
                         "qty": qty,
-                        "revenue_inc_gst": round(
-                            float(costing["sell_price_inc_gst"]) * qty, 2),
+                        "revenue_inc_gst": round(price * qty, 2),
                         "cogs": round(float(costing["cost_per_portion"]) * qty, 2),
                         "source": "manual",
                         "created_at": now,
