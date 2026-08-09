@@ -109,6 +109,14 @@
       margin-left: 0;
     }
 
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.55);
+      z-index: 999;
+    }
+
     /* ============================================
        SIDEBAR
        ============================================ */
@@ -1122,6 +1130,15 @@
       .sidebar {
         width: 260px;
         box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+      }
+
+      .sidebar.collapsed {
+        transform: translateX(-100%);
+      }
+
+      /* Dim the page behind the open drawer */
+      .sidebar:not(.collapsed) ~ .sidebar-backdrop {
+        display: block;
       }
 
       .main-content {
@@ -2390,6 +2407,9 @@
       </div>
     </div>
   </aside>
+
+  <!-- Mobile drawer backdrop (visible ≤768px while the sidebar is open) -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
   <!-- AI CHAT PANEL (removed — now integrated as page-ai-agent below) -->
 
@@ -5249,19 +5269,39 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  // Close menu when clicking on content
+  // Close menu when clicking on content or the drawer backdrop
   const mainContent = document.querySelector('.main-content');
   if (mainContent) {
     mainContent.addEventListener('click', closeMobileMenu);
   }
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if (backdrop) {
+    backdrop.addEventListener('click', closeMobileMenu);
+  }
 
-  // Close menu on window resize
+  // At mobile widths the sidebar starts closed (it's a drawer, not a rail —
+  // open-by-default buries the whole page underneath it)
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar && window.innerWidth <= 768) {
+    sidebar.classList.add('collapsed');
+  }
+
+  // Re-sync when the viewport crosses the mobile breakpoint. Only act on a
+  // crossing: mobile browsers fire resize on URL-bar show/hide, and closing
+  // the drawer on every resize would fight the user.
+  let wasMobile = window.innerWidth <= 768;
   window.addEventListener('resize', function() {
-    if (window.innerWidth > 768) {
-      const sidebar = document.getElementById('sidebar');
-      if (sidebar && sidebar.classList.contains('collapsed')) {
-        sidebar.classList.remove('collapsed');
-      }
+    const isMobile = window.innerWidth <= 768;
+    if (isMobile === wasMobile) return;
+    wasMobile = isMobile;
+    const sb = document.getElementById('sidebar');
+    if (!sb) return;
+    if (isMobile) {
+      sb.classList.add('collapsed');
+      const hb = document.querySelector('.hamburger');
+      if (hb) hb.classList.remove('open');
+    } else {
+      sb.classList.remove('collapsed');
     }
   });
 });
@@ -7475,12 +7515,8 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// ============================================
-// SIDEBAR TOGGLE
-// ============================================
-document.getElementById('hamburger').addEventListener('click', () => {
-  document.getElementById('sidebar').classList.toggle('collapsed');
-});
+// Sidebar toggle lives in the mobile-menu init above — a second listener
+// here would double-toggle and turn every hamburger click into a no-op.
 
 // ============================================
 // NAVIGATION
