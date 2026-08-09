@@ -304,6 +304,8 @@
     .hamburger {
       display: none;
       flex-direction: column;
+      justify-content: center;
+      align-items: center;
       width: 36px;
       height: 36px;
       border: none;
@@ -314,10 +316,11 @@
 
     .hamburger span {
       display: block;
+      flex-shrink: 0; /* the column flexbox otherwise crushes 2px bars to 0 */
       width: 20px;
       height: 2px;
       background: var(--text-secondary);
-      margin: 4px 0;
+      margin: 3px 0;
       border-radius: 1px;
       transition: all 0.3s;
     }
