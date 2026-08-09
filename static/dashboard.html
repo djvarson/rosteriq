@@ -7871,6 +7871,14 @@ function loadDemoVenue() {
   select.value = state.currentVenue;
   connectionManager.hide();
   loadDemoVenueData();
+  // Demo mode bypasses loadVenueData, so the home cards (wizard/briefing/
+  // snapshot) need the same first-load kick here — the demo session has a
+  // real scoped token, so the live endpoints work.
+  if (!state.currentPage || state.currentPage === 'dashboard') {
+    try { loadSetupWizard(); } catch (e) {}
+    try { loadBriefing(); } catch (e) {}
+    try { loadSnapshot(); } catch (e) {}
+  }
 }
 
 async function loadVenueData() {
