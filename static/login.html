@@ -9,17 +9,17 @@
         :root {
             --brand-blue: #F59E0B;
             --brand-blue-hover: #D97706;
-            --navy-dark: #0B0F1A;
-            --panel-bg: #111827;
-            --card-bg: #1F2937;
+            --navy-dark: #F6F7F9;
+            --panel-bg: #FFFFFF;
+            --card-bg: #FFFFFF;
             --white: #FFFFFF;
-            --text-primary: #F1F5F9;
-            --text-secondary: #94A3B8;
-            --border-color: #1E293B;
-            --input-bg: #0F172A;
-            --input-border: #334155;
-            --error-red: #EF4444;
-            --success-green: #10B981;
+            --text-primary: #111827;
+            --text-secondary: #55606E;
+            --border-color: #E5E8ED;
+            --input-bg: #FFFFFF;
+            --input-border: #E5E8ED;
+            --error-red: #DC2626;
+            --success-green: #16A34A;
             --transition: all 0.2s ease;
         }
 
@@ -187,7 +187,7 @@
 
         input[type="email"]::placeholder,
         input[type="password"]::placeholder {
-            color: #475569;
+            color: #8A94A1;
         }
 
         .form-footer {
@@ -254,15 +254,15 @@
         }
 
         .button-secondary {
-            background: transparent;
-            color: var(--text-secondary);
-            border: 1px solid var(--input-border);
+            background: var(--white);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
         }
 
         .button-secondary:hover {
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(17, 24, 39, 0.04);
             color: var(--text-primary);
-            border-color: #475569;
+            border-color: #8A94A1;
         }
 
         .divider-section {
@@ -305,7 +305,7 @@
 
         .error-message {
             background: rgba(239, 68, 68, 0.1);
-            color: #FCA5A5;
+            color: var(--error-red);
             padding: 12px 14px;
             border-radius: 6px;
             font-size: 13px;
@@ -321,7 +321,7 @@
 
         .success-message {
             background: rgba(16, 185, 129, 0.1);
-            color: #6EE7B7;
+            color: var(--success-green);
             padding: 12px 14px;
             border-radius: 6px;
             font-size: 13px;

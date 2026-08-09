@@ -7,19 +7,19 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --dark-navy: #0F1629;
-      --dark-bg: #1A202C;
-      --card-bg: #2D3748;
-      --light-bg: #F0F2F5;
-      --text-primary: #FFFFFF;
-      --text-secondary: #A0AEC0;
-      --text-muted: #718096;
-      --brand-blue: #3366FF;
-      --success: #10B981;
+      --dark-navy: #FFFFFF;
+      --dark-bg: #F1F3F6;
+      --card-bg: #FFFFFF;
+      --light-bg: #F6F7F9;
+      --text-primary: #111827;
+      --text-secondary: #55606E;
+      --text-muted: #8A94A1;
+      --brand-blue: #F59E0B;
+      --success: #16A34A;
       --warning: #F59E0B;
-      --danger: #EF4444;
+      --danger: #DC2626;
       --info: #3B82F6;
-      --border: #4A5568;
+      --border: #E5E8ED;
       --morning: #9F7AEA;
       --afternoon: #4299E1;
       --evening: #ED8936;
@@ -59,7 +59,7 @@
        ============================================ */
     .header {
       background: var(--dark-navy);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom: 1px solid #E5E8ED;
       padding: 16px 20px;
       display: flex;
       align-items: center;
@@ -159,7 +159,7 @@
 
     .nav-tab:hover {
       color: var(--text-primary);
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(17, 24, 39, 0.04);
     }
 
     .nav-tab.active {
@@ -208,8 +208,8 @@
       border-radius: 12px;
       padding: 24px;
       margin-bottom: 20px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-      border: 1px solid #E2E8F0;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+      border: 1px solid #E5E8ED;
     }
 
     .card-header {
@@ -224,12 +224,12 @@
     .card-title {
       font-size: 18px;
       font-weight: 700;
-      color: #1A202C;
+      color: #111827;
     }
 
     .card-subtitle {
       font-size: 13px;
-      color: #718096;
+      color: #8A94A1;
       margin-top: 4px;
     }
 
@@ -247,7 +247,7 @@
 
     .week-nav button {
       background: var(--brand-blue);
-      color: white;
+      color: #111827;
       border: none;
       padding: 8px 16px;
       border-radius: 8px;
@@ -258,13 +258,13 @@
     }
 
     .week-nav button:hover {
-      background: #2952CC;
+      background: #D97706;
     }
 
     .week-label {
       font-size: 14px;
       font-weight: 600;
-      color: #1A202C;
+      color: #111827;
     }
 
     .shifts-grid {
@@ -280,27 +280,27 @@
 
     .day-card {
       background: white;
-      border: 1px solid #E2E8F0;
+      border: 1px solid #E5E8ED;
       border-radius: 12px;
       overflow: hidden;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
     }
 
     .day-header {
-      background: #F7FAFC;
+      background: #F1F3F6;
       padding: 16px;
-      border-bottom: 1px solid #E2E8F0;
+      border-bottom: 1px solid #E5E8ED;
     }
 
     .day-name {
       font-size: 14px;
       font-weight: 700;
-      color: #1A202C;
+      color: #111827;
     }
 
     .day-date {
       font-size: 12px;
-      color: #718096;
+      color: #8A94A1;
       margin-top: 2px;
     }
 
@@ -309,7 +309,7 @@
     }
 
     .shift-item {
-      background: #F7FAFC;
+      background: #F1F3F6;
       border-left: 4px solid var(--info);
       padding: 12px;
       border-radius: 6px;
@@ -339,12 +339,12 @@
 
     .shift-time {
       font-weight: 600;
-      color: #1A202C;
+      color: #111827;
       margin-bottom: 4px;
     }
 
     .shift-details {
-      color: #718096;
+      color: #8A94A1;
       font-size: 12px;
       line-height: 1.4;
     }
@@ -352,7 +352,7 @@
     .no-shifts {
       text-align: center;
       padding: 32px 16px;
-      color: #718096;
+      color: #8A94A1;
     }
 
     .no-shifts-icon {
@@ -366,7 +366,7 @@
     .timeline {
       position: relative;
       height: 60px;
-      background: #EDF2F7;
+      background: #F1F3F6;
       border-radius: 6px;
       margin: 12px 0;
       overflow: hidden;
@@ -391,7 +391,7 @@
 
     .availability-day {
       background: white;
-      border: 1px solid #E2E8F0;
+      border: 1px solid #E5E8ED;
       border-radius: 8px;
       padding: 16px;
       display: grid;
@@ -402,7 +402,7 @@
 
     .day-label {
       font-weight: 600;
-      color: #1A202C;
+      color: #111827;
       grid-column: 1 / -1;
       margin-bottom: 8px;
     }
@@ -417,7 +417,7 @@
       appearance: none;
       width: 40px;
       height: 24px;
-      background: #CBD5E0;
+      background: #E5E8ED;
       border-radius: 12px;
       cursor: pointer;
       transition: background 0.2s;
@@ -446,7 +446,7 @@
 
     .toggle-label {
       font-size: 12px;
-      color: #4A5568;
+      color: #55606E;
       font-weight: 500;
     }
 
@@ -467,7 +467,7 @@
 
     .bid-card {
       background: white;
-      border: 2px solid #E2E8F0;
+      border: 2px solid #E5E8ED;
       border-radius: 12px;
       padding: 16px;
       transition: all 0.2s;
@@ -476,7 +476,7 @@
 
     .bid-card:hover {
       border-color: var(--brand-blue);
-      box-shadow: 0 4px 12px rgba(51, 102, 255, 0.1);
+      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.15);
     }
 
     .bid-card-header {
@@ -488,7 +488,7 @@
 
     .bid-date {
       font-weight: 700;
-      color: #1A202C;
+      color: #111827;
       font-size: 14px;
     }
 
@@ -513,13 +513,13 @@
 
     .bid-time {
       font-size: 13px;
-      color: #4A5568;
+      color: #55606E;
       margin-bottom: 8px;
     }
 
     .bid-role {
       font-size: 12px;
-      color: #718096;
+      color: #8A94A1;
       margin-bottom: 8px;
     }
 
@@ -527,8 +527,8 @@
       display: flex;
       gap: 12px;
       padding: 12px 0;
-      border-top: 1px solid #E2E8F0;
-      border-bottom: 1px solid #E2E8F0;
+      border-top: 1px solid #E5E8ED;
+      border-bottom: 1px solid #E5E8ED;
       margin: 12px 0;
       font-size: 12px;
     }
@@ -540,18 +540,18 @@
 
     .bid-stat-value {
       font-weight: 700;
-      color: #1A202C;
+      color: #111827;
       display: block;
     }
 
     .bid-stat-label {
-      color: #718096;
+      color: #8A94A1;
       font-size: 11px;
     }
 
     .bid-range {
       font-size: 12px;
-      color: #4A5568;
+      color: #55606E;
       margin: 8px 0;
     }
 
@@ -569,22 +569,22 @@
 
     .bid-action-btn.primary {
       background: var(--brand-blue);
-      color: white;
+      color: #111827;
     }
 
     .bid-action-btn.primary:hover {
-      background: #2952CC;
+      background: #D97706;
     }
 
     .bid-action-btn.secondary {
-      background: #F0F4FF;
-      color: var(--brand-blue);
-      border: 1px solid var(--brand-blue);
+      background: #FFFFFF;
+      color: #111827;
+      border: 1px solid #E5E8ED;
     }
 
     .bid-action-btn.secondary:hover {
-      background: var(--brand-blue);
-      color: white;
+      background: rgba(17, 24, 39, 0.04);
+      color: #111827;
     }
 
     .my-bids-list {
@@ -594,7 +594,7 @@
 
     .my-bid-item {
       background: white;
-      border: 1px solid #E2E8F0;
+      border: 1px solid #E5E8ED;
       border-radius: 8px;
       padding: 16px;
       display: flex;
@@ -608,19 +608,19 @@
 
     .my-bid-date {
       font-weight: 600;
-      color: #1A202C;
+      color: #111827;
       margin-bottom: 4px;
     }
 
     .my-bid-time {
       font-size: 12px;
-      color: #718096;
+      color: #8A94A1;
       margin-bottom: 4px;
     }
 
     .my-bid-rate {
       font-size: 13px;
-      color: #4A5568;
+      color: #55606E;
     }
 
     .my-bid-status {
@@ -652,7 +652,7 @@
        ============================================ */
     .notification-settings {
       background: white;
-      border: 1px solid #E2E8F0;
+      border: 1px solid #E5E8ED;
       border-radius: 8px;
       padding: 20px;
       margin-bottom: 20px;
@@ -668,7 +668,7 @@
 
     .notification-section-title {
       font-weight: 700;
-      color: #1A202C;
+      color: #111827;
       margin-bottom: 16px;
       font-size: 14px;
     }
@@ -678,7 +678,7 @@
       align-items: center;
       justify-content: space-between;
       padding: 12px 0;
-      border-bottom: 1px solid #E2E8F0;
+      border-bottom: 1px solid #E5E8ED;
     }
 
     .notification-item:last-child {
@@ -687,13 +687,13 @@
 
     .notification-label {
       font-size: 13px;
-      color: #1A202C;
+      color: #111827;
       font-weight: 500;
     }
 
     .notification-desc {
       font-size: 12px;
-      color: #718096;
+      color: #8A94A1;
       margin-top: 2px;
     }
 
@@ -745,13 +745,13 @@
     .time-input-label {
       font-size: 12px;
       font-weight: 600;
-      color: #4A5568;
+      color: #55606E;
       margin-bottom: 4px;
     }
 
     .time-input-group input[type="time"] {
       padding: 8px 12px;
-      border: 1px solid #CBD5E0;
+      border: 1px solid #E5E8ED;
       border-radius: 6px;
       font-size: 13px;
       font-family: inherit;
@@ -767,7 +767,7 @@
 
     .approval-card {
       background: white;
-      border: 1px solid #E2E8F0;
+      border: 1px solid #E5E8ED;
       border-radius: 8px;
       padding: 20px;
     }
@@ -781,13 +781,13 @@
 
     .approval-title {
       font-weight: 700;
-      color: #1A202C;
+      color: #111827;
       font-size: 14px;
     }
 
     .approval-subtitle {
       font-size: 12px;
-      color: #718096;
+      color: #8A94A1;
       margin-top: 4px;
     }
 
@@ -816,12 +816,12 @@
     }
 
     .approval-summary {
-      background: #F7FAFC;
+      background: #F1F3F6;
       border-radius: 6px;
       padding: 12px;
       margin-bottom: 16px;
       font-size: 13px;
-      color: #4A5568;
+      color: #55606E;
     }
 
     .approval-actions {
@@ -853,7 +853,7 @@
     }
 
     .approval-btn-approve:hover {
-      background: #059669;
+      background: #15803D;
     }
 
     .approval-btn-reject {
@@ -862,13 +862,13 @@
     }
 
     .approval-btn-reject:hover {
-      background: #DC2626;
+      background: #B91C1C;
     }
 
     .approval-comment {
       width: 100%;
       padding: 10px 12px;
-      border: 1px solid #CBD5E0;
+      border: 1px solid #E5E8ED;
       border-radius: 6px;
       font-size: 13px;
       font-family: inherit;
@@ -876,14 +876,14 @@
     }
 
     .approval-history {
-      border-top: 1px solid #E2E8F0;
+      border-top: 1px solid #E5E8ED;
       padding-top: 16px;
       margin-top: 16px;
     }
 
     .approval-history-title {
       font-weight: 600;
-      color: #1A202C;
+      color: #111827;
       font-size: 12px;
       margin-bottom: 12px;
     }
@@ -914,12 +914,12 @@
     }
 
     .approval-entry-action {
-      color: #1A202C;
+      color: #111827;
       font-weight: 600;
     }
 
     .approval-entry-time {
-      color: #718096;
+      color: #8A94A1;
       font-size: 11px;
     }
 
@@ -962,7 +962,7 @@
       bottom: 125%;
       left: 50%;
       transform: translateX(-50%);
-      background: #1A202C;
+      background: #111827;
       color: white;
       padding: 8px 12px;
       border-radius: 4px;
@@ -979,7 +979,7 @@
       left: 50%;
       transform: translateX(-50%);
       border: 4px solid transparent;
-      border-top-color: #1A202C;
+      border-top-color: #111827;
       z-index: 100;
     }
 
@@ -988,7 +988,7 @@
       padding: 20px;
       background: white;
       border-radius: 8px;
-      border: 1px solid #E2E8F0;
+      border: 1px solid #E5E8ED;
     }
 
     .slider-label {
@@ -1000,7 +1000,7 @@
 
     .slider-label-text {
       font-weight: 600;
-      color: #1A202C;
+      color: #111827;
     }
 
     .slider-value {
@@ -1012,7 +1012,7 @@
       width: 100%;
       height: 6px;
       border-radius: 3px;
-      background: #CBD5E0;
+      background: #E5E8ED;
       outline: none;
       -webkit-appearance: none;
     }
@@ -1063,21 +1063,21 @@
 
     .btn-primary {
       background: var(--brand-blue);
-      color: white;
+      color: #111827;
     }
 
     .btn-primary:hover {
-      background: #2952CC;
+      background: #D97706;
     }
 
     .btn-secondary {
       background: white;
-      color: var(--brand-blue);
-      border: 2px solid var(--brand-blue);
+      color: #111827;
+      border: 2px solid #E5E8ED;
     }
 
     .btn-secondary:hover {
-      background: #F0F4FF;
+      background: rgba(17, 24, 39, 0.04);
     }
 
     .swap-list {
@@ -1087,7 +1087,7 @@
 
     .swap-item {
       background: white;
-      border: 1px solid #E2E8F0;
+      border: 1px solid #E5E8ED;
       border-radius: 8px;
       padding: 16px;
       display: flex;
@@ -1101,18 +1101,18 @@
 
     .swap-date {
       font-weight: 600;
-      color: #1A202C;
+      color: #111827;
     }
 
     .swap-time {
       font-size: 13px;
-      color: #718096;
+      color: #8A94A1;
       margin-top: 4px;
     }
 
     .swap-role {
       font-size: 12px;
-      color: #718096;
+      color: #8A94A1;
       margin-top: 4px;
     }
 
@@ -1163,7 +1163,7 @@
     }
 
     .swap-btn-accept:hover {
-      background: #059669;
+      background: #15803D;
     }
 
     .swap-btn-reject {
@@ -1172,7 +1172,7 @@
     }
 
     .swap-btn-reject:hover {
-      background: #DC2626;
+      background: #B91C1C;
     }
 
     /* ============================================
@@ -1180,7 +1180,7 @@
        ============================================ */
     .pay-summary {
       background: white;
-      border: 1px solid #E2E8F0;
+      border: 1px solid #E5E8ED;
       border-radius: 8px;
       padding: 24px;
       margin-bottom: 24px;
@@ -1193,7 +1193,7 @@
       justify-content: space-between;
       align-items: center;
       padding: 12px 0;
-      border-bottom: 1px solid #EDF2F7;
+      border-bottom: 1px solid #E5E8ED;
     }
 
     .pay-row:last-child {
@@ -1202,17 +1202,17 @@
 
     .pay-label {
       font-size: 14px;
-      color: #4A5568;
+      color: #55606E;
     }
 
     .pay-value {
       font-weight: 600;
-      color: #1A202C;
+      color: #111827;
       font-size: 14px;
     }
 
     .pay-total-row {
-      border-top: 2px solid #E2E8F0;
+      border-top: 2px solid #E5E8ED;
       border-bottom: none !important;
       padding-top: 16px !important;
       font-size: 16px;
@@ -1224,7 +1224,7 @@
     }
 
     .pay-breakdown {
-      background: #F7FAFC;
+      background: #F1F3F6;
       border-radius: 8px;
       padding: 16px;
     }
@@ -1234,7 +1234,7 @@
       justify-content: space-between;
       font-size: 13px;
       margin-bottom: 8px;
-      color: #4A5568;
+      color: #55606E;
     }
 
     .breakdown-item:last-child {
@@ -1251,7 +1251,7 @@
 
     .profile-field {
       background: white;
-      border: 1px solid #E2E8F0;
+      border: 1px solid #E5E8ED;
       border-radius: 8px;
       padding: 16px;
     }
@@ -1260,21 +1260,21 @@
       display: block;
       font-size: 12px;
       font-weight: 600;
-      color: #718096;
+      color: #8A94A1;
       text-transform: uppercase;
       margin-bottom: 8px;
     }
 
     .profile-value {
       font-size: 15px;
-      color: #1A202C;
+      color: #111827;
       font-weight: 500;
     }
 
     .profile-input {
       width: 100%;
       padding: 10px 12px;
-      border: 1px solid #CBD5E0;
+      border: 1px solid #E5E8ED;
       border-radius: 6px;
       font-size: 14px;
       font-family: inherit;
@@ -1284,12 +1284,12 @@
     .profile-input:focus {
       outline: none;
       border-color: var(--brand-blue);
-      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
     }
 
     .cert-item {
-      background: #F7FAFC;
-      border: 1px solid #E2E8F0;
+      background: #F1F3F6;
+      border: 1px solid #E5E8ED;
       border-radius: 8px;
       padding: 12px;
       margin-bottom: 12px;
@@ -1300,13 +1300,13 @@
 
     .cert-name {
       font-weight: 600;
-      color: #1A202C;
+      color: #111827;
       font-size: 14px;
     }
 
     .cert-expiry {
       font-size: 12px;
-      color: #718096;
+      color: #8A94A1;
     }
 
     .cert-status {
@@ -1342,7 +1342,7 @@
       left: 0;
       width: 100%;
       height: 100%;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(2, 6, 23, 0.45);
       z-index: 1000;
       align-items: center;
       justify-content: center;
@@ -1361,13 +1361,13 @@
       width: 100%;
       max-height: 80vh;
       overflow-y: auto;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 10px 40px rgba(16, 24, 40, 0.12);
     }
 
     .modal-header {
       font-size: 18px;
       font-weight: 700;
-      color: #1A202C;
+      color: #111827;
       margin-bottom: 16px;
       display: flex;
       justify-content: space-between;
@@ -1379,11 +1379,11 @@
       border: none;
       font-size: 24px;
       cursor: pointer;
-      color: #718096;
+      color: #8A94A1;
     }
 
     .modal-close:hover {
-      color: #1A202C;
+      color: #111827;
     }
 
     .form-group {
@@ -1394,7 +1394,7 @@
       display: block;
       font-size: 13px;
       font-weight: 600;
-      color: #4A5568;
+      color: #55606E;
       margin-bottom: 8px;
     }
 
@@ -1402,7 +1402,7 @@
     .form-select {
       width: 100%;
       padding: 10px 12px;
-      border: 1px solid #CBD5E0;
+      border: 1px solid #E5E8ED;
       border-radius: 6px;
       font-size: 14px;
       font-family: inherit;
@@ -1412,7 +1412,7 @@
     .form-select:focus {
       outline: none;
       border-color: var(--brand-blue);
-      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
     }
 
     .form-actions {
@@ -2121,14 +2121,14 @@
     .loading {
       text-align: center;
       padding: 40px 20px;
-      color: #718096;
+      color: #8A94A1;
     }
 
     .loading-spinner {
       display: inline-block;
       width: 40px;
       height: 40px;
-      border: 4px solid #CBD5E0;
+      border: 4px solid #E5E8ED;
       border-top-color: var(--brand-blue);
       border-radius: 50%;
       animation: spin 0.6s linear infinite;
@@ -2142,7 +2142,7 @@
        LOADING SKELETONS
        ============================================ */
     .skeleton {
-      background: linear-gradient(90deg, #e0e0e0 25%, #d0d0d0 50%, #e0e0e0 75%);
+      background: linear-gradient(90deg, #F1F3F6 25%, #E5E8ED 50%, #F1F3F6 75%);
       background-size: 200% 100%;
       animation: shimmer 1.5s infinite;
       border-radius: 4px;
@@ -2173,7 +2173,7 @@
        ============================================ */
     .error-card {
       background: rgba(239, 68, 68, 0.1);
-      border: 1px solid #EF4444;
+      border: 1px solid #DC2626;
       border-radius: 12px;
       padding: 24px;
       text-align: center;
@@ -2209,14 +2209,14 @@
       left: 0;
       right: 0;
       background: rgba(239, 68, 68, 0.1);
-      border-bottom: 2px solid #EF4444;
+      border-bottom: 2px solid #DC2626;
       padding: 12px 24px;
       display: none;
       align-items: center;
       gap: 12px;
       z-index: 3000;
       font-size: 14px;
-      color: #EF4444;
+      color: #DC2626;
     }
 
     .connection-banner.show {
@@ -2225,20 +2225,20 @@
 
     .connection-banner.connected {
       background: rgba(16, 185, 129, 0.1);
-      border-bottom-color: #10B981;
-      color: #10B981;
+      border-bottom-color: #16A34A;
+      color: #16A34A;
     }
 
     .pulse-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #EF4444;
+      background: #DC2626;
       animation: pulse-connection 1.5s ease-in-out infinite;
     }
 
     .connection-banner.connected .pulse-dot {
-      background: #10B981;
+      background: #16A34A;
     }
 
     @keyframes pulse-connection {
@@ -2264,7 +2264,7 @@
       background: var(--card-bg);
       border-radius: 8px;
       padding: 16px 24px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12);
       display: flex;
       align-items: center;
       gap: 12px;
@@ -2273,11 +2273,11 @@
     }
 
     .toast.success {
-      border-left: 4px solid #10B981;
+      border-left: 4px solid #16A34A;
     }
 
     .toast.error {
-      border-left: 4px solid #EF4444;
+      border-left: 4px solid #DC2626;
     }
 
     .toast.warning {
@@ -2437,7 +2437,7 @@
           </div>
 
           <!-- Bidding Tabs -->
-          <div style="display: flex; gap: 12px; margin-bottom: 24px; border-bottom: 1px solid #E2E8F0;">
+          <div style="display: flex; gap: 12px; margin-bottom: 24px; border-bottom: 1px solid #E5E8ED;">
             <button class="bidding-tab-btn active" data-tab="open-shifts" style="padding: 12px 16px; background: none; border: none; color: var(--text-secondary); font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent;" onclick="switchBiddingTab(this)">Open Shifts</button>
             <button class="bidding-tab-btn" data-tab="my-bids" style="padding: 12px 16px; background: none; border: none; color: var(--text-secondary); font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent;" onclick="switchBiddingTab(this)">My Bids</button>
           </div>
@@ -2636,7 +2636,7 @@
       </div>
       <div class="form-group">
         <label class="form-label">Shift</label>
-        <div id="bidShiftInfo" style="padding: 12px; background: #F7FAFC; border-radius: 6px; font-size: 13px; color: #1A202C; margin-bottom: 16px;"></div>
+        <div id="bidShiftInfo" style="padding: 12px; background: #F1F3F6; border-radius: 6px; font-size: 13px; color: #111827; margin-bottom: 16px;"></div>
       </div>
       <div class="form-group">
         <label class="form-label">Your Offered Rate ($/hr)</label>
@@ -3041,8 +3041,8 @@
       if (headerRight) {
         const demoBadge = document.createElement('div');
         demoBadge.style.cssText = `
-          background: rgba(51, 102, 255, 0.1);
-          color: #3366FF;
+          background: rgba(245, 158, 11, 0.1);
+          color: #D97706;
           padding: 6px 12px;
           border-radius: 6px;
           font-size: 12px;
@@ -3155,9 +3155,9 @@
             const demoBadge = document.createElement('div');
             demoBadge.className = 'demo-indicator';
             demoBadge.style.cssText = `
-              background: rgba(51, 102, 255, 0.1);
-              border: 1px solid #3366FF;
-              color: #3366FF;
+              background: rgba(245, 158, 11, 0.1);
+              border: 1px solid #F59E0B;
+              color: #D97706;
               padding: 12px;
               border-radius: 8px;
               font-size: 12px;
@@ -3443,7 +3443,7 @@
           </div>
         </div>
         <div class="pay-breakdown">
-          <div style="font-weight: 600; margin-bottom: 12px; color: #1A202C;">Breakdown by Shift</div>
+          <div style="font-weight: 600; margin-bottom: 12px; color: #111827;">Breakdown by Shift</div>
           ${(data.shift_breakdown || []).map(shift => `
             <div class="breakdown-item">
               <span>${shift.date} ${shift.start_time}-${shift.end_time}</span>
@@ -3740,9 +3740,9 @@
               <button class="bid-action-btn primary" onclick="openBidModal('${shift.id}', '${shift.date}', '${shift.start_time}', '${shift.end_time}', '${shift.role_required}', ${shift.min_rate}, ${shift.max_rate || 'null'})">
                 Place Bid
               </button>
-            ` : '
+            ` : `
               <button class="bid-action-btn secondary" disabled style="opacity: 0.5;">Bidding Closed</button>
-            '}
+            `}
           </div>
         `;
       }).join('');
@@ -3876,10 +3876,10 @@
       statusEl.className = 'push-status ' + status;
       if (status === 'enabled') {
         textEl.textContent = 'Push notifications enabled';
-        dot.style.background = '#10B981';
+        dot.style.background = '#16A34A';
       } else if (status === 'disabled') {
         textEl.textContent = 'Push notifications disabled';
-        dot.style.background = '#EF4444';
+        dot.style.background = '#DC2626';
       } else {
         textEl.textContent = 'Push notifications not supported in this browser';
         dot.style.background = '#3B82F6';
@@ -4039,7 +4039,7 @@
           ${approval.review_notes ? `
             <div class="approval-history">
               <div class="approval-history-title">Review Notes</div>
-              <div style="font-size: 12px; color: #4A5568; background: #F7FAFC; padding: 8px; border-radius: 4px;">${approval.review_notes}</div>
+              <div style="font-size: 12px; color: #55606E; background: #F1F3F6; padding: 8px; border-radius: 4px;">${approval.review_notes}</div>
             </div>
           ` : ''}
 
@@ -4219,10 +4219,10 @@
           top: 20px;
           right: 20px;
           background: var(--warning);
-          color: white;
+          color: #111827;
           padding: 20px;
           border-radius: 12px;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+          box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12);
           max-width: 400px;
           z-index: 10000;
           font-weight: 600;

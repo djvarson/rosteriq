@@ -3,25 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#1e3a5f">
+  <meta name="theme-color" content="#F6F7F9">
   <title>RosterIQ - Connections</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --dark-navy: #090C12;
-      --dark-bg: #0F1419;
-      --card-bg: #161B22;
-      --light-bg: #0D1117;
-      --text-primary: #E6EDF3;
-      --text-secondary: #8B949E;
-      --text-muted: #484F58;
+      --dark-navy: #FFFFFF;
+      --dark-bg: #F1F3F6;
+      --card-bg: #FFFFFF;
+      --light-bg: #F6F7F9;
+      --text-primary: #111827;
+      --text-secondary: #55606E;
+      --text-muted: #8A94A1;
       --brand-blue: #F59E0B;
       --brand-accent: #D97706;
-      --success: #10B981;
+      --success: #16A34A;
       --warning: #F59E0B;
-      --danger: #EF4444;
+      --danger: #DC2626;
       --info: #F59E0B;
-      --border: #21262D;
+      --border: #E5E8ED;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -40,7 +40,7 @@
     .sidebar {
       width: 220px;
       background: var(--dark-navy);
-      border-right: 1px solid rgba(255, 255, 255, 0.1);
+      border-right: 1px solid #E5E8ED;
       padding: 24px 0;
       overflow-y: auto;
       position: fixed;
@@ -66,7 +66,7 @@
 
     .sidebar-logo {
       padding: 0 16px 16px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom: 1px solid #E5E8ED;
       margin-bottom: 12px;
       display: flex;
       align-items: center;
@@ -109,7 +109,7 @@
       box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
     }
 
-    .sidebar-divider { height: 1px; background: rgba(255, 255, 255, 0.1); margin: 16px 0; }
+    .sidebar-divider { height: 1px; background: #E5E8ED; margin: 16px 0; }
 
     .sidebar-section { margin-bottom: 8px; }
 
@@ -139,7 +139,7 @@
       text-decoration: none;
     }
 
-    .nav-item:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); }
+    .nav-item:hover { background: rgba(17, 24, 39, 0.04); color: var(--text-primary); }
 
     .nav-item.active {
       background: rgba(245, 158, 11, 0.12);
@@ -153,7 +153,7 @@
        TOP BAR
        ============================================ */
     .top-bar {
-      background: rgba(15, 20, 27, 0.85);
+      background: rgba(255, 255, 255, 0.85);
       backdrop-filter: blur(8px);
       border-bottom: 1px solid var(--border);
       padding: 12px 24px;
@@ -235,7 +235,7 @@
       border-radius: 10px;
       padding: 20px;
       transition: all 0.2s;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      box-shadow: 0 1px 2px rgba(16,24,40,0.06);
     }
 
     .connector-card:hover { border-color: rgba(245, 158, 11, 0.2); }
@@ -316,12 +316,12 @@
       white-space: nowrap;
     }
 
-    .btn-primary { background: var(--brand-blue); color: #0D1117; }
+    .btn-primary { background: var(--brand-blue); color: #111827; }
     .btn-primary:hover:not(:disabled) { background: var(--brand-accent); box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3); }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    .btn-secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
-    .btn-secondary:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); border-color: #475569; }
+    .btn-secondary { background: #FFFFFF; color: var(--text-primary); border: 1px solid #E5E8ED; }
+    .btn-secondary:hover { background: rgba(17, 24, 39, 0.04); color: var(--text-primary); border-color: #D0D5DD; }
 
     .btn-small { padding: 6px 12px; font-size: 12px; }
 
@@ -473,8 +473,8 @@
     }
 
     .method-message.show { display: block; animation: slideIn 0.3s ease; }
-    .method-message.success { background: rgba(16, 185, 129, 0.1); color: #6EE7B7; border-left: 3px solid var(--success); }
-    .method-message.error { background: rgba(239, 68, 68, 0.1); color: #FCA5A5; border-left: 3px solid var(--danger); }
+    .method-message.success { background: rgba(16, 185, 129, 0.1); color: var(--success); border-left: 3px solid var(--success); }
+    .method-message.error { background: rgba(239, 68, 68, 0.1); color: var(--danger); border-left: 3px solid var(--danger); }
 
     @keyframes slideIn {
       from { opacity: 0; transform: translateY(-6px); }
@@ -523,7 +523,7 @@
        ============================================ */
     @media (max-width: 768px) {
       .hamburger { display: flex; }
-      .sidebar { width: 260px; transform: translateX(-260px); box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3); }
+      .sidebar { width: 260px; transform: translateX(-260px); box-shadow: 2px 0 8px rgba(16, 24, 40, 0.08); }
       .sidebar.open { transform: translateX(0); }
       .main-content { margin-left: 0; }
       .content { padding: 16px; }

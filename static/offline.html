@@ -6,10 +6,10 @@
   <title>RosterIQ - Offline</title>
   <style>
     :root {
-      --dark-navy: #0F1629;
-      --brand-blue: #3366FF;
-      --text-primary: #FFFFFF;
-      --text-secondary: #A0AEC0;
+      --dark-navy: #FFFFFF;
+      --brand-blue: #F59E0B;
+      --text-primary: #111827;
+      --text-secondary: #55606E;
       --warning: #F59E0B;
     }
 
@@ -21,7 +21,7 @@
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, var(--dark-navy) 0%, #1a2847 100%);
+      background: linear-gradient(135deg, var(--dark-navy) 0%, #F1F3F6 100%);
       color: var(--text-primary);
       display: flex;
       align-items: center;
@@ -33,12 +33,12 @@
     .offline-container {
       max-width: 500px;
       text-align: center;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid #E5E8ED;
       border-radius: 12px;
       padding: 60px 40px;
       backdrop-filter: blur(10px);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
     }
 
     .offline-icon {
@@ -85,7 +85,7 @@
     }
 
     .cached-data {
-      background: rgba(51, 102, 255, 0.1);
+      background: rgba(245, 158, 11, 0.08);
       border: 1px solid var(--brand-blue);
       color: var(--text-secondary);
       padding: 16px;
@@ -109,9 +109,9 @@
     }
 
     .retry-btn:hover:not(:disabled) {
-      background: #2555dd;
+      background: #D97706;
       transform: translateY(-2px);
-      box-shadow: 0 8px 16px rgba(51, 102, 255, 0.3);
+      box-shadow: 0 8px 16px rgba(245, 158, 11, 0.25);
     }
 
     .retry-btn:active:not(:disabled) {
@@ -174,9 +174,9 @@
     window.addEventListener('online', () => {
       const statusEl = document.getElementById('status');
       statusEl.textContent = 'Back Online!';
-      document.querySelector('.status-badge').style.borderColor = '#10B981';
+      document.querySelector('.status-badge').style.borderColor = '#16A34A';
       document.querySelector('.status-badge').style.background = 'rgba(16, 185, 129, 0.1)';
-      document.querySelector('.status-badge').style.color = '#10B981';
+      document.querySelector('.status-badge').style.color = '#16A34A';
 
       setTimeout(() => {
         window.location.reload();

@@ -3,21 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#0F1629">
+  <meta name="theme-color" content="#F6F7F9">
   <title>My RosterIQ</title>
   <link rel="manifest" href="/static/manifest.json">
   <style>
     :root {
-      --navy: #0F1629;
-      --card: #1C2436;
-      --card-2: #242E44;
-      --border: #2E3A54;
-      --text: #F2F5FA;
-      --muted: #8A97B0;
-      --blue: #3366FF;
-      --green: #10B981;
-      --amber: #F59E0B;
-      --red: #EF4444;
+      --navy: #F6F7F9;
+      --card: #FFFFFF;
+      --card-2: #F1F3F6;
+      --border: #E5E8ED;
+      --text: #111827;
+      --muted: #55606E;
+      --blue: #F59E0B;
+      --green: #16A34A;
+      --amber: #D97706;
+      --red: #DC2626;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -31,11 +31,11 @@
     }
     .who .hi { font-size: 20px; font-weight: 700; }
     .who .venue { font-size: 13px; color: var(--muted); margin-top: 2px; }
-    .logout { background: none; border: 1px solid var(--border); color: var(--muted);
+    .logout { background: var(--card); border: 1px solid var(--border); color: var(--text);
       border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
     main { padding: 0 16px; max-width: 560px; margin: 0 auto; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
-      padding: 16px; margin-bottom: 12px; }
+      padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(16,24,40,0.06); }
     .section-title { font-size: 13px; font-weight: 600; color: var(--muted);
       text-transform: uppercase; letter-spacing: .06em; margin: 18px 4px 10px; }
     .empty { text-align: center; color: var(--muted); padding: 28px 12px; font-size: 14px; }
@@ -51,11 +51,11 @@
     .shift .meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
     .badge { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 999px;
       padding: 3px 9px; }
-    .badge.today { background: rgba(51,102,255,.18); color: #7C9BFF; }
+    .badge.today { background: rgba(245,158,11,.15); color: #D97706; }
     .badge.pending { background: rgba(245,158,11,.15); color: var(--amber); }
     .badge.approved { background: rgba(16,185,129,.15); color: var(--green); }
     .badge.declined { background: rgba(239,68,68,.15); color: var(--red); }
-    .badge.open { background: rgba(51,102,255,.15); color: #7C9BFF; }
+    .badge.open { background: rgba(245,158,11,.15); color: #D97706; }
     .badge.closed { background: rgba(245,158,11,.15); color: var(--amber); }
 
     /* Hours */
@@ -72,7 +72,7 @@
       color: var(--text); border-radius: 10px; padding: 11px 12px; font-size: 15px;
       font-family: inherit; }
     input:focus, textarea:focus { outline: none; border-color: var(--blue); }
-    .btn { width: 100%; background: var(--blue); color: #fff; border: none; border-radius: 10px;
+    .btn { width: 100%; background: var(--blue); color: #111827; border: none; border-radius: 10px;
       padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 14px; }
     .btn:disabled { opacity: .5; }
     .leave-row { padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
@@ -87,22 +87,23 @@
     nav button { flex: 1; background: none; border: none; color: var(--muted); padding: 10px 0 8px;
       font-size: 11px; cursor: pointer; display: flex; flex-direction: column; align-items: center;
       gap: 3px; font-family: inherit; }
-    nav button.active { color: var(--blue); }
+    nav button.active { color: #D97706; }
     nav svg { width: 22px; height: 22px; }
 
     .toast { position: fixed; left: 16px; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom));
-      background: var(--card-2); border: 1px solid var(--border); border-left: 4px solid var(--blue);
+      background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--blue);
       border-radius: 10px; padding: 12px 14px; font-size: 14px; display: none; z-index: 50;
+      box-shadow: 0 1px 2px rgba(16,24,40,0.06);
       max-width: 528px; margin: 0 auto; }
     .toast.err { border-left-color: var(--red); }
     .toast.ok { border-left-color: var(--green); }
-    .cover-btn { background: none; border: 1px solid var(--border); color: var(--muted);
+    .cover-btn { background: var(--card); border: 1px solid var(--border); color: var(--text);
       border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer;
       font-family: inherit; flex-shrink: 0; }
-    .claim-btn { background: var(--blue); border: none; color: #fff; border-radius: 8px;
+    .claim-btn { background: var(--blue); border: none; color: #111827; border-radius: 8px;
       padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
       font-family: inherit; flex-shrink: 0; }
-    .cancel-btn { background: none; border: 1px solid var(--border); color: var(--red);
+    .cancel-btn { background: var(--card); border: 1px solid var(--border); color: var(--red);
       border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer;
       font-family: inherit; flex-shrink: 0; }
     .nolink { text-align: center; padding: 40px 20px; }
@@ -294,7 +295,7 @@ async function loadAvailability() {
               '<span style="color:var(--muted);">to</span>' +
               '<input type="time" id="hours-end-' + d + '" value="' + esc(firstRange.end) + '" ' +
                 'style="background:var(--card-2); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:7px; font-family:inherit;">' +
-              '<button onclick="saveHours(\'' + d + '\')" style="background:var(--blue); border:none; color:#fff; ' +
+              '<button onclick="saveHours(\'' + d + '\')" style="background:var(--blue); border:none; color:#111827; ' +
                 'border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;">Save</button>' +
             '</div>' +
           '</div>' +

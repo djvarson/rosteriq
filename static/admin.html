@@ -7,21 +7,21 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --dark-navy: #0F1629;
-      --dark-bg: #1A202C;
-      --card-bg: #2D3748;
-      --light-bg: #F0F2F5;
-      --text-primary: #FFFFFF;
-      --text-secondary: #A0AEC0;
-      --text-muted: #718096;
-      --brand-blue: #3366FF;
-      --success: #10B981;
+      --dark-navy: #FFFFFF;
+      --dark-bg: #F1F3F6;
+      --card-bg: #FFFFFF;
+      --light-bg: #F6F7F9;
+      --text-primary: #111827;
+      --text-secondary: #55606E;
+      --text-muted: #8A94A1;
+      --brand-blue: #F59E0B;
+      --success: #16A34A;
       --warning: #F59E0B;
-      --danger: #EF4444;
+      --danger: #DC2626;
       --info: #3B82F6;
-      --border: #4A5568;
-      --light-text: #1A202C;
-      --light-border: #E2E8F0;
+      --border: #E5E8ED;
+      --light-text: #111827;
+      --light-border: #E5E8ED;
     }
 
     * {
@@ -45,7 +45,7 @@
     .sidebar {
       width: 260px;
       background: var(--dark-navy);
-      border-right: 1px solid rgba(255, 255, 255, 0.1);
+      border-right: 1px solid var(--border);
       padding: 24px 0;
       overflow-y: auto;
       position: fixed;
@@ -57,7 +57,7 @@
 
     .sidebar-logo {
       padding: 0 20px 24px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom: 1px solid var(--border);
       margin-bottom: 20px;
       display: flex;
       align-items: center;
@@ -107,7 +107,7 @@
     }
 
     .nav-item:hover {
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(17, 24, 39, 0.04);
       color: var(--text-primary);
     }
 
@@ -129,7 +129,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
     }
 
     .top-bar-title {
@@ -180,7 +180,7 @@
 
     .kpi-card:hover {
       border-color: var(--brand-blue);
-      box-shadow: 0 4px 12px rgba(51, 102, 255, 0.1);
+      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.12);
     }
 
     .kpi-label {
@@ -211,7 +211,7 @@
       border: 1px solid var(--light-border);
       border-radius: 12px;
       padding: 24px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
       margin-bottom: 24px;
     }
 
@@ -232,7 +232,7 @@
     }
 
     thead {
-      background: var(--light-bg);
+      background: var(--dark-bg);
       border-bottom: 1px solid var(--light-border);
     }
 
@@ -254,7 +254,7 @@
     }
 
     tbody tr:hover {
-      background: var(--light-bg);
+      background: rgba(17, 24, 39, 0.04);
     }
 
     /* Badge */
@@ -297,21 +297,21 @@
 
     .btn-primary {
       background: var(--brand-blue);
-      color: white;
+      color: #111827;
     }
 
     .btn-primary:hover {
-      background: #2552cc;
+      background: #D97706;
     }
 
     .btn-secondary {
-      background: var(--light-bg);
+      background: #FFFFFF;
       color: var(--light-text);
       border: 1px solid var(--light-border);
     }
 
     .btn-secondary:hover {
-      background: #E2E8F0;
+      background: rgba(17, 24, 39, 0.04);
     }
 
     .btn-small {
@@ -360,7 +360,7 @@
        LOADING SKELETONS
        ============================================ */
     .skeleton {
-      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background: linear-gradient(90deg, #F1F3F6 25%, #E5E8ED 50%, #F1F3F6 75%);
       background-size: 200% 100%;
       animation: shimmer 1.5s infinite;
       border-radius: 4px;
@@ -482,7 +482,7 @@
       background: white;
       border-radius: 8px;
       padding: 16px 24px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      box-shadow: 0 4px 12px rgba(16, 24, 40, 0.08);
       display: flex;
       align-items: center;
       gap: 12px;
@@ -662,7 +662,7 @@
     }
 
     .activity-entry:hover {
-      background: var(--light-bg);
+      background: rgba(17, 24, 39, 0.04);
     }
 
     .activity-badge {
@@ -742,7 +742,7 @@
     .filter-select:focus {
       outline: none;
       border-color: var(--brand-blue);
-      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
     }
 
     /* Chart Container */
@@ -813,7 +813,7 @@
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      background: var(--light-bg);
+      background: var(--dark-bg);
       border-bottom: 1px solid var(--light-border);
     }
 
@@ -859,7 +859,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(2, 6, 23, 0.45);
       z-index: 2000;
       align-items: center;
       justify-content: center;
@@ -875,7 +875,7 @@
       padding: 32px;
       max-width: 500px;
       width: 90%;
-      box-shadow: 0 20px 25px rgba(0, 0, 0, 0.15);
+      box-shadow: 0 20px 25px rgba(16, 24, 40, 0.1);
     }
 
     .modal-title {
@@ -909,7 +909,7 @@
     .form-input:focus {
       outline: none;
       border-color: var(--brand-blue);
-      box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
     }
 
     .modal-actions {
@@ -930,7 +930,7 @@
         width: 260px;
         transform: translateX(-260px);
         transition: transform 0.3s ease;
-        box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+        box-shadow: 2px 0 8px rgba(16, 24, 40, 0.08);
       }
 
       .sidebar.open {
@@ -1218,13 +1218,13 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
       }
 
       .hamburger span {
         width: 18px;
         height: 2px;
-        background: #1A202C;
+        background: #111827;
         margin: 3px 0;
         border-radius: 1px;
         transition: all 0.3s;
@@ -1261,7 +1261,7 @@
       }
 
       thead th:first-child {
-        background: #F7FAFC;
+        background: #F1F3F6;
       }
 
       .badge {
@@ -2422,7 +2422,7 @@
               <td><span class="badge success">${session.role || 'User'}</span></td>
               <td>${loginTime}</td>
               <td>${lastActivity}</td>
-              <td><code style="font-size: 11px; background: var(--light-bg); padding: 4px 8px; border-radius: 4px;">${session.ip_address || '--'}</code></td>
+              <td><code style="font-size: 11px; background: var(--dark-bg); padding: 4px 8px; border-radius: 4px;">${session.ip_address || '--'}</code></td>
               <td><span title="${session.user_agent}" style="cursor: help;">${userAgent}</span></td>
               <td><button class="btn btn-small btn-secondary" onclick="revokeSession('${session.id}')">Revoke</button></td>
             </tr>
@@ -2508,12 +2508,12 @@
           datasets: [{
             label: 'Requests',
             data: values,
-            borderColor: '#3366FF',
-            backgroundColor: 'rgba(51, 102, 255, 0.1)',
+            borderColor: '#F59E0B',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
             tension: 0.4,
             fill: true,
             pointRadius: 4,
-            pointBackgroundColor: '#3366FF',
+            pointBackgroundColor: '#F59E0B',
             pointBorderColor: 'white',
             pointBorderWidth: 2,
           }]
@@ -2530,16 +2530,16 @@
             y: {
               beginAtZero: true,
               ticks: {
-                color: '#718096',
+                color: '#8A94A1',
                 font: { size: 12 }
               },
               grid: {
-                color: 'rgba(226, 232, 240, 0.5)'
+                color: 'rgba(229, 232, 237, 0.6)'
               }
             },
             x: {
               ticks: {
-                color: '#718096',
+                color: '#8A94A1',
                 font: { size: 12 }
               },
               grid: {
@@ -2572,7 +2572,7 @@
           datasets: [{
             label: 'Request Count',
             data: values,
-            backgroundColor: '#3366FF',
+            backgroundColor: '#F59E0B',
             borderRadius: 6,
           }]
         },
@@ -2589,16 +2589,16 @@
             x: {
               beginAtZero: true,
               ticks: {
-                color: '#718096',
+                color: '#8A94A1',
                 font: { size: 11 }
               },
               grid: {
-                color: 'rgba(226, 232, 240, 0.5)'
+                color: 'rgba(229, 232, 237, 0.6)'
               }
             },
             y: {
               ticks: {
-                color: '#718096',
+                color: '#8A94A1',
                 font: { size: 11 }
               },
               grid: {
