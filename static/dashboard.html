@@ -8129,7 +8129,9 @@ function populateRealRoster(employees, shifts) {
   if (!tbody) return;
   var now = new Date();
   var monday = new Date(now);
-  monday.setDate(now.getDate() - now.getDay() + 1);
+  // Mon-Sun week: on Sundays getDay()=0, so "-getDay()+1" would point at
+  // TOMORROW's Monday and show a week that excludes today.
+  monday.setDate(now.getDate() + (now.getDay() === 0 ? -6 : 1 - now.getDay()));
   var dateEl = document.getElementById('roster-week-date');
   if (dateEl) dateEl.textContent = monday.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -8178,7 +8180,8 @@ function populateDemoOnShift() {
 function populateDemoRoster() {
   const now = new Date();
   const monday = new Date(now);
-  monday.setDate(now.getDate() - now.getDay() + 1);
+  // Mon-Sun week — Sunday belongs to the week that STARTED six days ago
+  monday.setDate(now.getDate() + (now.getDay() === 0 ? -6 : 1 - now.getDay()));
   document.getElementById('roster-week-date').textContent = monday.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 
   const rosterData = demoData.roster_week.staff;
