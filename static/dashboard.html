@@ -18,8 +18,8 @@
     function _onChartLoaded(src) {
       if (window._chartReady) return;
       window._chartReady = true;
-      Chart.defaults.color = '#94A3B8';
-      Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
+      Chart.defaults.color = '#55606E';
+      Chart.defaults.borderColor = 'rgba(17,24,39,0.08)';
       Chart.defaults.plugins.legend.labels.color = '#94A3B8';
       console.log('Chart.js loaded from: ' + src);
       window._chartCallbacks.forEach(function(fn) { try { fn(); } catch(e) { console.warn('Chart callback error:', e); } });
@@ -42,20 +42,27 @@
   </script>
   <style>
     :root {
-      --dark-navy: #090C12;
-      --dark-bg: #0F1419;
-      --card-bg: #161B22;
-      --light-bg: #0D1117;
-      --text-primary: #E6EDF3;
-      --text-secondary: #8B949E;
-      --text-muted: #484F58;
+      /* LIGHT AND BRIGHT theme (2026-08-09) — variable NAMES are legacy from
+         the dark era and are referenced everywhere; only the VALUES flip.
+         --dark-navy = sidebar/top surfaces, --card-bg = cards, --dark-bg =
+         inset wells, --light-bg = app background. */
+      --dark-navy: #FFFFFF;
+      --dark-bg: #F1F3F6;
+      --card-bg: #FFFFFF;
+      --light-bg: #F6F7F9;
+      --text-primary: #111827;
+      --text-secondary: #55606E;
+      --text-muted: #8A94A1;
       --brand-blue: #F59E0B;
       --brand-accent: #D97706;
-      --success: #10B981;
+      --success: #16A34A;
       --warning: #F59E0B;
-      --danger: #EF4444;
+      --danger: #DC2626;
       --info: #F59E0B;
-      --border: #21262D;
+      --border: #E5E8ED;
+      --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
+      --hover-fill: rgba(17, 24, 39, 0.04);
+      --accent: #F59E0B; /* was referenced but never defined — AI chat styles silently fell back */
     }
 
     * {
@@ -81,7 +88,7 @@
     .sidebar {
       width: 220px;
       background: var(--dark-navy);
-      border-right: 1px solid rgba(255, 255, 255, 0.1);
+      border-right: 1px solid var(--border);
       padding: 24px 0;
       overflow-y: auto;
       position: fixed;
@@ -122,7 +129,7 @@
        ============================================ */
     .sidebar-logo {
       padding: 0 16px 16px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom: 1px solid var(--border);
       margin-bottom: 12px;
       display: flex;
       align-items: center;
@@ -209,7 +216,7 @@
 
     .sidebar-divider {
       height: 1px;
-      background: rgba(255, 255, 255, 0.1);
+      background: var(--border);
       margin: 16px 0;
     }
 
@@ -248,7 +255,7 @@
     }
 
     .nav-item:hover {
-      background: rgba(255, 255, 255, 0.05);
+      background: var(--hover-fill);
       color: var(--text-primary);
     }
 
@@ -267,7 +274,7 @@
        TOP BAR
        ============================================ */
     .top-bar {
-      background: rgba(15, 20, 27, 0.85);
+      background: rgba(255, 255, 255, 0.85);
       backdrop-filter: blur(8px);
       border-bottom: 1px solid var(--border);
       padding: 12px 24px;
@@ -361,7 +368,7 @@
       border-radius: 10px;
       padding: 20px;
       transition: all 0.2s;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      box-shadow: var(--shadow-card);
     }
 
     .card:hover {
@@ -376,7 +383,7 @@
       display: flex;
       flex-direction: column;
       transition: all 0.2s;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      box-shadow: var(--shadow-card);
     }
 
     .kpi-card:hover {
@@ -427,7 +434,7 @@
     .progress-bar {
       width: 100%;
       height: 5px;
-      background: #334155;
+      background: #E5E8ED;
       border-radius: 3px;
       overflow: hidden;
       margin-top: 8px;
@@ -527,7 +534,7 @@
     }
 
     .roster-table tbody tr:nth-child(even) {
-      background: rgba(255,255,255,0.02);
+      background: rgba(17, 24, 39, 0.02);
     }
 
     .roster-table tbody tr:hover {
@@ -567,7 +574,7 @@
     .shift-cell[draggable="true"]:active {
       cursor: grabbing;
       transform: scale(1.05);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      box-shadow: 0 4px 12px rgba(16, 24, 40, 0.18);
     }
 
     .roster-table td.drag-over {
@@ -625,8 +632,8 @@
     }
 
     .alert-item:hover {
-      background: rgba(255, 255, 255, 0.03);
-      border-color: #334155;
+      background: var(--hover-fill);
+      border-color: #D5DAE1;
     }
 
     .alert-icon {
@@ -714,13 +721,13 @@
     }
 
     .btn-secondary {
-      background: rgba(255, 255, 255, 0.06);
+      background: #FFFFFF;
       color: var(--text-secondary);
       border: 1px solid var(--border);
     }
 
     .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.1);
+      background: var(--hover-fill);
       color: var(--text-primary);
     }
 
@@ -804,7 +811,7 @@
     }
 
     .table tbody tr:nth-child(even) {
-      background: rgba(255,255,255,0.02);
+      background: rgba(17, 24, 39, 0.02);
     }
 
     .table tbody tr:hover {
@@ -861,7 +868,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(2, 6, 23, 0.45);
       z-index: 2000;
       align-items: center;
       justify-content: center;
@@ -878,7 +885,7 @@
       padding: 24px;
       max-width: 500px;
       width: 90%;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 20px 60px rgba(16, 24, 40, 0.2);
     }
 
     .modal-header {
@@ -1133,7 +1140,7 @@
       /* Sidebar becomes overlay on mobile */
       .sidebar {
         width: 260px;
-        box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+        box-shadow: 2px 0 12px rgba(16, 24, 40, 0.12);
       }
 
       .sidebar.collapsed {
@@ -1484,7 +1491,7 @@
        LOADING SKELETONS
        ============================================ */
     .skeleton {
-      background: linear-gradient(90deg, #1E242C 25%, #252C36 50%, #1E242C 75%);
+      background: linear-gradient(90deg, #E9ECF1 25%, #F4F6F9 50%, #E9ECF1 75%);
       background-size: 200% 100%;
       animation: shimmer 1.5s infinite;
       border-radius: 4px;
@@ -1700,7 +1707,7 @@
       background: var(--card-bg);
       border-radius: 8px;
       padding: 16px 24px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 4px 16px rgba(16, 24, 40, 0.16);
       display: flex;
       align-items: center;
       gap: 12px;
@@ -2732,7 +2739,7 @@
             </div>
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Covers forecast</div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-              <div style="flex: 1; height: 8px; background: #334155; border-radius: 4px;">
+              <div style="flex: 1; height: 8px; background: #E5E8ED; border-radius: 4px;">
                 <div id="res-covers-bar" style="height: 100%; background: var(--brand-blue); border-radius: 4px; transition: width 0.3s;"></div>
               </div>
               <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);" id="res-covers-total">--</div>
@@ -2860,7 +2867,7 @@
             </div>
 
             <!-- Results Card -->
-            <div id="optimiser-results" style="display: none; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
+            <div id="optimiser-results" style="display: none; border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
               <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;">
                 <div>
                   <div class="kpi-label">Solver Used</div>
@@ -2890,7 +2897,7 @@
             <div id="optimiser-progress" style="display: none;">
               <div style="display: flex; align-items: center; gap: 12px;">
                 <div style="flex: 1;">
-                  <div class="progress-bar" style="height: 8px; background: #334155;">
+                  <div class="progress-bar" style="height: 8px; background: #E5E8ED;">
                     <div class="progress-fill" id="optimiser-progress-bar" style="width: 0%; background: var(--brand-blue); transition: width 0.3s;"></div>
                   </div>
                 </div>
@@ -4689,7 +4696,7 @@
             </div>
 
             <!-- Chat Input -->
-            <div style="padding:16px 20px; border-top:1px solid var(--border); display:flex; gap:10px; background:rgba(0,0,0,0.1);">
+            <div style="padding:16px 20px; border-top:1px solid var(--border); display:flex; gap:10px; background:rgba(17,24,39,0.03);">
               <input type="text" id="ai-chat-input" placeholder="Ask RosterIQ AI anything..." style="flex:1; background:var(--sidebar-bg); border:1px solid var(--border); border-radius:10px; padding:12px 16px; color:var(--text-primary); font-size:14px; outline:none; transition:border-color 0.2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendAIMessage();}">
               <button onclick="sendAIMessage()" id="ai-send-btn" style="background:linear-gradient(135deg, var(--accent), #0284c7); border:none; border-radius:10px; padding:12px 20px; cursor:pointer; color:#fff; font-weight:600; font-size:14px; white-space:nowrap; transition:opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Send</button>
             </div>
@@ -7627,7 +7634,7 @@ function initHourlyBreakdownChart(isDemo = false) {
       scales: {
         y: {
           beginAtZero: true,
-          grid: { color: 'rgba(255,255,255,0.06)' },
+          grid: { color: 'rgba(17,24,39,0.08)' },
           ticks: { callback: (v) => '$' + v.toLocaleString() },
         },
         x: {
@@ -7790,18 +7797,18 @@ function initLabourPctTrendChart() {
       plugins: {
         legend: {
           display: true,
-          labels: { boxWidth: 12, padding: 16, font: { size: 11 }, color: '#8B949E' },
+          labels: { boxWidth: 12, padding: 16, font: { size: 11 }, color: '#55606E' },
         },
       },
       scales: {
         y: {
-          title: { display: true, text: 'Percentage', color: '#8B949E' },
-          ticks: { callback: function(v) { return (v * 100).toFixed(0) + '%'; }, color: '#8B949E' },
-          grid: { color: 'rgba(255,255,255,0.06)' },
+          title: { display: true, text: 'Percentage', color: '#55606E' },
+          ticks: { callback: function(v) { return (v * 100).toFixed(0) + '%'; }, color: '#55606E' },
+          grid: { color: 'rgba(17,24,39,0.08)' },
         },
         x: {
-          ticks: { color: '#8B949E' },
-          grid: { color: 'rgba(255,255,255,0.06)' },
+          ticks: { color: '#55606E' },
+          grid: { color: 'rgba(17,24,39,0.08)' },
         },
       },
     },
@@ -8395,7 +8402,7 @@ function populateDemoDemandSignals() {
       var val = bd[c.key] || 0;
       return '<div style="text-align:center;">' +
         '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">' + c.label + '</div>' +
-        '<div style="height:6px;background:#334155;border-radius:3px;overflow:hidden;">' +
+        '<div style="height:6px;background:#E5E8ED;border-radius:3px;overflow:hidden;">' +
         '<div style="height:100%;width:' + val + '%;background:' + c.color + ';border-radius:3px;"></div>' +
         '</div>' +
         '<div style="font-size:12px;font-weight:600;color:' + c.color + ';margin-top:3px;">' + val + '</div>' +
@@ -8531,7 +8538,7 @@ function populateDemoOnShiftSignals() {
     var typeColors = { AFL: '#EF4444', Cricket: '#10B981', Festival: '#F59E0B', Concert: '#8B5CF6' };
     stripEl.innerHTML = ds.events.map(function(e) {
       var col = typeColors[e.type] || '#F59E0B';
-      return '<div style="padding:4px 10px;background:rgba(255,255,255,0.04);border:1px solid ' + col + ';border-radius:16px;font-size:11px;">' +
+      return '<div style="padding:4px 10px;background:rgba(17,24,39,0.04);border:1px solid ' + col + ';border-radius:16px;font-size:11px;">' +
         '<span style="color:' + col + ';font-weight:600;">' + esc(e.type) + '</span> ' +
         '<span style="color:var(--text-secondary);">' + esc(e.name.substring(0, 25)) + '</span> ' +
         '<span style="color:var(--success);">+' + e.demand_uplift + '%</span>' +
@@ -9289,7 +9296,7 @@ function displayNotificationStats(stats) {
             colors.warning,
             colors.primary,
           ],
-          borderColor: '#161B22',
+          borderColor: '#FFFFFF',
           borderWidth: 2,
         }],
       },
@@ -9299,7 +9306,7 @@ function displayNotificationStats(stats) {
         plugins: {
           legend: {
             position: 'bottom',
-            labels: { padding: 16, font: { size: 12 }, color: '#8B949E' },
+            labels: { padding: 16, font: { size: 12 }, color: '#55606E' },
           },
         },
       },
@@ -10192,7 +10199,7 @@ function updateHourlySparkline(hourlyData) {
       scales: {
         y: {
           beginAtZero: true,
-          grid: { color: 'rgba(255,255,255,0.05)' },
+          grid: { color: 'rgba(17,24,39,0.08)' },
           ticks: { color: 'var(--text-secondary)', font: { size: 11 } },
         },
         x: {
@@ -10949,7 +10956,7 @@ function exportRosterPDF() {
   .header .week { font-size: 14px; color: #666; }
   .header .brand { font-size: 10px; color: #999; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { background: #0F1419; color: #fff; padding: 8px 6px; text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  th { background: #F1F3F6; color: #111827; padding: 8px 6px; text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
   td { padding: 7px 6px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
   tr:nth-child(even) td { background: #f8f9fa; }
   .name { font-weight: 600; }
@@ -11259,7 +11266,7 @@ function exportDailyRunsheet() {
   .header .brand { font-size: 10px; color: #999; float: right; margin-top: -30px; }
   .count { font-size: 13px; color: #666; margin-bottom: 12px; }
   table { width: 100%; border-collapse: collapse; }
-  th { background: #0F1419; color: #fff; padding: 10px 12px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  th { background: #F1F3F6; color: #111827; padding: 10px 12px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
   td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; font-size: 14px; }
   tr:nth-child(even) td { background: #f8f9fa; }
   .name { font-weight: 600; font-size: 15px; }
@@ -11490,7 +11497,7 @@ function addAIChatMessage(role, content, extras) {
     let html = content
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/`(.*?)`/g, '<code style="background:rgba(255,255,255,0.1); padding:1px 4px; border-radius:3px;">$1</code>')
+      .replace(/`(.*?)`/g, '<code style="background:rgba(17,24,39,0.06); padding:1px 4px; border-radius:3px;">$1</code>')
       .replace(/\n/g, '<br>');
     div.innerHTML = html;
 
