@@ -7919,6 +7919,17 @@ async function loadVenueData() {
       showEmptyVenueStates();
     }
   }
+
+  // The home-page cards (setup wizard, Today briefing, Business snapshot)
+  // previously loaded only via showPage('dashboard') nav clicks — so the
+  // FIRST screen after login showed a dead "Loading…" until you navigated
+  // away and back. Load them whenever venue data (re)loads and the
+  // dashboard is the visible page.
+  if (!state.currentPage || state.currentPage === 'dashboard') {
+    try { loadSetupWizard(); } catch (e) {}
+    try { loadBriefing(); } catch (e) {}
+    try { loadSnapshot(); } catch (e) {}
+  }
 }
 
 function showEmptyVenueStates() {
