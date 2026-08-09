@@ -319,8 +319,20 @@ def _seed_demo_showcase(db, now) -> None:
             mix = {"Chicken Parmigiana": 0.63, "Bowl of Chips": 0.20, "Flat White": 0.17}
             by_name = {r.get("name"): r for r in recipes}
             target = 5300.0
-            for day_offset in (0, 1, 2):
-                sale_day = today - timedelta(days=day_offset)
+            # Every day in the snapshot's trailing 7-day window that carries
+            # demo labour gets sales at target — not just the 3 freshly-seeded
+            # days. Long-running prod accumulated a shift-day per seeder run
+            # (this week's AND last week's roster), and any labour day left
+            # without matching revenue drags the 7-day prime cost back into
+            # "failing business" territory.
+            trade_days = {today - timedelta(days=o) for o in (0, 1, 2)}
+            window_start = today - timedelta(days=6)
+            for ws in (week_start, week_start - timedelta(days=7)):
+                r = db.get_roster(f"demo-roster-{ws.isoformat()}")
+                if r:
+                    trade_days |= {s.date for s in r.shifts
+                                   if window_start <= s.date <= today}
+            for sale_day in sorted(trade_days):
                 existing = db.list_dish_sales(DEMO_VENUE_ID, sale_day, sale_day) or []
                 have = sum(float(s.get("revenue_inc_gst") or 0) for s in existing)
                 deficit = target - have
