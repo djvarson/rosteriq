@@ -17,6 +17,8 @@ Routes:
     GET  /api/myob/payroll/categories  -- Get payroll wage categories
     GET  /api/myob/payroll/runs        -- Get pay run history
     GET  /api/myob/accounts            -- Get revenue accounts
+    POST /api/myob/push-bill           -- Push a supplier invoice to MYOB as a bill
+    GET  /api/myob/bill-pushes         -- List invoices already pushed (the push ledger)
 """
 
 import os
@@ -28,6 +30,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.myob_adapter import (
     MYOBAdapter,
     MYOBOAuth,
@@ -93,6 +96,16 @@ class MYOBTimesheetPushRequest(BaseModel):
     employee_uid: str = Field(..., description="MYOB employee UID")
     start_date: date = Field(..., description="Week start date")
     entries: list = Field(..., description="Timesheet entries to push")
+
+
+class PushBillRequest(BaseModel):
+    """Push a supplier invoice to MYOB as a Service purchase bill."""
+    venue_id: str = Field(..., description="RosterIQ venue ID")
+    invoice_id: str = Field(..., description="RosterIQ supplier invoice ID")
+    account_display_id: str = Field(
+        default="5-1000", description="DisplayID of the MYOB purchases/COGS account"
+    )
+    tax_code: str = Field(default="GST", description="MYOB tax code for the bill lines")
 
 
 # ============================================================================
@@ -577,3 +590,110 @@ async def get_accounts(
         raise HTTPException(status_code=502, detail=f"MYOB API error: {e}")
 
     return {"status": "success", "venue_id": venue_id, "count": len(accounts), "accounts": accounts}
+
+
+# ============================================================================
+# Supplier Bill Push
+# ============================================================================
+
+
+@router.post("/push-bill")
+async def push_bill(body: PushBillRequest) -> dict:
+    """
+    Push an entered supplier invoice to MYOB as a Service purchase bill.
+
+    One push per invoice: a ledger row records the MYOB bill, and pushing
+    the same invoice again returns the recorded result instead of creating
+    a duplicate bill. Unlike Xero there is no draft state — MYOB AccountRight
+    creates a real open bill, which is correct because a RosterIQ supplier
+    invoice is already the verified actual delivery.
+    """
+    enforce_venue_access(body.venue_id)
+
+    db = get_db()
+    install = db.get_plugin_install(_org_key(body.venue_id))
+    if not install or install.get("status") != "active":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "MYOB is not connected for this venue — connect it on the "
+                "Connections page first."
+            ),
+        )
+
+    invoice = None
+    for row in db.list_supplier_invoices(body.venue_id) or []:
+        if row.get("id") == body.invoice_id:
+            invoice = row
+            break
+    if invoice is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Invoice {body.invoice_id} not found for venue {body.venue_id}",
+        )
+
+    # Already pushed? Return the ledger row — never create a second bill.
+    existing = db.get_myob_bill_push(body.invoice_id)
+    if existing and existing.get("venue_id") == body.venue_id:
+        return {
+            "status": "already_pushed",
+            "invoice_id": body.invoice_id,
+            "myob_bill_uid": existing.get("myob_bill_uid"),
+            "myob_bill_number": existing.get("myob_bill_number"),
+        }
+
+    credentials = _build_credentials(install)
+    try:
+        async with MYOBAdapter(credentials, on_token_refresh=_persist_refreshed_tokens(install)) as adapter:
+            result = await adapter.push_bill(
+                invoice,
+                account_display_id=body.account_display_id,
+                tax_code=body.tax_code,
+            )
+    except Exception as e:
+        logger.error(f"Bill push failed for invoice {body.invoice_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"MYOB rejected the bill: {str(e)}")
+
+    db.save_myob_bill_push({
+        "id": body.invoice_id,  # PK == invoice id -> one push per invoice
+        "venue_id": body.venue_id,
+        "invoice_id": body.invoice_id,
+        "myob_bill_uid": result.get("myob_bill_uid"),
+        "myob_bill_number": result.get("myob_bill_number"),
+        "status": "pushed",
+        "pushed_at": datetime.utcnow(),
+    })
+
+    logger.info(
+        f"Invoice {body.invoice_id} pushed to MYOB as bill "
+        f"{result.get('myob_bill_number') or result.get('myob_bill_uid')} "
+        f"for {body.venue_id}"
+    )
+
+    return {
+        "status": "pushed",
+        "invoice_id": body.invoice_id,
+        "myob_bill_uid": result.get("myob_bill_uid"),
+        "myob_bill_number": result.get("myob_bill_number"),
+        "myob_status": result.get("status"),
+        "total": invoice.get("total"),
+    }
+
+
+@router.get("/bill-pushes")
+async def list_bill_pushes(
+    venue_id: str = Query(..., description="RosterIQ venue ID"),
+) -> dict:
+    """
+    List the push ledger for a venue — every supplier invoice already
+    pushed to MYOB, newest first.
+    """
+    enforce_venue_access(venue_id)
+
+    db = get_db()
+    rows = db.list_myob_bill_pushes(venue_id) or []
+    return {
+        "venue_id": venue_id,
+        "count": len(rows),
+        "pushes": [{**r, "pushed_at": str(r.get("pushed_at"))} for r in rows],
+    }

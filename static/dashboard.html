@@ -6836,7 +6836,7 @@ async function loadInventory() {
     renderOrders(ivOrders);
   } catch (e) { /* list stays empty */ }
   try {
-    // Xero context first so invoice rows can show push buttons / "In Xero" chips
+    // Accounting context first so invoice rows can show push buttons / "In Xero/MYOB" chips
     try {
       const xs = await fetchAPI('/api/xero/status/' + encodeURIComponent(state.currentVenue));
       ivXeroConnected = !!xs.connected;
@@ -6846,6 +6846,15 @@ async function loadInventory() {
       ivXeroPushes = {};
       (xp.pushes || []).forEach(function(p) { ivXeroPushes[p.invoice_id] = p; });
     } catch (e) { ivXeroPushes = {}; }
+    try {
+      const ms = await fetchAPI('/api/myob/status?venue_id=' + encodeURIComponent(state.currentVenue));
+      ivMyobConnected = !!ms.connected;
+    } catch (e) { ivMyobConnected = false; }
+    try {
+      const mp = await fetchAPI('/api/myob/bill-pushes?venue_id=' + encodeURIComponent(state.currentVenue));
+      ivMyobPushes = {};
+      (mp.pushes || []).forEach(function(p) { ivMyobPushes[p.invoice_id] = p; });
+    } catch (e) { ivMyobPushes = {}; }
     const iv = await fetchAPI('/api/inventory/invoices?venue_id=' + encodeURIComponent(state.currentVenue));
     ivInvoices = iv.invoices || [];
     renderInvoices(ivInvoices);
@@ -7128,6 +7137,8 @@ async function saveInvoice() {
 
 let ivXeroConnected = false;
 let ivXeroPushes = {};
+let ivMyobConnected = false;
+let ivMyobPushes = {};
 let ivInvoices = [];
 
 function renderInvoices(invoices) {
@@ -7140,7 +7151,7 @@ function renderInvoices(invoices) {
     const changes = (v.price_changes || []).map(function(p) {
       return esc(p.name) + ' ' + formatCurrency(p.old_pack_cost) + '→' + formatCurrency(p.new_pack_cost);
     }).join(', ');
-    // Xero affordance: pushed -> chip; connected but not pushed -> push button
+    // Accounting affordances: pushed -> chip; connected but not pushed -> push button
     let xero = '';
     const push = ivXeroPushes[v.id];
     if (push) {
@@ -7150,6 +7161,15 @@ function renderInvoices(invoices) {
     } else if (ivXeroConnected) {
       xero = '<button class="btn btn-secondary btn-small" style="font-size:11px; padding:2px 10px;" ' +
         'onclick="pushInvoiceToXero(\'' + esc(v.id) + '\')">→ Xero bill</button>';
+    }
+    const mpush = ivMyobPushes[v.id];
+    if (mpush) {
+      xero += '<span title="Bill ' + esc(mpush.myob_bill_number || '') + ' in MYOB" ' +
+        'style="font-size:11px; font-weight:600; color:#6D28D9; background:rgba(109,40,217,0.1); ' +
+        'border-radius:10px; padding:2px 8px;">In MYOB ✓</span>';
+    } else if (ivMyobConnected) {
+      xero += '<button class="btn btn-secondary btn-small" style="font-size:11px; padding:2px 10px;" ' +
+        'onclick="pushInvoiceToMyob(\'' + esc(v.id) + '\')">→ MYOB bill</button>';
     }
     return '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; flex-wrap:wrap;">' +
       '<span style="font-weight:600;">' + esc(v.invoice_number) + ' · ' + esc(v.supplier || 'Unassigned') + '</span>' +
@@ -7176,6 +7196,26 @@ async function pushInvoiceToXero(invoiceId) {
       : 'Draft bill created in Xero — approve it there when the paperwork checks out', 'success');
   } catch (e) {
     showToast('Xero push failed: ' + e.message, 'error');
+  }
+}
+
+async function pushInvoiceToMyob(invoiceId) {
+  try {
+    const r = await fetchAPI('/api/myob/push-bill', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: state.currentVenue, invoice_id: invoiceId }),
+    });
+    ivMyobPushes[invoiceId] = {
+      invoice_id: invoiceId,
+      myob_bill_uid: r.myob_bill_uid,
+      myob_bill_number: r.myob_bill_number,
+    };
+    renderInvoices(ivInvoices);
+    showToast(r.status === 'already_pushed'
+      ? 'Already in MYOB as a bill'
+      : 'Bill created in MYOB (MYOB has no draft state — it lands as an open bill)', 'success');
+  } catch (e) {
+    showToast('MYOB push failed: ' + e.message, 'error');
   }
 }
 

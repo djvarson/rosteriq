@@ -700,6 +700,146 @@ class MYOBAdapter:
         ]
 
     # ================================================================
+    # Supplier Bills (Outbound)
+    # ================================================================
+
+    async def push_bill(
+        self,
+        invoice: dict,
+        account_display_id: str = "5-1000",
+        tax_code: str = "GST",
+    ) -> dict:
+        """
+        Push a RosterIQ supplier invoice to MYOB as a Service purchase bill.
+
+        MYOB references everything by UID, so this resolves in order:
+        1. Supplier contact UID by CompanyName — created on the fly if the
+           supplier does not exist in MYOB yet
+        2. Account UID from its DisplayID (e.g. "5-1000")
+        3. Tax code UID from its code (e.g. "GST")
+        then creates a tax-inclusive Purchase/Bill/Service with one line per
+        invoice item and a JournalMemo referencing the RosterIQ invoice id
+        for the audit trail.
+
+        NOTE — semantic difference vs Xero: Xero bills land as DRAFT for
+        review, but MYOB AccountRight has no draft state, so this creates a
+        real open Service Bill immediately. That is correct here because a
+        RosterIQ supplier invoice is already the verified actual delivery,
+        not a proposal.
+
+        Args:
+            invoice: RosterIQ supplier invoice record (from list_supplier_invoices)
+            account_display_id: DisplayID of the MYOB purchases/COGS account
+                for the lines (default "5-1000")
+            tax_code: MYOB tax code for the lines (default "GST" — AU GST)
+
+        Returns:
+            {"myob_bill_uid", "myob_bill_number", "status"} parsed from the
+            bill body MYOB returns
+        """
+        # 1. Supplier UID — match by CompanyName, create if missing.
+        supplier_name = invoice.get("supplier") or "Unknown supplier"
+        # MYOB OData filters escape single quotes by doubling them.
+        escaped_name = supplier_name.replace("'", "''")
+        data = await self._get(
+            f"{self.credentials.base_url}/Contact/Supplier",
+            params={"$filter": f"CompanyName eq '{escaped_name}'"},
+        )
+        items = data.get("Items", []) if isinstance(data, dict) else data
+        if items:
+            supplier_uid = items[0].get("UID")
+        else:
+            created = await self._post(
+                f"{self.credentials.base_url}/Contact/Supplier",
+                params={"returnBody": "true"},
+                json={"CompanyName": supplier_name, "IsIndividual": False},
+            )
+            supplier_uid = created.get("UID") if isinstance(created, dict) else None
+
+        # 2. Account UID from its DisplayID.
+        data = await self._get(
+            f"{self.credentials.base_url}/GeneralLedger/Account",
+            params={"$filter": f"DisplayID eq '{account_display_id}'"},
+        )
+        items = data.get("Items", []) if isinstance(data, dict) else data
+        if not items:
+            raise ValueError(
+                f"MYOB account {account_display_id} not found — pass "
+                "account_display_id of an existing purchases/COGS account"
+            )
+        account_uid = items[0].get("UID")
+
+        # 3. TaxCode UID from its code.
+        data = await self._get(
+            f"{self.credentials.base_url}/GeneralLedger/TaxCode",
+            params={"$filter": f"Code eq '{tax_code}'"},
+        )
+        items = data.get("Items", []) if isinstance(data, dict) else data
+        if not items:
+            raise ValueError(
+                f"MYOB tax code {tax_code} not found — pass "
+                "tax_code of an existing tax code"
+            )
+        tax_code_uid = items[0].get("UID")
+
+        # MYOB wants YYYY-MM-DD; the stored invoice_date may be a date, an ISO
+        # string (PostgreSQL round-trip), or missing — fall back to today.
+        raw_date = invoice.get("invoice_date")
+        if isinstance(raw_date, datetime):
+            bill_date = raw_date.date()
+        elif isinstance(raw_date, date):
+            bill_date = raw_date
+        elif raw_date:
+            try:
+                bill_date = date.fromisoformat(str(raw_date)[:10])
+            except ValueError:
+                bill_date = date.today()
+        else:
+            bill_date = date.today()
+
+        lines = []
+        for item in invoice.get("items", []) or []:
+            name = item.get("name")
+            packs = item.get("packs")
+            pack_size = item.get("pack_size")
+            unit = item.get("unit")
+            lines.append({
+                "Type": "Transaction",
+                "Description": f"{name} ({packs} x {pack_size}{unit or ''})",
+                "Total": item.get("line_total"),
+                "Account": {"UID": account_uid},
+                "TaxCode": {"UID": tax_code_uid},
+            })
+
+        # 4. Create the bill (returnBody so we get the UID back).
+        body = await self._post(
+            f"{self.credentials.base_url}/Purchase/Bill/Service",
+            params={"returnBody": "true"},
+            json={
+                "Supplier": {"UID": supplier_uid},
+                "Date": bill_date.strftime("%Y-%m-%d"),
+                "SupplierInvoiceNumber": invoice.get("invoice_number"),
+                "IsTaxInclusive": True,
+                "JournalMemo": f"RosterIQ {invoice.get('id')}",
+                "Lines": lines,
+            },
+        )
+
+        bill_uid = body.get("UID") if isinstance(body, dict) else None
+        if not bill_uid:
+            raise ValueError(
+                f"MYOB returned no bill for invoice {invoice.get('invoice_number')} "
+                "— the bill was not created"
+            )
+
+        logger.info(f"Pushed supplier invoice {invoice.get('id')} to MYOB as bill {bill_uid}")
+        return {
+            "myob_bill_uid": bill_uid,
+            "myob_bill_number": body.get("Number"),
+            "status": body.get("Status") or "Open",
+        }
+
+    # ================================================================
     # Connection verification
     # ================================================================
 
