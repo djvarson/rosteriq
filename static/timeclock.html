@@ -8,15 +8,20 @@
 <style>
   :root {
     --bg: #F6F7F9; --card: #FFFFFF; --border: #E5E8ED;
-    --text: #111827; --muted: #55606E; --accent: #F5A623;
+    --text: #111827; --muted: #55606E; --accent: #F59E0B;
     --green: #16A34A; --red: #DC2626; --blue: #0284C7;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { background: var(--bg); color: var(--text); font-family: 'Manrope', -apple-system, 'Segoe UI', Roboto, sans-serif; min-height: 100vh; }
-  header { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; border-bottom: 1px solid var(--border); background: var(--card); }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 24px; border-bottom: 1px solid var(--border); background: var(--card); }
   header .brand { font-size: 20px; font-weight: 700; }
   header .brand span { color: var(--accent); }
-  #clock-now { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #clock-now { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  @media (max-width: 480px) {
+    header { padding: 14px 16px; }
+    header .brand { font-size: 17px; }
+    #clock-now { font-size: 21px; }
+  }
   #venue-name { color: var(--muted); font-size: 14px; }
   main { padding: 20px; max-width: 1100px; margin: 0 auto; }
   .hint { color: var(--muted); text-align: center; margin: 10px 0 20px; font-size: 15px; }

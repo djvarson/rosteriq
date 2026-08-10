@@ -172,6 +172,9 @@
 
     .hamburger {
       display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
       width: 36px;
       height: 36px;
       border: none;
@@ -289,9 +292,10 @@
       font-size: 12px;
       font-weight: 600;
       text-transform: capitalize;
+      white-space: nowrap;
     }
 
-    .badge-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .badge-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 
     .badge.connected { background: rgba(16, 185, 129, 0.12); color: var(--success); }
     .badge.connected .badge-dot { background: var(--success); }

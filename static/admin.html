@@ -138,6 +138,11 @@
       color: var(--light-text);
     }
 
+    /* Hamburger (hidden on desktop; shown <=768px) */
+    .hamburger {
+      display: none;
+    }
+
     .content {
       padding: 32px;
       max-width: 1400px;
@@ -166,6 +171,12 @@
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 24px;
       margin-bottom: 32px;
+    }
+
+    .two-col-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
     }
 
     .kpi-card {
@@ -947,15 +958,60 @@
         gap: 16px;
       }
 
+      .two-col-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+
       .content {
         padding: 16px;
         max-width: 100%;
       }
 
       .top-bar {
-        padding: 12px 16px;
+        padding: 12px 16px 12px 68px;
         flex-wrap: wrap;
         gap: 12px;
+      }
+
+      /* Hamburger menu (needed wherever the sidebar is off-canvas) */
+      .hamburger {
+        display: flex;
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 1100;
+        width: 40px;
+        height: 40px;
+        border: 1px solid var(--light-border);
+        background: white;
+        border-radius: 8px;
+        cursor: pointer;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+      }
+
+      .hamburger span {
+        width: 18px;
+        height: 2px;
+        background: var(--text-primary);
+        margin: 3px 0;
+        border-radius: 1px;
+        transition: all 0.3s;
+      }
+
+      .hamburger.open span:nth-child(1) {
+        transform: translateY(8px) rotate(45deg);
+      }
+
+      .hamburger.open span:nth-child(2) {
+        opacity: 0;
+      }
+
+      .hamburger.open span:nth-child(3) {
+        transform: translateY(-8px) rotate(-45deg);
       }
 
       .top-bar-title {
@@ -984,6 +1040,7 @@
 
       .card {
         padding: 16px;
+        overflow-x: auto;
       }
 
       .card-title {
@@ -1193,41 +1250,12 @@
         padding: 10px 12px;
         font-size: 12px;
         min-height: 44px;
-        width: 100%;
       }
 
       .btn-small {
         padding: 8px 10px;
         font-size: 11px;
         min-height: 40px;
-      }
-
-      /* Hamburger menu */
-      .hamburger {
-        display: flex;
-        position: fixed;
-        top: 12px;
-        left: 12px;
-        z-index: 1100;
-        width: 40px;
-        height: 40px;
-        border: none;
-        background: white;
-        border-radius: 8px;
-        cursor: pointer;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
-      }
-
-      .hamburger span {
-        width: 18px;
-        height: 2px;
-        background: #111827;
-        margin: 3px 0;
-        border-radius: 1px;
-        transition: all 0.3s;
       }
 
       /* Table responsiveness */
@@ -1489,6 +1517,11 @@
   </style>
 </head>
 <body>
+  <button class="hamburger" type="button" aria-label="Toggle navigation menu">
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
   <div class="app-container">
     <!-- Sidebar -->
     <div class="sidebar">
@@ -1902,7 +1935,7 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+          <div class="two-col-grid">
             <div class="card">
               <div class="card-title">Top 10 Endpoints</div>
               <div class="chart-container small">

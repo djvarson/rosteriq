@@ -3125,21 +3125,21 @@
 
         <div class="grid-1">
           <div class="card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-              <div class="chart-title" style="margin: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
+              <div class="chart-title" style="margin: 0; white-space: nowrap; flex-shrink: 0;">
                 Week of <span id="roster-week-date">—</span>
               </div>
-              <div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
                 <button class="btn btn-primary btn-small" id="btn-prev-week">← Previous</button>
                 <button class="btn btn-secondary btn-small" id="btn-next-week">Next →</button>
                 <button class="btn btn-secondary btn-small" onclick="openRosterImport()" title="Paste a roster export from Deputy, Tanda, or a spreadsheet">Import roster</button>
                 <button class="btn btn-primary btn-small" id="btn-roster-generate" onclick="openModal('modal-generate-roster')">Generate Roster</button>
-                <span style="display:inline-block; width:1px; height:20px; background:#2A3040; margin:0 8px; vertical-align:middle;"></span>
+                <span style="display:inline-block; width:1px; height:20px; background:var(--border); margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterPDF()" title="Download PDF for printing">PDF</button>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterCSV()" title="Download CSV for Excel">CSV</button>
                 <button class="btn btn-primary btn-small" onclick="publishRoster()" id="btn-publish-roster" title="Publish this roster and notify staff (no integration required)">Publish Roster</button>
                 <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" title="Also push roster to a connected rostering system (Tanda/Deputy/Humanforce)" style="background:rgba(245,158,11,0.1); border-color:var(--brand-blue); color:var(--brand-blue);">Push to System</button>
-                <span style="display:inline-block; width:1px; height:20px; background:#2A3040; margin:0 8px; vertical-align:middle;"></span>
+                <span style="display:inline-block; width:1px; height:20px; background:var(--border); margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportDailyRunsheet()" title="Print today's shift runsheet">Runsheet</button>
                 <button class="btn btn-secondary btn-small" onclick="sendRosterToStaff()" id="btn-send-roster" title="Email/SMS roster to all staff" style="background:rgba(34,197,94,0.1); border-color:var(--success); color:var(--success);">Send to Staff</button>
               </div>
@@ -6452,7 +6452,7 @@ async function loadSnapshot() {
     chip.textContent = s.prime_cost_pct == null ? '' : ('Prime cost ' + s.prime_cost_pct + '% · ' + bandLabel);
     chip.style.color = bandColor;
     const cell = function(label, value, sub) {
-      return '<div style="background:var(--card-2,#242E44); border:1px solid var(--border); border-radius:12px; padding:14px;">' +
+      return '<div style="background:var(--card-2,#F1F3F6); border:1px solid var(--border); border-radius:12px; padding:14px;">' +
         '<div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;">' + label + '</div>' +
         '<div style="font-size:22px; font-weight:800; margin-top:4px;">' + value + '</div>' +
         (sub ? '<div style="font-size:12px; color:var(--text-muted); margin-top:2px;">' + sub + '</div>' : '') +

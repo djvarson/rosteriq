@@ -244,6 +244,7 @@
 
     .main-content {
       flex: 1;
+      min-width: 0;
       margin-left: 300px;
       background: var(--light-bg);
     }
@@ -448,7 +449,7 @@
       right: 12px;
       padding: 6px 12px;
       background: #F59E0B;
-      color: white;
+      color: #111827;
       border: none;
       border-radius: 4px;
       cursor: pointer;
@@ -462,10 +463,15 @@
       transform: scale(1.05);
     }
 
+    .code-example:has(.code-copy-btn) {
+      padding-right: 84px;
+    }
+
     .code-example code {
       color: #111827;
       font-family: 'Courier New', monospace;
       line-height: 1.5;
+      overflow-wrap: anywhere;
     }
 
     .response-codes {
@@ -516,7 +522,7 @@
       display: inline-block;
       padding: 10px 20px;
       background: #F59E0B;
-      color: white;
+      color: #111827;
       border: none;
       border-radius: 6px;
       cursor: pointer;
@@ -627,7 +633,11 @@
       }
 
       .method {
-        width: 100%;
+        width: auto;
+      }
+
+      .header-version {
+        text-align: left;
       }
 
       .sidebar-controls {
@@ -769,7 +779,7 @@
 
     .btn-primary {
       background: #F59E0B;
-      color: white;
+      color: #111827;
     }
 
     .btn-primary:hover {
