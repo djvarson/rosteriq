@@ -8,6 +8,8 @@ Endpoints:
 - POST /api/xero/disconnect - Revoke credentials
 - POST /api/xero/sync/revenue - Manually trigger revenue sync
 - POST /api/xero/sync/labour-costs - Export labour costs journal
+- POST /api/xero/push-bill - Push a supplier invoice to Xero as a draft bill
+- GET /api/xero/bill-pushes - List invoices already pushed (the push ledger)
 - GET /api/xero/pnl/{venue_id} - Get P&L with labour % metrics
 
 Usage:
@@ -17,16 +19,18 @@ Usage:
 
 import logging
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.xero_integration import (
     XeroOAuth,
     XeroClient,
+    XeroApiClient,
     XeroCredentials,
     LabourCostJournal,
     save_xero_credentials,
@@ -105,6 +109,14 @@ class LabourCostRequest(BaseModel):
 
     venue_id: str
     journal_date: date
+
+
+class PushBillRequest(BaseModel):
+    """Push a supplier invoice to Xero as a draft bill."""
+
+    venue_id: str
+    invoice_id: str
+    account_code: str = "300"
 
 
 class PnLResponse(BaseModel):
@@ -355,6 +367,111 @@ def setup_xero_routes(app, db):
             "venue_id": req.venue_id,
             "journal_date": req.journal_date.isoformat(),
             "note": "Integration pending payroll data hookup",
+        }
+
+    # ========================================================================
+    # Supplier Bill Push
+    # ========================================================================
+
+    @router.post("/push-bill")
+    async def push_bill(req: PushBillRequest):
+        """
+        POST /api/xero/push-bill
+
+        Push an entered supplier invoice to Xero as a draft ACCPAY bill.
+
+        Body:
+        {
+            "venue_id": "v1",
+            "invoice_id": "si-abc1234def",
+            "account_code": "300"
+        }
+
+        One push per invoice: a ledger row records the Xero bill, and pushing
+        the same invoice again returns the recorded result instead of creating
+        a duplicate bill. The bill lands in Xero as DRAFT for review.
+        """
+        enforce_venue_access(req.venue_id)
+
+        credentials = await get_xero_credentials(db, req.venue_id)
+        if not credentials:
+            raise HTTPException(
+                400,
+                "Xero is not connected for this venue — connect it on the "
+                "Connections page first.",
+            )
+
+        invoice = None
+        for row in db.list_supplier_invoices(req.venue_id) or []:
+            if row.get("id") == req.invoice_id:
+                invoice = row
+                break
+        if invoice is None:
+            raise HTTPException(
+                404,
+                f"Invoice {req.invoice_id} not found for venue {req.venue_id}",
+            )
+
+        # Already pushed? Return the ledger row — never create a second bill.
+        existing = db.get_xero_bill_push(req.invoice_id)
+        if existing and existing.get("venue_id") == req.venue_id:
+            return {
+                "status": "already_pushed",
+                "invoice_id": req.invoice_id,
+                "xero_invoice_id": existing.get("xero_invoice_id"),
+                "xero_invoice_number": existing.get("xero_invoice_number"),
+            }
+
+        try:
+            async with XeroApiClient(credentials, db) as xero:
+                result = await xero.push_bill(
+                    invoice, account_code=req.account_code
+                )
+        except Exception as e:
+            logger.error(f"Bill push failed for invoice {req.invoice_id}: {e}")
+            raise HTTPException(502, f"Xero rejected the bill: {str(e)}")
+
+        db.save_xero_bill_push({
+            "id": req.invoice_id,  # PK == invoice id -> one push per invoice
+            "venue_id": req.venue_id,
+            "invoice_id": req.invoice_id,
+            "xero_invoice_id": result.get("xero_invoice_id"),
+            "xero_invoice_number": result.get("xero_invoice_number"),
+            "status": "pushed",
+            "pushed_at": datetime.utcnow(),
+        })
+
+        logger.info(
+            f"Invoice {req.invoice_id} pushed to Xero as bill "
+            f"{result.get('xero_invoice_number')} for {req.venue_id}"
+        )
+
+        return {
+            "status": "pushed",
+            "invoice_id": req.invoice_id,
+            "xero_invoice_id": result.get("xero_invoice_id"),
+            "xero_invoice_number": result.get("xero_invoice_number"),
+            "xero_status": "DRAFT",
+            "total": invoice.get("total"),
+        }
+
+    @router.get("/bill-pushes")
+    async def list_bill_pushes(venue_id: str = Query(...)):
+        """
+        GET /api/xero/bill-pushes?venue_id=v1
+
+        List the push ledger for a venue — every supplier invoice already
+        pushed to Xero, newest first.
+        """
+        enforce_venue_access(venue_id)
+
+        rows = db.list_xero_bill_pushes(venue_id) or []
+        return {
+            "venue_id": venue_id,
+            "count": len(rows),
+            "pushes": [
+                {**r, "pushed_at": str(r.get("pushed_at"))} for r in rows
+            ],
         }
 
     # ========================================================================

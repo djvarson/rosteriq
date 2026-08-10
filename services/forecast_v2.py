@@ -513,6 +513,14 @@ class EnhancedForecaster:
         interval_80, interval_95 = self._calculate_confidence_intervals(
             point_estimate, seasonal_pred
         )
+        # The reported point is rounded to 1dp below; when the raw point sits
+        # exactly on a band edge, rounding can nudge it just OUTSIDE the raw
+        # interval (e.g. point 71.653 -> 71.7 vs upper bound 71.653). An
+        # interval that excludes its own point estimate is nonsense, so widen
+        # each band to contain the rounded point.
+        _pt = round(point_estimate, 1)
+        interval_80 = (min(interval_80[0], _pt), max(interval_80[1], _pt))
+        interval_95 = (min(interval_95[0], _pt), max(interval_95[1], _pt))
 
         # Confidence score
         confidence_score = self._calculate_confidence_score()

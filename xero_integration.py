@@ -5,6 +5,7 @@ Provides:
 - OAuth2 PKCE flow for secure authorization
 - Revenue sync (daily pulls from Xero bank/invoices)
 - Labour cost export (daily journal entries for wages)
+- Supplier bill push (draft ACCPAY bills from RosterIQ supplier invoices)
 - P&L reporting with labour % calculations
 - Australian context: GST 10%, super 11.5%, BAS periods
 
@@ -614,6 +615,97 @@ class XeroClient:
         return response
 
     # ========================================================================
+    # Supplier Bill Push (Outbound)
+    # ========================================================================
+
+    async def push_bill(
+        self,
+        invoice: dict,
+        account_code: str = "300",
+        tax_type: str = "INPUT",
+    ) -> dict:
+        """
+        Push a RosterIQ supplier invoice to Xero as a draft ACCPAY bill.
+
+        Creates an accounts-payable invoice with:
+        - One line item per invoice item (packs x pack cost, GST inclusive)
+        - Contact matched by supplier name
+        - Due date 14 days after the invoice date
+        - Reference back to the RosterIQ invoice id for the audit trail
+
+        Kept as DRAFT so the bookkeeper reviews before approval.
+
+        Args:
+            invoice: RosterIQ supplier invoice record (from list_supplier_invoices)
+            account_code: Xero expense account for the lines (default "300")
+            tax_type: Xero tax type for the lines (default "INPUT" — AU GST on expenses)
+
+        Returns:
+            {"xero_invoice_id", "xero_invoice_number", "status"} parsed from
+            Xero's Invoices response
+        """
+        # Xero wants YYYY-MM-DD; the stored invoice_date may be a date, an ISO
+        # string (PostgreSQL round-trip), or missing — fall back to today.
+        raw_date = invoice.get("invoice_date")
+        if isinstance(raw_date, datetime):
+            bill_date = raw_date.date()
+        elif isinstance(raw_date, date):
+            bill_date = raw_date
+        elif raw_date:
+            try:
+                bill_date = date.fromisoformat(str(raw_date)[:10])
+            except ValueError:
+                bill_date = date.today()
+        else:
+            bill_date = date.today()
+
+        line_items = []
+        for item in invoice.get("items", []) or []:
+            name = item.get("name")
+            packs = item.get("packs")
+            pack_size = item.get("pack_size")
+            unit = item.get("unit")
+            line_items.append({
+                "Description": f"{name} ({packs} x {pack_size}{unit or ''})",
+                "Quantity": packs,
+                "UnitAmount": item.get("pack_cost"),
+                "AccountCode": account_code,
+                "TaxType": tax_type,
+            })
+
+        bill = {
+            "Type": "ACCPAY",
+            "Contact": {"Name": invoice.get("supplier") or "Unknown supplier"},
+            "Date": bill_date.strftime("%Y-%m-%d"),
+            "DueDate": (bill_date + timedelta(days=14)).strftime("%Y-%m-%d"),
+            "InvoiceNumber": invoice.get("invoice_number"),
+            "Reference": f"RosterIQ {invoice.get('id')}",
+            "Status": "DRAFT",  # Keep as draft for review before approval
+            "LineAmountTypes": "Inclusive",
+            "LineItems": line_items,
+        }
+
+        response = await self._make_request(
+            "POST",
+            "Invoices",
+            data={"Invoices": [bill]},
+        )
+
+        pushed = response.get("Invoices") or []
+        if not pushed:
+            raise ValueError(
+                f"Xero returned no invoice for bill {invoice.get('invoice_number')} "
+                "— the bill was not created"
+            )
+
+        created = pushed[0]
+        return {
+            "xero_invoice_id": created.get("InvoiceID"),
+            "xero_invoice_number": created.get("InvoiceNumber"),
+            "status": created.get("Status"),
+        }
+
+    # ========================================================================
     # P&L Reporting
     # ========================================================================
 
@@ -689,6 +781,11 @@ class XeroClient:
             net_profit=net_profit,
             generated_at=datetime.utcnow(),
         )
+
+
+# API-facing alias: newer integrations (supplier bill push) construct the client
+# under this name — same class as XeroClient above.
+XeroApiClient = XeroClient
 
 
 # ============================================================================

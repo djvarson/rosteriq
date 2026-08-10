@@ -145,36 +145,44 @@ def seed_demo_environment(db) -> None:
             (5, "bar", time(11, 0), time(19, 0)),
             (6, "kitchen", time(15, 0), time(23, 0)),
         ]
-        existing = db.get_roster(f"demo-roster-{wk}")
-        have_days = {s.date for s in existing.shifts} if existing else set()
-        # Only days inside THIS week's roster window (a prior day in last
-        # week would violate the Mon-Sun roster validator).
-        want_days = [d for d in (today - timedelta(days=o) for o in (0, 1, 2))
-                     if week_start <= d <= week_end]
-        new_shifts = []
+        # All three trade days get labour, even when yesterday belongs to LAST
+        # week (a Monday clamp used to drop Sat/Sun labour while sales still
+        # topped those days up — prime cost read ~29%, a too-good-to-be-true
+        # venue). Days are grouped into their own Mon-Sun rosters so the
+        # roster validator stays honest.
+        want_days = [today - timedelta(days=o) for o in (0, 1, 2)]
+        by_week: dict = {}
         for d in want_days:
-            if d in have_days:
-                continue
-            for i, role, st, en in _SHIFTS:
-                paid_hours = (en.hour - st.hour) - 0.5
-                new_shifts.append(Shift(
-                    id=f"demo-shift-{d.isoformat()}-{i:03d}",
-                    employee_id=f"demo-staff-{i:03d}",
-                    date=d, start_time=st, end_time=en,
-                    break_minutes=30, status=ShiftStatus.scheduled, role=role,
-                    cost=Decimal(str(round(paid_hours * 32.5, 2))),
+            ws = d - timedelta(days=d.weekday())
+            by_week.setdefault(ws, []).append(d)
+        for ws, days in by_week.items():
+            rid = f"demo-roster-{ws.isoformat()}"
+            existing = db.get_roster(rid)
+            have_days = {s.date for s in existing.shifts} if existing else set()
+            new_shifts = []
+            for d in days:
+                if d in have_days:
+                    continue
+                for i, role, st, en in _SHIFTS:
+                    paid_hours = (en.hour - st.hour) - 0.5
+                    new_shifts.append(Shift(
+                        id=f"demo-shift-{d.isoformat()}-{i:03d}",
+                        employee_id=f"demo-staff-{i:03d}",
+                        date=d, start_time=st, end_time=en,
+                        break_minutes=30, status=ShiftStatus.scheduled, role=role,
+                        cost=Decimal(str(round(paid_hours * 32.5, 2))),
+                    ))
+            if new_shifts:
+                all_shifts = (list(existing.shifts) if existing else []) + new_shifts
+                db.save_roster(Roster(
+                    id=rid,
+                    venue_id=DEMO_VENUE_ID,
+                    week_start=ws,
+                    week_end=ws + timedelta(days=6),
+                    shifts=all_shifts,
+                    total_cost=Decimal(str(round(sum(float(s.cost or 0) for s in all_shifts), 2))),
+                    created_at=datetime.utcnow(),
                 ))
-        if new_shifts:
-            all_shifts = (list(existing.shifts) if existing else []) + new_shifts
-            db.save_roster(Roster(
-                id=f"demo-roster-{wk}",
-                venue_id=DEMO_VENUE_ID,
-                week_start=week_start,
-                week_end=week_end,
-                shifts=all_shifts,
-                total_cost=Decimal(str(round(sum(float(s.cost or 0) for s in all_shifts), 2))),
-                created_at=datetime.utcnow(),
-            ))
     except Exception:
         pass
 

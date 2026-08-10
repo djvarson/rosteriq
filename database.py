@@ -570,6 +570,19 @@ class BaseStore:
     def list_supplier_invoices(self, venue_id: str) -> list:
         raise NotImplementedError
 
+    # --- Xero bill push ledger (one push per invoice; PK == invoice id) ----
+
+    def save_xero_bill_push(self, rec: dict) -> None:
+        """Record that an invoice was pushed to Xero. First write wins:
+        a second save for the same invoice id is a silent no-op."""
+        raise NotImplementedError
+
+    def get_xero_bill_push(self, invoice_id: str):
+        raise NotImplementedError
+
+    def list_xero_bill_pushes(self, venue_id: str) -> list:
+        raise NotImplementedError
+
     # --- Wastage log (record spoiled/dropped stock) ------------------------
 
     def save_waste_entry(self, entry: dict) -> None:
@@ -995,6 +1008,7 @@ class MemoryStore(BaseStore):
         self._supplier_orders: dict[str, dict] = {}
         self._dish_sales: dict[str, dict] = {}
         self._supplier_invoices: dict[str, dict] = {}
+        self._xero_bill_pushes: dict[str, dict] = {}  # Key: invoice id (one push per invoice)
         self._waste_log: dict[str, dict] = {}
         self._pos_item_maps: dict[str, dict] = {}
         self._import_batches: dict[str, dict] = {}
@@ -1237,6 +1251,23 @@ class MemoryStore(BaseStore):
         return sorted(
             [i for i in self._supplier_invoices.values() if i.get("venue_id") == venue_id],
             key=lambda i: str(i.get("created_at")), reverse=True,
+        )
+
+    # --- Xero bill push ledger ---
+
+    def save_xero_bill_push(self, rec):
+        # First write wins, mirroring PG's ON CONFLICT (id) DO NOTHING.
+        if rec["id"] not in self._xero_bill_pushes:
+            self._xero_bill_pushes[rec["id"]] = dict(rec)
+
+    def get_xero_bill_push(self, invoice_id):
+        rec = self._xero_bill_pushes.get(invoice_id)
+        return dict(rec) if rec else None
+
+    def list_xero_bill_pushes(self, venue_id):
+        return sorted(
+            [dict(p) for p in self._xero_bill_pushes.values() if p.get("venue_id") == venue_id],
+            key=lambda p: str(p.get("pushed_at")), reverse=True,
         )
 
     # --- Wastage log ---
@@ -2819,6 +2850,17 @@ class PostgresStore(BaseStore):
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "xero_bill_pushes": """
+            CREATE TABLE IF NOT EXISTS xero_bill_pushes (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                invoice_id TEXT NOT NULL,
+                xero_invoice_id TEXT,
+                xero_invoice_number TEXT,
+                status TEXT DEFAULT 'pushed',
+                pushed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "dish_sales": """
             CREATE TABLE IF NOT EXISTS dish_sales (
                 id TEXT PRIMARY KEY,
@@ -3706,6 +3748,37 @@ class PostgresStore(BaseStore):
             """, (venue_id,))
             return [self._row_to_plain(r, json_fields=("items", "price_changes"))
                     for r in cur.fetchall()]
+
+    # --- Xero bill push ledger (PK == invoice id: one push per invoice) ---
+
+    def save_xero_bill_push(self, rec):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "xero_bill_pushes")
+            cur.execute("""
+                INSERT INTO xero_bill_pushes (id, venue_id, invoice_id, xero_invoice_id,
+                    xero_invoice_number, status, pushed_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (
+                rec["id"], rec["venue_id"], rec["invoice_id"],
+                rec.get("xero_invoice_id"), rec.get("xero_invoice_number"),
+                rec.get("status", "pushed"), rec.get("pushed_at", datetime.utcnow()),
+            ))
+
+    def get_xero_bill_push(self, invoice_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "xero_bill_pushes")
+            cur.execute("SELECT * FROM xero_bill_pushes WHERE id = %s", (invoice_id,))
+            row = cur.fetchone()
+            return self._row_to_plain(row) if row else None
+
+    def list_xero_bill_pushes(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "xero_bill_pushes")
+            cur.execute("""
+                SELECT * FROM xero_bill_pushes WHERE venue_id = %s ORDER BY pushed_at DESC
+            """, (venue_id,))
+            return [self._row_to_plain(r) for r in cur.fetchall()]
 
     def save_waste_entry(self, entry):
         with self._cursor() as cur:
