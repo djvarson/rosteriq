@@ -9437,8 +9437,24 @@ function displayNotificationLog(auditData) {
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
-// Initialize on page load
-loadVenues();
+// Initialize on page load. Demo mode must be self-sufficient: a cold
+// ?demo=true load (bookmark, cleared storage, new browser) has no JWT, so
+// every live endpoint — the AI chat, briefing, snapshot — would silently
+// 401. Mint a demo session first, THEN load.
+(async function boot() {
+  if (state.isDemo && !state.authToken) {
+    try {
+      const r = await fetch('/api/auth/demo', { method: 'POST' });
+      const j = await r.json();
+      if (j.access_token) {
+        localStorage.setItem('jwt_token', j.access_token);
+        state.authToken = j.access_token;
+        state.token = j.access_token;
+      }
+    } catch (e) { /* offline demo still renders the static showcase */ }
+  }
+  loadVenues();
+})();
 // Check if returning from Deputy OAuth redirect
 checkDeputyOAuthReturn();
 // Charts are initialized inside loadVenueData() or loadDemoVenueData()
