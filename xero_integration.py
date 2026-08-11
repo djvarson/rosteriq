@@ -140,12 +140,16 @@ class XeroOAuth:
             "profile",
             "email",
             # Xero apps created after 2 March 2026 only accept GRANULAR
-            # scopes — the old broad "accounting" scope now returns
-            # invalid_scope at the consent screen.
-            "accounting.transactions",   # bills push + bank transactions pull
-            "accounting.contacts",       # supplier contacts on ACCPAY bills
-            "accounting.settings.read",  # org/account metadata
-            "accounting.reports.read",   # P&L pull
+            # scopes (the old broad "accounting" scope returns invalid_scope
+            # at the consent screen). These names are the canonical list from
+            # the app's Configuration page — one per shipped feature:
+            "accounting.invoices",                    # ACCPAY bills push
+            "accounting.contacts",                    # supplier contacts on bills
+            "accounting.settings.read",               # org/account metadata
+            "accounting.banktransactions.read",       # revenue pull
+            "accounting.reports.profitandloss.read",  # P&L pull
+            "accounting.manualjournals",              # labour-cost journal push
+            "payroll.timesheets",                     # payroll timesheet push
         ]
 
     def generate_authorize_url(self) -> tuple[str, str, str]:
