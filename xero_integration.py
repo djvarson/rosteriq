@@ -21,7 +21,7 @@ import hashlib
 import secrets
 import time
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlencode, parse_qs, urlparse
@@ -351,7 +351,13 @@ class XeroClient:
 
     async def _ensure_token_valid(self) -> None:
         """Refresh token if expired."""
-        if datetime.utcnow() >= self.credentials.token_expires:
+        # PostgreSQL returns token_expires timezone-AWARE (TIMESTAMPTZ) while
+        # utcnow() is naive — comparing them raises TypeError. Normalise both
+        # sides to naive UTC. (Mocked tests never see this: they seed naive.)
+        expires = self.credentials.token_expires
+        if expires is not None and expires.tzinfo is not None:
+            expires = expires.astimezone(timezone.utc).replace(tzinfo=None)
+        if expires is None or datetime.utcnow() >= expires:
             oauth = XeroOAuth(
                 self.credentials.client_id,
                 self.credentials.client_secret,
