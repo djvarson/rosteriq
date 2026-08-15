@@ -104,6 +104,7 @@ EXEMPT_PATHS = {
     "/staff",
     "/login",
     "/register",
+    "/savings",
     "/timeclock",
     "/my",
     "/connections",
