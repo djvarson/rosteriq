@@ -501,6 +501,26 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register communication hub routes: {e}")
 
+# SOP / JSP document library (procedures, role targeting, acknowledgements)
+try:
+    from rosteriq.routes.sops import router as sops_router
+    app.include_router(sops_router)
+    logger.info("SOP library routes registered")
+except ImportError:
+    logger.info("SOP library routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register SOP library routes: {e}")
+
+# Team feed (two-way posts: staff + managers, comments, reactions, pins)
+try:
+    from rosteriq.routes.feed import router as feed_router
+    app.include_router(feed_router)
+    logger.info("Team feed routes registered")
+except ImportError:
+    logger.info("Team feed routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register team feed routes: {e}")
+
 # Inventory (stock levels, stocktakes, supplier orders)
 try:
     from rosteriq.routes.inventory import router as inventory_router

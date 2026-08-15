@@ -85,11 +85,11 @@
     nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--card);
       border-top: 1px solid var(--border); display: flex;
       padding-bottom: env(safe-area-inset-bottom); }
-    nav button { flex: 1; background: none; border: none; color: var(--muted); padding: 10px 0 8px;
-      font-size: 11px; cursor: pointer; display: flex; flex-direction: column; align-items: center;
-      gap: 3px; font-family: inherit; }
+    nav button { flex: 1; min-width: 0; background: none; border: none; color: var(--muted); padding: 9px 0 7px;
+      font-size: 10px; cursor: pointer; display: flex; flex-direction: column; align-items: center;
+      gap: 3px; font-family: inherit; white-space: nowrap; }
     nav button.active { color: #D97706; }
-    nav svg { width: 22px; height: 22px; }
+    nav svg { width: 20px; height: 20px; }
 
     .toast { position: fixed; left: 16px; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom));
       background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--blue);
@@ -107,6 +107,50 @@
     .cancel-btn { background: var(--card); border: 1px solid var(--border); color: var(--red);
       border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer;
       font-family: inherit; flex-shrink: 0; }
+    .home-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 4px; }
+    .home-tile { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px 12px; text-align: left; cursor: pointer; font-family: inherit; color: var(--text);
+      box-shadow: 0 1px 2px rgba(16,24,40,0.06); }
+    .home-tile:active { background: var(--card-2); }
+    .home-tile-n { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
+    .home-tile-l { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .home-next-when { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+    .home-next-time { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 4px 0 2px; }
+    .week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .week-day { text-align: center; padding: 8px 2px; border-radius: 10px; background: var(--card-2); }
+    .week-day.on { background: rgba(245,158,11,0.15); }
+    .week-day.today { outline: 2px solid var(--blue); }
+    .week-day .d { font-size: 11px; color: var(--muted); font-weight: 600; }
+    .week-day .n { font-size: 15px; font-weight: 800; }
+    .week-day .t { font-size: 10px; color: var(--text); margin-top: 2px; white-space: nowrap; }
+    .seg-btn { flex: 1; background: var(--card); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 10px; padding: 8px 0; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .seg-btn.active { background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.5); color: #D97706; }
+    .post { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
+      box-shadow: 0 1px 2px rgba(16,24,40,0.06); }
+    .post.pinned { border-color: rgba(245,158,11,0.5); }
+    .post-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+    .post-who { font-weight: 700; font-size: 14px; }
+    .post-who .role { font-weight: 600; font-size: 11px; color: var(--muted); margin-left: 6px; }
+    .post-when { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .post-body { margin: 6px 0 8px; font-size: 14px; white-space: pre-wrap; line-height: 1.45; }
+    .react-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .react { background: var(--card-2); border: 1px solid var(--border); border-radius: 14px; padding: 3px 9px;
+      font: inherit; font-size: 13px; cursor: pointer; }
+    .react.mine { background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.5); }
+    .comment { border-top: 1px solid var(--border); padding: 8px 0 2px; font-size: 13px; }
+    .comment .who { font-weight: 700; }
+    .comment .when { color: var(--muted); font-size: 11px; margin-left: 6px; }
+    .comment-box { display: flex; gap: 6px; margin-top: 8px; }
+    .comment-box input { flex: 1; margin: 0; padding: 8px 10px; font-size: 13px; }
+    .sop { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
+      box-shadow: 0 1px 2px rgba(16,24,40,0.06); }
+    .sop-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .sop-title { font-weight: 700; font-size: 14px; }
+    .sop-cat { font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 2px 7px; border-radius: 8px;
+      background: rgba(2,132,199,0.10); color: #0284C7; margin-right: 6px; vertical-align: 1px; }
+    .sop-body { display: none; margin-top: 10px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; color: var(--text); }
+    .sop.open .sop-body { display: block; }
     .nolink { text-align: center; padding: 40px 20px; }
     .nolink h2 { font-size: 18px; margin-bottom: 10px; }
     .nolink p { color: var(--muted); font-size: 14px; line-height: 1.5; }
@@ -129,6 +173,32 @@
       <p id="nolink-msg"></p>
     </div>
 
+    <div id="view-home" style="display:none;">
+      <div class="card" id="home-next" style="border-left:4px solid var(--blue);">
+        <div class="empty">Loading your day&hellip;</div>
+      </div>
+      <div class="home-grid">
+        <button class="home-tile" onclick="show('news')">
+          <div class="home-tile-n" id="home-unread">0</div><div class="home-tile-l">unread news</div>
+        </button>
+        <button class="home-tile" onclick="show('cover')">
+          <div class="home-tile-n" id="home-grabs">0</div><div class="home-tile-l">shifts up for grabs</div>
+        </button>
+        <button class="home-tile" onclick="show('leave')">
+          <div class="home-tile-n" id="home-leave">0</div><div class="home-tile-l">leave pending</div>
+        </button>
+        <button class="home-tile" onclick="show('hours')">
+          <div class="home-tile-n" id="home-hours">0</div><div class="home-tile-l">hrs last 14 days</div>
+        </button>
+      </div>
+      <div class="section-title">This week</div>
+      <div class="card" id="home-week"><div class="empty">Loading&hellip;</div></div>
+      <div id="home-todo-wrap" style="display:none;">
+        <div class="section-title">Needs you</div>
+        <div class="card" id="home-todo"></div>
+      </div>
+    </div>
+
     <div id="view-shifts" style="display:none;">
       <div class="section-title">Next 14 days</div>
       <div class="card" id="shifts-card"><div class="empty">No shifts loaded</div></div>
@@ -143,8 +213,28 @@
     </div>
 
     <div id="view-news" style="display:none;">
-      <div class="section-title">From your venue</div>
-      <div class="card" id="news-card"><div class="empty">No announcements yet</div></div>
+      <div class="seg" style="display:flex; gap:6px; margin-bottom:12px;">
+        <button class="seg-btn active" id="seg-feed" onclick="newsMode('feed')">Team feed</button>
+        <button class="seg-btn" id="seg-ann" onclick="newsMode('ann')">Announcements</button>
+      </div>
+      <div id="news-feed">
+        <div class="card" style="padding:12px;">
+          <textarea id="feed-body" rows="2" maxlength="2000" placeholder="Post to the team…" style="margin:0;"></textarea>
+          <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+            <button class="claim-btn" id="feed-post-btn" onclick="postToFeed()">Post</button>
+          </div>
+        </div>
+        <div id="feed-list"><div class="empty">Loading&hellip;</div></div>
+      </div>
+      <div id="news-ann" style="display:none;">
+        <div class="section-title">From your venue</div>
+        <div class="card" id="news-card"><div class="empty">No announcements yet</div></div>
+      </div>
+    </div>
+
+    <div id="view-sops" style="display:none;">
+      <div class="section-title">Procedures &amp; policies</div>
+      <div id="sops-list"><div class="empty">Loading&hellip;</div></div>
     </div>
 
     <div id="view-cover" style="display:none;">
@@ -177,7 +267,11 @@
   </main>
 
   <nav id="tabbar" style="display:none;">
-    <button data-view="shifts" class="active" onclick="show('shifts')">
+    <button data-view="home" class="active" onclick="show('home')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg>
+      Home
+    </button>
+    <button data-view="shifts" onclick="show('shifts')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
       Shifts
     </button>
@@ -192,6 +286,10 @@
     <button data-view="cover" onclick="show('cover')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
       Cover
+    </button>
+    <button data-view="sops" onclick="show('sops')" style="position:relative;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      SOPs<span id="sops-dot" style="display:none; position:absolute; top:6px; right:calc(50% - 16px); width:8px; height:8px; border-radius:50%; background:var(--red);"></span>
     </button>
     <button data-view="leave" onclick="show('leave')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M2 12c0-5 4-9 10-9M2 12c0 5 4 9 10 9m10-9c0-5-4-9-10-9m10 9c0 5-4 9-10 9M12 3c2.5 2.4 4 5.5 4 9s-1.5 6.6-4 9c-2.5-2.4-4-5.5-4-9s1.5-6.6 4-9z"/></svg>
@@ -241,17 +339,207 @@ function logout() {
 }
 
 function show(view) {
-  ['shifts', 'hours', 'news', 'cover', 'leave'].forEach(function (v) {
-    document.getElementById('view-' + v).style.display = v === view ? 'block' : 'none';
+  ['home', 'shifts', 'hours', 'news', 'sops', 'cover', 'leave'].forEach(function (v) {
+    const el = document.getElementById('view-' + v);
+    if (el) el.style.display = v === view ? 'block' : 'none';
   });
   document.querySelectorAll('nav button').forEach(function (b) {
     b.classList.toggle('active', b.getAttribute('data-view') === view);
   });
+  window.scrollTo(0, 0);
+  if (view === 'home') loadHome();
   if (view === 'shifts') loadShifts();
   if (view === 'hours') loadHours();
-  if (view === 'news') loadNews();
+  if (view === 'news') { loadFeed(); loadNews(); }
+  if (view === 'sops') loadSops();
   if (view === 'cover') loadCover();
   if (view === 'leave') { loadAvailability(); loadLeave(); }
+}
+
+// ---- Team feed (two-way) ------------------------------------------------------
+let myVenueId = null;
+const REACTS = ['👍', '❤️', '🎉', '👏', '😂'];
+
+function newsMode(mode) {
+  document.getElementById('news-feed').style.display = mode === 'feed' ? 'block' : 'none';
+  document.getElementById('news-ann').style.display = mode === 'ann' ? 'block' : 'none';
+  document.getElementById('seg-feed').classList.toggle('active', mode === 'feed');
+  document.getElementById('seg-ann').classList.toggle('active', mode === 'ann');
+}
+
+function timeAgo(iso) {
+  const t = new Date(iso).getTime(); if (!t) return '';
+  const m = Math.floor((Date.now() - t) / 60000);
+  if (m < 1) return 'just now'; if (m < 60) return m + 'm';
+  const h = Math.floor(m / 60); if (h < 24) return h + 'h';
+  return Math.floor(h / 24) + 'd';
+}
+
+function renderPost(p) {
+  const counts = p.reaction_counts || {};
+  const mine = p.my_reactions || [];
+  const reacts = REACTS.map(function (e) {
+    const n = counts[e] || 0;
+    return '<button class="react' + (mine.indexOf(e) >= 0 ? ' mine' : '') + '" onclick="reactTo(\'' + esc(p.id) + '\', \'' + e + '\')">' + e + (n ? ' ' + n : '') + '</button>';
+  }).join('');
+  const comments = (p.comments || []).map(function (c) {
+    return '<div class="comment"><span class="who">' + esc(c.author_name) + '</span><span class="when">' + timeAgo(c.created_at) + '</span><div>' + esc(c.body) + '</div></div>';
+  }).join('');
+  return '<div class="post' + (p.pinned ? ' pinned' : '') + '" id="post-' + esc(p.id) + '">' +
+    '<div class="post-head"><div class="post-who">' + (p.pinned ? '&#128204; ' : '') + esc(p.author_name) +
+      '<span class="role">' + (p.author_role === 'manager' ? 'Manager' : '') + '</span></div>' +
+      '<div class="post-when">' + timeAgo(p.created_at) + '</div></div>' +
+    '<div class="post-body">' + esc(p.body) + '</div>' +
+    '<div class="react-row">' + reacts + '</div>' +
+    comments +
+    '<div class="comment-box"><input id="cm-' + esc(p.id) + '" maxlength="1000" placeholder="Reply…">' +
+      '<button class="cover-btn" onclick="commentOn(\'' + esc(p.id) + '\')">Send</button></div>' +
+  '</div>';
+}
+
+async function loadFeed() {
+  const box = document.getElementById('feed-list');
+  if (!myVenueId) { box.innerHTML = '<div class="empty">Loading&hellip;</div>'; return; }
+  try {
+    const data = await api('/api/feed/posts?venue_id=' + encodeURIComponent(myVenueId));
+    if (!data.count) { box.innerHTML = '<div class="empty">Nothing posted yet — say hi to the team 👋</div>'; return; }
+    box.innerHTML = data.posts.map(renderPost).join('');
+  } catch (e) {
+    box.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
+}
+
+async function postToFeed() {
+  const ta = document.getElementById('feed-body');
+  const body = ta.value.trim();
+  if (!body) return;
+  const btn = document.getElementById('feed-post-btn'); btn.disabled = true;
+  try {
+    await api('/api/feed/posts', { method: 'POST', body: { venue_id: myVenueId, body: body } });
+    ta.value = '';
+    loadFeed();
+  } catch (e) { toast(e.message, 'err'); }
+  finally { btn.disabled = false; }
+}
+
+async function reactTo(postId, emoji) {
+  try {
+    await api('/api/feed/posts/' + encodeURIComponent(postId) + '/react', { method: 'POST', body: { emoji: emoji } });
+    loadFeed();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function commentOn(postId) {
+  const input = document.getElementById('cm-' + postId);
+  const body = (input.value || '').trim();
+  if (!body) return;
+  try {
+    await api('/api/feed/posts/' + encodeURIComponent(postId) + '/comments', { method: 'POST', body: { body: body } });
+    loadFeed();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ---- Procedures & policies (SOP / JSP library) --------------------------------
+async function loadSops() {
+  const box = document.getElementById('sops-list');
+  try {
+    const data = await api('/api/me/sops');
+    if (!data.linked) { box.innerHTML = '<div class="empty">' + esc(data.message || '') + '</div>'; return; }
+    if (!data.count) { box.innerHTML = '<div class="empty">No procedures published for your role yet</div>'; return; }
+    box.innerHTML = data.documents.map(function (d) {
+      const needs = d.requires_ack !== false && !d.acknowledged;
+      return '<div class="sop" id="sop-' + esc(d.id) + '">' +
+        '<div class="sop-head" onclick="document.getElementById(\'sop-' + esc(d.id) + '\').classList.toggle(\'open\')">' +
+          '<div><span class="sop-cat">' + esc((d.category || 'sop').toUpperCase()) + '</span><span class="sop-title">' + esc(d.title) + '</span>' +
+            '<div class="note">v' + esc(d.version) + (d.acknowledged ? ' &middot; acknowledged ' + esc(String(d.acknowledged_at || '').slice(0, 10)) : (needs ? ' &middot; <span style="color:var(--red); font-weight:600;">needs your acknowledgement</span>' : '')) + '</div></div>' +
+          '<span class="badge ' + (d.acknowledged ? 'approved' : (needs ? 'pending' : 'today')) + '">' + (d.acknowledged ? 'Done' : (needs ? 'Read me' : 'Info')) + '</span>' +
+        '</div>' +
+        '<div class="sop-body">' + esc(d.body) +
+          (needs ? '<div style="margin-top:12px;"><button class="claim-btn" onclick="ackSop(\'' + esc(d.id) + '\')">I have read and understood this</button></div>' : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+    document.getElementById('sops-dot').style.display = data.outstanding ? 'block' : 'none';
+  } catch (e) {
+    box.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
+}
+
+async function ackSop(docId) {
+  try {
+    await api('/api/me/sops/' + encodeURIComponent(docId) + '/acknowledge', { method: 'POST' });
+    toast('Acknowledged — thanks', 'ok');
+    loadSops();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ---- Home: today at a glance ------------------------------------------------
+async function loadHome() {
+  const next = document.getElementById('home-next');
+  const week = document.getElementById('home-week');
+  const todo = document.getElementById('home-todo');
+  const todoWrap = document.getElementById('home-todo-wrap');
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const results = await Promise.allSettled([
+    api('/api/me/shifts'), api('/api/me/announcements'), api('/api/me/cover'),
+    api('/api/me/leave'), api('/api/me/timesheets'), api('/api/me/sops').catch(function () { return { documents: [] }; }),
+  ]);
+  const val = function (i, fallback) { return results[i].status === 'fulfilled' ? results[i].value : fallback; };
+  const shifts = (val(0, {}).shifts || []).slice().sort(function (a, b) { return (a.date + a.start).localeCompare(b.date + b.start); });
+  const news = val(1, {}).announcements || [];
+  const cover = val(2, {});
+  const leave = val(3, {}).requests || val(3, {}).leave || [];
+  const ts = val(4, {});
+  const sops = val(5, {}).documents || [];
+
+  // Next shift hero
+  const upcoming = shifts.find(function (s) { return s.date >= todayIso; });
+  if (!upcoming) {
+    next.innerHTML = '<div class="home-next-when">Next shift</div><div class="home-next-time">Nothing rostered</div><div class="note">Check back after the next roster is published.</div>';
+  } else {
+    const isToday = upcoming.date === todayIso;
+    next.innerHTML =
+      '<div class="home-next-when">' + (isToday ? 'Today' : 'Next shift &middot; ' + niceDate(upcoming.date)) + '</div>' +
+      '<div class="home-next-time">' + esc(upcoming.start) + ' &ndash; ' + esc(upcoming.end) + '</div>' +
+      '<div class="note">' + esc(upcoming.role || '') + (upcoming.break_minutes ? ' &middot; ' + upcoming.break_minutes + 'm break' : '') + '</div>' +
+      (isToday ? '' : '<button class="cover-btn" style="margin-top:10px;" onclick="offerCover(\'' + esc(upcoming.id) + '\', \'' + esc(upcoming.date) + ' ' + esc(upcoming.start) + '\')">Can&rsquo;t work it?</button>');
+  }
+
+  // Tiles
+  const unread = news.filter(function (a) { return !a.read; }).length;
+  document.getElementById('home-unread').textContent = unread;
+  document.getElementById('news-dot').style.display = unread ? 'block' : 'none';
+  document.getElementById('home-grabs').textContent = (cover.up_for_grabs || cover.open || []).length;
+  document.getElementById('home-leave').textContent = leave.filter(function (l) { return l.status === 'pending'; }).length;
+  document.getElementById('home-hours').textContent = Math.round((ts.total_worked_minutes || 0) / 60);
+
+  // Week strip: Mon-Sun of the current week, shaded when rostered
+  const now = new Date();
+  const mon = new Date(now); mon.setDate(now.getDate() + (now.getDay() === 0 ? -6 : 1 - now.getDay()));
+  const byDate = {}; shifts.forEach(function (s) { byDate[s.date] = s; });
+  const cells = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(mon); d.setDate(mon.getDate() + i);
+    const iso = d.toISOString().slice(0, 10);
+    const s = byDate[iso];
+    cells.push('<div class="week-day' + (s ? ' on' : '') + (iso === todayIso ? ' today' : '') + '">' +
+      '<div class="d">' + DOW[d.getDay()] + '</div><div class="n">' + d.getDate() + '</div>' +
+      '<div class="t">' + (s ? esc(s.start.replace(/:00$/, '')) : '&nbsp;') + '</div></div>');
+  }
+  week.innerHTML = '<div class="week-strip">' + cells.join('') + '</div>';
+
+  // Needs you: unacknowledged procedures
+  const pendingSops = sops.filter(function (d) { return d.requires_ack !== false && !d.acknowledged; });
+  if (pendingSops.length) {
+    todoWrap.style.display = 'block';
+    todo.innerHTML = pendingSops.slice(0, 4).map(function (d) {
+      return '<div class="leave-row" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">' +
+        '<div><div class="dates">' + esc(d.title) + '</div><div class="note">' + esc((d.category || '').toUpperCase()) + ' &middot; please read &amp; acknowledge</div></div>' +
+        '<button class="claim-btn" onclick="show(\'sops\')">Read</button></div>';
+    }).join('');
+  } else {
+    todoWrap.style.display = 'none';
+  }
 }
 
 const AVAIL_DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
@@ -566,10 +854,14 @@ async function boot() {
     }
     document.getElementById('hi').textContent = 'Hi, ' + (prof.name.split(' ')[0] || prof.name);
     document.getElementById('venue').textContent = prof.venue_name;
+    myVenueId = prof.venue_id;
     document.getElementById('tabbar').style.display = 'flex';
-    document.getElementById('view-shifts').style.display = 'block';
-    loadShifts();
+    show('home');
     refreshNewsDot();
+    // SOP dot without opening the tab
+    api('/api/me/sops').then(function (d) {
+      document.getElementById('sops-dot').style.display = d && d.outstanding ? 'block' : 'none';
+    }).catch(function () {});
   } catch (e) {
     document.getElementById('loading').textContent = e.message;
   }

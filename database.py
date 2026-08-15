@@ -519,6 +519,34 @@ class BaseStore:
     def list_announcements(self, venue_id: str) -> list:
         raise NotImplementedError
 
+    # --- SOP / JSP document library (procedures + acknowledgements) --------
+
+    def save_sop_document(self, doc: dict) -> None:
+        raise NotImplementedError
+
+    def get_sop_document(self, doc_id: str):
+        raise NotImplementedError
+
+    def list_sop_documents(self, venue_id: str, include_inactive: bool = False) -> list:
+        raise NotImplementedError
+
+    def save_sop_ack(self, ack: dict) -> None:
+        raise NotImplementedError
+
+    def list_sop_acks(self, venue_id: str, doc_id: str = None) -> list:
+        raise NotImplementedError
+
+    # --- Team feed (two-way posts: staff + managers) -----------------------
+
+    def save_feed_post(self, post: dict) -> None:
+        raise NotImplementedError
+
+    def get_feed_post(self, post_id: str):
+        raise NotImplementedError
+
+    def list_feed_posts(self, venue_id: str, limit: int = 50) -> list:
+        raise NotImplementedError
+
     # --- Inventory: stocktakes + supplier orders ---------------------------
 
     def save_stocktake(self, st: dict) -> None:
@@ -1017,6 +1045,9 @@ class MemoryStore(BaseStore):
         self._leave_requests: dict[str, dict] = {}
         self._shift_covers: dict[str, dict] = {}
         self._announcements: dict[str, dict] = {}
+        self._sop_documents: dict[str, dict] = {}  # Key: doc id (SOP/JSP library)
+        self._sop_acks: dict[str, dict] = {}  # Key: ack id; unique per (doc, version, employee)
+        self._feed_posts: dict[str, dict] = {}  # Key: post id (team feed)
         self._stocktakes: dict[str, dict] = {}
         self._supplier_orders: dict[str, dict] = {}
         self._dish_sales: dict[str, dict] = {}
@@ -1205,6 +1236,55 @@ class MemoryStore(BaseStore):
             [a for a in self._announcements.values() if a.get("venue_id") == venue_id],
             key=lambda a: (not a.get("pinned"), str(a.get("created_at"))),
         )
+
+    # --- SOP / JSP document library ---
+
+    def save_sop_document(self, doc):
+        self._sop_documents[doc["id"]] = dict(doc)
+
+    def get_sop_document(self, doc_id):
+        return self._sop_documents.get(doc_id)
+
+    def list_sop_documents(self, venue_id, include_inactive=False):
+        rows = [d for d in self._sop_documents.values() if d.get("venue_id") == venue_id]
+        if not include_inactive:
+            rows = [d for d in rows if d.get("active", True)]
+        return sorted(rows, key=lambda d: (str(d.get("created_at")), str(d.get("title"))))
+
+    def save_sop_ack(self, ack):
+        # Mirrors the PG UNIQUE (doc_id, doc_version, employee_id) ... ON
+        # CONFLICT DO NOTHING: the first acknowledgement per key wins.
+        key = (ack["doc_id"], int(ack["doc_version"]), ack["employee_id"])
+        for existing in self._sop_acks.values():
+            if (existing.get("doc_id"), int(existing.get("doc_version") or 0),
+                    existing.get("employee_id")) == key:
+                return
+        self._sop_acks[ack["id"]] = dict(ack)
+
+    def list_sop_acks(self, venue_id, doc_id=None):
+        rows = [a for a in self._sop_acks.values() if a.get("venue_id") == venue_id]
+        if doc_id is not None:
+            rows = [a for a in rows if a.get("doc_id") == doc_id]
+        return sorted(rows, key=lambda a: str(a.get("acknowledged_at")))
+
+    # --- Team feed ---
+
+    def save_feed_post(self, post):
+        self._feed_posts[post["id"]] = dict(post)
+
+    def get_feed_post(self, post_id):
+        return self._feed_posts.get(post_id)
+
+    def list_feed_posts(self, venue_id, limit=50):
+        # Iterate newest-inserted first so a stable sort keeps insertion order
+        # as the tiebreak when two posts share a created_at.
+        rows = [
+            p for p in reversed(list(self._feed_posts.values()))
+            if p.get("venue_id") == venue_id and not p.get("removed")
+        ]
+        rows.sort(key=lambda p: (bool(p.get("pinned")), str(p.get("created_at"))),
+                  reverse=True)
+        return rows[: max(int(limit or 50), 0)]
 
     # --- Inventory ---
 
@@ -3003,6 +3083,50 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "sop_documents": """
+            CREATE TABLE IF NOT EXISTS sop_documents (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                category TEXT,
+                body TEXT NOT NULL,
+                applies_to JSONB DEFAULT '[]'::jsonb,
+                version INTEGER DEFAULT 1,
+                requires_ack BOOLEAN DEFAULT true,
+                active BOOLEAN DEFAULT true,
+                author_name TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
+        "sop_acknowledgements": """
+            CREATE TABLE IF NOT EXISTS sop_acknowledgements (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                doc_id TEXT NOT NULL,
+                doc_version INTEGER NOT NULL,
+                employee_id TEXT NOT NULL,
+                employee_name TEXT,
+                acknowledged_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (doc_id, doc_version, employee_id)
+            )
+        """,
+        "feed_posts": """
+            CREATE TABLE IF NOT EXISTS feed_posts (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                author_user_id TEXT,
+                author_name TEXT,
+                author_role TEXT,
+                body TEXT NOT NULL,
+                pinned BOOLEAN DEFAULT false,
+                removed BOOLEAN DEFAULT false,
+                reactions JSONB DEFAULT '{}'::jsonb,
+                comments JSONB DEFAULT '[]'::jsonb,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "recipes": """
             CREATE TABLE IF NOT EXISTS recipes (
                 id TEXT PRIMARY KEY,
@@ -3676,6 +3800,125 @@ class PostgresStore(BaseStore):
                 ORDER BY pinned DESC, created_at DESC
             """, (venue_id,))
             return [dict(r) for r in cur.fetchall()]
+
+    # --- SOP / JSP document library (procedures + acknowledgements) ---
+
+    def save_sop_document(self, doc):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sop_documents")
+            cur.execute("""
+                INSERT INTO sop_documents (id, venue_id, title, category, body,
+                    applies_to, version, requires_ack, active, author_name,
+                    created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    title=EXCLUDED.title, category=EXCLUDED.category,
+                    body=EXCLUDED.body, applies_to=EXCLUDED.applies_to,
+                    version=EXCLUDED.version, requires_ack=EXCLUDED.requires_ack,
+                    active=EXCLUDED.active, author_name=EXCLUDED.author_name,
+                    updated_at=now()
+            """, (
+                doc["id"], doc["venue_id"], doc["title"], doc.get("category", "sop"),
+                doc["body"], json.dumps(list(doc.get("applies_to") or [])),
+                int(doc.get("version", 1) or 1), bool(doc.get("requires_ack", True)),
+                bool(doc.get("active", True)), doc.get("author_name"),
+                doc.get("created_at", datetime.utcnow()),
+            ))
+
+    def get_sop_document(self, doc_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sop_documents")
+            cur.execute("SELECT * FROM sop_documents WHERE id = %s", (doc_id,))
+            row = cur.fetchone()
+            return self._row_to_plain(row, json_fields=("applies_to",)) if row else None
+
+    def list_sop_documents(self, venue_id, include_inactive=False):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sop_documents")
+            if include_inactive:
+                cur.execute("""
+                    SELECT * FROM sop_documents WHERE venue_id = %s
+                    ORDER BY created_at, title
+                """, (venue_id,))
+            else:
+                cur.execute("""
+                    SELECT * FROM sop_documents WHERE venue_id = %s AND active = true
+                    ORDER BY created_at, title
+                """, (venue_id,))
+            return [self._row_to_plain(r, json_fields=("applies_to",)) for r in cur.fetchall()]
+
+    def save_sop_ack(self, ack):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sop_acknowledgements")
+            cur.execute("""
+                INSERT INTO sop_acknowledgements (id, venue_id, doc_id, doc_version,
+                    employee_id, employee_name, acknowledged_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (doc_id, doc_version, employee_id) DO NOTHING
+            """, (
+                ack["id"], ack["venue_id"], ack["doc_id"], int(ack["doc_version"]),
+                ack["employee_id"], ack.get("employee_name"),
+                ack.get("acknowledged_at", datetime.utcnow()),
+            ))
+
+    def list_sop_acks(self, venue_id, doc_id=None):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sop_acknowledgements")
+            if doc_id is not None:
+                cur.execute("""
+                    SELECT * FROM sop_acknowledgements
+                    WHERE venue_id = %s AND doc_id = %s
+                    ORDER BY acknowledged_at
+                """, (venue_id, doc_id))
+            else:
+                cur.execute("""
+                    SELECT * FROM sop_acknowledgements WHERE venue_id = %s
+                    ORDER BY acknowledged_at
+                """, (venue_id,))
+            return [self._row_to_plain(r) for r in cur.fetchall()]
+
+    # --- Team feed (two-way posts) ---
+
+    def save_feed_post(self, post):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "feed_posts")
+            cur.execute("""
+                INSERT INTO feed_posts (id, venue_id, author_user_id, author_name,
+                    author_role, body, pinned, removed, reactions, comments,
+                    created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    author_name=EXCLUDED.author_name, author_role=EXCLUDED.author_role,
+                    body=EXCLUDED.body, pinned=EXCLUDED.pinned, removed=EXCLUDED.removed,
+                    reactions=EXCLUDED.reactions, comments=EXCLUDED.comments,
+                    updated_at=now()
+            """, (
+                post["id"], post["venue_id"], post.get("author_user_id"),
+                post.get("author_name"), post.get("author_role"), post["body"],
+                bool(post.get("pinned", False)), bool(post.get("removed", False)),
+                json.dumps(dict(post.get("reactions") or {})),
+                json.dumps(list(post.get("comments") or []), default=str),
+                post.get("created_at", datetime.utcnow()),
+            ))
+
+    def get_feed_post(self, post_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "feed_posts")
+            cur.execute("SELECT * FROM feed_posts WHERE id = %s", (post_id,))
+            row = cur.fetchone()
+            return self._row_to_plain(row, json_fields=("reactions", "comments")) if row else None
+
+    def list_feed_posts(self, venue_id, limit=50):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "feed_posts")
+            cur.execute("""
+                SELECT * FROM feed_posts
+                WHERE venue_id = %s AND removed = false
+                ORDER BY pinned DESC, created_at DESC
+                LIMIT %s
+            """, (venue_id, int(limit or 50)))
+            return [self._row_to_plain(r, json_fields=("reactions", "comments"))
+                    for r in cur.fetchall()]
 
     def save_stocktake(self, st):
         with self._cursor() as cur:

@@ -225,6 +225,59 @@ def _seed_demo_showcase(db, now) -> None:
     except Exception:
         pass
 
+    # Team feed (two-way: a staff swap ask with a manager reply, plus a pinned
+    # manager post with a couple of thumbs-up). Guarded: only when empty.
+    try:
+        if not db.list_feed_posts(DEMO_VENUE_ID):
+            db.save_feed_post({
+                "id": "demo-feed-002", "venue_id": DEMO_VENUE_ID,
+                "author_user_id": DEMO_USER_ID, "author_name": "Management",
+                "author_role": "manager",
+                "body": "New pass-through window opens Friday — kitchen walkthrough "
+                        "3pm Thursday",
+                "pinned": True, "removed": False,
+                "reactions": {"\U0001F44D": ["demo-staff-003", "demo-staff-006"]},
+                "comments": [],
+                "created_at": now - timedelta(hours=5), "updated_at": now,
+            })
+            db.save_feed_post({
+                "id": "demo-feed-001", "venue_id": DEMO_VENUE_ID,
+                "author_user_id": "demo-staff-002", "author_name": "James Wilson",
+                "author_role": "staff",
+                "body": "Anyone able to swap my Sat close? Family thing",
+                "pinned": False, "removed": False,
+                "reactions": {},
+                "comments": [{
+                    "id": "demo-feed-001-c1", "author_user_id": DEMO_USER_ID,
+                    "author_name": "Management", "author_role": "manager",
+                    "body": "Post it as a shift cover in /my and I'll approve "
+                            "whoever grabs it — Lisa's usually keen for Saturdays.",
+                    "created_at": now - timedelta(hours=1),
+                }],
+                "created_at": now - timedelta(hours=2), "updated_at": now,
+            })
+    except Exception:
+        pass
+
+    # SOP / JSP library: the four starter procedures, with 3 of 6 staff having
+    # read Food safety so the manager view shows real outstanding names.
+    try:
+        if not db.list_sop_documents(DEMO_VENUE_ID):
+            from rosteriq.routes.sops import seed_starter_sops
+            seed_starter_sops(db, DEMO_VENUE_ID, author_name="Management", now=now)
+            food = next((d for d in (db.list_sop_documents(DEMO_VENUE_ID) or [])
+                         if str(d.get("title", "")).lower().startswith("food safety")), None)
+            if food:
+                for i, (name, _role, _rate) in enumerate(_DEMO_STAFF[:3], start=1):
+                    db.save_sop_ack({
+                        "id": f"demo-sop-ack-{i:03d}", "venue_id": DEMO_VENUE_ID,
+                        "doc_id": food["id"], "doc_version": int(food.get("version") or 1),
+                        "employee_id": f"demo-staff-{i:03d}", "employee_name": name,
+                        "acknowledged_at": now - timedelta(hours=3 + i),
+                    })
+    except Exception:
+        pass
+
     # One pending leave request (Leave page approve-it-live beat). Refresh the
     # SAME record when its dates fall into the past, so the demo never shows a
     # "pending" leave for a date that's already gone.
