@@ -1808,6 +1808,21 @@ async def register_page():
     return RedirectResponse(url="/static/register.html")
 
 
+@app.get("/savings", tags=["auth"])
+async def savings_page():
+    """'What you can cancel' calculator — public sales page (static/savings.html)."""
+    try:
+        import pathlib
+        page = pathlib.Path(__file__).parent / "static" / "savings.html"
+        if page.exists():
+            from fastapi.responses import FileResponse
+            return FileResponse(page, media_type="text/html")
+    except Exception:
+        pass
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/savings.html")
+
+
 @app.get("/api/status", response_model=HealthResponse)
 async def api_status():
     """API status endpoint — returns system info as JSON."""
