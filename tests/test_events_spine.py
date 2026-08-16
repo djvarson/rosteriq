@@ -638,3 +638,25 @@ def test_event_row_garbage_string_details_become_raw():
 def test_event_row_none_details_left_alone():
     out = PostgresStore._event_row({"id": 4, "details": None})
     assert out["details"] is None
+
+
+def test_denied_access_event_carries_the_targeted_venue():
+    """A venue manager must be able to see 'someone tried to get into MY
+    venue' in their own Activity tab, not just the platform owner."""
+    c = TestClient(app)
+    owner_h = _register_login(c, f"o{uuid.uuid4().hex[:8]}@x.com")
+    for v in ("ev-target", "ev-other"):
+        c.post("/venues", json={"id": v, "name": v, "state": "wa", "max_labour_pct": 30,
+                                "tanda_org_id": "", "created_at": "2026-07-01T00:00:00"}, headers=owner_h)
+    other_email = f"m{uuid.uuid4().hex[:8]}@x.com"
+    other_h = _register_login(c, other_email)
+    db = get_db(); rec = db.get_user_by_email(other_email); rec["role"] = "manager"; rec["venue_ids"] = ["ev-other"]; db.save_user(rec)
+    other_h = _login_headers(c, other_email) if "_login_headers" in globals() else _register_login(c, other_email)
+    r = c.get("/api/snapshot?venue_id=ev-target", headers=other_h)
+    assert r.status_code == 403
+    rows = db.list_events(venue_id="ev-target", category="security", action_prefix="access.denied")
+    assert rows, "the denied attempt must be filed under the venue that was targeted"
+    assert rows[0]["details"]["path"] == "/api/snapshot"
+    # And the target venue's OWN listing surfaces it via the API
+    ev = c.get("/api/events?venue_id=ev-target&category=security", headers=owner_h).json()
+    assert any(e["action"] == "access.denied" for e in ev["events"])

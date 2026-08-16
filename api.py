@@ -180,6 +180,23 @@ _metrics = MetricsCollector()
 # Request logging middleware
 # ============================================================================
 
+def _requested_venue_id(request) -> Optional[str]:
+    """Best-effort venue the request targeted, for security events."""
+    try:
+        v = request.query_params.get("venue_id")
+        if v:
+            return v[:80]
+        parts = request.url.path.split("/")
+        for marker in ("venues", "venue", "dashboard"):
+            if marker in parts:
+                i = parts.index(marker)
+                if i + 1 < len(parts) and parts[i + 1]:
+                    return parts[i + 1][:80]
+    except Exception:
+        pass
+    return None
+
+
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log structured details for every request (skip /health)."""
 
@@ -233,6 +250,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                     {401: "access.unauthenticated", 403: "access.denied",
                      429: "rate.limited"}[response.status_code],
                     outcome="denied" if response.status_code != 429 else "throttled",
+                    # The venue the caller was reaching for (query ?venue_id= or a
+                    # /venues/{id}/... path) — so a venue's own manager can see
+                    # "someone tried to get into my venue", not just the owner.
+                    venue_id=_requested_venue_id(request),
                     # Actor: get_current_user stashes the identity on the shared
                     # request scope (contextvars set downstream don't reach here).
                     user_id=getattr(request.state, "user_id", None),
