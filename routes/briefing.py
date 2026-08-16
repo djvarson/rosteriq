@@ -107,6 +107,19 @@ async def daily_briefing(venue_id: str = Query(...)) -> dict:
     if open_covers:
         attention.append(f"{open_covers} shift(s) up for cover need approval.")
 
+    # --- Team pulse: procedure compliance + unanswered staff posts --------
+    # Same engine the AI copilot's tools use, so the numbers never disagree.
+    from rosteriq.services.team_pulse import procedure_compliance, feed_attention
+    compliance = procedure_compliance(db, venue_id)
+    if compliance["outstanding_acks"]:
+        worst = compliance["outstanding"][0]
+        attention.append(
+            f"{compliance['outstanding_acks']} procedure acknowledgement(s) outstanding — "
+            f"'{worst['title']}' is waiting on {len(worst['waiting_on'])} staff.")
+    pulse = feed_attention(db, venue_id)
+    if pulse["awaiting_reply"]:
+        attention.append(f"{pulse['awaiting_reply']} team feed post(s) from staff awaiting a reply.")
+
     # --- Kitchen: stock + menu flags -------------------------------------
     ingredients = [i for i in (db.list_ingredients(venue_id) or []) if i.get("active", True)]
     stock_value = 0.0
@@ -156,6 +169,9 @@ async def daily_briefing(venue_id: str = Query(...)) -> dict:
             "coverage": coverage,
         },
         "approvals": {"pending_leave": pending_leave, "open_covers": open_covers},
+        "team": {"outstanding_acks": compliance["outstanding_acks"],
+                 "documents_requiring_ack": compliance["documents"],
+                 "feed_awaiting_reply": pulse["awaiting_reply"]},
         "kitchen": {"stock_value": round(stock_value, 2),
                     "below_par_count": below_par,
                     "flagged_dishes": flagged_dishes,

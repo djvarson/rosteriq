@@ -369,6 +369,11 @@ GEMINI_TOOLS = [
             "parameters": {"type": "OBJECT", "properties": {}},
         },
         {
+            "name": "get_team_pulse",
+            "description": "Procedure (SOP/JSP/policy) compliance — which documents still have staff who haven't acknowledged the current version and WHO they are — plus staff posts on the team feed that no manager has replied to. Use for 'who hasn't read the food safety procedure', 'any outstanding acknowledgements', 'anything from the team I haven't answered', 'is the team across the new SOP'.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
+        {
             "name": "get_roster_coverage",
             "description": "Check the current/latest roster against forecast demand: which days are SHORT-STAFFED at their peak hour and by how many people. Use for 'am I covered this week', 'any understaffed shifts', 'do I have enough people on Saturday'.",
             "parameters": {"type": "OBJECT", "properties": {}},
@@ -1281,6 +1286,15 @@ class AgentContext:
             "pending_leave": leave,
             "open_cover_count": len(covers),
             "shift_cover": covers,
+        }
+
+    async def _tool_get_team_pulse(self, params: dict) -> dict:
+        # Shares the engine with the daily briefing (services/team_pulse), so
+        # what the copilot says matches the morning screen exactly.
+        from rosteriq.services.team_pulse import procedure_compliance, feed_attention
+        return {
+            "procedures": procedure_compliance(self.db, self.venue_id),
+            "team_feed": feed_attention(self.db, self.venue_id),
         }
 
     async def _tool_get_roster_coverage(self, params: dict) -> dict:
