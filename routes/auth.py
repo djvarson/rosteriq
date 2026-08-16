@@ -59,7 +59,7 @@ async def demo_session(request: Request, db = Depends(get_db)):
         logger.warning("Demo seed issue (continuing): %s", e)
 
     access_token, _ = auth_service.create_access_token(
-        DEMO_USER_ID, DEMO_USER_EMAIL, "manager"
+        DEMO_USER_ID, DEMO_USER_EMAIL, "staff"
     )
     # Record as a (successful) attempt so the per-IP counter advances.
     auth_service.record_login_attempt(DEMO_USER_EMAIL, client_ip, True)

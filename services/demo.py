@@ -56,20 +56,20 @@ def seed_demo_environment(db) -> None:
                 "email": DEMO_USER_EMAIL,
                 "name": "Demo User",
                 "password_hash": "",      # login-by-password disabled for demo
-                "role": "manager",
+                "role": "staff",
                 "is_active": True,
                 "venue_ids": [DEMO_VENUE_ID],
                 "created_at": now,
             })
         elif (
             existing.get("venue_ids") != [DEMO_VENUE_ID]
-            or existing.get("role") != "manager"
+            or existing.get("role") != "staff"
             or not existing.get("is_active")
         ):
             # Self-heal a demo user created before venue_ids persisted (it
             # otherwise 403s on its own venue) or otherwise drifted.
             existing["venue_ids"] = [DEMO_VENUE_ID]
-            existing["role"] = "manager"
+            existing["role"] = "staff"
             existing["is_active"] = True
             db.save_user(existing)
     except Exception:

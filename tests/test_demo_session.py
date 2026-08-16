@@ -23,7 +23,7 @@ def test_demo_endpoint_mints_token_and_seeds():
 
     db = get_db()
     user = db.get_user_by_id(DEMO_USER_ID)
-    assert user and user["email"] == DEMO_USER_EMAIL and user["role"] == "manager"
+    assert user and user["email"] == DEMO_USER_EMAIL and user["role"] == "staff"
     assert user.get("venue_ids") == [DEMO_VENUE_ID]
 
     venue = db.get_venue(DEMO_VENUE_ID)
