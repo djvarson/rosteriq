@@ -1017,7 +1017,7 @@
 
       container.innerHTML = html;
       document.querySelectorAll('.code-example code').forEach(block => {
-        hljs.highlightElement(block);
+        window.hljs && hljs.highlightElement(block);
       });
     }
 
@@ -1135,7 +1135,7 @@
 
       container.innerHTML = filtered.map(ep => renderEndpointCard(ep)).join('');
       document.querySelectorAll('.code-example code').forEach(block => {
-        hljs.highlightElement(block);
+        window.hljs && hljs.highlightElement(block);
       });
     }
 
@@ -1219,7 +1219,7 @@
 
         document.getElementById('tryResponseCode').textContent = formatted;
         document.getElementById('tryResponse').style.display = 'block';
-        hljs.highlightElement(document.getElementById('tryResponseCode'));
+        window.hljs && hljs.highlightElement(document.getElementById('tryResponseCode'));
       } catch (error) {
         document.getElementById('tryResponseCode').textContent = `Error: ${error.message}`;
         document.getElementById('tryResponse').style.display = 'block';

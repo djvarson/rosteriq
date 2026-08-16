@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.services.clock import venue_today
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.services.events import audit
@@ -115,7 +116,7 @@ async def clock_board(venue_id: str = Query(...)) -> dict:
     and their live clock state (off / on / done)."""
     enforce_venue_access(venue_id)
     db = get_db()
-    today = date.today()
+    today = venue_today(venue_id, db)
 
     shifts_today = {}
     try:
@@ -162,12 +163,13 @@ async def clock_in(body: PunchRequest) -> dict:
         raise HTTPException(status_code=409, detail=f"{emp.name} is already clocked in")
 
     now = datetime.utcnow()
-    shift = _todays_shift_for(db, body.venue_id, body.employee_id, date.today())
+    work_date = venue_today(body.venue_id, db)
+    shift = _todays_shift_for(db, body.venue_id, body.employee_id, work_date)
     ts = {
         "id": f"ts-{uuid.uuid4().hex[:12]}",
         "venue_id": body.venue_id,
         "employee_id": body.employee_id,
-        "work_date": date.today(),
+        "work_date": work_date,
         "clock_in": now,
         "clock_out": None,
         "break_minutes": 0,
@@ -215,7 +217,7 @@ async def clock_out(body: PunchRequest) -> dict:
     shift = None
     if ts.get("rostered_shift_id"):
         shift = _todays_shift_for(db, body.venue_id, body.employee_id, ts["work_date"]
-                                  if isinstance(ts["work_date"], date) else date.today())
+                                  if isinstance(ts["work_date"], date) else venue_today(body.venue_id, db))
     if shift is not None:
         variance = worked_minutes - _shift_minutes(shift)
 

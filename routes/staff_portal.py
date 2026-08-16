@@ -41,6 +41,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.services.clock import venue_today
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.services.demo import (
@@ -218,7 +219,7 @@ async def my_shifts(user: UserContext = Depends(get_current_user)) -> dict:
     emp, vid = _linked_employee(db, user)
     if not emp:
         return _no_link_response(user)
-    today = date.today()
+    today = venue_today(vid, db)
     horizon = today + timedelta(days=14)
     mine = []
     try:
@@ -249,7 +250,7 @@ async def my_timesheets(user: UserContext = Depends(get_current_user)) -> dict:
     emp, vid = _linked_employee(db, user)
     if not emp:
         return _no_link_response(user)
-    end = date.today()
+    end = venue_today(vid, db)
     start = end - timedelta(days=14)
     rows = []
     total = 0
@@ -298,7 +299,7 @@ async def request_leave(body: LeaveRequestBody,
         raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
     if body.end_date < body.start_date:
         raise HTTPException(status_code=422, detail="end_date must be on or after start_date")
-    if body.start_date < date.today():
+    if body.start_date < venue_today(vid, db):
         raise HTTPException(status_code=422, detail="Leave requests must be for future dates")
     # One pending request per overlapping period keeps things sane
     for r in db.list_leave_requests(vid) or []:
@@ -394,7 +395,7 @@ async def set_my_availability(body: AvailabilityBody,
 
 def _find_my_shift(db, venue_id: str, employee_id: str, shift_id: str):
     """The named future shift, only if it belongs to this employee."""
-    today = date.today()
+    today = venue_today(venue_id, db)
     try:
         shifts = db.get_shifts(venue_id, today, today + timedelta(days=60)) or []
     except Exception:

@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from rosteriq.database import get_db
+from rosteriq.services.clock import venue_today
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.menu_costing import GST_RATE, _cost_recipe
 from rosteriq.roster_optimiser import compute_coverage_gaps
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/api/briefing", tags=["briefing"])
 async def daily_briefing(venue_id: str = Query(...)) -> dict:
     enforce_venue_access(venue_id)
     db = get_db()
-    today = date.today()
+    today = venue_today(venue_id, db)  # venue-local: 6am Perth is still yesterday in UTC
     week_ago = today - timedelta(days=6)
     attention = []  # deterministic "what needs you today", worst first
 

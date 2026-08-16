@@ -186,7 +186,8 @@ def seed_demo_environment(db) -> None:
     # real venue (labour on days without sales made the demo look like a
     # failing business at 85%+ prime cost).
     try:
-        today = date.today()
+        from rosteriq.services.clock import venue_today
+        today = venue_today(DEMO_VENUE_ID, db)  # the demo venue is Perth; seed 'today' in ITS day
         week_start = today - timedelta(days=today.weekday())
         week_end = week_start + timedelta(days=6)
         wk = week_start.isoformat()
@@ -249,7 +250,8 @@ def _seed_demo_showcase(db, now) -> None:
     shift-cover, stock/par levels, and recent dish sales. Every block is
     guarded (seed only when that pillar is empty) and best-effort — a partial
     showcase beats a broken Try Demo."""
-    today = date.today()
+    from rosteriq.services.clock import venue_today
+    today = venue_today(DEMO_VENUE_ID, db)
     week_start = today - timedelta(days=today.weekday())
     wk = week_start.isoformat()
 

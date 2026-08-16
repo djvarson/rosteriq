@@ -441,11 +441,14 @@ def _gemini_tools_to_openai(gemini_tools: list) -> list:
 OPENAI_TOOLS = _gemini_tools_to_openai(GEMINI_TOOLS)
 
 
-def _system_prompt_now() -> str:
+def _system_prompt_now(venue_id: Optional[str] = None) -> str:
     """System prompt with the current date appended. Without this the model has
     no idea what 'today' is, guesses a date, and every date-scoped tool call
-    (shifts, labour, events) silently misses the real data."""
-    today = date.today()
+    (shifts, labour, events) silently misses the real data. The date is the
+    VENUE's local date — the host runs UTC, and at 6am Perth that is still
+    yesterday."""
+    from rosteriq.services.clock import venue_today
+    today = venue_today(venue_id)
     return (
         f"{SYSTEM_PROMPT}\n\n"
         f"## Current date\n"
@@ -467,6 +470,13 @@ class AgentContext:
         self.venue_id = venue_id
         self.user_id = user_id
         self.db = get_db()
+
+
+    @property
+    def today(self):
+        """The venue's local calendar date (see services/clock)."""
+        from rosteriq.services.clock import venue_today
+        return venue_today(self.venue_id, self.db)
 
     async def execute_tool(self, tool_name: str, tool_input: dict) -> str:
         """Execute a tool call and return the result as a JSON string."""
@@ -509,12 +519,12 @@ class AgentContext:
         return {"employees": result, "count": len(result)}
 
     async def _tool_get_shifts(self, params: dict) -> dict:
-        start_str = params.get("start_date", date.today().isoformat())
+        start_str = params.get("start_date", self.today.isoformat())
         end_str = params.get("end_date")
         try:
             start_dt = date.fromisoformat(start_str)
         except ValueError:
-            start_dt = date.today()
+            start_dt = self.today
         if end_str:
             try:
                 end_dt = date.fromisoformat(end_str)
@@ -554,13 +564,13 @@ class AgentContext:
         }
 
     async def _tool_get_labour_summary(self, params: dict) -> dict:
-        start_str = params.get("start_date", date.today().isoformat())
-        end_str = params.get("end_date", (date.today() + timedelta(days=7)).isoformat())
+        start_str = params.get("start_date", self.today.isoformat())
+        end_str = params.get("end_date", (self.today + timedelta(days=7)).isoformat())
         try:
             start_dt = date.fromisoformat(start_str)
             end_dt = date.fromisoformat(end_str)
         except ValueError:
-            start_dt = date.today()
+            start_dt = self.today
             end_dt = start_dt + timedelta(days=7)
 
         shifts = self.db.get_shifts(self.venue_id, start_dt, end_dt)
@@ -597,7 +607,7 @@ class AgentContext:
 
     async def _tool_get_compliance_issues(self, params: dict) -> dict:
         days = params.get("date_range_days", 7)
-        start_dt = date.today()
+        start_dt = self.today
         end_dt = start_dt + timedelta(days=days)
 
         issues = []
@@ -671,7 +681,7 @@ class AgentContext:
 
     async def _tool_get_venue_stats(self, params: dict) -> dict:
         employees = self.db.get_employees(self.venue_id)
-        today = date.today()
+        today = self.today
         week_shifts = self.db.get_shifts(self.venue_id, today, today + timedelta(days=7))
 
         emp_count = len(employees) if employees else 0
@@ -703,7 +713,7 @@ class AgentContext:
     async def _tool_get_upcoming_events(self, params: dict) -> dict:
         days = params.get("days_ahead", 7)
         # Pull from reservations if available
-        today = date.today()
+        today = self.today
         events = []
         try:
             reservations = self.db.get_reservations(self.venue_id, today, today + timedelta(days=days))
@@ -741,11 +751,11 @@ class AgentContext:
         }
 
     async def _tool_suggest_roster_changes(self, params: dict) -> dict:
-        target = params.get("target_date", date.today().isoformat())
+        target = params.get("target_date", self.today.isoformat())
         try:
             target_dt = date.fromisoformat(target)
         except ValueError:
-            target_dt = date.today()
+            target_dt = self.today
 
         shifts = self.db.get_shifts(self.venue_id, target_dt, target_dt + timedelta(days=1))
         suggestions = []
@@ -808,7 +818,7 @@ class AgentContext:
 
     async def _tool_find_available_staff(self, params: dict) -> dict:
         """SOS staff finder — returns all staff with availability status and contact details."""
-        target_date_str = params.get("date", date.today().isoformat())
+        target_date_str = params.get("date", self.today.isoformat())
         start_time = params.get("start_time", "")
         end_time = params.get("end_time", "")
         role_filter = params.get("role", "").lower()
@@ -817,7 +827,7 @@ class AgentContext:
         try:
             target_date = date.fromisoformat(target_date_str)
         except ValueError:
-            target_date = date.today()
+            target_date = self.today
 
         employees = self.db.get_employees(self.venue_id)
         if not employees:
@@ -948,7 +958,7 @@ class AgentContext:
 
         # Build fixture data — in production this would come from an AFL API feed
         # For now, generate realistic upcoming fixtures based on the current date
-        today = date.today()
+        today = self.today
         fixtures = []
 
         # Generate fixtures for the next N days (realistic AFL schedule)
@@ -1042,7 +1052,7 @@ class AgentContext:
         current_covers = params.get("current_covers")
         current_hourly_sales = params.get("current_hourly_sales")
 
-        today = date.today()
+        today = self.today
         now = datetime.now()
         current_hour = now.hour
 
@@ -1183,7 +1193,7 @@ class AgentContext:
 
     async def _tool_get_business_snapshot(self, params: dict) -> dict:
         from rosteriq.routes.menu_costing import GST_RATE
-        today = date.today()
+        today = self.today
         try:
             end = date.fromisoformat(params["end_date"]) if params.get("end_date") else today
         except Exception:
@@ -1458,7 +1468,7 @@ class RosterIQAgent:
         actions: list = []
         tool_calls_log: list = []
 
-        oai_messages: list = [{"role": "system", "content": _system_prompt_now()}]
+        oai_messages: list = [{"role": "system", "content": _system_prompt_now(self.context.venue_id)}]
         for msg in messages:
             role = msg.get("role", "user")
             if role not in ("user", "assistant", "system"):
@@ -1591,7 +1601,7 @@ class RosterIQAgent:
             "contents": contents,
             "tools": GEMINI_TOOLS,
             "systemInstruction": {
-                "parts": [{"text": _system_prompt_now()}],
+                "parts": [{"text": _system_prompt_now(self.context.venue_id)}],
             },
             "generationConfig": {
                 "maxOutputTokens": 2048,
@@ -1695,7 +1705,8 @@ async def generate_insights(venue_id: str, max_insights: int = 5) -> list[dict]:
     """
     db = get_db()
     insights = []
-    today = date.today()
+    from rosteriq.services.clock import venue_today
+    today = venue_today(venue_id, db)
 
     try:
         # 1. Staffing coverage check

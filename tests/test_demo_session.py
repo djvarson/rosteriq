@@ -90,6 +90,10 @@ def test_demo_roster_rolls_forward_each_week(monkeypatch):
             return next_week_today
 
     monkeypatch.setattr(demo_mod, "date", _FakeDate)
+    # The seed now asks the venue-local clock what "today" is (services/clock);
+    # freeze that too so this test still simulates "one week later".
+    from rosteriq.services import clock as clock_mod
+    monkeypatch.setattr(clock_mod, "venue_today", lambda venue_id, db=None: next_week_today)
     seed_demo_environment(db)
 
     next_monday = this_monday + timedelta(days=7)

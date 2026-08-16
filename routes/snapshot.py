@@ -30,6 +30,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from rosteriq.database import get_db
+from rosteriq.services.clock import venue_today
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.menu_costing import GST_RATE
 
@@ -85,7 +86,7 @@ async def business_snapshot(venue_id: str = Query(...),
                             end_date: Optional[date] = Query(None)) -> dict:
     enforce_venue_access(venue_id)
     db = get_db()
-    end = end_date or date.today()
+    end = end_date or venue_today(venue_id, db)
     start = start_date or (end - timedelta(days=6))
     if start > end:
         raise HTTPException(status_code=422, detail="start_date is after end_date")
