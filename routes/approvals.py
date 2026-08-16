@@ -31,6 +31,7 @@ from rosteriq.services.approval_workflow import (
     ApprovalRequest,
     ApprovalStatus,
 )
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["approvals"])
@@ -166,6 +167,9 @@ async def submit_for_approval(
             roster_id=roster_id,
             submitted_by=user.user_id,
         )
+        audit("approval.submit", request.venue_id, "approval_request", request.id,
+              roster_id=roster_id, status=request.status.value, tier=request.tier,
+              failed_rules=list(request.failed_rules or []))
 
         return ApprovalResponse(
             id=request.id,
@@ -283,6 +287,9 @@ async def approve_roster(
             approved=True,
             notes=body.notes,
         )
+        audit("approval.approve", request.venue_id, "approval_request", request.id,
+              roster_id=request.roster_id, notes=body.notes, status=request.status.value,
+              revision=request.revision_number)
 
         return ApprovalResponse(
             id=request.id,
@@ -343,6 +350,9 @@ async def reject_roster(
             approved=False,
             notes=body.notes,
         )
+        audit("approval.reject", request.venue_id, "approval_request", request.id,
+              roster_id=request.roster_id, notes=body.notes, status=request.status.value,
+              revision=request.revision_number)
 
         return ApprovalResponse(
             id=request.id,
@@ -390,6 +400,8 @@ async def escalate_approval(
 
     try:
         request = await approval_workflow.escalate(request_id=request_id)
+        audit("approval.escalate", request.venue_id, "approval_request", request.id,
+              roster_id=request.roster_id, escalated_to=request.escalated_to)
 
         return ApprovalResponse(
             id=request.id,

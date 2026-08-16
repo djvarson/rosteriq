@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_access, get_tenant_context_optional
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,7 @@ async def start_stocktake(body: StocktakeStartBody) -> dict:
         "created_at": datetime.utcnow(),
     }
     db.save_stocktake(st)
+    audit("stocktake.start", body.venue_id, "stocktake", st["id"], item_count=len(st["items"]))
     return {"status": "open", "stocktake_id": st["id"], "item_count": len(st["items"])}
 
 
@@ -270,6 +272,9 @@ async def complete_stocktake(body: StocktakeCompleteBody) -> dict:
     db.save_stocktake(st)
     logger.info(f"Stocktake {st['id']} completed at {body.venue_id}: "
                 f"variance ${st['total_variance_value']}, {len(uncounted)} uncounted")
+    audit("stocktake.complete", body.venue_id, "stocktake", st["id"],
+          variance_value=st["total_variance_value"], counted=len(counted_items),
+          uncounted=len(uncounted))
     return {
         "status": "completed",
         "stocktake_id": st["id"],
@@ -356,6 +361,8 @@ async def draft_orders(body: OrderDraftBody) -> dict:
             "received_at": None,
         }
         db.save_supplier_order(order)
+        audit("order.create", body.venue_id, "supplier_order", order["id"],
+              supplier=supplier, lines=len(items), total_cost=order["total_cost"])
         orders.append({"order_id": order["id"], "supplier": supplier,
                        "lines": len(items), "total_cost": order["total_cost"]})
     return {"status": "drafted", "orders": orders}
@@ -401,6 +408,9 @@ async def set_order_status(order_id: str, body: OrderStatusBody) -> dict:
                 item["ingredient_id"],
                 float(item.get("packs", 0)) * float(item.get("pack_size", 0)))
     logger.info(f"Supplier order {order_id} -> {body.status} at {body.venue_id}")
+    audit("order.status_change", body.venue_id, "supplier_order", order_id,
+          from_status=current, to_status=body.status, supplier=order.get("supplier"),
+          total_cost=order.get("total_cost"))
     return {"status": body.status, "order_id": order_id}
 
 
@@ -499,6 +509,14 @@ async def enter_invoice(body: InvoiceBody) -> dict:
     db.save_supplier_invoice(inv)
     logger.info(f"Invoice {inv['invoice_number']} entered at {body.venue_id}: "
                 f"${inv['total']}, {len(price_changes)} price changes")
+    audit("invoice.enter", body.venue_id, "supplier_invoice", inv["id"],
+          supplier=body.supplier, invoice_number=inv["invoice_number"], total=inv["total"],
+          lines=len(items), price_changes=len(price_changes), order_closed=bool(order))
+    for pc in price_changes:
+        audit("ingredient.price_change", body.venue_id, "ingredient", pc["ingredient_id"],
+              name=pc["name"], old_purchase_cost=pc["old_pack_cost"],
+              new_purchase_cost=pc["new_pack_cost"], source="invoice",
+              invoice_number=inv["invoice_number"])
     return {
         "status": "entered",
         "invoice_id": inv["id"],
@@ -566,6 +584,9 @@ async def log_waste(body: WasteBody) -> dict:
     db.save_waste_entry(entry)
     logger.info(f"Waste logged at {body.venue_id}: {ing.get('name')} "
                 f"{qty_in_stock_unit}{stock_unit} ({body.reason}) = ${value}")
+    audit("waste.log", body.venue_id, "waste_entry", entry["id"],
+          ingredient=ing.get("name"), qty=entry["qty"], unit=stock_unit,
+          value=value, reason=body.reason)
     result = {
         "status": "logged", "waste_id": entry["id"],
         "ingredient": ing.get("name"), "value": value,

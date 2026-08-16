@@ -47,6 +47,7 @@ from rosteriq.services.demo import (
     DEMO_USER_ID, DEMO_USER_EMAIL, DEMO_VENUE_ID,
     DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL,
 )
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,10 @@ def _linked_employee(db, user: UserContext):
                                 logger.info(
                                     f"Staff auto-link: {email} -> employee "
                                     f"{emp.id} at {vid}")
+                                # Audit the implicit venue grant (email match).
+                                audit("user.venue_grant", vid, "user", rec.get("id"),
+                                      email=email, employee_id=emp.id,
+                                      reason="staff_email_auto_link", venue_ids=vids)
                     except Exception as e:
                         logger.warning(f"Staff auto-link grant failed for {email}: {e}")
                     return emp, vid
@@ -609,6 +614,7 @@ async def decide_cover(cover_id: str, body: CoverDecision,
     if cover.get("status") != "claimed":
         raise HTTPException(status_code=409, detail=f"Request is already {cover.get('status')}")
 
+    claimant_id = cover.get("claimed_by")
     if body.approve:
         # The roster is the source of truth — a cover is only approved if the
         # shift genuinely moves. Fail loud if the roster changed underneath us.
@@ -627,10 +633,34 @@ async def decide_cover(cover_id: str, body: CoverDecision,
     cover["decision_note"] = body.note
     if not body.approve:
         db.save_shift_cover(cover)
+        _audit_cover_decision(db, cover, cover_id, "decline", claimant_id, body.note)
         return {"status": "reopened", "cover_id": cover_id}
     db.save_shift_cover(cover)
+    _audit_cover_decision(db, cover, cover_id, "approve", claimant_id, body.note)
     logger.info(f"Cover approved: shift {cover['shift_id']} -> {cover['claimed_by']} at {body.venue_id}")
     return {"status": "approved", "cover_id": cover_id}
+
+
+def _emp_name(db, venue_id: str, employee_id) -> str:
+    """Employee display name for the event log (id if not resolvable)."""
+    try:
+        emp = db.get_employee(employee_id) if employee_id else None
+        return getattr(emp, "name", None) or str(employee_id)
+    except Exception:
+        return str(employee_id)
+
+
+def _audit_cover_decision(db, cover: dict, cover_id: str, decision: str,
+                          claimant_id, note: str) -> None:
+    audit("cover.decide", cover.get("venue_id"), "shift_cover", cover_id,
+          decision=decision, status=cover.get("status"),
+          shift_id=cover.get("shift_id"), shift_date=str(cover.get("shift_date")),
+          shift_start=cover.get("shift_start"), shift_end=cover.get("shift_end"),
+          requested_by=cover.get("requested_by"),
+          requested_by_name=_emp_name(db, cover.get("venue_id"), cover.get("requested_by")),
+          claimed_by=claimant_id,
+          claimed_by_name=_emp_name(db, cover.get("venue_id"), claimant_id),
+          note=note)
 
 
 @router.post("/api/leave/{req_id}/decide")
@@ -648,4 +678,10 @@ async def decide_leave(req_id: str, body: LeaveDecision,
     req["decided_at"] = datetime.utcnow()
     req["decision_note"] = body.note
     db.save_leave_request(req)
+    audit("leave.decide", body.venue_id, "leave_request", req_id,
+          decision="approve" if body.approve else "decline", status=req["status"],
+          employee_id=req.get("employee_id"),
+          employee=_emp_name(db, body.venue_id, req.get("employee_id")),
+          start_date=str(req.get("start_date")), end_date=str(req.get("end_date")),
+          reason=req.get("reason"), note=body.note)
     return {"status": req["status"], "request_id": req_id}

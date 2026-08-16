@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.services.events import audit, record_event
 from rosteriq.myob_adapter import (
     MYOBAdapter,
     MYOBOAuth,
@@ -262,6 +263,9 @@ async def install_token(body: MYOBInstallTokenRequest) -> dict:
         f"MYOB connected for venue {body.venue_id} "
         f"(verified: {connected}, company: {company_name})"
     )
+    audit("myob.connect", body.venue_id, "myob_connection", org_key, method="install_token",
+          connectivity_verified=connected, company_name=company_name,
+          synced_employees=synced_employees)
 
     return {
         "status": "success",
@@ -356,6 +360,7 @@ async def oauth_callback(
     db.save_plugin_install(install)
 
     logger.info(f"MYOB OAuth complete for venue {venue_id}")
+    audit("myob.connect", venue_id, "myob_connection", org_key, method="oauth")
     return {
         "status": "success",
         "venue_id": venue_id,
@@ -378,6 +383,7 @@ async def uninstall(body: MYOBUninstallRequest) -> dict:
     db = get_db()
     db.save_plugin_install(install)
     logger.info(f"MYOB uninstalled for venue {body.venue_id}")
+    audit("myob.disconnect", body.venue_id, "myob_connection", _org_key(body.venue_id))
     return {"status": "success", "venue_id": body.venue_id, "message": "MYOB connection removed."}
 
 
@@ -652,6 +658,12 @@ async def push_bill(body: PushBillRequest) -> dict:
             )
     except Exception as e:
         logger.error(f"Bill push failed for invoice {body.invoice_id}: {e}")
+        record_event("audit", "myob.bill_push", venue_id=body.venue_id,
+                     resource_type="supplier_invoice", resource_id=body.invoice_id,
+                     outcome="failed",
+                     details={"reason": str(e)[:300], "supplier": invoice.get("supplier"),
+                              "invoice_number": invoice.get("invoice_number"),
+                              "total": invoice.get("total")})
         raise HTTPException(status_code=502, detail=f"MYOB rejected the bill: {str(e)}")
 
     db.save_myob_bill_push({
@@ -669,6 +681,12 @@ async def push_bill(body: PushBillRequest) -> dict:
         f"{result.get('myob_bill_number') or result.get('myob_bill_uid')} "
         f"for {body.venue_id}"
     )
+    audit("myob.bill_push", body.venue_id, "supplier_invoice", body.invoice_id,
+          myob_bill_uid=result.get("myob_bill_uid"),
+          myob_bill_number=result.get("myob_bill_number"),
+          supplier=invoice.get("supplier"), invoice_number=invoice.get("invoice_number"),
+          total=invoice.get("total"), account_display_id=body.account_display_id,
+          tax_code=body.tax_code)
 
     return {
         "status": "pushed",

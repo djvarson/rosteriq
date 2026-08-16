@@ -18,6 +18,7 @@ from rosteriq.services.demo import (
     DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL,
 )
 from rosteriq.middleware.auth import get_current_user, UserContext
+from rosteriq.services.events import record_event, security
 from rosteriq.schemas import (
     RegisterRequest,
     LoginRequest,
@@ -58,6 +59,10 @@ async def demo_session(
     client_ip = request.client.host if request.client else "unknown"
     # Reuse the login throttle: too many recent attempts from this IP -> back off.
     if not auth_service.check_login_rate_limit(client_ip):
+        # The api.py request middleware skips /api/auth/* for rate.limited, so
+        # record the throttle here (security, no identity involved).
+        security("rate.limited", outcome="throttled", path="/api/auth/demo",
+                 client_ip=client_ip)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many demo sessions from this address. Try again shortly.",
@@ -77,6 +82,11 @@ async def demo_session(
     )
     # Record as a (successful) attempt so the per-IP counter advances.
     auth_service.record_login_attempt(demo_email, client_ip, True)
+    # Audit which demo identity was minted (unauthenticated path: no actor in
+    # context, so the demo user is recorded explicitly as the subject).
+    record_event("audit", "demo.session", user_id=demo_user_id,
+                 details={"identity": "staff" if demo_user_id == DEMO_STAFF_USER_ID else "manager",
+                          "email": demo_email})
     return {"access_token": access_token, "token_type": "bearer", "demo": True}
 
 
@@ -161,6 +171,12 @@ async def register(
     # Update last login
     auth_service.update_last_login(user["id"])
 
+    # Audit the new identity (self-registration; owner bootstrap is notable).
+    record_event("audit", "auth.register", user_id=user["id"],
+                 resource_type="user", resource_id=user["id"],
+                 details={"email": user["email"], "name": user.get("name"),
+                          "role": role, "bootstrap_owner": role == "owner"})
+
     # Email verification disabled for pilot — enable with SendGrid when scaling
     # verify_token = auth_service.create_email_verification_token(user["id"])
     # verification_url = f"https://rosteriq-production-6aaf.up.railway.app/verify-email?token={verify_token}"
@@ -207,6 +223,10 @@ async def login(
 
     # Check rate limit
     if not auth_service.check_login_rate_limit(client_ip):
+        # Attempt while locked out: an attack signal in its own right (the
+        # api.py middleware deliberately skips /api/auth/* so record it here).
+        security("auth.login_failed", outcome="denied", email=request.email,
+                 reason="locked", client_ip=client_ip)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Try again in a minute.",
@@ -224,6 +244,16 @@ async def login(
     auth_service.record_login_attempt(request.email, client_ip, password_valid)
 
     if not user or not user.get("is_active") or not password_valid:
+        # Security event: the email is the identity under attack (owners need
+        # it); the password is never recorded.
+        reason = "unknown_user" if not user else ("inactive" if not user.get("is_active") else "bad_password")
+        security("auth.login_failed", outcome="failed", email=request.email,
+                 reason=reason, client_ip=client_ip,
+                 user_id=(user or {}).get("id"))
+        # Did this failure trip the per-IP lockout? Record the trigger once.
+        if not auth_service.check_login_rate_limit(client_ip):
+            security("auth.locked", outcome="denied", email=request.email,
+                     client_ip=client_ip, window_minutes=1, max_attempts=5)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -235,6 +265,10 @@ async def login(
 
     # Update last login
     auth_service.update_last_login(user["id"])
+
+    # Audit (low noise, outcome ok): who signed in, as what role.
+    record_event("audit", "auth.login", user_id=user["id"],
+                 details={"email": user["email"], "role": user.get("role")})
 
     return TokenPair(
         access_token=access_token,
@@ -368,6 +402,11 @@ async def generate_api_key(
     api_key = auth_service.generate_api_key(current_user.user_id)
     user = db.get_user_by_id(current_user.user_id)
 
+    # Credential change: a new long-lived API key now exists for this user
+    # (the key itself is never recorded — and the scrubber would redact it).
+    security("auth.api_key_generate", outcome="ok", user_id=current_user.user_id,
+             email=current_user.email)
+
     return ApiKeyResponse(
         api_key=api_key,
         created_at=user["created_at"],
@@ -433,6 +472,12 @@ async def invite_user(
         user["venue_ids"] = [str(v) for v in request.venue_ids]
         db.save_user(user)
 
+    # Audit: an owner created an identity with a role (and venue grants).
+    record_event("audit", "auth.invite", user_id=current_user.user_id,
+                 resource_type="user", resource_id=user["id"],
+                 details={"invited_email": user["email"], "invited_name": user.get("name"),
+                          "role": user["role"], "venue_ids": list(user.get("venue_ids") or [])})
+
     return UserResponse(
         id=user["id"],
         email=user["email"],
@@ -497,10 +542,17 @@ async def reset_password(
     success = auth_service.reset_password(request.token, request.new_password)
 
     if not success:
+        # Credential change attempted with a bad/expired token: security signal.
+        # (The token itself is never recorded.)
+        security("auth.password_reset", outcome="failed", reason="invalid_or_expired_token")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset token",
         )
+
+    # Credential changed (unauthenticated path: the token is single-use and
+    # consumed by the service, so no actor beyond the outcome is available).
+    security("auth.password_reset", outcome="ok")
 
     return {"message": "Password reset successful. You can now log in with your new password."}
 

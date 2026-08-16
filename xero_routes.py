@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.services.events import audit, record_event
 from rosteriq.xero_integration import (
     XeroOAuth,
     XeroClient,
@@ -217,6 +218,8 @@ def setup_xero_routes(app, db):
             credentials = await oauth.exchange_code(code, state, code_verifier)
             credentials.venue_id = venue_id
             await save_xero_credentials(db, credentials)
+            audit("xero.connect", venue_id, "xero_connection", credentials.tenant_id,
+                  tenant_id=credentials.tenant_id)
 
             return {
                 "status": "success",
@@ -226,6 +229,9 @@ def setup_xero_routes(app, db):
             }
         except Exception as e:
             logger.error(f"OAuth callback failed: {e}")
+            record_event("audit", "xero.connect", venue_id=venue_id,
+                         resource_type="xero_connection", outcome="failed",
+                         details={"reason": str(e)[:300]})
             raise HTTPException(400, f"OAuth failed: {str(e)}")
 
     # ========================================================================
@@ -264,6 +270,7 @@ def setup_xero_routes(app, db):
         Revoke Xero credentials for venue.
         """
         await delete_xero_credentials(db, venue_id)
+        audit("xero.disconnect", venue_id, "xero_connection", venue_id)
 
         return {
             "status": "success",
@@ -429,6 +436,12 @@ def setup_xero_routes(app, db):
                 )
         except Exception as e:
             logger.error(f"Bill push failed for invoice {req.invoice_id}: {e}")
+            record_event("audit", "xero.bill_push", venue_id=req.venue_id,
+                         resource_type="supplier_invoice", resource_id=req.invoice_id,
+                         outcome="failed",
+                         details={"reason": str(e)[:300], "supplier": invoice.get("supplier"),
+                                  "invoice_number": invoice.get("invoice_number"),
+                                  "total": invoice.get("total")})
             raise HTTPException(502, f"Xero rejected the bill: {str(e)}")
 
         db.save_xero_bill_push({
@@ -445,6 +458,11 @@ def setup_xero_routes(app, db):
             f"Invoice {req.invoice_id} pushed to Xero as bill "
             f"{result.get('xero_invoice_number')} for {req.venue_id}"
         )
+        audit("xero.bill_push", req.venue_id, "supplier_invoice", req.invoice_id,
+              xero_invoice_id=result.get("xero_invoice_id"),
+              xero_invoice_number=result.get("xero_invoice_number"),
+              supplier=invoice.get("supplier"), invoice_number=invoice.get("invoice_number"),
+              total=invoice.get("total"), account_code=req.account_code)
 
         return {
             "status": "pushed",

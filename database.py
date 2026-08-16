@@ -718,6 +718,13 @@ class BaseStore:
         """List audit logs for a venue."""
         raise NotImplementedError
 
+    def list_events(self, venue_id=None, category=None, action_prefix=None,
+                    since=None, limit: int = 100, offset: int = 0) -> list[dict]:
+        """Event log query. venue_id=None means platform-wide (owner view);
+        category filters details.category ('audit'|'security'|'error');
+        action_prefix matches action LIKE 'prefix%'; since is a datetime."""
+        raise NotImplementedError
+
     # --- Credential Management (API Keys & Webhook Secrets) ---
 
     def save_api_key_record(self, record: dict) -> None:
@@ -2124,6 +2131,20 @@ class MemoryStore(BaseStore):
 
         # Apply pagination
         return logs[offset : offset + limit]
+
+    def list_events(self, venue_id=None, category=None, action_prefix=None,
+                    since=None, limit=100, offset=0):
+        rows = list(self._audit_logs)
+        if venue_id is not None:
+            rows = [r for r in rows if r.get("venue_id") == venue_id]
+        if category:
+            rows = [r for r in rows if (r.get("details") or {}).get("category") == category]
+        if action_prefix:
+            rows = [r for r in rows if str(r.get("action") or "").startswith(action_prefix)]
+        if since is not None:
+            rows = [r for r in rows if r.get("created_at") and r["created_at"] >= since]
+        rows.sort(key=lambda r: str(r.get("created_at")), reverse=True)
+        return [dict(r) for r in rows[offset: offset + limit]]
 
     # --- White-Label Theming ---
 
@@ -5662,13 +5683,42 @@ class PostgresStore(BaseStore):
                 LIMIT %s OFFSET %s
             """, (venue_id, limit, offset))
 
-            results = []
-            for row in cur.fetchall():
-                result = dict(row)
-                if result.get('details'):
-                    result['details'] = json.loads(result['details'])
-                results.append(result)
-            return results
+            return [self._event_row(row) for row in cur.fetchall()]
+
+    @staticmethod
+    def _event_row(row) -> dict:
+        # psycopg2 already parses JSONB to a dict; only json.loads a raw string
+        # (the earlier unconditional json.loads(dict) raised TypeError).
+        result = dict(row)
+        d = result.get("details")
+        if isinstance(d, str):
+            try:
+                result["details"] = json.loads(d)
+            except Exception:
+                result["details"] = {"raw": d}
+        return result
+
+    def list_events(self, venue_id=None, category=None, action_prefix=None,
+                    since=None, limit=100, offset=0):
+        clauses, params = [], []
+        if venue_id is not None:
+            clauses.append("venue_id = %s"); params.append(venue_id)
+        if category:
+            clauses.append("details->>'category' = %s"); params.append(category)
+        if action_prefix:
+            clauses.append("action LIKE %s"); params.append(action_prefix + "%")
+        if since is not None:
+            clauses.append("created_at >= %s"); params.append(since)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        with self._cursor() as cur:
+            self._ensure_table(cur, "audit_logs")
+            cur.execute(f"""
+                SELECT id, venue_id, user_id, action, resource_type, resource_id, details, created_at
+                FROM audit_logs {where}
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+            """, (*params, limit, offset))
+            return [self._event_row(row) for row in cur.fetchall()]
 
     # --- White-Label Theming ---
 

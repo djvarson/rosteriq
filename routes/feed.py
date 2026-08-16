@@ -32,6 +32,7 @@ from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +294,9 @@ async def pin_post(post_id: str, body: PinBody,
     post["pinned"] = bool(body.pinned)
     post["updated_at"] = datetime.utcnow()
     db.save_feed_post(post)
+    audit("feed.pin", post.get("venue_id"), "feed_post", post_id,
+          pinned=bool(body.pinned), author_name=post.get("author_name"),
+          preview=(post.get("body") or "")[:80])
     return {"status": "pinned" if body.pinned else "unpinned", "post_id": post_id,
             "post": _post_payload(post, user.user_id)}
 
@@ -309,4 +313,7 @@ async def remove_post(post_id: str,
     post["removed"] = True
     post["updated_at"] = datetime.utcnow()
     db.save_feed_post(post)
+    audit("feed.remove", post.get("venue_id"), "feed_post", post_id,
+          by_author=is_author, author_name=post.get("author_name"),
+          preview=(post.get("body") or "")[:80])
     return {"status": "removed", "post_id": post_id}

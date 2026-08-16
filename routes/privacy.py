@@ -31,6 +31,7 @@ from rosteriq.services.data_retention import DataRetentionService
 from rosteriq.services.demo import DEMO_USER_ID
 from rosteriq.middleware.auth import get_current_user, require_role
 from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,11 @@ async def export_my_data(
         service = PrivacyService(db)
         data = service.export_user_data(current_user.user_id)
 
+        # Audit: a full personal-data export left the building (self-service).
+        audit("privacy.export", None, "user", current_user.user_id,
+              subject="user", subject_id=current_user.user_id,
+              email=getattr(current_user, "email", None), self_service=True)
+
         # Return as downloadable JSON
         return JSONResponse(
             content=data,
@@ -144,7 +150,7 @@ async def export_employee_data(
         # Authorization: the employee must belong to a venue this user can
         # access (owner passes; manager/staff limited to their venue_ids).
         # Cross-venue -> 404 (not an id oracle).
-        _load_employee_in_scope(db, employee_id)
+        employee = _load_employee_in_scope(db, employee_id)
 
         # Role gate: staff cannot export other people's data.
         if current_user.role == 'staff':
@@ -152,6 +158,11 @@ async def export_employee_data(
 
         service = PrivacyService(db)
         data = service.export_employee_data(employee_id)
+
+        # Audit: someone pulled an employee's personal data (who, whose, where).
+        audit("privacy.export", getattr(employee, "venue_id", None), "employee", employee_id,
+              subject="employee", subject_id=employee_id,
+              employee_name=getattr(employee, "name", None))
 
         return JSONResponse(
             content=data,
@@ -199,13 +210,22 @@ async def anonymise_employee(
 
         # Tenant scope FIRST so a cross-venue caller gets 404 (no id oracle)
         # rather than learning the id exists via a 403.
-        _load_employee_in_scope(db, employee_id)
+        employee = _load_employee_in_scope(db, employee_id)
+        _venue_id = getattr(employee, "venue_id", None)
+        _name_before = getattr(employee, "name", None)
 
         # Authorization: only owner may anonymise
         _require_owner(current_user)
 
         service = PrivacyService(db)
         result = service.anonymise_employee(employee_id)
+
+        # Audit: irreversible erasure of PII — record who, whose (name before),
+        # and which fields went.
+        audit("privacy.anonymise", _venue_id, "employee", employee_id,
+              employee_name_before=_name_before,
+              anonymised_fields=list(result.get("anonymised_fields") or []),
+              preserved=list(result.get("preserved") or []))
 
         return {
             'success': True,
@@ -364,6 +384,11 @@ async def trigger_retention_cleanup(
 
         service = DataRetentionService(db)
         stats = service.run_cleanup(dry_run=dry_run)
+
+        # Audit only real purges (a dry run deletes nothing — keep the log quiet).
+        if not dry_run:
+            audit("privacy.retention_cleanup", None, "retention", None,
+                  dry_run=False, stats=stats)
 
         return {
             'success': True,

@@ -30,6 +30,7 @@ from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
+from rosteriq.services.events import audit
 from rosteriq.services.sms import get_sms_service
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,13 @@ async def publish_announcement(body: AnnouncementBody,
     }
     db.save_announcement(ann)
     logger.info(f"Announcement published at {body.venue_id}: {body.title!r}")
+    audit("announcement.publish", body.venue_id, "announcement", ann["id"],
+          title=body.title, pinned=body.pinned, staff_count=len(staff),
+          sms_requested=body.send_sms,
+          sms_attempted=bool(sms_result and sms_result.get("attempted")),
+          sms_sent=(sms_result or {}).get("sent", 0),
+          sms_failed=(sms_result or {}).get("failed", 0),
+          sms_no_phone=(sms_result or {}).get("no_phone", 0))
     return {"status": "published", "announcement_id": ann["id"], "sms_result": sms_result}
 
 
@@ -139,6 +147,8 @@ async def pin_announcement(ann_id: str, body: PinBody,
         raise HTTPException(status_code=404, detail="Announcement not found")
     ann["pinned"] = body.pinned
     db.save_announcement(ann)
+    audit("announcement.pin", body.venue_id, "announcement", ann_id,
+          title=ann.get("title"), pinned=bool(body.pinned))
     return {"status": "pinned" if body.pinned else "unpinned", "announcement_id": ann_id}
 
 

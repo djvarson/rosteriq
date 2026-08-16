@@ -36,6 +36,7 @@ from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +401,9 @@ async def create_sop_document(body: SopCreateBody,
     }
     db.save_sop_document(doc)
     logger.info(f"SOP published at {body.venue_id}: {doc['title']!r} ({doc['category']})")
+    audit("sop.publish", body.venue_id, "sop_document", doc["id"], title=doc["title"],
+          category=doc["category"], requires_ack=doc["requires_ack"],
+          applies_to=doc["applies_to"], version=1)
     return {"status": "published", "document_id": doc["id"], "document": _doc_payload(doc)}
 
 
@@ -421,6 +425,8 @@ async def delete_sop_document(doc_id: str,
                    "compliance record — retire it instead of deleting it.")
     db.delete_sop_document(doc_id)
     logger.info(f"SOP {doc_id} deleted at {doc.get('venue_id')} (no acknowledgements)")
+    audit("sop.delete", doc.get("venue_id"), "sop_document", doc_id, title=doc.get("title"),
+          category=doc.get("category"), version=doc.get("version"))
     return {"status": "deleted", "document_id": doc_id}
 
 
@@ -433,6 +439,7 @@ async def update_sop_document(doc_id: str, body: SopUpdateBody,
         raise HTTPException(status_code=404, detail="Procedure not found")
     _require_manager_for_doc(user, doc)
 
+    was_active = bool(doc.get("active", True))
     bump = False
     if body.title is not None and body.title.strip() != (doc.get("title") or ""):
         doc["title"] = body.title.strip()
@@ -460,6 +467,16 @@ async def update_sop_document(doc_id: str, body: SopUpdateBody,
         doc["version"] = int(doc.get("version") or 1) + 1
     doc["updated_at"] = datetime.utcnow()
     db.save_sop_document(doc)
+    now_active = bool(doc.get("active", True))
+    vid = doc.get("venue_id")
+    if now_active != was_active:
+        audit("sop.retire" if not now_active else "sop.restore", vid, "sop_document", doc_id,
+              title=doc.get("title"), version=doc.get("version"))
+    if bump or now_active == was_active:
+        audit("sop.update", vid, "sop_document", doc_id, title=doc.get("title"),
+              category=doc.get("category"), version=doc.get("version"), version_bumped=bump,
+              requires_ack=doc.get("requires_ack"), applies_to=doc.get("applies_to"),
+              active=now_active)
     payload = _doc_payload(doc)
     payload["status"] = "updated"
     payload["version_bumped"] = bump
@@ -496,6 +513,9 @@ async def seed_sops(body: SeedBody, user: UserContext = Depends(get_current_user
     _require_manager(user, body.venue_id)
     db = get_db()
     result = seed_starter_sops(db, body.venue_id, author_name=user.name or user.email)
+    if result["created"]:
+        audit("sop.seed", body.venue_id, "sop_document", None,
+              created=len(result["created"]), skipped=len(result["skipped"]))
     return {
         "status": "seeded",
         "created": len(result["created"]),

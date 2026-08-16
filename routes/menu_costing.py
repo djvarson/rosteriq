@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,23 @@ async def upsert_ingredient(body: IngredientRequest) -> dict:
         "par_level": float((prior or {}).get("par_level") or 0),
         "created_at": datetime.utcnow(),
     })
+    if prior is None:
+        audit("ingredient.create", body.venue_id, "ingredient", ing_id, name=body.name,
+              unit=body.unit, purchase_size=body.purchase_size,
+              purchase_cost=body.purchase_cost, supplier=body.supplier)
+    else:
+        old_cost = float(prior.get("purchase_cost") or 0)
+        old_size = float(prior.get("purchase_size") or 0)
+        if round(old_cost, 4) != round(float(body.purchase_cost), 4) \
+                or round(old_size, 4) != round(float(body.purchase_size), 4):
+            audit("ingredient.price_change", body.venue_id, "ingredient", ing_id,
+                  name=body.name, old_purchase_cost=old_cost, new_purchase_cost=body.purchase_cost,
+                  old_purchase_size=old_size, new_purchase_size=body.purchase_size,
+                  old_cost_per_unit=round(float(prior.get("cost_per_unit") or 0), 4),
+                  new_cost_per_unit=round(cost_per_unit, 4), source="edit")
+        else:
+            audit("ingredient.update", body.venue_id, "ingredient", ing_id, name=body.name,
+                  unit=body.unit, supplier=body.supplier, active=body.active)
     return {"status": "saved", "ingredient_id": ing_id,
             "cost_per_unit": round(cost_per_unit, 4), "unit": body.unit}
 
@@ -229,8 +247,12 @@ async def upsert_recipe(body: RecipeRequest) -> dict:
         "created_at": datetime.utcnow(),
     }
     db.save_recipe(recipe)
-    return {"status": "saved", "recipe_id": recipe_id,
-            "costing": _cost_recipe(recipe, ings)}
+    costing = _cost_recipe(recipe, ings)
+    audit("recipe.update" if body.id else "recipe.create", body.venue_id, "recipe", recipe_id,
+          name=body.name, category=body.category, sell_price_inc_gst=body.sell_price_inc_gst,
+          items=len(body.items), cost_per_portion=costing.get("cost_per_portion"),
+          food_cost_pct=costing.get("food_cost_pct"), active=body.active)
+    return {"status": "saved", "recipe_id": recipe_id, "costing": costing}
 
 
 # ---------------------------------------------------------------------------

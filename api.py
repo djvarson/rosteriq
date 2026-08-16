@@ -190,6 +190,19 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             return response
 
         start_time = time.time()
+        # Correlation id + client IP live in contextvars so every log line and
+        # every recorded event in this request can be tied back together.
+        try:
+            from rosteriq.middleware.logging import (
+                set_correlation_id, set_request_ip, get_correlation_id)
+            cid = request.headers.get("x-request-id") or request.headers.get("x-correlation-id")
+            if cid:
+                set_correlation_id(cid[:64])
+            fwd = request.headers.get("x-forwarded-for", "")
+            ip = (fwd.split(",")[0].strip() if fwd else None) or (request.client.host if request.client else None)
+            set_request_ip(ip)
+        except Exception:
+            cid = None
         response = await call_next(request)
         duration_ms = (time.time() - start_time) * 1000
 
@@ -206,6 +219,30 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "duration_ms": round(duration_ms, 2),
             },
         )
+        try:
+            response.headers["X-Correlation-ID"] = get_correlation_id()
+        except Exception:
+            pass
+
+        # Security events: denied / throttled requests are recorded durably,
+        # not just as a stdout line. (401 on the demo/auth endpoints is noise.)
+        if response.status_code in (401, 403, 429) and not request.url.path.startswith("/api/auth/"):
+            try:
+                from rosteriq.services.events import security
+                security(
+                    {401: "access.unauthenticated", 403: "access.denied",
+                     429: "rate.limited"}[response.status_code],
+                    outcome="denied" if response.status_code != 429 else "throttled",
+                    # Actor: get_current_user stashes the identity on the shared
+                    # request scope (contextvars set downstream don't reach here).
+                    user_id=getattr(request.state, "user_id", None),
+                    role=getattr(request.state, "user_role", None),
+                    method=request.method, path=request.url.path,
+                    query=str(request.url.query)[:200] or None,
+                    user_agent=(request.headers.get("user-agent") or "")[:120],
+                )
+            except Exception:
+                pass
 
         return response
 
@@ -520,6 +557,16 @@ except ImportError:
     logger.info("Team feed routes not available — skipping")
 except Exception as e:
     logger.error(f"Failed to register team feed routes: {e}")
+
+# Event log read API (audit / security / error events from services/events.py)
+try:
+    from rosteriq.routes.events import router as events_router
+    app.include_router(events_router)
+    logger.info("Event log routes registered")
+except ImportError:
+    logger.info("Event log routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register event log routes: {e}")
 
 # Inventory (stock levels, stocktakes, supplier orders)
 try:
@@ -1373,15 +1420,32 @@ except ImportError:
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle unexpected exceptions with generic message (don't leak internals)."""
     logger.exception(f"Unhandled exception: {exc}")
+    try:
+        from rosteriq.services.events import error as _record_error
+        _record_error("http.unhandled", exc, method=request.method, path=request.url.path)
+    except Exception:
+        pass
+    # Surface the correlation id on the 500 itself: this handler runs in
+    # Starlette's outermost ServerErrorMiddleware, past the request middleware
+    # that normally stamps the header, so a support conversation ("it broke at
+    # 2:14pm") could not otherwise be traced to the recorded error event.
+    try:
+        from rosteriq.middleware.logging import get_correlation_id
+        cid = get_correlation_id() or ""
+    except Exception:
+        cid = ""
     return RIQJSONResponse(
         status_code=500,
         content={
             "error": {
                 "code": "INTERNAL_SERVER_ERROR",
-                "message": "An internal error occurred. Please try again later.",
+                "message": "An internal error occurred. Please try again later."
+                           + (f" Reference: {cid}" if cid else ""),
                 "status": 500,
+                "reference": cid or None,
             }
         },
+        headers={"X-Correlation-ID": cid} if cid else None,
     )
 
 
@@ -2164,12 +2228,23 @@ async def create_venue(venue: VenueConfig):
         _user = _raw.get_user_by_id(_tenant.user_id)
         if _user:
             _vids = list(_user.get("venue_ids") or [])
+            _old_role = _user.get("role")
             if venue.id not in _vids:
                 _vids.append(venue.id)
             _user["venue_ids"] = _vids
             if _user.get("role") == "staff":
                 _user["role"] = "manager"
             _raw.save_user(_user)
+            # Audit the self-serve grant (venue access, and the staff->manager
+            # promotion when it happens) so an owner can see who got what.
+            from rosteriq.services.events import audit as _audit_grant
+            _audit_grant("user.venue_grant", venue.id, "user", _user["id"],
+                         email=_user.get("email"), reason="first_venue_bootstrap",
+                         venue_ids=_vids)
+            if _old_role != _user.get("role"):
+                _audit_grant("user.role_change", venue.id, "user", _user["id"],
+                             email=_user.get("email"), old_role=_old_role,
+                             new_role=_user.get("role"), reason="first_venue_bootstrap")
         _tenant.venue_ids.append(venue.id)
         logger.info(f"First-venue bootstrap: user {_tenant.user_id} created and now manages {venue.id}")
     else:
@@ -2252,10 +2327,58 @@ async def get_venue(venue_id: str):
 # Employee management
 # ============================================================================
 
+_EMPLOYEE_AUDIT_FIELDS = (
+    "name", "employment_type", "award_level", "state", "hourly_base_rate",
+    "skills", "email", "phone", "max_hours_per_week", "consecutive_days_limit",
+    "venue_id", "availability",
+)
+
+
+def _audit_employee_saved(employee: Employee, previous, via: str = None) -> None:
+    """Event-log an employee create/update (POST /employees is an upsert).
+
+    Emits employee.create for a new record, employee.update (with the changed
+    fields, before/after) for an existing one, plus employee.rate_change when
+    hourly_base_rate moved — the fact a venue owner most needs to answer for.
+    Never raises (the events spine swallows failures)."""
+    try:
+        from rosteriq.services.events import audit
+
+        def _plain(v):
+            if isinstance(v, Decimal):
+                return str(v)
+            if hasattr(v, "value"):
+                return v.value
+            return v
+
+        extra = {"via": via} if via else {}
+        if previous is None:
+            audit("employee.create", employee.venue_id, "employee", employee.id,
+                  name=employee.name, employment_type=_plain(employee.employment_type),
+                  award_level=_plain(employee.award_level), skills=list(employee.skills or []),
+                  hourly_base_rate=str(employee.hourly_base_rate), **extra)
+            return
+        changed = {}
+        for f in _EMPLOYEE_AUDIT_FIELDS:
+            old, new = _plain(getattr(previous, f, None)), _plain(getattr(employee, f, None))
+            if old != new:
+                changed[f] = {"old": old, "new": new}
+        audit("employee.update", employee.venue_id, "employee", employee.id,
+              name=employee.name, changed=changed, changed_fields=sorted(changed), **extra)
+        if "hourly_base_rate" in changed:
+            audit("employee.rate_change", employee.venue_id, "employee", employee.id,
+                  name=employee.name, old=changed["hourly_base_rate"]["old"],
+                  new=changed["hourly_base_rate"]["new"], **extra)
+    except Exception as e:  # noqa: BLE001 — recording must never break the save
+        logger.warning(f"employee audit event not recorded: {e}")
+
+
 @app.post("/employees")
 async def create_employee(employee: Employee):
     enforce_venue_access(getattr(employee, "venue_id", None))
+    previous = _store["employees"].get(employee.id)
     _store["employees"][employee.id] = employee
+    _audit_employee_saved(employee, previous)
 
     # Invalidate employee cache
     if get_cache_manager:
@@ -2274,7 +2397,9 @@ async def bulk_create_employees(employees: list[Employee]):
     for emp in employees:
         enforce_venue_access(getattr(emp, "venue_id", None))
     for emp in employees:
+        previous = _store["employees"].get(emp.id)
         _store["employees"][emp.id] = emp
+        _audit_employee_saved(emp, previous, via="bulk")
 
     # Invalidate employee cache
     if get_cache_manager:
@@ -2563,6 +2688,16 @@ async def generate_roster(req: GenerateRosterRequest):
             roster.shifts = kept
 
     _store["rosters"][roster.id] = roster
+    try:
+        from rosteriq.services.events import audit as _audit
+        _audit("roster.generate", req.venue_id, "roster", roster.id,
+               week_start=req.week_start.isoformat(),
+               week_end=roster.week_end.isoformat(),
+               shifts=len(roster.shifts), employees=len(employees),
+               removed_for_leave=len(removed_for_leave),
+               total_cost=str(roster.total_cost) if roster.total_cost is not None else None)
+    except Exception:
+        pass
 
     # Broadcast roster update to connected clients (non-fatal)
     try:

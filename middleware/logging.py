@@ -36,6 +36,18 @@ _correlation_id_var: ContextVar[str] = ContextVar(
 _request_user_var: ContextVar[Optional[str]] = ContextVar(
     'request_user', default=None
 )
+_request_ip_var: ContextVar[Optional[str]] = ContextVar(
+    'request_ip', default=None
+)
+
+
+def set_request_ip(ip: Optional[str]) -> None:
+    """Client IP for the current request (X-Forwarded-For first hop, else peer)."""
+    _request_ip_var.set(ip)
+
+
+def get_request_ip() -> Optional[str]:
+    return _request_ip_var.get()
 
 
 # ============================================================================

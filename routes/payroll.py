@@ -30,10 +30,22 @@ from rosteriq.services.payroll_export import (
 )
 from rosteriq.services.xero_payroll import XeroPayrollClient
 from rosteriq.services.keypay_export import KeyPayClient
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/payroll", tags=["payroll"])
+
+
+def _audit_batch_created(batch, errors, basis: str) -> None:
+    """Event-log a prepared payroll batch: the period, how many people are in
+    it, the money, and what it was built from (rostered shifts vs approved
+    timesheets). Never raises — the events spine swallows failures."""
+    audit("payroll.batch_create", batch.venue_id, "payroll_batch", batch.batch_id,
+          period_start=str(batch.period_start), period_end=str(batch.period_end),
+          basis=basis, employee_count=len(batch.employees),
+          total_gross=str(batch.total_gross), total_super=str(batch.total_super),
+          status=batch.status.value, validation_errors=len(errors or []))
 
 
 # ============================================================================
@@ -181,6 +193,7 @@ async def prepare_payroll_batch(
 
         # Save batch to DB
         db.save_payroll_batch(batch.to_dict())
+        _audit_batch_created(batch, errors, basis="rostered_shifts")
 
         return PayrollBatchResponse(
             batch_id=batch.batch_id,
@@ -275,6 +288,7 @@ async def prepare_payroll_from_timesheets(
     )
     errors = exporter.validate_batch(batch)
     db.save_payroll_batch(batch.to_dict())
+    _audit_batch_created(batch, errors, basis="approved_timesheets")
     logger.info(f"Payroll batch {batch.batch_id} prepared from {len(shifts)} "
                 f"approved timesheets at {request.venue_id}")
 
@@ -400,6 +414,12 @@ async def approve_payroll_batch(
         batch_dict["status"] = "approved"
         batch_dict["approved_at"] = date.today().isoformat()
         db.save_payroll_batch(batch_dict)
+        audit("payroll.batch_approve", batch_dict.get("venue_id"), "payroll_batch", batch_id,
+              period_start=str(batch_dict.get("period_start")),
+              period_end=str(batch_dict.get("period_end")),
+              employee_count=len(batch_dict.get("employees", [])),
+              total_gross=str(batch_dict.get("total_gross")),
+              approved_by=request.approved_by, notes=request.notes)
 
         return PayrollBatchResponse(
             batch_id=batch_dict["batch_id"],

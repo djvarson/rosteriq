@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.menu_costing import GST_RATE, _cost_recipe, _qty_in_unit
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +144,13 @@ async def record_sales(body: RecordSalesBody) -> dict:
         raise HTTPException(status_code=422,
                             detail=f"Unknown recipes for this venue: {', '.join(unknown)}")
 
-    return _record_lines(db, body.venue_id, sale_date,
-                         [(recipes[l.recipe_id], l.qty) for l in body.items], "manual")
+    result = _record_lines(db, body.venue_id, sale_date,
+                           [(recipes[l.recipe_id], l.qty) for l in body.items], "manual")
+    audit("sales.record", body.venue_id, "dish_sales", sale_date.isoformat(),
+          sale_date=sale_date.isoformat(), lines=len(result["lines"]),
+          total_revenue_inc_gst=result["total_revenue_inc_gst"],
+          total_cogs=result["total_cogs"], source="manual")
+    return result
 
 
 @router.get("/mapping")
@@ -269,6 +275,11 @@ async def import_sales(body: ImportSalesBody) -> dict:
         "auto_mapped": auto_mapped,
         "unmapped": unmapped,
     })
+    audit("sales.import", body.venue_id, "import_batch", batch_id,
+          sale_date=sale_date.isoformat(), rows=len(body.rows), recorded_lines=len(lines),
+          unmapped=len(unmapped), auto_mapped=len(auto_mapped),
+          total_revenue_inc_gst=result["total_revenue_inc_gst"],
+          total_cogs=result["total_cogs"], source="pos_import")
     return result
 
 

@@ -143,6 +143,24 @@ async def get_current_user(
     # Get venue IDs for this user
     venue_ids = user.get("venue_ids", [])
 
+    # Identity hook for the event log: stash who this is on the shared request
+    # scope (visible to OUTER middleware, e.g. the 401/403/429 security-event
+    # recorder in api.py — contextvars set here do not propagate outward
+    # because each BaseHTTPMiddleware layer runs call_next in its own task)
+    # and on the request-user contextvar (visible to everything downstream in
+    # this task, so events recorded by tenant-exempt routes such as /api/auth/*
+    # still carry the actor). Best-effort: never breaks auth.
+    try:
+        request.state.user_id = user["id"]
+        request.state.user_role = user["role"]
+    except Exception:
+        pass
+    try:
+        from rosteriq.middleware.logging import set_request_user
+        set_request_user(user["id"])
+    except Exception:
+        pass
+
     return UserContext(
         user_id=user["id"],
         email=user["email"],

@@ -751,6 +751,30 @@
       font-size: 12px;
     }
 
+    /* Activity tab filter pills (Comms & Procedures) */
+    .btn-secondary.act-cat.active, .btn-secondary.act-since.active {
+      background: rgba(245, 158, 11, 0.12);
+      color: #B45309;
+      border-color: rgba(245, 158, 11, 0.5);
+    }
+    .act-row {
+      display: flex; gap: 10px; align-items: flex-start;
+      padding: 10px 0; border-top: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .act-row:first-child { border-top: none; }
+    .act-dot {
+      width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0;
+      background: var(--brand-blue);
+    }
+    .act-dot.security { background: var(--warning); }
+    .act-dot.error { background: var(--danger); }
+    .act-dot.denied { background: var(--warning); }
+    .act-cid {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+      color: var(--text-muted); word-break: break-all;
+    }
+
     .input-group {
       display: flex;
       flex-direction: column;
@@ -3651,6 +3675,44 @@
           <button class="tab active" data-ctab="ann" onclick="commsTab('ann')">Announcements</button>
           <button class="tab" data-ctab="feed" onclick="commsTab('feed')">Team feed</button>
           <button class="tab" data-ctab="sops" onclick="commsTab('sops')">Procedures &amp; policies <span id="sops-outstanding-chip" style="display:none; margin-left:6px; font-size:11px; padding:1px 7px; border-radius:10px; background:rgba(220,38,38,0.1); color:var(--danger);"></span></button>
+          <button class="tab" data-ctab="activity" onclick="commsTab('activity')">Activity</button>
+        </div>
+
+        <!-- ACTIVITY (event log: who did what, when) -->
+        <div id="ctab-activity" style="display:none;">
+          <div class="card" style="margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+              <div>
+                <div style="font-weight:700; font-size:15px;">Activity</div>
+                <div style="color:var(--text-muted); font-size:13px;">Who did what at this venue — approvals, publishes, pay changes, bills pushed — plus anything that was blocked or broke.</div>
+              </div>
+              <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+                <div style="display:flex; gap:4px;" id="act-cat-filter">
+                  <button class="btn btn-secondary btn-small act-cat active" data-cat="" onclick="actSetFilter('category', '')">All</button>
+                  <button class="btn btn-secondary btn-small act-cat" data-cat="audit" onclick="actSetFilter('category', 'audit')">Audit</button>
+                  <button class="btn btn-secondary btn-small act-cat" data-cat="security" onclick="actSetFilter('category', 'security')">Security</button>
+                  <button class="btn btn-secondary btn-small act-cat" data-cat="error" onclick="actSetFilter('category', 'error')">Errors</button>
+                </div>
+                <div style="display:flex; gap:4px;" id="act-since-filter">
+                  <button class="btn btn-secondary btn-small act-since" data-since="24h" onclick="actSetFilter('since', '24h')">24h</button>
+                  <button class="btn btn-secondary btn-small act-since active" data-since="7d" onclick="actSetFilter('since', '7d')">7d</button>
+                  <button class="btn btn-secondary btn-small act-since" data-since="30d" onclick="actSetFilter('since', '30d')">30d</button>
+                </div>
+                <button class="btn btn-secondary btn-small" onclick="loadActivity()" title="Refresh">Refresh</button>
+              </div>
+            </div>
+            <div id="act-summary" style="margin-top:10px; font-size:12px; color:var(--text-muted);"></div>
+          </div>
+          <div id="act-list"></div>
+          <div class="card" id="act-platform-card" style="display:none; margin-top:16px; border-color:rgba(220,38,38,0.35);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+              <div>
+                <div style="font-weight:700; font-size:15px;">Platform security &amp; errors <span style="font-size:11px; font-weight:700; letter-spacing:.06em; padding:2px 7px; border-radius:8px; background:rgba(245,158,11,0.12); color:#B45309; margin-left:6px; vertical-align:2px;">OWNER</span></div>
+                <div style="color:var(--text-muted); font-size:13px;">Every venue, last 7 days: failed sign-ins, lockouts, denied access, and unhandled errors with their correlation ids.</div>
+              </div>
+            </div>
+            <div id="act-platform-list"></div>
+          </div>
         </div>
 
         <!-- TEAM FEED (manager view + moderation) -->
@@ -7441,7 +7503,7 @@ async function togglePin(i) {
 let commsCurrentTab = 'ann';
 function commsTab(which) {
   commsCurrentTab = which;
-  ['ann', 'feed', 'sops'].forEach(function(t) {
+  ['ann', 'feed', 'sops', 'activity'].forEach(function(t) {
     const el = document.getElementById('ctab-' + t);
     if (el) el.style.display = t === which ? 'block' : 'none';
   });
@@ -7450,6 +7512,7 @@ function commsTab(which) {
   });
   if (which === 'feed') loadManagerFeed();
   if (which === 'sops') loadSopLibrary();
+  if (which === 'activity') loadActivity();
 }
 
 function _ago(iso) {
@@ -7542,6 +7605,129 @@ async function managerRemoveFeed(i) {
     showToast('Post removed', 'success');
     loadManagerFeed();
   } catch (e) { showToast('Remove failed: ' + e.message, 'error'); }
+}
+
+// ---- Activity (event log: audit / security / errors) ----
+let actFilter = { category: '', since: '7d' };
+function actSetFilter(key, val) {
+  actFilter[key] = val;
+  document.querySelectorAll('#act-cat-filter .act-cat').forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-cat') === actFilter.category); });
+  document.querySelectorAll('#act-since-filter .act-since').forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-since') === actFilter.since); });
+  loadActivity();
+}
+
+// One line of English per event. Falls back to the raw action so nothing is hidden.
+function eventCopy(e) {
+  const d = e.details || {};
+  const who = esc(e.user_name || e.user_id || 'System');
+  const A = e.action || '';
+  const name = esc(d.employee || d.name || d.employee_name || d.subject || '');
+  const money = function(v) { return v == null ? '' : formatCurrency(v); };
+  const map = {
+    'timesheet.approve': function() { return who + ' approved ' + (name || 'a') + "'s timesheet" + (d.work_date ? ' for ' + esc(d.work_date) : ''); },
+    'timesheet.correct': function() { return who + ' corrected ' + (name || 'a') + "'s timesheet" + (d.note ? ' — "' + esc(d.note) + '"' : ''); },
+    'leave.decide': function() { return who + ' ' + (d.decision === 'approve' ? 'approved' : 'declined') + ' leave for ' + (name || 'a staff member') + (d.start_date ? ' (' + esc(d.start_date) + (d.end_date && d.end_date !== d.start_date ? ' → ' + esc(d.end_date) : '') + ')' : ''); },
+    'cover.decide': function() { return who + ' ' + (d.decision === 'approve' ? 'approved' : 'declined') + ' a shift cover' + (d.claimed_by_name ? ' — ' + esc(d.claimed_by_name) + ' takes it' : ''); },
+    'roster.generate': function() { return who + ' generated a roster' + (d.week_start ? ' for week of ' + esc(d.week_start) : '') + (d.shifts != null ? ' (' + d.shifts + ' shifts)' : ''); },
+    'roster.publish': function() { return who + (e.outcome === 'ok' ? ' published' : ' tried to publish') + ' the roster' + (d.week_start ? ' for week of ' + esc(d.week_start) : '') + (e.outcome !== 'ok' && d.message ? ' — ' + esc(d.message) : ''); },
+    'roster.recall': function() { return who + ' recalled a published roster' + (d.reason ? ' — "' + esc(d.reason) + '"' : ''); },
+    'roster.archive': function() { return who + ' archived a roster'; },
+    'employee.create': function() { return who + ' added ' + name + ' to the team'; },
+    'employee.update': function() { return who + ' updated ' + name + (d.changed_fields ? ' (' + esc([].concat(d.changed_fields).join(', ')) + ')' : ''); },
+    'employee.rate_change': function() { return who + ' changed ' + name + "'s rate " + money(d.old) + ' → ' + money(d.new); },
+    'payroll.batch_create': function() { return who + ' prepared a pay run ' + esc(d.period_start || '') + ' → ' + esc(d.period_end || '') + (d.employee_count != null ? ' · ' + d.employee_count + ' staff' : '') + (d.total_gross != null ? ' · ' + money(d.total_gross) + ' gross' : ''); },
+    'payroll.batch_approve': function() { return who + ' approved a pay run' + (d.total_gross != null ? ' · ' + money(d.total_gross) + ' gross' : ''); },
+    'invoice.enter': function() { return who + ' entered invoice ' + esc(d.invoice_number || '') + ' from ' + esc(d.supplier || 'a supplier') + (d.total != null ? ' · ' + money(d.total) : '') + (d.price_changes ? ' · ' + d.price_changes + ' price change(s)' : ''); },
+    'stocktake.complete': function() { return who + ' completed a stocktake' + (d.variance_value != null ? ' · variance ' + money(d.variance_value) : ''); },
+    'stocktake.start': function() { return who + ' started a stocktake'; },
+    'waste.log': function() { return who + ' logged waste' + (d.ingredient ? ' — ' + esc(d.ingredient) : '') + (d.value != null ? ' · ' + money(d.value) : '') + (d.reason ? ' (' + esc(d.reason) + ')' : ''); },
+    'order.create': function() { return who + ' drafted a supplier order' + (d.supplier ? ' to ' + esc(d.supplier) : ''); },
+    'ingredient.price_change': function() { return who + ' changed the price of ' + name + ' ' + money(d.old_purchase_cost != null ? d.old_purchase_cost : d.old) + ' → ' + money(d.new_purchase_cost != null ? d.new_purchase_cost : d.new) + (d.source === 'invoice' ? ' (from invoice ' + esc(d.invoice_number || '') + ')' : ''); },
+    'sales.record': function() { return who + ' recorded sales' + (d.rows != null ? ' (' + d.rows + ' lines)' : ''); },
+    'sales.import': function() { return who + ' imported POS sales' + (d.rows != null ? ' (' + d.rows + ' rows)' : ''); },
+    'xero.bill_push': function() { return who + (e.outcome === 'ok' ? ' pushed a bill to Xero' : ' failed to push a bill to Xero') + (d.invoice_number ? ' (' + esc(d.invoice_number) + ')' : '') + (e.outcome !== 'ok' && d.reason ? ' — ' + esc(d.reason) : ''); },
+    'myob.bill_push': function() { return who + (e.outcome === 'ok' ? ' pushed a bill to MYOB' : ' failed to push a bill to MYOB') + (d.invoice_number ? ' (' + esc(d.invoice_number) + ')' : ''); },
+    'xero.connect': function() { return who + ' connected Xero'; },
+    'announcement.publish': function() { return who + ' published "' + esc(d.title || 'an announcement') + '"'; },
+    'feed.pin': function() { return who + (d.pinned === false ? ' unpinned' : ' pinned') + ' a team post'; },
+    'feed.remove': function() { return who + ' removed a team post'; },
+    'sop.publish': function() { return who + ' published procedure "' + esc(d.title || '') + '"'; },
+    'sop.update': function() { return who + ' updated procedure "' + esc(d.title || '') + '"' + (d.version_bumped ? ' → v' + esc(d.version) + ' (re-acknowledge)' : ''); },
+    'sop.retire': function() { return who + ' retired procedure "' + esc(d.title || '') + '"'; },
+    'sop.restore': function() { return who + ' restored procedure "' + esc(d.title || '') + '"'; },
+    'sop.delete': function() { return who + ' deleted procedure "' + esc(d.title || '') + '"'; },
+    'privacy.export': function() { return who + ' exported personal data' + (name ? ' for ' + name : ''); },
+    'privacy.anonymise': function() { return who + ' anonymised a staff record'; },
+    'auth.login_failed': function() { return 'Failed login for ' + esc(d.email || 'unknown') + (d.reason ? ' (' + esc(d.reason) + ')' : ''); },
+    'auth.locked': function() { return 'Account locked after repeated failures: ' + esc(d.email || ''); },
+    'auth.login': function() { return who + ' signed in'; },
+    'auth.register': function() { return esc(d.email || 'Someone') + ' registered'; },
+    'access.denied': function() { return who + ' was refused ' + esc(d.method || '') + ' ' + esc(d.path || ''); },
+    'access.unauthenticated': function() { return 'Unauthenticated request to ' + esc(d.path || ''); },
+    'rate.limited': function() { return 'Rate limit hit on ' + esc(d.path || ''); },
+    'http.unhandled': function() { return 'Server error on ' + esc(d.method || '') + ' ' + esc(d.path || '') + (d.exception ? ' — ' + esc(d.exception) : ''); },
+    'user.venue_grant': function() { return esc(d.email || who) + ' was granted access to this venue' + (d.reason ? ' (' + esc(d.reason).replace(/_/g, ' ') + ')' : ''); },
+    'user.role_change': function() { return who + "'s role changed " + esc(d.old_role || '') + ' → ' + esc(d.new_role || ''); },
+    'demo.session': function() { return 'Demo session started (' + esc(d.identity || 'manager') + ')'; },
+  };
+  try { if (map[A]) return map[A](); } catch (err) { /* fall through */ }
+  return who + ' · ' + esc(A) + (e.resource_id ? ' · ' + esc(e.resource_id) : '');
+}
+
+async function loadActivity() {
+  if (!state.currentVenue) return;
+  const list = document.getElementById('act-list');
+  const sum = document.getElementById('act-summary');
+  const q = '?venue_id=' + encodeURIComponent(state.currentVenue) + '&since=' + actFilter.since + '&limit=200' + (actFilter.category ? '&category=' + actFilter.category : '');
+  try {
+    const [d, s] = await Promise.all([
+      fetchAPI('/api/events' + q),
+      fetchAPI('/api/events/summary?venue_id=' + encodeURIComponent(state.currentVenue) + '&days=' + (actFilter.since === '24h' ? 1 : actFilter.since === '30d' ? 30 : 7)),
+    ]);
+    if (sum && s && s.by_category) {
+      sum.textContent = 'Last ' + s.days + ' day' + (s.days === 1 ? '' : 's') + ': ' + s.by_category.audit + ' actions · ' + s.by_category.security + ' security events · ' + s.by_category.error + ' errors';
+    }
+    const evs = d.events || [];
+    if (!evs.length) {
+      list.innerHTML = '<div class="card" style="text-align:center; color:var(--text-muted); padding:28px;">Nothing recorded for this filter yet</div>';
+    } else {
+      list.innerHTML = '<div class="card" style="padding:0;">' + evs.map(function(e) {
+        const tone = e.category === 'error' ? 'var(--danger)' : (e.category === 'security' ? '#B45309' : 'var(--text-muted)');
+        const chip = '<span style="font-size:10px; font-weight:700; letter-spacing:.06em; padding:2px 7px; border-radius:8px; color:' + tone + '; background:' + (e.category === 'error' ? 'rgba(220,38,38,0.08)' : e.category === 'security' ? 'rgba(245,158,11,0.12)' : 'rgba(17,24,39,0.05)') + ';">' + esc(e.category.toUpperCase()) + (e.outcome && e.outcome !== 'ok' ? ' · ' + esc(e.outcome.toUpperCase()) : '') + '</span>';
+        return '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:10px 16px; border-bottom:1px solid var(--border); font-size:13px;">' +
+          '<div style="min-width:0;">' + chip + ' <span style="margin-left:6px;">' + eventCopy(e) + '</span>' +
+            (e.category === 'error' && e.correlation_id ? '<div style="font-size:11px; color:var(--text-muted); margin-top:2px; font-family:ui-monospace,Menlo,monospace;">ref ' + esc(e.correlation_id) + '</div>' : '') +
+          '</div>' +
+          '<div style="white-space:nowrap; color:var(--text-muted); font-size:12px;" title="' + esc(e.created_at || '') + '">' + _ago(e.created_at) + '</div>' +
+        '</div>';
+      }).join('') + '</div>';
+    }
+  } catch (e) {
+    list.innerHTML = '<div class="card" style="color:var(--danger);">' + esc(e.message) + '</div>';
+  }
+  // Owner-only platform view: the endpoint refuses non-owners without venue_id, so just try.
+  loadPlatformSecurity();
+}
+
+async function loadPlatformSecurity() {
+  let box = document.getElementById('act-platform');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'act-platform';
+    document.getElementById('act-list').insertAdjacentElement('afterend', box);
+  }
+  try {
+    const d = await fetchAPI('/api/events?since=' + actFilter.since + '&limit=100&category=security');
+    const errs = await fetchAPI('/api/events?since=' + actFilter.since + '&limit=50&category=error');
+    const rows = (d.events || []).concat(errs.events || []).sort(function(a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }).slice(0, 100);
+    box.innerHTML = '<div class="card" style="margin-top:16px;"><div style="font-weight:700; font-size:15px;">Platform security &amp; errors <span style="font-size:11px; font-weight:600; color:var(--text-muted); margin-left:6px;">owner view · all venues</span></div>' +
+      (rows.length ? '<div style="margin-top:10px;">' + rows.map(function(e) {
+        return '<div style="display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px;">' +
+          '<div style="min-width:0;">' + eventCopy(e) + (e.venue_id ? ' <span style="color:var(--text-muted); font-size:11px;">@ ' + esc(e.venue_id) + '</span>' : '') + (e.ip ? ' <span style="color:var(--text-muted); font-size:11px;">· ' + esc(e.ip) + '</span>' : '') + '</div>' +
+          '<div style="white-space:nowrap; color:var(--text-muted); font-size:12px;">' + _ago(e.created_at) + '</div></div>';
+      }).join('') + '</div>' : '<div style="color:var(--text-muted); font-size:13px; margin-top:8px;">Quiet — no security events or errors in this window.</div>') + '</div>';
+  } catch (e) {
+    box.innerHTML = '';  // not an owner (403) — hide silently
+  }
 }
 
 // ---- SOP / JSP library (manager) ----

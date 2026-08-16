@@ -31,8 +31,31 @@ from rosteriq.services.roster_publisher import (
     RosterState,
     PublicationEvent,
 )
+from rosteriq.services.events import audit, record_event
 
 logger = logging.getLogger(__name__)
+
+
+def _week(roster) -> Optional[str]:
+    ws = getattr(roster, "week_start", None)
+    return ws.isoformat() if hasattr(ws, "isoformat") else (str(ws) if ws else None)
+
+
+def _audit_publish(roster, result, **extra) -> None:
+    """One roster.publish event per publish attempt: outcome ok when it went
+    through, failed otherwise (conflicts / bad state / push error), always with
+    the resulting state and the human message."""
+    record_event(
+        "audit", "roster.publish", venue_id=roster.venue_id,
+        resource_type="roster", resource_id=roster.id,
+        outcome="ok" if result.success else "failed",
+        details={"week_start": _week(roster), "state": result.state,
+                 "conflicts_found": result.conflicts_found,
+                 "critical_conflicts": result.critical_conflicts,
+                 "notifications_sent": result.notifications_sent,
+                 "approval_request_id": result.approval_request_id,
+                 "message": result.message, **extra},
+    )
 router = APIRouter(prefix="/api/v1", tags=["publishing"])
 
 
@@ -203,6 +226,7 @@ async def publish_roster(
         publisher_id=user.user_id,
         skip_approval=body.skip_approval and user.role in ("owner", "manager"),
     )
+    _audit_publish(roster, result, skip_approval=bool(body.skip_approval))
 
     return PublishRosterResponse(
         success=result.success,
@@ -271,6 +295,8 @@ async def recall_roster(
             status_code=400,
             detail=f"Cannot recall roster {roster_id} (must be in PUBLISHED state)",
         )
+    audit("roster.recall", roster.venue_id, "roster", roster_id,
+          week_start=_week(roster), reason=body.reason)
 
     return {
         "success": True,
@@ -327,6 +353,7 @@ async def archive_roster(
             status_code=400,
             detail=f"Cannot archive roster {roster_id} (must be in PUBLISHED state)",
         )
+    audit("roster.archive", roster.venue_id, "roster", roster_id, week_start=_week(roster))
 
     return {
         "success": True,
@@ -448,6 +475,8 @@ async def transition_roster_state(
             status_code=400,
             detail=f"State transition failed",
         )
+    audit("roster.transition", roster.venue_id, "roster", roster_id,
+          week_start=_week(roster), new_state=body.new_state, reason=body.reason)
 
     return {
         "success": True,
@@ -563,6 +592,7 @@ async def auto_publish_roster(
 
     # Auto-publish
     result = await publisher.auto_publish_if_no_conflicts(roster_id=roster_id)
+    _audit_publish(roster, result, via="auto")
 
     if not result.success and result.conflicts_found > 0:
         raise HTTPException(

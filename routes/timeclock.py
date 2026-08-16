@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +275,8 @@ async def review_timesheet(
     if ts.get("status") == "approved":
         raise HTTPException(status_code=409, detail="Timesheet is already approved")
 
+    before = {k: (str(ts.get(k)) if k != "break_minutes" else ts.get(k))
+              for k in ("clock_in", "clock_out", "break_minutes")}
     adjusted = False
     for field in ("clock_in", "clock_out"):
         val = getattr(body, field)
@@ -312,6 +315,28 @@ async def review_timesheet(
         ts["adjustment_note"] = body.note
     ts["clock_in"], ts["clock_out"] = a, b
     db.save_timesheet(ts)
+
+    # Event log: a correction and an approval are two separate facts a venue
+    # owner must be able to answer for (who changed the punch, who signed it off).
+    try:
+        emp_name = getattr(db.get_employee(ts["employee_id"]), "name", None) or str(ts["employee_id"])
+    except Exception:
+        emp_name = str(ts["employee_id"])
+    if adjusted:
+        after = {"clock_in": str(a), "clock_out": str(b), "break_minutes": ts.get("break_minutes")}
+        audit("timesheet.correct", body.venue_id, "timesheet", ts_id,
+              employee_id=ts["employee_id"], employee=emp_name,
+              work_date=str(work_date), worked_minutes=worked,
+              variance_minutes=ts.get("variance_minutes"), note=body.note,
+              changed={k: {"old": before[k], "new": after[k]}
+                       for k in after if before[k] != after[k]})
+    if body.approve:
+        audit("timesheet.approve", body.venue_id, "timesheet", ts_id,
+              employee_id=ts["employee_id"], employee=emp_name,
+              work_date=str(work_date), worked_minutes=worked,
+              break_minutes=ts.get("break_minutes"),
+              variance_minutes=ts.get("variance_minutes"),
+              corrected=adjusted, note=body.note)
 
     logger.info(
         f"Timesheet {ts_id} reviewed by {user.user_id}: "
