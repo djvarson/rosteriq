@@ -119,6 +119,19 @@
           <label for="venues">Venues / sites</label>
           <input id="venues" type="number" min="1" max="50" value="1">
         </div>
+        <div style="border-top:1px solid var(--border); margin:14px 0 10px;"></div>
+        <div style="font-size:11px; font-weight:700; letter-spacing:.06em; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">RosterIQ pilot pricing (ex GST)</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="field" style="margin:0;">
+            <label for="riq-base">$ / venue / mo</label>
+            <input id="riq-base" type="number" min="0" step="1" value="149">
+          </div>
+          <div class="field" style="margin:0;">
+            <label for="riq-staff">$ / staff / mo</label>
+            <input id="riq-staff" type="number" min="0" step="0.5" value="3.50">
+          </div>
+        </div>
+        <div style="font-size:12px; color:var(--muted); margin-top:6px;">Editable — put the price you quote them here and the saving updates live.</div>
       </div>
 
       <div class="card" style="margin-top:20px;">
@@ -165,14 +178,17 @@
     { id: 'restoke',  name: 'Restoke',          sub: 'recipe costing + inventory',     mode: 'per_venue', price: 249,  on: false, replace: true },
     { id: 'marketman',name: 'MarketMan',        sub: 'inventory + ordering',           mode: 'per_venue', price: 200,  on: false, replace: true },
     { id: 'clock',    name: 'Standalone time clock app', sub: 'e.g. Clockify, TSheets', mode: 'per_staff', price: 4.00, on: false, replace: true },
-    { id: 'comms',    name: 'Team messaging',   sub: 'e.g. Slack, WhatsApp Business',  mode: 'per_staff', price: 0,    on: false, replace: true },
+    { id: 'comms',    name: 'Team messaging',   sub: 'e.g. Slack, WhatsApp Business — RosterIQ has a moderated team feed',  mode: 'per_staff', price: 0,    on: false, replace: true },
+    { id: 'sops',     name: 'SOP / WHS acknowledgement tool', sub: 'e.g. SafetyCulture — procedures on every phone, acknowledged with a tap', mode: 'per_staff', price: 0, on: false, replace: true },
     { id: 'xero',     name: 'Xero / MYOB',      sub: 'accounting — RosterIQ pushes bills into it', mode: 'flat', price: 0, on: true, replace: false },
     { id: 'payroll',  name: 'Payroll (Xero Payroll / KeyPay)', sub: 'RosterIQ hands it approved actuals', mode: 'flat', price: 0, on: true, replace: false },
     { id: 'pos',      name: 'POS',              sub: 'sales feed via export / import',  mode: 'flat', price: 0, on: true, replace: false },
   ];
-  // Pilot pricing (ex GST): per venue base + per staff. Adjust when pricing is finalised.
-  const RIQ_BASE_PER_VENUE = 149;
-  const RIQ_PER_STAFF = 3.50;
+  // Pilot pricing (ex GST): per venue base + per staff — DEFAULTS only. The
+  // page exposes both as inputs so the quoted price can be set live in the
+  // room; the saving shown is always NET of RosterIQ, never the gross drop.
+  const riqBase = () => +document.getElementById('riq-base').value || 0;
+  const riqStaff = () => +document.getElementById('riq-staff').value || 0;
 
   const fmt = n => '$' + Math.round(n).toLocaleString('en-AU');
 
@@ -213,7 +229,7 @@
         keepRows.push(`<div class="row"><span>${t.name}</span><span class="pill keep">connected</span></div>`);
       }
     });
-    const riq = RIQ_BASE_PER_VENUE * venues + RIQ_PER_STAFF * staff;
+    const riq = riqBase() * venues + riqStaff() * staff;
     const saving = today - riq;
     const el = document.getElementById('saving');
     el.innerHTML = fmt(Math.abs(saving)) + `<small>/ month ${saving >= 0 ? 'saved' : 'more'}</small>`;
@@ -228,6 +244,8 @@
 
   document.getElementById('staff').addEventListener('input', calc);
   document.getElementById('venues').addEventListener('input', calc);
+  document.getElementById('riq-base').addEventListener('input', calc);
+  document.getElementById('riq-staff').addEventListener('input', calc);
   render();
 </script>
 </body>
