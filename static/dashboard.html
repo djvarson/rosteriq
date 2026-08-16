@@ -7567,9 +7567,17 @@ async function loadSopLibrary() {
   const CAT = { sop: 'SOP', jsp: 'JSP', policy: 'POLICY', other: 'DOC' };
   list.innerHTML = sopDocs.map(function(d, i) {
     const st = d.ack_stats || { required: 0, acknowledged_current_version: 0, outstanding_names: [] };
-    const pct = st.required ? Math.round(100 * st.acknowledged_current_version / st.required) : 100;
-    const bar = '<div style="height:6px; background:#E5E8ED; border-radius:3px; overflow:hidden; margin:8px 0 4px;"><div style="height:100%; width:' + pct + '%; background:' + (pct === 100 ? 'var(--success)' : 'var(--brand-blue)') + ';"></div></div>';
+    // An active, ack-required doc that applies to nobody is a misconfiguration (role names
+    // don't match any current staff) — not "100% acknowledged".
+    const noOneApplies = st.required === 0 && d.requires_ack !== false && d.active !== false;
+    const pct = noOneApplies ? 0 : (st.required ? Math.round(100 * st.acknowledged_current_version / st.required) : 100);
+    const barColor = noOneApplies ? 'var(--warning)' : (pct === 100 ? 'var(--success)' : 'var(--brand-blue)');
+    const bar = '<div style="height:6px; background:#E5E8ED; border-radius:3px; overflow:hidden; margin:8px 0 4px;"><div style="height:100%; width:' + pct + '%; background:' + barColor + ';"></div></div>';
     const outs = (st.outstanding_names || []);
+    const caption = noOneApplies
+      ? '<span style="color:var(--warning); font-weight:600;">applies to no current staff — check the role names</span>'
+      : st.acknowledged_current_version + ' of ' + st.required + ' acknowledged' +
+        (outs.length ? ' · <span style="color:var(--danger); font-weight:600;">waiting on ' + esc(outs.slice(0, 6).join(', ')) + (outs.length > 6 ? ' +' + (outs.length - 6) : '') + '</span>' : (st.required ? ' · <span style="color:var(--success);">everyone is across it</span>' : ''));
     return '<div class="card" style="margin-bottom:12px;' + (d.active === false ? ' opacity:.6;' : '') + '">' +
       '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">' +
         '<div style="flex:1; min-width:0;">' +
@@ -7577,13 +7585,13 @@ async function loadSopLibrary() {
             (d.active === false ? ' <span style="font-size:11px; color:var(--text-muted);">(retired)</span>' : '') + '</div>' +
           '<div style="font-size:12px; color:var(--text-muted); margin-top:4px;">v' + d.version + ' · applies to ' + (d.applies_to && d.applies_to.length ? esc(d.applies_to.join(', ')) : 'everyone') + (d.requires_ack === false ? ' · info only' : '') + '</div>' +
           (d.requires_ack === false || d.active === false ? '' :
-            bar + '<div style="font-size:12px; color:var(--text-muted);">' + st.acknowledged_current_version + ' of ' + st.required + ' acknowledged' +
-              (outs.length ? ' · <span style="color:var(--danger); font-weight:600;">waiting on ' + esc(outs.slice(0, 6).join(', ')) + (outs.length > 6 ? ' +' + (outs.length - 6) : '') + '</span>' : (st.required ? ' · <span style="color:var(--success);">everyone is across it</span>' : '')) + '</div>') +
+            bar + '<div style="font-size:12px; color:var(--text-muted);">' + caption + '</div>') +
         '</div>' +
         '<div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;">' +
           '<button class="btn btn-secondary btn-small" onclick="openSopEditor(' + i + ')">Edit</button>' +
           '<button class="btn btn-secondary btn-small" onclick="toggleSopActive(' + i + ')">' + (d.active === false ? 'Restore' : 'Retire') + '</button>' +
-          (st.acknowledged_current_version === 0 && !(d.version > 1) ? '<button class="btn btn-secondary btn-small" style="color:var(--danger);" onclick="deleteSop(' + i + ')">Delete</button>' : '') +
+          // The server decides deletability (no acks on any version); the list payload carries it.
+          (d.deletable === true ? '<button class="btn btn-secondary btn-small" style="color:var(--danger);" onclick="deleteSop(' + i + ')">Delete</button>' : '') +
         '</div>' +
       '</div>' +
     '</div>';
@@ -7616,14 +7624,19 @@ async function saveSop() {
   };
   if (!payload.title || !payload.body) { showToast('Title and procedure text are both needed', 'warning'); return; }
   try {
+    let msg = 'Published to staff';
     if (id) {
-      await fetchAPI('/api/sops/documents/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+      // PUT returns the doc payload plus version_bumped; only a title/body change makes a new version.
+      const r = await fetchAPI('/api/sops/documents/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) }) || {};
+      if (r.active === false) msg = 'Saved — retired, staff won\'t see it until restored';
+      else if (r.version_bumped) msg = 'Published v' + r.version + ' — staff will be asked to acknowledge again';
+      else msg = 'Details updated — no new version, existing acknowledgements stand';
     } else {
       payload.venue_id = state.currentVenue;
       await fetchAPI('/api/sops/documents', { method: 'POST', body: JSON.stringify(payload) });
     }
     document.getElementById('sop-editor').style.display = 'none';
-    showToast(id ? 'Updated — staff will see the new version' : 'Published to staff', 'success');
+    showToast(msg, 'success');
     loadSopLibrary();
   } catch (e) { showToast('Save failed: ' + e.message, 'error'); }
 }

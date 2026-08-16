@@ -43,8 +43,17 @@ from pydantic import BaseModel, Field
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.services.demo import (
+    DEMO_USER_ID, DEMO_USER_EMAIL, DEMO_VENUE_ID,
+    DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL,
+)
 
 logger = logging.getLogger(__name__)
+
+# The public demo identities are a sandbox: they may only ever link to the
+# demo venue, never auto-link into (or be granted) a real tenant.
+_DEMO_USER_IDS = frozenset({DEMO_USER_ID, DEMO_STAFF_USER_ID})
+_DEMO_EMAILS = frozenset(e.strip().lower() for e in (DEMO_USER_EMAIL, DEMO_STAFF_EMAIL))
 
 router = APIRouter(tags=["staff-portal"])
 
@@ -118,6 +127,17 @@ def _linked_employee(db, user: UserContext):
     email = (user.email or "").strip().lower()
     if not email:
         return None, None
+
+    # The public demo identity is a sandbox: it must NEVER be linked (let
+    # alone auto-granted) into a real venue, even if someone puts
+    # demo@rosteriq.app on one of their employee records. Only the demo
+    # venue is ever considered for it.
+    if user.user_id in _DEMO_USER_IDS or email in _DEMO_EMAILS:
+        for emp in db.get_employees(DEMO_VENUE_ID) or []:
+            if (getattr(emp, "email", "") or "").strip().lower() == email:
+                return emp, DEMO_VENUE_ID
+        return None, None
+
     if user.is_owner:
         venue_ids = [v.id for v in (db.list_venues() or [])]
     else:

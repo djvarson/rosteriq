@@ -112,3 +112,55 @@ def test_demo_user_venue_ids_backfilled(monkeypatch):
     })
     seed_demo_environment(db)
     assert db.get_user_by_id(DEMO_USER_ID)["venue_ids"] == [DEMO_VENUE_ID]
+
+
+def test_demo_as_staff_mints_linked_staff_identity():
+    """`POST /api/auth/demo?as=staff` mints the SECOND demo identity (Emma
+    Thompson) whose email sits on seeded employee demo-staff-001, so the staff
+    phone portal links instead of dead-ending on linked:false."""
+    from rosteriq.services.demo import DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL
+
+    c = TestClient(app)
+    r = c.post("/api/auth/demo?as=staff")
+    assert r.status_code == 200, r.text
+    token = r.json()["access_token"]
+
+    db = get_db()
+    user = db.get_user_by_id(DEMO_STAFF_USER_ID)
+    assert user and user["email"] == DEMO_STAFF_EMAIL and user["role"] == "staff"
+    assert user.get("venue_ids") == [DEMO_VENUE_ID]
+
+    prof = c.get("/api/me/profile", headers={"Authorization": f"Bearer {token}"})
+    assert prof.status_code == 200, prof.text
+    body = prof.json()
+    assert body.get("linked") is True, body
+    assert body.get("name") == "Emma Thompson"
+    assert body.get("venue_id") == DEMO_VENUE_ID
+    assert body.get("employee_id") == "demo-staff-001"
+
+    # The default (no ?as) demo is unchanged: still the venue-side demo user.
+    # (/api/auth/me used to KeyError on the seeded row's missing last_login.)
+    default_token = c.post("/api/auth/demo").json()["access_token"]
+    me = c.get("/api/auth/me", headers={"Authorization": f"Bearer {default_token}"})
+    assert me.status_code == 200, me.text
+    assert me.json().get("email") == DEMO_USER_EMAIL
+    me_staff = c.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_staff.status_code == 200, me_staff.text
+    assert me_staff.json().get("email") == DEMO_STAFF_EMAIL
+    assert me_staff.json().get("role") == "staff"
+
+
+def test_demo_staff_employee_email_self_heals():
+    """A demo-staff-001 seeded before the staff identity existed carries no
+    email; the seeder must put it back so the staff demo links."""
+    from rosteriq.services.demo import DEMO_STAFF_EMAIL
+
+    db = MemoryStore()
+    seed_demo_environment(db)
+    emma = db.get_employee("demo-staff-001")
+    assert emma.email == DEMO_STAFF_EMAIL
+    emma.email = None
+    db.save_employee(emma)
+    assert db.get_employee("demo-staff-001").email is None
+    seed_demo_environment(db)
+    assert db.get_employee("demo-staff-001").email == DEMO_STAFF_EMAIL

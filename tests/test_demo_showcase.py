@@ -79,3 +79,79 @@ def test_showcase_seed_is_stable_across_runs():
     seed_demo_environment(db)
     seed_demo_environment(db)
     assert counts() == before  # fully idempotent on the same day
+
+
+def test_showcase_feed_posts_are_reasserted_every_seed():
+    """The two showcase feed posts are upserted by fixed id on EVERY seed, so a
+    demo post a prospect removed (or edited) is restored next Try Demo, while
+    posts prospects created themselves are left alone. (Guarding on "feed is
+    empty" meant one removed post blanked the showcase for good.)"""
+    from datetime import datetime
+    db = MemoryStore()
+    seed_demo_environment(db)
+    ids = {p["id"] for p in db.list_feed_posts(DEMO_VENUE_ID)}
+    assert {"demo-feed-001", "demo-feed-002"} <= ids
+
+    # A prospect soft-removes the swap ask and edits the pinned post.
+    post = db.get_feed_post("demo-feed-001")
+    post["removed"] = True
+    db.save_feed_post(post)
+    pinned = db.get_feed_post("demo-feed-002")
+    pinned["body"] = "edited by a prospect"
+    pinned["pinned"] = False
+    db.save_feed_post(pinned)
+    # ...and adds a post of their own.
+    db.save_feed_post({
+        "id": "prospect-post-1", "venue_id": DEMO_VENUE_ID,
+        "author_user_id": "someone", "author_name": "Someone", "author_role": "staff",
+        "body": "hello", "pinned": False, "removed": False, "reactions": {},
+        "comments": [], "created_at": datetime.utcnow(), "updated_at": datetime.utcnow(),
+    })
+    assert "demo-feed-001" not in {p["id"] for p in db.list_feed_posts(DEMO_VENUE_ID)}
+
+    seed_demo_environment(db)
+    posts = {p["id"]: p for p in db.list_feed_posts(DEMO_VENUE_ID)}
+    assert "demo-feed-001" in posts, "removed showcase post was not restored"
+    assert posts["demo-feed-001"]["removed"] is False
+    assert posts["demo-feed-002"]["pinned"] is True
+    assert posts["demo-feed-002"]["body"].startswith("New pass-through window")
+    assert "prospect-post-1" in posts, "prospect-created post must be untouched"
+    assert len(posts) == 3  # no duplicates on re-assert
+
+
+def test_showcase_food_safety_sop_and_acks_are_reasserted():
+    """Hard-deleting the Food safety starter (e.g. via the SOP delete route)
+    used to leave the showcase without it forever because the SOP block only
+    seeded when the library was empty. Now every seed re-runs the idempotent
+    starter seed and re-asserts the three demo acks."""
+    from rosteriq.routes.sops import _starter_doc_id, STARTER_SOPS
+    food_title = next(s["title"] for s in STARTER_SOPS
+                      if s["title"].lower().startswith("food safety"))
+    food_id = _starter_doc_id(DEMO_VENUE_ID, food_title)
+
+    db = MemoryStore()
+    seed_demo_environment(db)
+    assert db.get_sop_document(food_id)
+    assert len(db.list_sop_documents(DEMO_VENUE_ID)) == 4
+    assert len(db.list_sop_acks(DEMO_VENUE_ID, food_id)) == 3
+
+    db.delete_sop_document(food_id)
+    # Simulate the acks going with it (PG cascades / a fresh store).
+    for a in list(db.list_sop_acks(DEMO_VENUE_ID, food_id)):
+        db._sop_acks.pop(a["id"], None)
+    assert db.get_sop_document(food_id) is None
+    assert db.list_sop_acks(DEMO_VENUE_ID, food_id) == []
+
+    seed_demo_environment(db)
+    food = db.get_sop_document(food_id)
+    assert food and food["title"] == food_title
+    assert len(db.list_sop_documents(DEMO_VENUE_ID)) == 4  # no duplicates
+    acks = db.list_sop_acks(DEMO_VENUE_ID, food_id)
+    assert len(acks) == 3
+    assert {a["employee_id"] for a in acks} == {"demo-staff-001", "demo-staff-002", "demo-staff-003"}
+    assert {a["id"] for a in acks} == {"demo-sop-ack-001", "demo-sop-ack-002", "demo-sop-ack-003"}
+
+    # And a third seed with everything present is a pure no-op.
+    seed_demo_environment(db)
+    assert len(db.list_sop_documents(DEMO_VENUE_ID)) == 4
+    assert len(db.list_sop_acks(DEMO_VENUE_ID, food_id)) == 3

@@ -30,7 +30,7 @@ from datetime import datetime
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
@@ -46,6 +46,16 @@ _MANAGER_ROLES = ("owner", "manager", "admin")
 MAX_BODY_CHARS = 20000
 
 
+def _strip_nul(v):
+    """Postgres TEXT/JSONB reject NUL bytes (\\x00) — drop them before
+    validation so a pasted procedure can never 500 the write."""
+    if isinstance(v, str):
+        return v.replace("\x00", "")
+    if isinstance(v, list):
+        return [x.replace("\x00", "") if isinstance(x, str) else x for x in v]
+    return v
+
+
 class SopCreateBody(BaseModel):
     venue_id: str
     title: str = Field(..., min_length=1, max_length=160)
@@ -55,6 +65,11 @@ class SopCreateBody(BaseModel):
                                   description="Role/skill names; empty = everyone")
     requires_ack: bool = True
 
+    @field_validator("title", "body", "applies_to", mode="before")
+    @classmethod
+    def _no_nul(cls, v):
+        return _strip_nul(v)
+
 
 class SopUpdateBody(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=160)
@@ -63,6 +78,11 @@ class SopUpdateBody(BaseModel):
     applies_to: Optional[List[str]] = Field(default=None, max_length=30)
     requires_ack: Optional[bool] = None
     active: Optional[bool] = None
+
+    @field_validator("title", "body", "applies_to", mode="before")
+    @classmethod
+    def _no_nul(cls, v):
+        return _strip_nul(v)
 
 
 class SeedBody(BaseModel):
@@ -90,6 +110,18 @@ def _require_manager(user: UserContext, venue_id: str) -> None:
             detail="Only managers can publish or edit procedures. Read and "
                    "acknowledge yours in the SOPs tab of /my instead.",
         )
+
+
+def _require_manager_for_doc(user: UserContext, doc: dict) -> None:
+    """By-id routes: a caller WITHOUT access to the document's venue gets the
+    same 404 as an unknown id (the id must not be an oracle for another
+    venue's library). Same-venue non-managers still get the 403 that names
+    the fix."""
+    try:
+        enforce_venue_access(doc.get("venue_id"))
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Procedure not found")
+    _require_manager(user, doc.get("venue_id"))
 
 
 def _applies_to_employee(doc: dict, emp) -> bool:
@@ -129,10 +161,12 @@ def _ack_stats(doc: dict, staff: list, acks: list) -> dict:
     outstanding = sorted(e.name for e in applicable if e.id not in current)
     if not doc.get("requires_ack", True):
         # Reference-only document: nobody is "outstanding".
-        return {"required": 0, "acknowledged_current_version": len(acked),
+        return {"required": 0, "applicable": len(applicable),
+                "acknowledged_current_version": len(acked),
                 "outstanding_names": []}
     return {
         "required": len(applicable),
+        "applicable": len(applicable),
         "acknowledged_current_version": len(acked),
         "outstanding_names": outstanding,
     }
@@ -346,6 +380,8 @@ def seed_starter_sops(db, venue_id: str, author_name: str = "RosterIQ",
 async def create_sop_document(body: SopCreateBody,
                               user: UserContext = Depends(get_current_user)) -> dict:
     _require_manager(user, body.venue_id)
+    if not body.body.strip():
+        raise HTTPException(status_code=422, detail="Procedure body cannot be blank")
     db = get_db()
     now = datetime.utcnow()
     doc = {
@@ -353,7 +389,7 @@ async def create_sop_document(body: SopCreateBody,
         "venue_id": body.venue_id,
         "title": body.title.strip(),
         "category": body.category,
-        "body": body.body,
+        "body": body.body.strip(),
         "applies_to": _clean_roles(body.applies_to),
         "version": 1,
         "requires_ack": bool(body.requires_ack),
@@ -377,7 +413,7 @@ async def delete_sop_document(doc_id: str,
     doc = db.get_sop_document(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Procedure not found")
-    _require_manager(user, doc.get("venue_id"))
+    _require_manager_for_doc(user, doc)
     if db.list_sop_acks(doc.get("venue_id"), doc_id=doc_id):
         raise HTTPException(
             status_code=409,
@@ -395,15 +431,22 @@ async def update_sop_document(doc_id: str, body: SopUpdateBody,
     doc = db.get_sop_document(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Procedure not found")
-    _require_manager(user, doc.get("venue_id"))
+    _require_manager_for_doc(user, doc)
 
     bump = False
     if body.title is not None and body.title.strip() != (doc.get("title") or ""):
         doc["title"] = body.title.strip()
         bump = True
-    if body.body is not None and body.body != (doc.get("body") or ""):
-        doc["body"] = body.body
-        bump = True
+    if body.body is not None:
+        # Compare stripped-to-stripped: the editor round-trips the body with
+        # trailing whitespace, so an applies_to-only save must never look
+        # like a body edit (which would bump the version and reset acks).
+        new_body = body.body.strip()
+        if not new_body:
+            raise HTTPException(status_code=422, detail="Procedure body cannot be blank")
+        if new_body != (doc.get("body") or "").strip():
+            doc["body"] = new_body
+            bump = True
     if body.category is not None:
         doc["category"] = body.category
     if body.applies_to is not None:
@@ -432,10 +475,17 @@ async def list_sop_documents(venue_id: str = Query(...),
     staff = db.get_employees(venue_id) or []
     docs = db.list_sop_documents(venue_id, include_inactive=include_inactive) or []
     acks = db.list_sop_acks(venue_id) or []
+    acked_doc_ids = {a.get("doc_id") for a in acks}
     out = []
     for d in docs:
         p = _doc_payload(d)
         p["ack_stats"] = _ack_stats(d, staff, acks)
+        # Any ack on ANY version makes the doc part of the compliance record:
+        # it can be retired but not deleted (mirrors DELETE's 409 rule), so
+        # the UI can show Delete vs Retire without a round trip.
+        has_any_ack = d["id"] in acked_doc_ids
+        p["has_any_ack"] = has_any_ack
+        p["deletable"] = not has_any_ack
         out.append(p)
     return {"venue_id": venue_id, "count": len(out), "staff_count": len(staff),
             "documents": out}

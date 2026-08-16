@@ -551,6 +551,16 @@ class BaseStore:
     def list_feed_posts(self, venue_id: str, limit: int = 50) -> list:
         raise NotImplementedError
 
+    def append_feed_comment(self, post_id: str, comment: dict):
+        """Atomically append ``comment`` to the post; returns the updated post
+        (or None if the post does not exist)."""
+        raise NotImplementedError
+
+    def toggle_feed_reaction(self, post_id: str, emoji: str, user_id: str):
+        """Atomically add/remove ``user_id`` under ``emoji``; returns
+        ``(updated_post, "added"|"removed")`` or ``(None, None)`` if missing."""
+        raise NotImplementedError
+
     # --- Inventory: stocktakes + supplier orders ---------------------------
 
     def save_stocktake(self, st: dict) -> None:
@@ -1292,6 +1302,41 @@ class MemoryStore(BaseStore):
         rows.sort(key=lambda p: (bool(p.get("pinned")), str(p.get("created_at"))),
                   reverse=True)
         return rows[: max(int(limit or 50), 0)]
+
+    def append_feed_comment(self, post_id, comment):
+        post = self._feed_posts.get(post_id)
+        if not post:
+            return None
+        comments = post.get("comments")
+        if not isinstance(comments, list):
+            comments = []
+        # Append in place on the stored row (no whole-blob rewrite).
+        comments.append(dict(comment))
+        post["comments"] = comments
+        post["updated_at"] = datetime.utcnow()
+        return post
+
+    def toggle_feed_reaction(self, post_id, emoji, user_id):
+        post = self._feed_posts.get(post_id)
+        if not post:
+            return None, None
+        reactions = post.get("reactions")
+        if not isinstance(reactions, dict):
+            reactions = {}
+        ids = list(reactions.get(emoji) or [])
+        if user_id in ids:
+            ids = [i for i in ids if i != user_id]
+            state = "removed"
+        else:
+            ids.append(user_id)
+            state = "added"
+        if ids:
+            reactions[emoji] = ids
+        else:
+            reactions.pop(emoji, None)
+        post["reactions"] = reactions
+        post["updated_at"] = datetime.utcnow()
+        return post, state
 
     # --- Inventory ---
 
@@ -3931,6 +3976,69 @@ class PostgresStore(BaseStore):
             """, (venue_id, int(limit or 50)))
             return [self._row_to_plain(r, json_fields=("reactions", "comments"))
                     for r in cur.fetchall()]
+
+    def append_feed_comment(self, post_id, comment):
+        """Atomic append: one statement using jsonb ``||`` so two comments
+        posted at the same instant both land (no read-modify-write of the
+        whole comments blob)."""
+        with self._cursor() as cur:
+            self._ensure_table(cur, "feed_posts")
+            cur.execute("""
+                UPDATE feed_posts
+                SET comments = COALESCE(comments, '[]'::jsonb) || %s::jsonb,
+                    updated_at = now()
+                WHERE id = %s
+                RETURNING *
+            """, (json.dumps([comment], default=str), post_id))
+            row = cur.fetchone()
+            return (self._row_to_plain(row, json_fields=("reactions", "comments"))
+                    if row else None)
+
+    def toggle_feed_reaction(self, post_id, emoji, user_id):
+        """Atomic toggle: lock the row (SELECT ... FOR UPDATE) inside an
+        explicit transaction, flip the caller's membership under ``emoji``,
+        write it back, commit. The connection runs autocommit, so BEGIN /
+        COMMIT are issued explicitly on this one cursor."""
+        with self._cursor() as cur:
+            self._ensure_table(cur, "feed_posts")
+            cur.execute("BEGIN")
+            try:
+                cur.execute("SELECT * FROM feed_posts WHERE id = %s FOR UPDATE", (post_id,))
+                row = cur.fetchone()
+                if not row:
+                    cur.execute("ROLLBACK")
+                    return None, None
+                post = self._row_to_plain(row, json_fields=("reactions", "comments"))
+                reactions = post.get("reactions")
+                if not isinstance(reactions, dict):
+                    reactions = {}
+                ids = list(reactions.get(emoji) or [])
+                if user_id in ids:
+                    ids = [i for i in ids if i != user_id]
+                    state = "removed"
+                else:
+                    ids.append(user_id)
+                    state = "added"
+                if ids:
+                    reactions[emoji] = ids
+                else:
+                    reactions.pop(emoji, None)
+                cur.execute("""
+                    UPDATE feed_posts
+                    SET reactions = %s::jsonb, updated_at = now()
+                    WHERE id = %s
+                    RETURNING *
+                """, (json.dumps(reactions), post_id))
+                row = cur.fetchone()
+                cur.execute("COMMIT")
+            except Exception:
+                try:
+                    cur.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise
+            return (self._row_to_plain(row, json_fields=("reactions", "comments"))
+                    if row else None), state
 
     def save_stocktake(self, st):
         with self._cursor() as cur:

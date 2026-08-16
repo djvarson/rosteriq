@@ -313,10 +313,40 @@ async function api(path, opts) {
   if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthenticated'); }
   const data = await res.json().catch(function () { return {}; });
   if (!res.ok) {
-    const detail = (data && data.detail) ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : ('Request failed (' + res.status + ')');
-    const e = new Error(detail); e.status = res.status; throw e;
+    const e = new Error(apiErrorMessage(data, res.status)); e.status = res.status; throw e;
   }
   return data;
+}
+
+// The app returns {error:{message}} for most failures and FastAPI returns {detail}
+// for validation/auth errors; prefer the app's message, then detail, then a fallback.
+function apiErrorMessage(data, status) {
+  const asText = function (v) { return typeof v === 'string' ? v : JSON.stringify(v); };
+  if (data && data.error && data.error.message) return asText(data.error.message);
+  if (data && data.detail) return asText(data.detail);
+  return 'Request failed (' + status + ')';
+}
+
+// Local calendar date (YYYY-MM-DD) in the browser's timezone. Never use
+// toISOString().slice(0,10) for "today": that is the UTC date, which is
+// yesterday until 08:00 in Perth.
+function localIso(d) {
+  d = d || new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// Format a server timestamp as a local en-AU short date. Timezone-less strings
+// (e.g. "2026-08-15 23:30:00.123456") are treated as UTC, which is how the
+// backend stores them.
+function localDay(iso) {
+  if (!iso) return '';
+  let s = String(iso).trim().replace(' ', 'T');
+  s = s.replace(/(\.\d{3})\d+/, '$1');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s += 'T00:00:00';            // bare calendar date: keep as local
+  else if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s += 'Z';           // tz-less timestamp: it is UTC
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return String(iso).slice(0, 10);
+  return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
@@ -456,7 +486,7 @@ async function loadSops() {
       return '<div class="sop" id="sop-' + esc(d.id) + '">' +
         '<div class="sop-head" onclick="document.getElementById(\'sop-' + esc(d.id) + '\').classList.toggle(\'open\')">' +
           '<div><span class="sop-cat">' + esc((d.category || 'sop').toUpperCase()) + '</span><span class="sop-title">' + esc(d.title) + '</span>' +
-            '<div class="note">v' + esc(d.version) + (d.acknowledged ? ' &middot; acknowledged ' + esc(String(d.acknowledged_at || '').slice(0, 10)) : (needs ? ' &middot; <span style="color:var(--red); font-weight:600;">needs your acknowledgement</span>' : '')) + '</div></div>' +
+            '<div class="note">v' + esc(d.version) + (d.acknowledged ? ' &middot; acknowledged ' + esc(localDay(d.acknowledged_at)) : (needs ? ' &middot; <span style="color:var(--red); font-weight:600;">needs your acknowledgement</span>' : '')) + '</div></div>' +
           '<span class="badge ' + (d.acknowledged ? 'approved' : (needs ? 'pending' : 'today')) + '">' + (d.acknowledged ? 'Done' : (needs ? 'Read me' : 'Info')) + '</span>' +
         '</div>' +
         '<div class="sop-body">' + esc(d.body) +
@@ -484,7 +514,7 @@ async function loadHome() {
   const week = document.getElementById('home-week');
   const todo = document.getElementById('home-todo');
   const todoWrap = document.getElementById('home-todo-wrap');
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = localIso();
   const results = await Promise.allSettled([
     api('/api/me/shifts'), api('/api/me/announcements'), api('/api/me/cover'),
     api('/api/me/leave'), api('/api/me/timesheets'), api('/api/me/sops').catch(function () { return { documents: [] }; }),
@@ -525,7 +555,7 @@ async function loadHome() {
   const cells = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(mon); d.setDate(mon.getDate() + i);
-    const iso = d.toISOString().slice(0, 10);
+    const iso = localIso(d);
     const s = byDate[iso];
     cells.push('<div class="week-day' + (s ? ' on' : '') + (iso === todayIso ? ' today' : '') + '">' +
       '<div class="d">' + DOW[d.getDay()] + '</div><div class="n">' + d.getDate() + '</div>' +
@@ -684,7 +714,7 @@ async function loadShifts() {
       card.innerHTML = '<div class="empty">No shifts rostered in the next 14 days.<br>Check back after the next roster is published.</div>';
       return;
     }
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = localIso();
     card.innerHTML = data.shifts.map(function (s) {
       const d = new Date(s.date + 'T00:00:00');
       const isToday = s.date === todayIso;

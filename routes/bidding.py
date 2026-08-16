@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
+from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.models import UserRole
 from rosteriq.services.shift_bidding import (
     ShiftBiddingService, OpenShift, Bid, OpenShiftStatus, BidStatus
@@ -132,6 +133,35 @@ def get_bidding_service(db=Depends(get_db)) -> ShiftBiddingService:
     return ShiftBiddingService(db, notifications)
 
 
+def _load_shift_in_scope(
+    bidding_service: ShiftBiddingService, shift_id: str
+) -> OpenShift:
+    """
+    Load an open shift by id and enforce that the CURRENT request's user may
+    act on the shift's venue.
+
+    Owners pass; managers/staff must have the shift's venue in their venue_ids.
+    A cross-venue request gets the SAME 404 as a missing shift so shift ids are
+    not an oracle for other tenants' data.
+    """
+    shift = bidding_service.get_open_shift(shift_id) if shift_id else None
+    if not shift:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Open shift not found",
+        )
+    try:
+        enforce_venue_access(shift.venue_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Open shift not found",
+            )
+        raise
+    return shift
+
+
 # ============================================================================
 # ENDPOINTS
 # ============================================================================
@@ -152,8 +182,11 @@ async def post_open_shift(
     """
     Post an open shift for employees to bid on.
 
-    Only managers can post shifts.
+    Only managers can post shifts, and only for a venue they can access.
     """
+    # Tenant scope: manager/staff limited to their venue_ids (owner passes).
+    enforce_venue_access(venue_id)
+
     if user.role != UserRole.manager:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -174,7 +207,7 @@ async def post_open_shift(
                 "deadline": request.deadline,
                 "notes": request.notes,
             },
-            posted_by=user.id,
+            posted_by=user.user_id,
         )
         return OpenShiftResponse.from_model(shift)
     except ValueError as e:
@@ -198,7 +231,10 @@ async def list_open_shifts(
     user: UserContext = Depends(get_current_user),
     bidding_service: ShiftBiddingService = Depends(get_bidding_service),
 ):
-    """List open shifts for a venue."""
+    """List open shifts for a venue the caller can access."""
+    # Tenant scope: manager/staff limited to their venue_ids (owner passes).
+    enforce_venue_access(venue_id)
+
     try:
         shift_status = None
         if status_filter:
@@ -233,12 +269,8 @@ async def get_open_shift_with_bids(
     bidding_service: ShiftBiddingService = Depends(get_bidding_service),
 ):
     """Get details of an open shift and all bids (manager view only)."""
-    shift = bidding_service.get_open_shift(shift_id)
-    if not shift:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Open shift not found",
-        )
+    # 404 for missing OR cross-venue (ids are not an oracle).
+    shift = _load_shift_in_scope(bidding_service, shift_id)
 
     # Only managers can see all bids
     if user.role != UserRole.manager:
@@ -271,7 +303,8 @@ async def place_bid(
     """
     Place a bid on an open shift.
 
-    Staff can only bid with their own ID.
+    Staff can only bid with their own ID, and only on shifts in a venue they
+    belong to.
     """
     if user.role != UserRole.staff:
         raise HTTPException(
@@ -279,10 +312,13 @@ async def place_bid(
             detail="Only staff can place bids",
         )
 
+    # 404 for missing OR cross-venue shift (ids are not an oracle).
+    _load_shift_in_scope(bidding_service, open_shift_id)
+
     try:
         bid = bidding_service.place_bid(
             open_shift_id=open_shift_id,
-            employee_id=user.id,
+            employee_id=user.user_id,
             offered_rate=request.offered_rate,
             message=request.message,
         )
@@ -310,7 +346,7 @@ async def withdraw_bid(
     Staff can only withdraw their own bids.
     """
     try:
-        bidding_service.withdraw_bid(bid_id, user.id)
+        bidding_service.withdraw_bid(bid_id, user.user_id)
         return None
     except ValueError as e:
         raise HTTPException(
@@ -332,8 +368,11 @@ async def auto_assign_shift(
     """
     Automatically assign shift to best-scoring bid.
 
-    Only managers can auto-assign.
+    Only managers can auto-assign, and only within a venue they can access.
     """
+    # 404 for missing OR cross-venue (ids are not an oracle).
+    _load_shift_in_scope(bidding_service, shift_id)
+
     if user.role != UserRole.manager:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -370,8 +409,11 @@ async def award_shift(
     Manager manually awards shift to a bidder.
 
     Creates actual shift in roster and rejects other bids.
-    Only managers can award.
+    Only managers can award, and only within a venue they can access.
     """
+    # 404 for missing OR cross-venue (ids are not an oracle).
+    _load_shift_in_scope(bidding_service, shift_id)
+
     if user.role != UserRole.manager:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -379,7 +421,7 @@ async def award_shift(
         )
 
     try:
-        shift = bidding_service.award_shift(shift_id, bid_id, user.id)
+        shift = bidding_service.award_shift(shift_id, bid_id, user.user_id)
         return {
             "id": shift.id,
             "employee_id": shift.employee_id,
@@ -409,8 +451,12 @@ async def cancel_open_shift(
     """
     Cancel an open shift posting.
 
-    Only managers who posted the shift can cancel it.
+    Only managers who posted the shift can cancel it, and only within a venue
+    they can access.
     """
+    # 404 for missing OR cross-venue (ids are not an oracle).
+    _load_shift_in_scope(bidding_service, shift_id)
+
     if user.role != UserRole.manager:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -418,7 +464,7 @@ async def cancel_open_shift(
         )
 
     try:
-        bidding_service.cancel_open_shift(shift_id, user.id)
+        bidding_service.cancel_open_shift(shift_id, user.user_id)
         return None
     except ValueError as e:
         raise HTTPException(
@@ -465,8 +511,11 @@ async def get_eligible_employees(
     """
     Get list of employees eligible to bid on a shift.
 
-    Only managers can view this.
+    Only managers can view this, and only within a venue they can access.
     """
+    # 404 for missing OR cross-venue (ids are not an oracle).
+    _load_shift_in_scope(bidding_service, shift_id)
+
     if user.role != UserRole.manager:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

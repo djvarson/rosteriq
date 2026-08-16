@@ -26,7 +26,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
@@ -50,13 +50,31 @@ MANAGER_ROLES = ("owner", "manager", "admin")
 # Request bodies
 # ---------------------------------------------------------------------------
 
+def _strip_nul(v):
+    """Postgres TEXT/JSONB reject NUL bytes (\\x00) — drop them before
+    validation so a pasted body can never 500 the write."""
+    if isinstance(v, str):
+        return v.replace("\x00", "")
+    return v
+
+
 class PostBody(BaseModel):
     venue_id: str
     body: str = Field(..., min_length=1, max_length=2000)
 
+    @field_validator("body", mode="before")
+    @classmethod
+    def _no_nul(cls, v):
+        return _strip_nul(v)
+
 
 class CommentBody(BaseModel):
     body: str = Field(..., min_length=1, max_length=1000)
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def _no_nul(cls, v):
+        return _strip_nul(v)
 
 
 class ReactBody(BaseModel):
@@ -93,11 +111,16 @@ def _resolve_actor(db, user: UserContext, venue_id: str, *, hide_as_404: bool = 
 
     * Linked staff at ``venue_id``  -> staff actor (employee name).
     * Manager/owner with venue access -> manager actor (user name/email).
+    * BOTH (a manager whose email is also on an employee record here) ->
+      manager actor, but displayed under the employee's name — a working
+      manager who is also on the roster still moderates as management.
     * Anyone else -> 403 (or 404 when ``hide_as_404`` — per-post routes must
       not reveal that another venue's post exists).
     """
     emp, emp_vid = _linked_employee(db, user)
     if emp is not None and str(emp_vid) == str(venue_id):
+        if _is_manager_user(user):
+            return _Actor("manager", emp.name, employee_id=emp.id)
         return _Actor("staff", emp.name, employee_id=emp.id)
 
     try:
@@ -227,19 +250,20 @@ async def add_comment(post_id: str, body: CommentBody,
                       user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
     post, actor = _load_post(db, user, post_id)
-    comments = list(post.get("comments") or [])
-    comments.append({
+    comment = {
         "id": f"fc-{uuid.uuid4().hex[:10]}",
         "author_user_id": user.user_id,
         "author_name": actor.name,
         "author_role": actor.role,
         "body": body.body.strip(),
         "created_at": datetime.utcnow(),
-    })
-    post["comments"] = comments
-    post["updated_at"] = datetime.utcnow()
-    db.save_feed_post(post)
-    return _post_payload(post, user.user_id)
+    }
+    # Atomic append in the store (jsonb || on Postgres) — two people
+    # commenting at once must not clobber each other's comment.
+    updated = db.append_feed_comment(post_id, comment)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return _post_payload(updated, user.user_id)
 
 
 @router.post("/posts/{post_id}/react")
@@ -247,23 +271,13 @@ async def toggle_reaction(post_id: str, body: ReactBody,
                           user: UserContext = Depends(get_current_user)) -> dict:
     emoji = _normalise_emoji(body.emoji)
     db = get_db()
-    post, _actor = _load_post(db, user, post_id)
-    reactions = dict(post.get("reactions") or {})
-    ids = list(reactions.get(emoji) or [])
-    if user.user_id in ids:
-        ids = [i for i in ids if i != user.user_id]
-        state = "removed"
-    else:
-        ids.append(user.user_id)
-        state = "added"
-    if ids:
-        reactions[emoji] = ids
-    else:
-        reactions.pop(emoji, None)
-    post["reactions"] = reactions
-    post["updated_at"] = datetime.utcnow()
-    db.save_feed_post(post)
-    counts, mine = _reaction_summary(post, user.user_id)
+    _load_post(db, user, post_id)  # visibility / tenancy check
+    # Atomic toggle in the store (row-locked read-modify-write on Postgres) —
+    # two people reacting at once must not lose each other's reaction.
+    updated, state = db.toggle_feed_reaction(post_id, emoji, user.user_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Post not found")
+    counts, mine = _reaction_summary(updated, user.user_id)
     return {"post_id": post_id, "emoji": emoji, "status": state,
             "reaction_counts": counts, "my_reactions": mine}
 

@@ -8,13 +8,14 @@ import asyncio
 import logging
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 
 from rosteriq.database import get_db
 from rosteriq.services.auth import auth_service
 from rosteriq.services.notifications import get_notification_service
 from rosteriq.services.demo import (
     seed_demo_environment, DEMO_USER_ID, DEMO_USER_EMAIL,
+    DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL,
 )
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.schemas import (
@@ -38,12 +39,21 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.post("/demo")
-async def demo_session(request: Request, db = Depends(get_db)):
+async def demo_session(
+    request: Request,
+    as_: str = Query("manager", alias="as"),
+    db = Depends(get_db),
+):
     """Mint a short-lived session for the sandboxed demo user so prospects can
     try the product (incl. the AI agent) without registering.
 
     The demo user is scoped to the demo venue only, so this exposes no real
     tenant data. Rate-limited per IP to bound abuse of the unauthenticated path.
+
+    ``?as=staff`` mints the session for the second demo identity (Emma
+    Thompson, whose email is on a seeded employee) so the staff phone portal
+    (/my) links and can be showcased; anything else is the default (venue-side)
+    demo user. Both are role "staff" and locked to the demo venue.
     """
     client_ip = request.client.host if request.client else "unknown"
     # Reuse the login throttle: too many recent attempts from this IP -> back off.
@@ -58,11 +68,15 @@ async def demo_session(request: Request, db = Depends(get_db)):
     except Exception as e:  # never 500 the public demo path
         logger.warning("Demo seed issue (continuing): %s", e)
 
+    if (as_ or "").strip().lower() == "staff":
+        demo_user_id, demo_email = DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL
+    else:
+        demo_user_id, demo_email = DEMO_USER_ID, DEMO_USER_EMAIL
     access_token, _ = auth_service.create_access_token(
-        DEMO_USER_ID, DEMO_USER_EMAIL, "staff"
+        demo_user_id, demo_email, "staff"
     )
     # Record as a (successful) attempt so the per-IP counter advances.
-    auth_service.record_login_attempt(DEMO_USER_EMAIL, client_ip, True)
+    auth_service.record_login_attempt(demo_email, client_ip, True)
     return {"access_token": access_token, "token_type": "bearer", "demo": True}
 
 
@@ -302,7 +316,9 @@ async def get_current_user_profile(
         role=user["role"],
         is_active=user["is_active"],
         created_at=user["created_at"],
-        last_login=user["last_login"],
+        # Seeded rows (demo identities) never logged in by password and carry
+        # no last_login key on the in-memory store — don't 500 the profile.
+        last_login=user.get("last_login"),
         venue_ids=user.get("venue_ids", []),
     )
 

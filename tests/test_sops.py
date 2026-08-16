@@ -139,7 +139,7 @@ def test_acknowledge_updates_staff_view_and_manager_ack_stats():
 
     # Before: nobody has acknowledged; both staff outstanding
     stats = c.get(f"/api/sops/documents?venue_id={vid}", headers=owner_h).json()["documents"][0]["ack_stats"]
-    assert stats == {"required": 2, "acknowledged_current_version": 0,
+    assert stats == {"required": 2, "applicable": 2, "acknowledged_current_version": 0,
                      "outstanding_names": ["Bec Barkeep", "Kai Kitchen"]}
 
     r = c.post(f"/api/me/sops/{doc['id']}/acknowledge", headers=bar_h)
@@ -160,7 +160,7 @@ def test_acknowledge_updates_staff_view_and_manager_ack_stats():
     bar_doc = _publish(c, owner_h, vid, title="RSA refusal script", applies_to=["bar"])["document"]
     listing = c.get(f"/api/sops/documents?venue_id={vid}", headers=owner_h).json()["documents"]
     bar_stats = next(d for d in listing if d["id"] == bar_doc["id"])["ack_stats"]
-    assert bar_stats == {"required": 1, "acknowledged_current_version": 0,
+    assert bar_stats == {"required": 1, "applicable": 1, "acknowledged_current_version": 0,
                          "outstanding_names": ["Bec Barkeep"]}
     # ...and the kitchen hand cannot acknowledge a doc that is not theirs
     r = c.post(f"/api/me/sops/{bar_doc['id']}/acknowledge", headers=kit_h)
@@ -310,8 +310,9 @@ def test_cross_venue_access_is_denied():
     assert c.post("/api/sops/documents", json={
         "venue_id": vid, "title": "Nope", "category": "sop", "body": "no",
     }, headers=outsider_h).status_code == 403
+    # By-id routes: another venue's id is a 404 (no oracle), not a 403
     assert c.put(f"/api/sops/documents/{doc['id']}", json={"title": "Hijack"},
-                 headers=outsider_h).status_code == 403
+                 headers=outsider_h).status_code == 404
     assert c.post("/api/sops/seed", json={"venue_id": vid}, headers=outsider_h).status_code == 403
 
     # A staff member linked to a different venue cannot acknowledge this venue's doc
@@ -398,3 +399,136 @@ def test_delete_only_while_unacknowledged():
     r = c.delete(f"/api/sops/documents/{d2}", headers=owner_h)
     assert r.status_code == 409, r.text
     assert "retire" in _err(r).lower()
+
+
+# ---------------------------------------------------------------------------
+# Hardening: NUL bytes, by-id 404 (no cross-venue oracle), stripped body
+# compare, list payload deletable/has_any_ack + applicable count.
+# ---------------------------------------------------------------------------
+
+def test_nul_bytes_are_stripped_from_title_body_and_applies_to():
+    c = TestClient(app)
+    vid = "sop-v-nul"
+    owner_h, _, _, _ = _setup(c, vid)
+    r = c.post("/api/sops/documents", json={
+        "venue_id": vid, "title": "Fire\x00 plan", "category": "sop",
+        "body": "hi\x00there", "applies_to": ["ba\x00r", "kitchen"],
+    }, headers=owner_h)
+    assert r.status_code == 200, r.text
+    doc = r.json()["document"]
+    assert doc["title"] == "Fire plan"
+    assert doc["body"] == "hithere"
+    assert doc["applies_to"] == ["bar", "kitchen"]
+    stored = get_db().get_sop_document(doc["id"])
+    assert stored["body"] == "hithere" and stored["title"] == "Fire plan"
+
+    # Update path strips too
+    r = c.put(f"/api/sops/documents/{doc['id']}", json={
+        "title": "Evac\x00uation", "body": "new\x00 body", "applies_to": ["flo\x00or"],
+    }, headers=owner_h)
+    assert r.status_code == 200, r.text
+    assert r.json()["title"] == "Evacuation" and r.json()["body"] == "new body"
+    assert r.json()["applies_to"] == ["floor"]
+
+    # All-NUL body is empty -> rejected, never stored
+    r = c.post("/api/sops/documents", json={
+        "venue_id": vid, "title": "X", "category": "sop", "body": "\x00\x00",
+    }, headers=owner_h)
+    assert r.status_code == 422, r.text
+
+
+def test_update_and_delete_by_id_are_404_for_other_venues_403_for_same_venue_staff():
+    c = TestClient(app)
+    vid = "sop-v-oracle"
+    owner_h, bar_h, _, _ = _setup(c, vid)
+    doc = _publish(c, owner_h, vid, title="Secret procedure")["document"]
+
+    outsider_email = f"m{uuid.uuid4().hex[:8]}@x.com"
+    outsider_h = _register_login(c, outsider_email)
+    _scope(outsider_email, "some-other-venue", role="manager")
+
+    # Cross-venue manager: the id must not be an oracle -> same 404 as unknown id
+    r = c.put(f"/api/sops/documents/{doc['id']}", json={"title": "Hijack"}, headers=outsider_h)
+    assert r.status_code == 404, r.text
+    assert _err(r) == "Procedure not found"
+    r = c.delete(f"/api/sops/documents/{doc['id']}", headers=outsider_h)
+    assert r.status_code == 404, r.text
+    assert _err(r) == "Procedure not found"
+    ghost = c.put("/api/sops/documents/ghost-id", json={"title": "x"}, headers=outsider_h)
+    assert ghost.status_code == 404 and _err(ghost) == "Procedure not found"
+
+    # Same-venue staff still get the 403 that names the fix
+    r = c.put(f"/api/sops/documents/{doc['id']}", json={"title": "Nope"}, headers=bar_h)
+    assert r.status_code == 403, r.text
+    assert "manager" in _err(r).lower()
+    r = c.delete(f"/api/sops/documents/{doc['id']}", headers=bar_h)
+    assert r.status_code == 403, r.text
+    assert "manager" in _err(r).lower()
+
+    # Untouched
+    assert get_db().get_sop_document(doc["id"])["title"] == "Secret procedure"
+
+
+def test_body_is_stored_stripped_and_whitespace_only_diff_never_bumps_version():
+    c = TestClient(app)
+    vid = "sop-v-strip"
+    owner_h, bar_h, _, _ = _setup(c, vid)
+    out = _publish(c, owner_h, vid, title="Till float", body="  Count the float twice.\n\n")
+    doc = out["document"]
+    assert doc["body"] == "Count the float twice."
+    assert get_db().get_sop_document(doc["id"])["body"] == "Count the float twice."
+    assert c.post(f"/api/me/sops/{doc['id']}/acknowledge", headers=bar_h).status_code == 200
+
+    # Editor round-trips the body with trailing whitespace + changes applies_to
+    # only: no version bump, ack stands.
+    r = c.put(f"/api/sops/documents/{doc['id']}", json={
+        "body": "Count the float twice.\n", "applies_to": ["bar"],
+    }, headers=owner_h)
+    assert r.status_code == 200, r.text
+    assert r.json()["version"] == 1 and r.json()["version_bumped"] is False
+    assert r.json()["applies_to"] == ["bar"]
+    assert r.json()["body"] == "Count the float twice."
+    me = next(d for d in c.get("/api/me/sops", headers=bar_h).json()["documents"] if d["id"] == doc["id"])
+    assert me["acknowledged"] is True
+
+    # A real body change still bumps and is stored stripped
+    r = c.put(f"/api/sops/documents/{doc['id']}", json={"body": "  Count it three times.  "}, headers=owner_h)
+    assert r.json()["version"] == 2 and r.json()["version_bumped"] is True
+    assert r.json()["body"] == "Count it three times."
+
+    # Whitespace-only body on update is rejected
+    assert c.put(f"/api/sops/documents/{doc['id']}", json={"body": "   "}, headers=owner_h).status_code == 422
+
+
+def test_listing_reports_deletable_has_any_ack_and_applicable_count():
+    c = TestClient(app)
+    vid = "sop-v-deletable"
+    owner_h, bar_h, _, _ = _setup(c, vid)
+    fresh = _publish(c, owner_h, vid, title="Fresh draft")["document"]
+    signed = _publish(c, owner_h, vid, title="Signed procedure", applies_to=["bar"])["document"]
+    ref = _publish(c, owner_h, vid, title="Reference only", requires_ack=False)["document"]
+    assert c.post(f"/api/me/sops/{signed['id']}/acknowledge", headers=bar_h).status_code == 200
+
+    docs = {d["id"]: d for d in c.get(f"/api/sops/documents?venue_id={vid}", headers=owner_h).json()["documents"]}
+    assert docs[fresh["id"]]["deletable"] is True and docs[fresh["id"]]["has_any_ack"] is False
+    assert docs[signed["id"]]["deletable"] is False and docs[signed["id"]]["has_any_ack"] is True
+    assert docs[ref["id"]]["deletable"] is True and docs[ref["id"]]["has_any_ack"] is False
+
+    # applicable = staff the doc applies to, regardless of requires_ack
+    assert docs[fresh["id"]]["ack_stats"]["applicable"] == 2
+    assert docs[fresh["id"]]["ack_stats"]["required"] == 2
+    assert docs[signed["id"]]["ack_stats"]["applicable"] == 1
+    assert docs[signed["id"]]["ack_stats"]["acknowledged_current_version"] == 1
+    assert docs[ref["id"]]["ack_stats"] == {
+        "required": 0, "applicable": 2, "acknowledged_current_version": 0, "outstanding_names": [],
+    }
+
+    # A body edit bumps the version, but an ack on ANY version keeps it non-deletable
+    r = c.put(f"/api/sops/documents/{signed['id']}", json={"body": "v2 body"}, headers=owner_h)
+    assert r.json()["version"] == 2
+    docs = {d["id"]: d for d in c.get(f"/api/sops/documents?venue_id={vid}", headers=owner_h).json()["documents"]}
+    assert docs[signed["id"]]["deletable"] is False and docs[signed["id"]]["has_any_ack"] is True
+    assert docs[signed["id"]]["ack_stats"]["acknowledged_current_version"] == 0
+    # ...and the payload agrees with what DELETE actually does
+    assert c.delete(f"/api/sops/documents/{signed['id']}", headers=owner_h).status_code == 409
+    assert c.delete(f"/api/sops/documents/{fresh['id']}", headers=owner_h).status_code == 200

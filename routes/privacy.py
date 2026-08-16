@@ -28,7 +28,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from rosteriq.database import get_db
 from rosteriq.services.privacy import PrivacyService
 from rosteriq.services.data_retention import DataRetentionService
+from rosteriq.services.demo import DEMO_USER_ID
 from rosteriq.middleware.auth import get_current_user, require_role
+from rosteriq.middleware.tenant import enforce_venue_access
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,38 @@ def _require_owner(current_user) -> None:
     """
     if getattr(current_user, "role", None) != "owner":
         raise HTTPException(status_code=403, detail="Owner role required")
+
+
+def _refuse_demo(current_user) -> None:
+    """
+    The public "Try Demo" identity must never be able to pull or destroy PII —
+    even for the demo venue's own seeded staff. Refuse it outright.
+    """
+    if getattr(current_user, "user_id", None) == DEMO_USER_ID:
+        raise HTTPException(
+            status_code=403, detail="This action is not available in the demo"
+        )
+
+
+def _load_employee_in_scope(db, employee_id: str):
+    """
+    Load an employee by id and enforce that the CURRENT request's user may act
+    on that employee's venue.
+
+    Owners pass; managers/staff must have the employee's venue in their
+    venue_ids. A cross-venue request gets the SAME 404 as a missing employee so
+    employee ids are not an oracle for other tenants' data.
+    """
+    employee = db.get_employee(employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    try:
+        enforce_venue_access(getattr(employee, "venue_id", None))
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        raise
+    return employee
 
 
 # ============================================================================
@@ -101,16 +135,18 @@ async def export_employee_data(
     - Skills
     - Employment details
 
-    Requires: Manager or Owner role
+    Requires: Manager or Owner role, scoped to a venue the user can access
     """
     try:
-        # Authorization: user must be manager of a venue this employee is in
-        employee = db.get_employee(employee_id)
-        if not employee:
-            raise HTTPException(status_code=404, detail="Employee not found")
+        # The demo identity can never export PII.
+        _refuse_demo(current_user)
 
-        # Check if user can access this employee
-        user = db.get_user_by_id(current_user.user_id)
+        # Authorization: the employee must belong to a venue this user can
+        # access (owner passes; manager/staff limited to their venue_ids).
+        # Cross-venue -> 404 (not an id oracle).
+        _load_employee_in_scope(db, employee_id)
+
+        # Role gate: staff cannot export other people's data.
         if current_user.role == 'staff':
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
@@ -154,10 +190,18 @@ async def anonymise_employee(
     - Email → "anon_XXXXXXXX@deleted.local"
     - Phone → removed
 
-    Requires: Owner role (this is a significant operation)
+    Requires: Owner role (this is a significant operation), and the employee
+    must belong to a venue the caller can access.
     """
     try:
-        # Authorization: only venue owner
+        # The demo identity can never anonymise anyone.
+        _refuse_demo(current_user)
+
+        # Tenant scope FIRST so a cross-venue caller gets 404 (no id oracle)
+        # rather than learning the id exists via a 403.
+        _load_employee_in_scope(db, employee_id)
+
+        # Authorization: only owner may anonymise
         _require_owner(current_user)
 
         service = PrivacyService(db)

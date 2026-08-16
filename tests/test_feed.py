@@ -288,3 +288,150 @@ def test_demo_seed_populates_feed_once():
     # Idempotent: seeding again does not duplicate
     seed_demo_environment(db)
     assert len(db.list_feed_posts(DEMO_VENUE_ID)) == 2
+
+
+# ---------------------------------------------------------------------------
+# Hardening: demo identity sandbox, NUL bytes, manager-on-roster identity,
+# atomic comment append / reaction toggle in the store.
+# ---------------------------------------------------------------------------
+
+def test_demo_identity_never_auto_links_into_a_real_venue():
+    """The staff-portal auto-link scans every venue by email and GRANTS the
+    matching venue to the user. A real venue that puts demo@rosteriq.app on an
+    employee record must NOT pull the public demo user into that tenant."""
+    from rosteriq.services.auth import auth_service
+    from rosteriq.services.demo import (
+        seed_demo_environment, DEMO_USER_ID, DEMO_USER_EMAIL, DEMO_VENUE_ID,
+    )
+    c, owner_h, vid, _, _ = _world()
+    db = get_db()
+    seed_demo_environment(db)
+    before = list((db.get_user_by_id(DEMO_USER_ID) or {}).get("venue_ids") or [])
+    _employee(c, owner_h, vid, f"{vid}-trap", "Trap Employee", DEMO_USER_EMAIL)
+
+    tok, _ = auth_service.create_access_token(DEMO_USER_ID, DEMO_USER_EMAIL, "staff")
+    demo_h = {"Authorization": f"Bearer {tok}"}
+
+    prof = c.get("/api/me/profile", headers=demo_h)
+    assert prof.status_code == 200, prof.text
+    body = prof.json()
+    # Either unlinked, or linked ONLY at the demo venue — never at the real one
+    if body.get("linked"):
+        assert body["venue_id"] == DEMO_VENUE_ID
+    assert body.get("venue_id") != vid
+
+    # No durable grant leaked onto the demo user record
+    rec = db.get_user_by_id(DEMO_USER_ID)
+    assert vid not in (rec.get("venue_ids") or [])
+    assert (rec.get("venue_ids") or []) == before
+
+    # And the demo session cannot read or write the real venue's feed
+    r = c.post("/api/feed/posts", json={"venue_id": vid, "body": "sneak"}, headers=demo_h)
+    assert r.status_code == 403, r.text
+    assert c.get(f"/api/feed/posts?venue_id={vid}", headers=demo_h).status_code == 403
+
+
+def test_nul_bytes_are_stripped_from_post_and_comment_bodies():
+    c, owner_h, vid, s1_h, _ = _world()
+    p = _post(c, s1_h, vid, "hi\x00there")
+    assert p["body"] == "hithere"
+    assert get_db().get_feed_post(p["id"])["body"] == "hithere"
+
+    r = c.post(f"/api/feed/posts/{p['id']}/comments", json={"body": "yo\x00u"}, headers=owner_h)
+    assert r.status_code == 200, r.text
+    assert r.json()["comments"][0]["body"] == "you"
+
+    # A body that is nothing but NULs is empty after stripping -> validation 422
+    assert c.post("/api/feed/posts", json={"venue_id": vid, "body": "\x00\x00"},
+                  headers=s1_h).status_code == 422
+    assert c.post(f"/api/feed/posts/{p['id']}/comments", json={"body": "\x00"},
+                  headers=owner_h).status_code == 422
+
+
+def test_manager_whose_email_is_on_an_employee_record_acts_as_manager():
+    """A working manager who is ALSO on the roster (email on an employee
+    record) posts/comments as ``manager`` but under the employee's name."""
+    c, owner_h, vid, s1_h, _ = _world()
+    mgr_email = f"mgr{uuid.uuid4().hex[:8]}@x.com"
+    _employee(c, owner_h, vid, f"{vid}-mgr", "Morgan Manager", mgr_email)
+    mgr_h = _manager_at(c, mgr_email, vid)
+
+    p = _post(c, mgr_h, vid, "Working manager here")
+    assert p["author_role"] == "manager"
+    assert p["author_name"] == "Morgan Manager"
+
+    sp = _post(c, s1_h, vid, "staff post")
+    r = c.post(f"/api/feed/posts/{sp['id']}/comments", json={"body": "noted"}, headers=mgr_h)
+    assert r.status_code == 200, r.text
+    assert r.json()["comments"][0]["author_role"] == "manager"
+    assert r.json()["comments"][0]["author_name"] == "Morgan Manager"
+
+    # Manager powers still apply (pin someone else's post)
+    assert c.post(f"/api/feed/posts/{sp['id']}/pin", json={"pinned": True},
+                  headers=mgr_h).status_code == 200
+
+    # A plain staff member with the same shape is still ``staff``
+    plain = _post(c, s1_h, vid, "just staff")
+    assert plain["author_role"] == "staff" and plain["author_name"] == "Ava Staff"
+
+
+def test_comment_append_and_reaction_toggle_use_atomic_store_ops(monkeypatch):
+    """Comments/reactions must not be whole-blob read-modify-write: the routes
+    go through ``append_feed_comment`` / ``toggle_feed_reaction`` (jsonb ``||``
+    and a row-locked toggle on Postgres). Guard: if either route falls back to
+    ``save_feed_post`` the test fails."""
+    from datetime import datetime
+    c, owner_h, vid, s1_h, s2_h = _world()
+    p = _post(c, owner_h, vid, "atomic")
+    db = get_db()
+
+    def _boom(*a, **k):
+        raise AssertionError("whole-blob save_feed_post used for a comment/reaction write")
+    monkeypatch.setattr(db, "save_feed_post", _boom)
+
+    # Two comments from two people both land, in order (append, not replace)
+    assert c.post(f"/api/feed/posts/{p['id']}/comments", json={"body": "one"}, headers=s1_h).status_code == 200
+    r = c.post(f"/api/feed/posts/{p['id']}/comments", json={"body": "two"}, headers=s2_h)
+    assert r.status_code == 200, r.text
+    assert [cm["body"] for cm in r.json()["comments"]] == ["one", "two"]
+    assert r.json()["comment_count"] == 2
+    assert [cm["body"] for cm in db.get_feed_post(p["id"])["comments"]] == ["one", "two"]
+
+    # Reaction toggle through the route: on, on (other user), off
+    r = c.post(f"/api/feed/posts/{p['id']}/react", json={"emoji": THUMBS}, headers=s1_h)
+    assert r.status_code == 200 and r.json()["status"] == "added"
+    assert r.json()["reaction_counts"] == {THUMBS: 1} and r.json()["my_reactions"] == [THUMBS]
+    r = c.post(f"/api/feed/posts/{p['id']}/react", json={"emoji": THUMBS}, headers=s2_h)
+    assert r.json()["status"] == "added" and r.json()["reaction_counts"] == {THUMBS: 2}
+    r = c.post(f"/api/feed/posts/{p['id']}/react", json={"emoji": THUMBS}, headers=s1_h)
+    assert r.json()["status"] == "removed" and r.json()["reaction_counts"] == {THUMBS: 1}
+    assert r.json()["my_reactions"] == []
+    # The comments written earlier survived the reaction writes (no clobber)
+    stored = db.get_feed_post(p["id"])
+    assert [cm["body"] for cm in stored["comments"]] == ["one", "two"]
+    assert len(stored["reactions"][THUMBS]) == 1
+
+    # Store-level contract: both return the updated post; unknown id -> None
+    monkeypatch.undo()
+    upd = db.append_feed_comment(p["id"], {
+        "id": "fc-store", "author_user_id": "u-x", "author_name": "X",
+        "author_role": "staff", "body": "three", "created_at": datetime.utcnow(),
+    })
+    assert [cm["body"] for cm in upd["comments"]] == ["one", "two", "three"]
+    assert db.append_feed_comment("ghost", {"id": "fc-g", "body": "x"}) is None
+
+    post, state = db.toggle_feed_reaction(p["id"], HEART, "user-a")
+    assert state == "added" and post["reactions"][HEART] == ["user-a"]
+    post, state = db.toggle_feed_reaction(p["id"], HEART, "user-b")
+    assert state == "added" and post["reactions"][HEART] == ["user-a", "user-b"]
+    post, state = db.toggle_feed_reaction(p["id"], HEART, "user-a")
+    assert state == "removed" and post["reactions"][HEART] == ["user-b"]
+    post, state = db.toggle_feed_reaction(p["id"], HEART, "user-b")
+    assert state == "removed" and HEART not in post["reactions"]
+    assert THUMBS in post["reactions"]  # other emoji untouched
+    assert db.toggle_feed_reaction("ghost", HEART, "u") == (None, None)
+
+    # Removed / unknown posts still 404 through the routes
+    assert c.delete(f"/api/feed/posts/{p['id']}", headers=owner_h).status_code == 200
+    assert c.post(f"/api/feed/posts/{p['id']}/comments", json={"body": "late"}, headers=s1_h).status_code == 404
+    assert c.post(f"/api/feed/posts/{p['id']}/react", json={"emoji": THUMBS}, headers=s1_h).status_code == 404

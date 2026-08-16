@@ -22,6 +22,13 @@ DEMO_VENUE_ID = "demo-venue-001"
 DEMO_USER_ID = "demo-user"
 DEMO_USER_EMAIL = "demo@rosteriq.app"
 
+# Second demo identity for the staff-phone (/my) showcase: a login whose email
+# matches a seeded employee (Emma Thompson, demo-staff-001) so the portal
+# links and every "my shifts / my leave / swaps" beat has real data behind it.
+DEMO_STAFF_USER_ID = "demo-staff-user"
+DEMO_STAFF_EMAIL = "demo.staff@rosteriq.app"
+DEMO_STAFF_EMPLOYEE_ID = "demo-staff-001"
+
 # (name, role/skill, hourly rate) — mirrors the dashboard's client-side demo set.
 _DEMO_STAFF = [
     ("Emma Thompson", "floor", "32.50"),
@@ -75,6 +82,36 @@ def seed_demo_environment(db) -> None:
     except Exception:
         pass
 
+    # Staff-side demo identity (Emma Thompson). Same self-heal pattern: a row
+    # that drifted (wrong venue scope, role, deactivated, or an email that no
+    # longer matches the seeded employee) is put back so the /my portal links.
+    try:
+        existing = db.get_user_by_id(DEMO_STAFF_USER_ID)
+        if not existing:
+            db.save_user({
+                "id": DEMO_STAFF_USER_ID,
+                "email": DEMO_STAFF_EMAIL,
+                "name": "Emma Thompson",
+                "password_hash": "",      # login-by-password disabled for demo
+                "role": "staff",
+                "is_active": True,
+                "venue_ids": [DEMO_VENUE_ID],
+                "created_at": now,
+            })
+        elif (
+            existing.get("venue_ids") != [DEMO_VENUE_ID]
+            or existing.get("role") != "staff"
+            or not existing.get("is_active")
+            or existing.get("email") != DEMO_STAFF_EMAIL
+        ):
+            existing["venue_ids"] = [DEMO_VENUE_ID]
+            existing["role"] = "staff"
+            existing["is_active"] = True
+            existing["email"] = DEMO_STAFF_EMAIL
+            db.save_user(existing)
+    except Exception:
+        pass
+
     _demo_min_staff = {"floor": 1, "bar": 1, "kitchen": 1}  # a 3-body floor the demo roster meets
     _existing_venue = db.get_venue(DEMO_VENUE_ID)
     if not _existing_venue:
@@ -114,12 +151,25 @@ def seed_demo_environment(db) -> None:
                 state=State.wa,
                 hourly_base_rate=Decimal(rate),
                 skills=[role],
+                # Emma carries the staff-demo login email so /my links to her.
+                email=DEMO_STAFF_EMAIL if f"demo-staff-{i:03d}" == DEMO_STAFF_EMPLOYEE_ID else None,
                 created_at=now,
                 updated_at=now,
             )
             for i, (name, role, rate) in enumerate(_DEMO_STAFF, start=1)
         ]
         db.save_employees(employees)
+    else:
+        # Self-heal: a demo-staff-001 seeded before the staff-side identity
+        # existed has no email, so the staff demo would land on linked:false.
+        try:
+            emma = next((e for e in already if e.id == DEMO_STAFF_EMPLOYEE_ID), None)
+            if emma is not None and (getattr(emma, "email", None) or "").strip().lower() != DEMO_STAFF_EMAIL:
+                emma.email = DEMO_STAFF_EMAIL
+                emma.updated_at = now
+                db.save_employee(emma)
+        except Exception:
+            pass
 
     # Starter menu (ingredients + recipes) so Menu & Sales, inventory and the
     # snapshot are never empty — previously only seeded if someone manually
@@ -230,55 +280,85 @@ def _seed_demo_showcase(db, now) -> None:
         pass
 
     # Team feed (two-way: a staff swap ask with a manager reply, plus a pinned
-    # manager post with a couple of thumbs-up). Guarded: only when empty.
+    # manager post with a couple of thumbs-up). Re-asserted on EVERY Try Demo:
+    # the two showcase posts are upserted by fixed id with their canonical
+    # content, so a prospect who removed or edited one gets it back next
+    # session, while posts prospects created themselves are left untouched.
+    # (Guarding on "feed empty" let one removed post blank the showcase for
+    # good — the pillar was never empty again, so it never re-seeded.)
     try:
-        if not db.list_feed_posts(DEMO_VENUE_ID):
-            db.save_feed_post({
-                "id": "demo-feed-002", "venue_id": DEMO_VENUE_ID,
-                "author_user_id": DEMO_USER_ID, "author_name": "Management",
-                "author_role": "manager",
-                "body": "New pass-through window opens Friday — kitchen walkthrough "
-                        "3pm Thursday",
-                "pinned": True, "removed": False,
-                "reactions": {"\U0001F44D": ["demo-staff-003", "demo-staff-006"]},
-                "comments": [],
-                "created_at": now - timedelta(hours=5), "updated_at": now,
-            })
-            db.save_feed_post({
-                "id": "demo-feed-001", "venue_id": DEMO_VENUE_ID,
-                "author_user_id": "demo-staff-002", "author_name": "James Wilson",
-                "author_role": "staff",
-                "body": "Anyone able to swap my Sat close? Family thing",
-                "pinned": False, "removed": False,
-                "reactions": {},
-                "comments": [{
-                    "id": "demo-feed-001-c1", "author_user_id": DEMO_USER_ID,
-                    "author_name": "Management", "author_role": "manager",
-                    "body": "Post it as a shift cover in /my and I'll approve "
-                            "whoever grabs it — Lisa's usually keen for Saturdays.",
-                    "created_at": now - timedelta(hours=1),
-                }],
-                "created_at": now - timedelta(hours=2), "updated_at": now,
-            })
+        db.save_feed_post({
+            "id": "demo-feed-002", "venue_id": DEMO_VENUE_ID,
+            "author_user_id": DEMO_USER_ID, "author_name": "Management",
+            "author_role": "manager",
+            "body": "New pass-through window opens Friday — kitchen walkthrough "
+                    "3pm Thursday",
+            "pinned": True, "removed": False,
+            "reactions": {"\U0001F44D": ["demo-staff-003", "demo-staff-006"]},
+            "comments": [],
+            "created_at": now - timedelta(hours=5), "updated_at": now,
+        })
+        db.save_feed_post({
+            "id": "demo-feed-001", "venue_id": DEMO_VENUE_ID,
+            "author_user_id": "demo-staff-002", "author_name": "James Wilson",
+            "author_role": "staff",
+            "body": "Anyone able to swap my Sat close? Family thing",
+            "pinned": False, "removed": False,
+            "reactions": {},
+            "comments": [{
+                "id": "demo-feed-001-c1", "author_user_id": DEMO_USER_ID,
+                "author_name": "Management", "author_role": "manager",
+                "body": "Post it as a shift cover in /my and I'll approve "
+                        "whoever grabs it — Lisa's usually keen for Saturdays.",
+                "created_at": now - timedelta(hours=1),
+            }],
+            "created_at": now - timedelta(hours=2), "updated_at": now,
+        })
     except Exception:
         pass
 
     # SOP / JSP library: the four starter procedures, with 3 of 6 staff having
     # read Food safety so the manager view shows real outstanding names.
+    # Re-asserted every Try Demo: seed_starter_sops is idempotent (deterministic
+    # ids, skips titles that exist), so a starter a prospect deleted comes back
+    # while a renamed/edited one is left alone; the acks are first-write-wins
+    # in the store, so re-saving them is a no-op when they already exist.
     try:
-        if not db.list_sop_documents(DEMO_VENUE_ID):
-            from rosteriq.routes.sops import seed_starter_sops
-            seed_starter_sops(db, DEMO_VENUE_ID, author_name="Management", now=now)
+        from rosteriq.routes.sops import seed_starter_sops, _starter_doc_id, STARTER_SOPS
+        seed_starter_sops(db, DEMO_VENUE_ID, author_name="Management", now=now)
+        food_title = next((s["title"] for s in STARTER_SOPS
+                           if str(s.get("title", "")).lower().startswith("food safety")),
+                          "Food safety & allergen declaration")
+        food = db.get_sop_document(_starter_doc_id(DEMO_VENUE_ID, food_title))
+        if not food:
+            # A demo library seeded before starter ids became deterministic
+            # holds Food safety under a random id (seed_starter_sops skips it
+            # by title) — fall back to the title so its acks still re-assert.
             food = next((d for d in (db.list_sop_documents(DEMO_VENUE_ID) or [])
                          if str(d.get("title", "")).lower().startswith("food safety")), None)
-            if food:
-                for i, (name, _role, _rate) in enumerate(_DEMO_STAFF[:3], start=1):
+        if food:
+            version = int(food.get("version") or 1)
+            have = {
+                a.get("employee_id")
+                for a in (db.list_sop_acks(DEMO_VENUE_ID, food["id"]) or [])
+                if int(a.get("doc_version") or 0) == version
+            }
+            for i, (name, _role, _rate) in enumerate(_DEMO_STAFF[:3], start=1):
+                emp_id = f"demo-staff-{i:03d}"
+                if emp_id in have:
+                    continue  # first-write-wins anyway; skip the round-trip
+                # Fixed ids for the canonical v1 acks; a later version gets its
+                # own ids so PG's PK on id can't collide with the v1 rows.
+                ack_id = f"demo-sop-ack-{i:03d}" if version == 1 else f"demo-sop-ack-{i:03d}-v{version}"
+                try:
                     db.save_sop_ack({
-                        "id": f"demo-sop-ack-{i:03d}", "venue_id": DEMO_VENUE_ID,
-                        "doc_id": food["id"], "doc_version": int(food.get("version") or 1),
-                        "employee_id": f"demo-staff-{i:03d}", "employee_name": name,
+                        "id": ack_id, "venue_id": DEMO_VENUE_ID,
+                        "doc_id": food["id"], "doc_version": version,
+                        "employee_id": emp_id, "employee_name": name,
                         "acknowledged_at": now - timedelta(hours=3 + i),
                     })
+                except Exception:
+                    continue  # one ack failing must not drop the others
     except Exception:
         pass
 

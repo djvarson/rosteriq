@@ -210,10 +210,10 @@ class ShiftBiddingService:
         if isinstance(end_time, str):
             end_time = time.fromisoformat(end_time)
 
-        # Validate minimum rate meets award requirements
-        day_type = get_day_type(shift_date)
-        from rosteriq.models import EmploymentType
-        award_multiplier = get_penalty_multiplier(EmploymentType.casual, day_type)
+        # Validate minimum rate. (A previous get_day_type(shift_date) call here
+        # was dead code — its result was unused — and crashed every post with
+        # "missing 1 required positional argument: 'state'", so posting an open
+        # shift always 500'd. Removed.)
         if min_rate <= 0:
             raise ValueError("min_rate must be greater than 0")
 
@@ -840,6 +840,12 @@ class ShiftBiddingService:
 
         eligible = []
         for emp in all_employees:
+            # Tenant scope: only staff of the shift's own venue are eligible.
+            # list_employees() is global, so without this a manager viewing a
+            # venue-A shift would be shown venue-B staff (names + skills).
+            if getattr(emp, "venue_id", None) != open_shift.venue_id:
+                continue
+
             # Check required skills
             if open_shift.skills_required:
                 if not hasattr(emp, "skills") or not emp.skills:

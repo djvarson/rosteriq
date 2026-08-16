@@ -24,6 +24,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
 from rosteriq.middleware.auth import get_current_user, UserContext
+from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.database import get_db
 from rosteriq.services.approval_workflow import (
     approval_workflow,
@@ -33,6 +34,41 @@ from rosteriq.services.approval_workflow import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["approvals"])
+
+
+# ============================================================================
+# Tenant helpers
+# ============================================================================
+
+
+def _user_can_access_venue(user: UserContext, venue_id: Optional[str]) -> bool:
+    """Owner passes everything; manager/staff only their own venue_ids."""
+    if user.is_owner:
+        return True
+    return bool(venue_id) and venue_id in (user.venue_ids or [])
+
+
+def _enforce_venue_or_404(venue_id: Optional[str], not_found_detail: str) -> None:
+    """
+    Tenant gate for by-id routes. Denial is reported as 404 (same as a missing
+    record) so approval/roster ids are not an oracle for other tenants' data.
+    """
+    try:
+        enforce_venue_access(venue_id)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise HTTPException(status_code=404, detail=not_found_detail)
+        raise
+
+
+def _load_approval_request_scoped(request_id: str) -> dict:
+    """Load an approval request by id, 404 if missing or outside the caller's venues."""
+    request_dict = get_db().get_approval_request(request_id)
+    not_found = f"Request {request_id} not found"
+    if not request_dict:
+        raise HTTPException(status_code=404, detail=not_found)
+    _enforce_venue_or_404(request_dict.get("venue_id"), not_found)
+    return request_dict
 
 
 # ============================================================================
@@ -119,6 +155,12 @@ async def submit_for_approval(
     Returns:
         ApprovalResponse with status and next steps
     """
+    # Tenant gate: the roster must belong to one of the caller's venues.
+    roster = get_db().get_roster(roster_id)
+    if not roster:
+        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    _enforce_venue_or_404(roster.venue_id, f"Roster {roster_id} not found")
+
     try:
         request = await approval_workflow.submit_for_approval(
             roster_id=roster_id,
@@ -142,6 +184,8 @@ async def submit_for_approval(
             auto_approved_by_rules=request.auto_approved_by_rules,
             failed_rules=request.failed_rules,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -165,11 +209,19 @@ async def get_pending_approvals(
     Returns:
         List of pending ApprovalRequest objects
     """
+    # Tenant gate: an explicit venue filter must be one of the caller's venues.
+    if venue_id:
+        enforce_venue_access(venue_id)
+
     try:
         approvals = approval_workflow.get_pending_approvals(
             user_id=user.user_id,
             venue_id=venue_id,
         )
+
+        # Non-owners only ever see approvals for their own venues.
+        if not user.is_owner:
+            approvals = [a for a in approvals if _user_can_access_venue(user, a.venue_id)]
 
         return PendingApprovalsResponse(
             pending_count=len(approvals),
@@ -194,6 +246,8 @@ async def get_pending_approvals(
                 for a in approvals
             ],
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching pending approvals: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -219,6 +273,9 @@ async def approve_roster(
     Returns:
         Updated ApprovalResponse
     """
+    # Tenant gate BEFORE acting: 404 if missing or outside the caller's venues.
+    _load_approval_request_scoped(request_id)
+
     try:
         request = await approval_workflow.review(
             request_id=request_id,
@@ -244,6 +301,8 @@ async def approve_roster(
             auto_approved_by_rules=request.auto_approved_by_rules,
             failed_rules=request.failed_rules,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -271,6 +330,9 @@ async def reject_roster(
     Returns:
         Updated ApprovalResponse
     """
+    # Tenant gate BEFORE acting: 404 if missing or outside the caller's venues.
+    _load_approval_request_scoped(request_id)
+
     try:
         if body.approved:
             raise ValueError("Cannot use approve endpoint for rejection")
@@ -299,6 +361,8 @@ async def reject_roster(
             auto_approved_by_rules=request.auto_approved_by_rules,
             failed_rules=request.failed_rules,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -321,6 +385,9 @@ async def escalate_approval(
     Returns:
         Updated ApprovalResponse
     """
+    # Tenant gate BEFORE acting: 404 if missing or outside the caller's venues.
+    _load_approval_request_scoped(request_id)
+
     try:
         request = await approval_workflow.escalate(request_id=request_id)
 
@@ -341,6 +408,8 @@ async def escalate_approval(
             auto_approved_by_rules=request.auto_approved_by_rules,
             failed_rules=request.failed_rules,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -361,8 +430,19 @@ async def get_approval_history(
     Returns:
         List of all ApprovalResponse objects for this roster
     """
+    # Tenant gate: if the roster exists it must be in one of the caller's venues
+    # (404 on denial so roster ids are not an oracle).
+    roster = get_db().get_roster(roster_id)
+    if roster is not None:
+        _enforce_venue_or_404(roster.venue_id, f"Roster {roster_id} not found")
+
     try:
         approvals = approval_workflow.get_approval_history(roster_id=roster_id)
+
+        # Belt and braces: never return another tenant's approval records even
+        # if the roster row itself has gone.
+        if not user.is_owner:
+            approvals = [a for a in approvals if _user_can_access_venue(user, a.venue_id)]
 
         return [
             ApprovalResponse(
@@ -384,6 +464,8 @@ async def get_approval_history(
             )
             for a in approvals
         ]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching approval history: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -408,12 +490,10 @@ async def get_revision_diff(
     Returns:
         RosterDiffResponse with added/removed/changed shifts
     """
-    try:
-        db = get_db()
-        request_dict = db.get_approval_request(request_id)
-        if not request_dict:
-            raise ValueError(f"Request {request_id} not found")
+    # Tenant gate: 404 if missing or outside the caller's venues.
+    request_dict = _load_approval_request_scoped(request_id)
 
+    try:
         roster_id = request_dict["roster_id"]
 
         diff = approval_workflow.diff_revisions(
@@ -432,6 +512,8 @@ async def get_revision_diff(
             cost_delta=diff.cost_delta,
             hours_delta=diff.hours_delta,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

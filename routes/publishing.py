@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Depends, Path, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.middleware.auth import get_current_user, UserContext
+from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.database import get_db
 from rosteriq.services.roster_publisher import (
     publisher,
@@ -33,6 +34,25 @@ from rosteriq.services.roster_publisher import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["publishing"])
+
+
+def _load_roster_scoped(roster_id: str):
+    """
+    Load a roster by id and enforce that it belongs to one of the caller's
+    venues (owner passes everything). Denial is reported as 404 — identical to
+    a missing roster — so roster ids are not an oracle for other tenants' data.
+    """
+    roster = get_db().get_roster(roster_id)
+    not_found = f"Roster {roster_id} not found"
+    if not roster:
+        raise HTTPException(status_code=404, detail=not_found)
+    try:
+        enforce_venue_access(roster.venue_id)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise HTTPException(status_code=404, detail=not_found)
+        raise
+    return roster
 
 
 # ============================================================================
@@ -167,11 +187,8 @@ async def publish_roster(
         f"(skip_approval={body.skip_approval})"
     )
 
-    # Verify user is manager or owner for this venue
-    db = get_db()
-    roster = db.get_roster(roster_id)
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
+    roster = _load_roster_scoped(roster_id)
 
     # Verify permissions
     if user.role not in ("owner", "manager") and body.skip_approval:
@@ -243,11 +260,8 @@ async def recall_roster(
             detail="Only managers and owners can recall rosters",
         )
 
-    # Verify roster exists
-    db = get_db()
-    roster = db.get_roster(roster_id)
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
+    roster = _load_roster_scoped(roster_id)
 
     # Recall
     success = publisher.recall_roster(roster_id=roster_id, reason=body.reason)
@@ -302,11 +316,8 @@ async def archive_roster(
             detail="Only managers and owners can archive rosters",
         )
 
-    # Verify roster exists
-    db = get_db()
-    roster = db.get_roster(roster_id)
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
+    roster = _load_roster_scoped(roster_id)
 
     # Archive
     success = publisher.archive_roster(roster_id=roster_id)
@@ -350,11 +361,8 @@ async def get_roster_state(
     Raises:
         404: Roster not found
     """
-    # Verify roster exists
-    db = get_db()
-    roster = db.get_roster(roster_id)
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
+    roster = _load_roster_scoped(roster_id)
 
     # Get state
     state = publisher.get_roster_state(roster_id=roster_id)
@@ -416,11 +424,8 @@ async def transition_roster_state(
             detail="Only owners can perform manual state transitions",
         )
 
-    # Verify roster exists
-    db = get_db()
-    roster = db.get_roster(roster_id)
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
+    roster = _load_roster_scoped(roster_id)
 
     # Validate state
     valid_states = [s.value for s in RosterPublishState]
@@ -481,7 +486,9 @@ async def get_publication_history(
         404: Venue not found
         403: User lacks permission
     """
-    # Verify user can access this venue
+    # Verify user can access this venue (tenant gate: 403 for other tenants' venues)
+    enforce_venue_access(venue_id)
+
     db = get_db()
     venue = db.get_venue(venue_id)
     if not venue:
@@ -551,11 +558,8 @@ async def auto_publish_roster(
             detail="Only managers and owners can auto-publish",
         )
 
-    # Verify roster exists
-    db = get_db()
-    roster = db.get_roster(roster_id)
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
+    roster = _load_roster_scoped(roster_id)
 
     # Auto-publish
     result = await publisher.auto_publish_if_no_conflicts(roster_id=roster_id)
