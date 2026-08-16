@@ -527,6 +527,10 @@ class BaseStore:
     def get_sop_document(self, doc_id: str):
         raise NotImplementedError
 
+    def delete_sop_document(self, doc_id: str) -> None:
+        """Hard-delete a document (routes only allow this when it has no acks)."""
+        raise NotImplementedError
+
     def list_sop_documents(self, venue_id: str, include_inactive: bool = False) -> list:
         raise NotImplementedError
 
@@ -1244,6 +1248,9 @@ class MemoryStore(BaseStore):
 
     def get_sop_document(self, doc_id):
         return self._sop_documents.get(doc_id)
+
+    def delete_sop_document(self, doc_id):
+        self._sop_documents.pop(doc_id, None)
 
     def list_sop_documents(self, venue_id, include_inactive=False):
         rows = [d for d in self._sop_documents.values() if d.get("venue_id") == venue_id]
@@ -3831,6 +3838,11 @@ class PostgresStore(BaseStore):
             cur.execute("SELECT * FROM sop_documents WHERE id = %s", (doc_id,))
             row = cur.fetchone()
             return self._row_to_plain(row, json_fields=("applies_to",)) if row else None
+
+    def delete_sop_document(self, doc_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sop_documents")
+            cur.execute("DELETE FROM sop_documents WHERE id = %s", (doc_id,))
 
     def list_sop_documents(self, venue_id, include_inactive=False):
         with self._cursor() as cur:

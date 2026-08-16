@@ -24,6 +24,7 @@ listed (case-insensitive).
 """
 
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import List, Literal, Optional
@@ -283,6 +284,14 @@ STARTER_SOPS = [
 ]
 
 
+def _starter_doc_id(venue_id: str, title: str) -> str:
+    """Stable id for a starter document at a venue (see seed_starter_sops)."""
+    import hashlib
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:32]
+    h = hashlib.sha1(f"{venue_id}|{title.lower()}".encode()).hexdigest()[:8]
+    return f"sop-{slug}-{h}"
+
+
 def seed_starter_sops(db, venue_id: str, author_name: str = "RosterIQ",
                       now: Optional[datetime] = None) -> dict:
     """Idempotently seed the starter procedures for a venue.
@@ -290,6 +299,13 @@ def seed_starter_sops(db, venue_id: str, author_name: str = "RosterIQ",
     Titles that already exist (any case, active or retired) are skipped, so a
     manager who edited "Cash handling & till variance" never gets a duplicate.
     Returns {"created": [ids], "skipped": [titles]}.
+
+    Race-proof: ids are DETERMINISTIC per venue + starter (the app boots with
+    two uvicorn workers that both seed the demo at once — random ids let both
+    slip past the "nothing here yet" check and produced two copies of every
+    starter on production). Same id -> the store's upsert makes concurrent
+    seeds converge on one row. An id-exists check also protects a doc a
+    manager RENAMED from being overwritten back to starter content.
     """
     now = now or datetime.utcnow()
     existing_titles = {
@@ -298,11 +314,12 @@ def seed_starter_sops(db, venue_id: str, author_name: str = "RosterIQ",
     }
     created, skipped = [], []
     for spec in STARTER_SOPS:
-        if spec["title"].strip().lower() in existing_titles:
+        doc_id = _starter_doc_id(venue_id, spec["title"])
+        if spec["title"].strip().lower() in existing_titles or db.get_sop_document(doc_id):
             skipped.append(spec["title"])
             continue
         doc = {
-            "id": f"sop-{uuid.uuid4().hex[:10]}",
+            "id": doc_id,
             "venue_id": venue_id,
             "title": spec["title"],
             "category": spec["category"],
@@ -348,6 +365,27 @@ async def create_sop_document(body: SopCreateBody,
     db.save_sop_document(doc)
     logger.info(f"SOP published at {body.venue_id}: {doc['title']!r} ({doc['category']})")
     return {"status": "published", "document_id": doc["id"], "document": _doc_payload(doc)}
+
+
+@router.delete("/api/sops/documents/{doc_id}")
+async def delete_sop_document(doc_id: str,
+                              user: UserContext = Depends(get_current_user)) -> dict:
+    """Hard-delete a procedure that nobody has ever acknowledged (a draft, a
+    duplicate, a mistake). Once staff have signed off on any version it is
+    part of the compliance record — retire it (PUT active=false) instead."""
+    db = get_db()
+    doc = db.get_sop_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Procedure not found")
+    _require_manager(user, doc.get("venue_id"))
+    if db.list_sop_acks(doc.get("venue_id"), doc_id=doc_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Staff have acknowledged this procedure, so it is part of the "
+                   "compliance record — retire it instead of deleting it.")
+    db.delete_sop_document(doc_id)
+    logger.info(f"SOP {doc_id} deleted at {doc.get('venue_id')} (no acknowledgements)")
+    return {"status": "deleted", "document_id": doc_id}
 
 
 @router.put("/api/sops/documents/{doc_id}")

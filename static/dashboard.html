@@ -7583,6 +7583,7 @@ async function loadSopLibrary() {
         '<div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;">' +
           '<button class="btn btn-secondary btn-small" onclick="openSopEditor(' + i + ')">Edit</button>' +
           '<button class="btn btn-secondary btn-small" onclick="toggleSopActive(' + i + ')">' + (d.active === false ? 'Restore' : 'Retire') + '</button>' +
+          (st.acknowledged_current_version === 0 && !(d.version > 1) ? '<button class="btn btn-secondary btn-small" style="color:var(--danger);" onclick="deleteSop(' + i + ')">Delete</button>' : '') +
         '</div>' +
       '</div>' +
     '</div>';
@@ -7635,6 +7636,16 @@ async function toggleSopActive(i) {
     await fetchAPI('/api/sops/documents/' + encodeURIComponent(d.id), { method: 'PUT', body: JSON.stringify({ active: !retiring }) });
     loadSopLibrary();
   } catch (e) { showToast('Update failed: ' + e.message, 'error'); }
+}
+
+async function deleteSop(i) {
+  const d = sopDocs[i];
+  if (!confirm('Delete "' + d.title + '"? Only allowed while nobody has acknowledged it.')) return;
+  try {
+    await fetchAPI('/api/sops/documents/' + encodeURIComponent(d.id), { method: 'DELETE' });
+    showToast('Deleted', 'success');
+    loadSopLibrary();
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 async function seedSops() {

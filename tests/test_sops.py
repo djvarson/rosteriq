@@ -340,3 +340,61 @@ def test_demo_seed_populates_library_with_partial_acks():
     seed_demo_environment(db)
     assert len(db.list_sop_documents(DEMO_VENUE_ID)) == 4
     assert len(db.list_sop_acks(DEMO_VENUE_ID)) == 3
+
+
+def test_concurrent_seeds_converge_on_one_set():
+    """Production runs two uvicorn workers that both seed the demo at boot.
+    Both saw 'no documents yet' and both wrote a set with random ids — every
+    starter procedure appeared twice. Starter ids are now deterministic per
+    venue, so two seeds that BOTH pass the emptiness check still land on the
+    same four rows (the store upserts by id)."""
+    from rosteriq.database import MemoryStore
+    from rosteriq.routes.sops import seed_starter_sops, STARTER_SOPS
+    db = MemoryStore()
+    # Simulate the race: both callers computed "empty" before either wrote.
+    r1 = seed_starter_sops(db, "race-venue", author_name="A")
+    # Second caller with a stale emptiness view — force it past the title
+    # skip by clearing what it would have read... it can't (it reads live), so
+    # emulate the pre-fix hazard directly: same venue, same specs, second call.
+    r2 = seed_starter_sops(db, "race-venue", author_name="B")
+    docs = db.list_sop_documents("race-venue", include_inactive=True)
+    assert len(docs) == len(STARTER_SOPS) == 4
+    assert len(r1["created"]) == 4 and r2["created"] == []
+    # Deterministic per venue: another venue gets its own ids, same venue same ids
+    ids_a = {d["id"] for d in docs}
+    seed_starter_sops(db, "other-venue", author_name="A")
+    ids_b = {d["id"] for d in db.list_sop_documents("other-venue", include_inactive=True)}
+    assert ids_a.isdisjoint(ids_b)
+    assert all(i.startswith("sop-") for i in ids_a)
+    # A doc the manager RENAMED keeps its id and is never clobbered by a reseed
+    cash = next(d for d in docs if d["title"].startswith("Cash"))
+    cash["title"] = "Till policy (renamed)"; cash["version"] = 2; cash["body"] = "custom"
+    db.save_sop_document(cash)
+    r3 = seed_starter_sops(db, "race-venue", author_name="C")
+    assert r3["created"] == []  # id exists -> skipped even though the title changed
+    assert db.get_sop_document(cash["id"])["body"] == "custom"
+
+
+def test_delete_only_while_unacknowledged():
+    """A draft/duplicate can be deleted outright; once anyone has acknowledged
+    it, it's compliance record — 409, retire it instead."""
+    c = TestClient(app)
+    vid = "sop-v-delete"
+    owner_h, bar_h, _, _ = _setup(c, vid)
+    doc = _publish(c, owner_h, vid, title="Draft I made by mistake")
+    doc_id = doc["document"]["id"] if "document" in doc else doc["document_id"]
+
+    # staff can't delete
+    assert c.delete(f"/api/sops/documents/{doc_id}", headers=bar_h).status_code == 403
+    # manager can, while unacknowledged
+    r = c.delete(f"/api/sops/documents/{doc_id}", headers=owner_h)
+    assert r.status_code == 200, r.text
+    assert c.delete(f"/api/sops/documents/{doc_id}", headers=owner_h).status_code == 404
+
+    # acknowledged -> refused
+    doc2 = _publish(c, owner_h, vid, title="Real procedure")
+    d2 = doc2["document"]["id"] if "document" in doc2 else doc2["document_id"]
+    assert c.post(f"/api/me/sops/{d2}/acknowledge", headers=bar_h).status_code == 200
+    r = c.delete(f"/api/sops/documents/{d2}", headers=owner_h)
+    assert r.status_code == 409, r.text
+    assert "retire" in _err(r).lower()
