@@ -87,7 +87,7 @@ def _require_manager(user: UserContext, venue_id: str) -> None:
         raise HTTPException(
             status_code=403,
             detail="Only managers can publish or edit procedures. Read and "
-                   "acknowledge yours under My Procedures instead.",
+                   "acknowledge yours in the SOPs tab of /my instead.",
         )
 
 

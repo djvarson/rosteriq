@@ -43,7 +43,11 @@ def seed_demo_environment(db) -> None:
     """
     now = datetime.utcnow()
 
-    # Scoped, non-owner demo user limited to the demo venue.
+    # Scoped, non-owner demo user limited to the demo venue. Role is
+    # "manager" (NOT owner): managers are venue_ids-scoped exactly like staff,
+    # so the sandbox holds — but the demo can showcase the manager side
+    # (publishing procedures, moderating the feed) that role-gated routes
+    # require.
     try:
         existing = db.get_user_by_id(DEMO_USER_ID)
         if not existing:
@@ -52,20 +56,20 @@ def seed_demo_environment(db) -> None:
                 "email": DEMO_USER_EMAIL,
                 "name": "Demo User",
                 "password_hash": "",      # login-by-password disabled for demo
-                "role": "staff",
+                "role": "manager",
                 "is_active": True,
                 "venue_ids": [DEMO_VENUE_ID],
                 "created_at": now,
             })
         elif (
             existing.get("venue_ids") != [DEMO_VENUE_ID]
-            or existing.get("role") != "staff"
+            or existing.get("role") != "manager"
             or not existing.get("is_active")
         ):
             # Self-heal a demo user created before venue_ids persisted (it
             # otherwise 403s on its own venue) or otherwise drifted.
             existing["venue_ids"] = [DEMO_VENUE_ID]
-            existing["role"] = "staff"
+            existing["role"] = "manager"
             existing["is_active"] = True
             db.save_user(existing)
     except Exception:
