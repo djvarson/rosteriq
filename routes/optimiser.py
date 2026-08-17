@@ -38,6 +38,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import load_roster_in_scope
 from rosteriq.models import (
     VenueConfig, Employee, DemandForecast, Roster, State,
     User, UserRole,
@@ -436,9 +437,7 @@ async def get_roster(
     Raises:
         HTTPException if roster not found
     """
-    roster = db.get_roster(roster_id)
-    if not roster:
-        raise HTTPException(status_code=404, detail="Roster not found")
+    roster = load_roster_in_scope(db, roster_id)  # 404 if missing or another tenant's
 
     return RosterResponse(
         id=roster.id,
@@ -476,11 +475,9 @@ async def compare_rosters(
     Raises:
         HTTPException if rosters not found
     """
-    original = db.get_roster(original_roster_id)
-    optimised = db.get_roster(optimised_roster_id)
-
-    if not original or not optimised:
-        raise HTTPException(status_code=404, detail="Roster not found")
+    # Both rosters must be in the caller's venues (foreign == missing == 404)
+    original = load_roster_in_scope(db, original_roster_id)
+    optimised = load_roster_in_scope(db, optimised_roster_id)
 
     cost_savings = (original.total_cost or Decimal("0")) - \
                    (optimised.total_cost or Decimal("0"))

@@ -29,6 +29,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends, Body
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import load_roster_in_scope, enforce_venue_access
 from rosteriq.models import Roster, User, UserRole
 from rosteriq.services.roster_diff import RosterDiffService
 from rosteriq.auth import get_current_user, require_role
@@ -128,19 +129,9 @@ async def compare_rosters(
     """
     try:
         # Fetch both rosters
-        roster_a = db.get_roster(request.roster_a_id)
-        roster_b = db.get_roster(request.roster_b_id)
-
-        if not roster_a:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {request.roster_a_id} not found"
-            )
-        if not roster_b:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {request.roster_b_id} not found"
-            )
+        # Scoped loads: missing OR another tenant's roster → the same 404
+        roster_a = load_roster_in_scope(db, request.roster_a_id)
+        roster_b = load_roster_in_scope(db, request.roster_b_id)
 
         # Verify user has access to both rosters (via venue)
         require_role(current_user, [UserRole.owner, UserRole.manager])
@@ -257,12 +248,7 @@ async def get_roster_history(
         require_role(current_user, [UserRole.owner, UserRole.manager])
 
         # Fetch roster
-        current_roster = db.get_roster(roster_id)
-        if not current_roster:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {roster_id} not found"
-            )
+        current_roster = load_roster_in_scope(db, roster_id)
 
         # Fetch version history from database
         # TODO: Implement version tracking in database layer
@@ -317,21 +303,11 @@ async def get_diff_from_previous(
         require_role(current_user, [UserRole.owner, UserRole.manager])
 
         # Fetch current roster
-        current_roster = db.get_roster(roster_id)
-        if not current_roster:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {roster_id} not found"
-            )
+        current_roster = load_roster_in_scope(db, roster_id)
 
         # Fetch previous roster
         if previous_roster_id:
-            previous_roster = db.get_roster(previous_roster_id)
-            if not previous_roster:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Previous roster {previous_roster_id} not found"
-                )
+            previous_roster = load_roster_in_scope(db, previous_roster_id)
         else:
             # TODO: Look up previous version from database
             raise HTTPException(

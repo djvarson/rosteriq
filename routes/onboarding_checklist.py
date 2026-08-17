@@ -23,10 +23,78 @@ from rosteriq.services.employee_onboarding import (
     OnboardingItemStatus,
     OnboardingItemCategory,
 )
+from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_access, get_tenant_context_optional
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["employee-onboarding"])
+
+
+# ============================================================================
+# Tenant scoping. Every route here takes an employee_id / venue_id straight
+# from the URL, so each one must prove the caller may act on that venue
+# BEFORE touching the service (whose checklists span all venues). Denials
+# are 404 — the same answer as "no such employee" — so ids are not an oracle.
+# NOTE: these checks sit OUTSIDE the handlers' try/except so the broad
+# ``except Exception -> 500`` cannot swallow the HTTPException.
+# ============================================================================
+
+def _deny_as_404(what: str):
+    return HTTPException(status_code=404, detail=f"{what} not found")
+
+
+def _scope_venue(venue_id: str) -> None:
+    """403→404 for a venue outside the caller's scope."""
+    try:
+        enforce_venue_access(venue_id)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise _deny_as_404("Venue")
+        raise
+
+
+def _scope_employee(employee_id: str, venue_id: Optional[str] = None) -> Optional[str]:
+    """
+    Resolve the venue an employee belongs to and enforce access to it.
+    Order: the employee record's venue (authoritative) → an existing checklist's
+    venue → the caller-supplied venue_id. Returns the venue id that was proven,
+    or None when nothing is known yet (a non-owner then can only proceed for
+    a venue they hold — checked by the caller). Denials are 404.
+    """
+    emp = None
+    try:
+        emp = get_db().get_employee(employee_id)
+    except Exception:
+        emp = None
+    emp_venue = getattr(emp, "venue_id", None) if emp is not None else None
+    if emp_venue:
+        if venue_id and venue_id != emp_venue:
+            # Asking about the employee under a venue they don't belong to
+            raise _deny_as_404("Employee")
+        _scope_employee_venue(emp_venue)
+        return emp_venue
+    checklist = get_onboarding_service().get_onboarding(employee_id, venue_id)
+    if checklist is not None:
+        _scope_employee_venue(checklist.venue_id)
+        return checklist.venue_id
+    if venue_id:
+        _scope_employee_venue(venue_id)
+        return venue_id
+    tenant = get_tenant_context_optional()
+    if tenant is not None and not tenant.is_owner:
+        # Unknown employee, no venue given: nothing a non-owner may see
+        raise _deny_as_404("Employee")
+    return None
+
+
+def _scope_employee_venue(venue_id: str) -> None:
+    try:
+        enforce_venue_access(venue_id)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise _deny_as_404("Employee")
+        raise
 
 
 # ============================================================================
@@ -163,6 +231,10 @@ async def create_onboarding(employee_id: str, req: CreateOnboardingRequest):
             status_code=400,
             detail="employee_id in path does not match request body",
         )
+    # Caller must hold the target venue, and if the employee already exists
+    # they must belong to that venue (no cross-venue checklist injection).
+    _scope_venue(req.venue_id)
+    _scope_employee(employee_id, req.venue_id)
 
     try:
         service = get_onboarding_service()
@@ -209,6 +281,7 @@ async def get_onboarding(employee_id: str, venue_id: Optional[str] = None):
     Returns:
         OnboardingChecklistResponse with current status
     """
+    venue_id = _scope_employee(employee_id, venue_id) or venue_id
     try:
         service = get_onboarding_service()
         checklist = service.get_onboarding(employee_id, venue_id)
@@ -274,6 +347,7 @@ async def update_item(
     Returns:
         Updated OnboardingItemResponse
     """
+    venue_id = _scope_employee(employee_id, venue_id) or venue_id
     try:
         service = get_onboarding_service()
 
@@ -325,6 +399,7 @@ async def check_rostering_ready(employee_id: str, venue_id: Optional[str] = None
     Returns:
         RosteringReadyResponse with is_ready flag and list of missing mandatory items
     """
+    venue_id = _scope_employee(employee_id, venue_id) or venue_id
     try:
         service = get_onboarding_service()
         is_ready, missing_items = service.is_rostering_ready(employee_id, venue_id)
@@ -364,6 +439,7 @@ async def send_reminder(
     Returns:
         SendReminderResponse with count of reminders sent
     """
+    venue_id = _scope_employee(employee_id, venue_id) or venue_id
     try:
         service = get_onboarding_service()
 
@@ -402,6 +478,7 @@ async def get_venue_template(venue_id: str):
     Returns:
         VenueTemplateResponse with list of template items
     """
+    _scope_venue(venue_id)
     try:
         service = get_onboarding_service()
         templates = service.get_venue_template(venue_id)
@@ -439,6 +516,7 @@ async def update_venue_template(venue_id: str, req: UpdateVenueTemplateRequest):
     Returns:
         Updated VenueTemplateResponse
     """
+    _scope_venue(venue_id)
     try:
         service = get_onboarding_service()
         templates = service.update_venue_template(venue_id, req.items)
@@ -480,6 +558,7 @@ async def get_venue_onboarding_status(venue_id: str):
     Returns:
         VenueOnboardingStatusResponse with aggregate data
     """
+    _scope_venue(venue_id)
     try:
         service = get_onboarding_service()
         status = service.get_venue_onboarding_status(venue_id)
@@ -522,6 +601,7 @@ async def auto_remind_incomplete(
     Returns:
         AutoRemindResponse with counts
     """
+    _scope_venue(venue_id)
     try:
         service = get_onboarding_service()
 

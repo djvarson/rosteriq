@@ -14,6 +14,11 @@ from typing import List, Dict, Optional, Any
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from rosteriq.database import get_db
+from rosteriq.middleware.tenant import (
+    enforce_venue_access, load_employee_in_scope, load_shift_in_scope,
+)
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
@@ -26,6 +31,18 @@ from rosteriq.services.noshow_predictor import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["noshow"])
+
+
+def _scope_venue(venue_id: str) -> None:
+    """Caller must hold this venue; denial is a 404 (no venue-id oracle).
+    Runs BEFORE each handler's try/except so the broad handler can't turn the
+    HTTPException into a 500."""
+    try:
+        enforce_venue_access(venue_id)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise HTTPException(status_code=404, detail="Venue not found")
+        raise
 
 
 # ============================================================================
@@ -169,6 +186,7 @@ async def get_noshow_risks(
     - high: 50-75
     - critical: >75
     """
+    _scope_venue(venue_id)
     try:
         predictor = NoShowPredictor()
         shifts = predictor.predict_risks(venue_id, date_from, date_to)
@@ -269,6 +287,7 @@ async def get_employee_reliability(
     - Risk days (days with >40% no-show rate)
     - Days since last no-show
     """
+    load_employee_in_scope(get_db(), employee_id)  # 404 if missing or another tenant's
     try:
         predictor = NoShowPredictor()
         profile = predictor.get_employee_reliability(employee_id)
@@ -311,6 +330,7 @@ async def record_shift_outcome(
     This allows the model to learn from real outcomes and improve predictions.
     Outcomes: completed, no_show, late_arrival, cancelled
     """
+    load_shift_in_scope(get_db(), shift_id)  # 404 if missing or another tenant's
     try:
         predictor = NoShowPredictor()
         predictor.record_outcome(shift_id, request.outcome)
@@ -353,6 +373,7 @@ async def get_venue_risk_summary(
     - Highest risk date and role
     - Recommendations for venue management
     """
+    _scope_venue(venue_id)
     try:
         predictor = NoShowPredictor()
         summary = predictor.get_venue_risk_summary(venue_id, date_from, date_to)
@@ -407,6 +428,7 @@ async def get_shift_backups(
 
     Returns top 5 backup candidates sorted by suitability.
     """
+    load_shift_in_scope(get_db(), shift_id)  # 404 if missing or another tenant's
     try:
         predictor = NoShowPredictor()
         backups = predictor.suggest_backups(shift_id)

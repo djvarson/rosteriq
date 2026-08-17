@@ -723,10 +723,12 @@ class NoShowPredictor:
         all_rosters = self.db.list_rosters()
         target_shift: Optional[Shift] = None
 
+        target_venue_id = None
         for roster in all_rosters:
             for shift in roster.shifts:
                 if shift.id == shift_id:
                     target_shift = shift
+                    target_venue_id = getattr(roster, "venue_id", None)
                     break
             if target_shift:
                 break
@@ -736,7 +738,12 @@ class NoShowPredictor:
             return []
 
         backups: List[BackupEmployee] = []
-        all_employees = self.db.list_employees()
+        # Only this venue's people can cover this venue's shift (never suggest
+        # — or reveal — another tenant's staff).
+        all_employees = [
+            e for e in self.db.list_employees()
+            if not target_venue_id or getattr(e, "venue_id", None) == target_venue_id
+        ]
 
         for employee in all_employees:
             if employee.id == target_shift.employee_id:

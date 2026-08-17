@@ -171,6 +171,14 @@
     <div id="nolink" class="nolink" style="display:none;">
       <h2>Almost there</h2>
       <p id="nolink-msg"></p>
+      <div style="max-width:320px;margin:18px auto 0;text-align:left;">
+        <label for="join-code" style="font-size:12px;color:var(--muted);font-weight:600;">Join code from your manager</label>
+        <input id="join-code" type="text" inputmode="text" autocapitalize="characters" autocomplete="one-time-code"
+               maxlength="9" placeholder="ABCD-EFGH" spellcheck="false"
+               style="width:100%;margin:6px 0 10px;text-align:center;font-size:20px;letter-spacing:3px;text-transform:uppercase;">
+        <button class="btn" id="join-btn" onclick="submitJoinCode()">Link my account</button>
+        <p id="join-err" style="color:#B42318;font-size:13px;margin-top:8px;display:none;"></p>
+      </div>
     </div>
 
     <div id="view-home" style="display:none;">
@@ -873,6 +881,25 @@ async function submitLeave() {
     loadLeave();
   } catch (e) {
     toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function submitJoinCode() {
+  var inp = document.getElementById('join-code'), btn = document.getElementById('join-btn'), err = document.getElementById('join-err');
+  var code = (inp.value || '').trim();
+  err.style.display = 'none';
+  if (code.replace(/[^A-Za-z0-9]/g, '').length < 8) { err.textContent = 'Enter the 8-character code, e.g. ABCD-EFGH.'; err.style.display = 'block'; return; }
+  btn.disabled = true;
+  try {
+    var r = await api('/api/me/link', { method: 'POST', body: { code: code } });
+    toast('Linked to ' + (r.venue_name || 'your venue') + ' — welcome!', 'ok');
+    document.getElementById('nolink').style.display = 'none';
+    document.getElementById('loading').style.display = 'block';
+    boot();
+  } catch (e) {
+    err.textContent = e.message; err.style.display = 'block';
   } finally {
     btn.disabled = false;
   }

@@ -25,6 +25,16 @@ def _register_login(c, email):
     return {"Authorization": f"Bearer {tok}"}
 
 
+def _register_link_login(c, email, emp_id):
+    """The real staff flow: self-register, enter the manager-issued join code
+    (POST /api/me/link), log in again so the token carries the venue."""
+    from rosteriq.services.linking import join_code
+    h = _register_login(c, email)
+    r = c.post("/api/me/link", json={"code": join_code(emp_id)}, headers=h)
+    assert r.status_code == 200, r.text
+    return _register_login(c, email)  # re-login (register is a no-op 4xx now)
+
+
 def _venue(c, owner_h, vid):
     r = c.post("/venues", json={
         "id": vid, "name": "Feed Venue", "state": "wa", "max_labour_pct": 30,
@@ -53,8 +63,8 @@ def _world():
     s2_email = f"s2{uuid.uuid4().hex[:8]}@x.com"
     _employee(c, owner_h, vid, f"{vid}-e1", "Ava Staff", s1_email)
     _employee(c, owner_h, vid, f"{vid}-e2", "Ben Staff", s2_email)
-    s1_h = _register_login(c, s1_email)
-    s2_h = _register_login(c, s2_email)
+    s1_h = _register_link_login(c, s1_email, f"{vid}-e1")
+    s2_h = _register_link_login(c, s2_email, f"{vid}-e2")
     return c, owner_h, vid, s1_h, s2_h
 
 
@@ -225,7 +235,7 @@ def test_cross_venue_staff_is_denied():
     _venue(c, owner_h, other)
     other_email = f"x{uuid.uuid4().hex[:8]}@x.com"
     _employee(c, owner_h, other, f"{other}-e1", "Outsider", other_email)
-    outsider_h = _register_login(c, other_email)
+    outsider_h = _register_link_login(c, other_email, f"{other}-e1")
 
     # Outsider (linked at the other venue) can post at their venue ...
     _post(c, outsider_h, other, "hello from other venue")

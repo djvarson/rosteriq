@@ -18,6 +18,8 @@ from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.models import Employee, Shift, ShiftStatus
 from rosteriq.award_rules import get_day_type, get_penalty_multiplier
 from rosteriq.services.ws_events import get_dispatcher
+from rosteriq.services.linking import find_linked_employee
+from rosteriq.middleware.tenant import get_tenant_context_optional
 
 router = APIRouter(prefix="/api/staff", tags=["staff"])
 
@@ -66,6 +68,49 @@ def _get_week_range(week_start: date):
     return week_start, week_end
 
 
+def _my_employee(db, current_user: UserContext):
+    """The employee record for this login — email match INSIDE the venues the
+    user holds (see services/linking.py). Never another tenant's record."""
+    emp, _vid = find_linked_employee(db, current_user)
+    return emp
+
+
+def _venue_in_scope(venue_id) -> bool:
+    tenant = get_tenant_context_optional()
+    if tenant is None or tenant.is_owner:
+        return True
+    return bool(venue_id) and venue_id in (tenant.venue_ids or [])
+
+
+def _swap_in_scope_or_404(db, swap_id: str) -> dict:
+    """A swap (offer or request) the caller may see: its venue must be in the
+    caller's scope. Missing and foreign are the same 404."""
+    swap = db.get_shift_swap(swap_id) if hasattr(db, "get_shift_swap") else None
+    if not swap:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Swap not found")
+    vid = swap.get("venue_id")
+    if not vid and swap.get("swap_id"):
+        # a request record: inherit the parent offer's venue
+        parent = db.get_shift_swap(swap["swap_id"]) if hasattr(db, "get_shift_swap") else None
+        vid = (parent or {}).get("venue_id")
+    if not _venue_in_scope(vid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Swap not found")
+    return swap
+
+
+def _may_decide_swap(db, swap: dict, current_user: UserContext) -> None:
+    """Accept/reject: a manager/owner of the swap's venue, or a party to it."""
+    if current_user.role in ("owner", "manager"):
+        return
+    emp = _my_employee(db, current_user)
+    parties = {swap.get("offered_by"), swap.get("requested_by")}
+    if emp is None or emp.id not in parties:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the staff involved or a manager can decide this swap",
+        )
+
+
 @router.get("/my-shifts")
 async def get_my_shifts(
     week_start: str = Query(..., description="Week start date (YYYY-MM-DD)"),
@@ -92,12 +137,7 @@ async def get_my_shifts(
     week_end = week_start_date + timedelta(days=6)
 
     # Get employee by user
-    employees = db.list_employees()
-    emp = None
-    for e in employees:
-        if e.email == current_user.email:
-            emp = e
-            break
+    emp = _my_employee(db, current_user)
 
     if not emp:
         raise HTTPException(
@@ -167,12 +207,7 @@ async def get_pay_estimate(
     week_end = week_start_date + timedelta(days=6)
 
     # Get employee
-    employees = db.list_employees()
-    emp = None
-    for e in employees:
-        if e.email == current_user.email:
-            emp = e
-            break
+    emp = _my_employee(db, current_user)
 
     if not emp:
         raise HTTPException(
@@ -255,12 +290,7 @@ async def get_availability(
             detail="Only staff can view their availability",
         )
 
-    employees = db.list_employees()
-    emp = None
-    for e in employees:
-        if e.email == current_user.email:
-            emp = e
-            break
+    emp = _my_employee(db, current_user)
 
     if not emp:
         raise HTTPException(
@@ -290,12 +320,7 @@ async def update_availability(
             detail="Only staff can update their availability",
         )
 
-    employees = db.list_employees()
-    emp = None
-    for e in employees:
-        if e.email == current_user.email:
-            emp = e
-            break
+    emp = _my_employee(db, current_user)
 
     if not emp:
         raise HTTPException(
@@ -331,12 +356,7 @@ async def get_profile(
             detail="Only staff can view their profile",
         )
 
-    employees = db.list_employees()
-    emp = None
-    for e in employees:
-        if e.email == current_user.email:
-            emp = e
-            break
+    emp = _my_employee(db, current_user)
 
     if not emp:
         raise HTTPException(
@@ -372,12 +392,7 @@ async def update_profile(
             detail="Only staff can update their profile",
         )
 
-    employees = db.list_employees()
-    emp = None
-    for e in employees:
-        if e.email == current_user.email:
-            emp = e
-            break
+    emp = _my_employee(db, current_user)
 
     if not emp:
         raise HTTPException(
@@ -414,7 +429,21 @@ async def get_swap_board(
             detail="Only staff can view the swap board",
         )
 
-    swaps = db.list_shift_swaps() if hasattr(db, 'list_shift_swaps') else []
+    all_swaps = db.list_shift_swaps() if hasattr(db, 'list_shift_swaps') else []
+    # Only this caller's venues' swaps (owner: all). Request records inherit
+    # the parent offer's venue; anything unattributable is hidden.
+    by_id = {sw.get("id"): sw for sw in all_swaps if isinstance(sw, dict)}
+    tenant = get_tenant_context_optional()
+    swaps = []
+    for sw in all_swaps:
+        vid = sw.get("venue_id")
+        if not vid and sw.get("swap_id"):
+            vid = (by_id.get(sw["swap_id"]) or {}).get("venue_id")
+        if vid:
+            if _venue_in_scope(vid):
+                swaps.append(sw)
+        elif tenant is None or tenant.is_owner:
+            swaps.append(sw)  # unattributable legacy rows: owners only
 
     return {
         "swaps": swaps,
@@ -462,14 +491,9 @@ async def offer_shift_for_swap(
         )
 
     # Verify ownership
-    employees = db.list_employees()
-    emp = None
-    for e in employees:
-        if e.email == current_user.email:
-            emp = e
-            break
+    emp = _my_employee(db, current_user)
 
-    if shift.employee_id != emp.id:
+    if emp is None or shift.employee_id != emp.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only offer your own shifts",
@@ -538,23 +562,13 @@ async def request_shift_swap(
             detail="Your shift not found",
         )
 
-    # Get the swap being requested
-    swap = db.get_shift_swap(swap_id) if hasattr(db, 'get_shift_swap') else None
-    if not swap:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Swap not found",
-        )
+    # Get the swap being requested — must be in one of the caller's venues
+    swap = _swap_in_scope_or_404(db, swap_id)
 
     # Get current employee
-    employees = db.list_employees()
-    emp = None
-    for e in employees:
-        if e.email == current_user.email:
-            emp = e
-            break
+    emp = _my_employee(db, current_user)
 
-    if my_shift.employee_id != emp.id:
+    if emp is None or my_shift.employee_id != emp.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only request swaps with your own shifts",
@@ -567,6 +581,7 @@ async def request_shift_swap(
         "requested_by": emp.id,
         "my_shift_id": my_shift_id,
         "offered_shift_id": swap["shift_id"],
+        "venue_id": swap.get("venue_id"),
         "message": message,
         "status": "pending",
         "created_at": datetime.utcnow().isoformat(),
@@ -589,12 +604,8 @@ async def accept_swap(
     """
     Accept a swap offer (if you are the offered recipient).
     """
-    swap = db.get_shift_swap(swap_id) if hasattr(db, 'get_shift_swap') else None
-    if not swap:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Swap not found",
-        )
+    swap = _swap_in_scope_or_404(db, swap_id)
+    _may_decide_swap(db, swap, current_user)
 
     swap["status"] = "approved"
     db.save_shift_swap(swap)
@@ -628,12 +639,8 @@ async def reject_swap(
     """
     Reject a swap offer.
     """
-    swap = db.get_shift_swap(swap_id) if hasattr(db, 'get_shift_swap') else None
-    if not swap:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Swap not found",
-        )
+    swap = _swap_in_scope_or_404(db, swap_id)
+    _may_decide_swap(db, swap, current_user)
 
     swap["status"] = "rejected"
     db.save_shift_swap(swap)

@@ -119,75 +119,38 @@ class CoverDecision(BaseModel):
 
 
 def _linked_employee(db, user: UserContext):
-    """Find the employee record matching this user's email.
+    """(employee, venue_id) for this login — see services/linking.py.
 
-    Searches the venues the user can access first (owners search all). If a
-    self-registered staff member has NO venue access yet, the manager putting
-    their email on an employee record IS the authorisation — so we search all
-    venues by email and durably grant that venue on first match. Without this,
-    staff who sign themselves up are stuck at linked:false forever."""
-    email = (user.email or "").strip().lower()
-    if not email:
-        return None, None
+    Email match INSIDE the venues the user holds only. Self-registered users
+    who hold no venue link by entering the join code their manager gives them
+    (POST /api/me/link); the old "search every venue and auto-grant on email
+    match" is gone because registration email is unverified."""
+    from rosteriq.services.linking import find_linked_employee
+    return find_linked_employee(db, user)
 
-    # The public demo identity is a sandbox: it must NEVER be linked (let
-    # alone auto-granted) into a real venue, even if someone puts
-    # demo@rosteriq.app on one of their employee records. Only the demo
-    # venue is ever considered for it.
-    if user.user_id in _DEMO_USER_IDS or email in _DEMO_EMAILS:
-        for emp in db.get_employees(DEMO_VENUE_ID) or []:
-            if (getattr(emp, "email", "") or "").strip().lower() == email:
-                return emp, DEMO_VENUE_ID
-        return None, None
 
-    if user.is_owner:
-        venue_ids = [v.id for v in (db.list_venues() or [])]
+def _no_link_response(user: UserContext, db=None) -> dict:
+    """Not linked. If a manager has set this email up at a venue the user
+    doesn't hold yet, say so and invite the join code (link_pending)."""
+    pending = False
+    pending_venue = None
+    try:
+        from rosteriq.services.linking import find_pending_link
+        emp, vid = find_pending_link(db or get_db(), user)
+        if emp is not None:
+            pending = True
+            v = (db or get_db()).get_venue(vid)
+            pending_venue = getattr(v, "name", None) or vid
+    except Exception:
+        pending = False
+    if pending:
+        msg = (f"Your manager has set you up at {pending_venue}. Enter the join "
+               "code they gave you to link your account.")
     else:
-        venue_ids = list(user.venue_ids or [])
-    for vid in venue_ids:
-        for emp in db.get_employees(vid) or []:
-            if (getattr(emp, "email", "") or "").strip().lower() == email:
-                return emp, vid
-
-    if not user.is_owner:
-        for venue in db.list_venues() or []:
-            vid = getattr(venue, "id", None)
-            if not vid or vid in venue_ids:
-                continue
-            for emp in db.get_employees(vid) or []:
-                if (getattr(emp, "email", "") or "").strip().lower() == email:
-                    # Auto-link: grant this venue to the user record so every
-                    # later request (and the tenant middleware) sees it.
-                    try:
-                        rec = db.get_user_by_id(user.user_id)
-                        if rec is not None:
-                            vids = list(rec.get("venue_ids") or [])
-                            if vid not in vids:
-                                vids.append(vid)
-                                rec["venue_ids"] = vids
-                                db.save_user(rec)
-                                logger.info(
-                                    f"Staff auto-link: {email} -> employee "
-                                    f"{emp.id} at {vid}")
-                                # Audit the implicit venue grant (email match).
-                                audit("user.venue_grant", vid, "user", rec.get("id"),
-                                      email=email, employee_id=emp.id,
-                                      reason="staff_email_auto_link", venue_ids=vids)
-                    except Exception as e:
-                        logger.warning(f"Staff auto-link grant failed for {email}: {e}")
-                    return emp, vid
-    return None, None
-
-
-def _no_link_response(user: UserContext) -> dict:
-    return {
-        "linked": False,
-        "message": (
-            "No staff record matches your login email "
-            f"({user.email}). Ask your manager to add this email to your "
-            "profile in Staff, then reload."
-        ),
-    }
+        msg = ("No staff record matches your login email "
+               f"({user.email}). Ask your manager to add this email to your "
+               "profile in Staff and give you your join code.")
+    return {"linked": False, "link_pending": pending, "message": msg}
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +162,7 @@ async def my_profile(user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
     emp, vid = _linked_employee(db, user)
     if not emp:
-        return _no_link_response(user)
+        return _no_link_response(user, db)
     venue = db.get_venue(vid)
     return {
         "linked": True,
@@ -212,13 +175,55 @@ async def my_profile(user: UserContext = Depends(get_current_user)) -> dict:
     }
 
 
+class LinkBody(BaseModel):
+    code: str = Field(..., min_length=4, max_length=16)
+
+
+@router.post("/api/me/link")
+async def link_my_account(body: LinkBody, user: UserContext = Depends(get_current_user)) -> dict:
+    """Link this login to a staff record with the join code the manager gave
+    you. Grants the venue durably; throttled (5 tries / 15 min)."""
+    from rosteriq.services.linking import link_with_code
+    db = get_db()
+    emp, vid = link_with_code(db, user, body.code)
+    venue = db.get_venue(vid)
+    return {
+        "linked": True,
+        "employee_id": emp.id,
+        "name": emp.name,
+        "venue_id": vid,
+        "venue_name": getattr(venue, "name", vid) if venue else vid,
+    }
+
+
+@router.get("/api/employees/{employee_id}/join-code")
+async def employee_join_code(employee_id: str, user: UserContext = Depends(get_current_user)) -> dict:
+    """The join code a manager hands a staff member so they can link their
+    login. Manager/owner only, and only for employees in the caller's venues
+    (a foreign id is a 404)."""
+    from rosteriq.middleware.tenant import load_employee_in_scope
+    from rosteriq.services.linking import join_code
+    if user.role not in ("manager", "owner") and not getattr(user, "is_owner", False):
+        raise HTTPException(status_code=403, detail="Managers only")
+    db = get_db()
+    emp = load_employee_in_scope(db, employee_id)
+    return {
+        "employee_id": emp.id,
+        "name": emp.name,
+        "email": getattr(emp, "email", None),
+        "join_code": join_code(emp.id),
+        "instructions": ("Ask them to sign up at /login with this email, open the "
+                         "staff app and enter the join code when prompted."),
+    }
+
+
 @router.get("/api/me/shifts")
 async def my_shifts(user: UserContext = Depends(get_current_user)) -> dict:
     """My upcoming shifts — the schedule-visibility fix."""
     db = get_db()
     emp, vid = _linked_employee(db, user)
     if not emp:
-        return _no_link_response(user)
+        return _no_link_response(user, db)
     today = venue_today(vid, db)
     horizon = today + timedelta(days=14)
     mine = []
@@ -249,7 +254,7 @@ async def my_timesheets(user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
     emp, vid = _linked_employee(db, user)
     if not emp:
-        return _no_link_response(user)
+        return _no_link_response(user, db)
     end = venue_today(vid, db)
     start = end - timedelta(days=14)
     rows = []
@@ -281,7 +286,7 @@ async def my_leave(user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
     emp, vid = _linked_employee(db, user)
     if not emp:
-        return _no_link_response(user)
+        return _no_link_response(user, db)
     mine = [r for r in (db.list_leave_requests(vid) or []) if r.get("employee_id") == emp.id]
     return {"linked": True, "count": len(mine), "requests": [{
         "id": r["id"], "start_date": str(r["start_date"]), "end_date": str(r["end_date"]),
@@ -336,7 +341,7 @@ async def my_availability(user: UserContext = Depends(get_current_user)) -> dict
     db = get_db()
     emp, vid = _linked_employee(db, user)
     if not emp:
-        return _no_link_response(user)
+        return _no_link_response(user, db)
     avail = getattr(emp, "availability", {}) or {}
     days = []
     for d in _WEEKDAYS:
@@ -464,7 +469,7 @@ async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
     emp, vid = _linked_employee(db, user)
     if not emp:
-        return _no_link_response(user)
+        return _no_link_response(user, db)
     emp_names = {e.id: e.name for e in (db.get_employees(vid) or [])}
     covers = db.list_shift_covers(vid) or []
     up_for_grabs, mine, claimed_by_me = [], [], []

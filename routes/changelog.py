@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Path, Depends, Body
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import load_roster_in_scope, enforce_venue_access
 from rosteriq.models import User, UserRole
 from rosteriq.services.roster_changelog import (
     RosterChangelogService,
@@ -172,12 +173,7 @@ async def get_changelog(
     """
     try:
         # Verify roster exists and user has access
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {roster_id} not found"
-            )
+        roster = load_roster_in_scope(db, roster_id)
 
         require_role(current_user, [UserRole.owner, UserRole.manager])
 
@@ -223,12 +219,7 @@ async def get_version(
     """
     try:
         # Verify roster exists
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {roster_id} not found"
-            )
+        roster = load_roster_in_scope(db, roster_id)
 
         require_role(current_user, [UserRole.owner, UserRole.manager])
 
@@ -284,12 +275,7 @@ async def get_diff(
     """
     try:
         # Verify roster exists
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {roster_id} not found"
-            )
+        roster = load_roster_in_scope(db, roster_id)
 
         require_role(current_user, [UserRole.owner, UserRole.manager])
 
@@ -343,12 +329,7 @@ async def revert_to_version(
     """
     try:
         # Verify roster exists
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {roster_id} not found"
-            )
+        roster = load_roster_in_scope(db, roster_id)
 
         require_role(current_user, [UserRole.owner, UserRole.manager])
 
@@ -429,6 +410,13 @@ async def get_recent_activity(
                 status_code=404,
                 detail=f"Venue {venue_id} not found"
             )
+        # Tenant scope: a manager may only read their own venues' activity
+        try:
+            enforce_venue_access(venue_id)
+        except HTTPException as exc:
+            if exc.status_code == 403:
+                raise HTTPException(status_code=404, detail=f"Venue {venue_id} not found")
+            raise
 
         require_role(current_user, [UserRole.owner, UserRole.manager])
 
@@ -475,12 +463,7 @@ async def export_changelog(
     """
     try:
         # Verify roster exists
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {roster_id} not found"
-            )
+        roster = load_roster_in_scope(db, roster_id)
 
         require_role(current_user, [UserRole.owner, UserRole.manager])
 
@@ -528,12 +511,7 @@ async def get_changelog_stats(
     """
     try:
         # Verify roster exists
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Roster {roster_id} not found"
-            )
+        roster = load_roster_in_scope(db, roster_id)
 
         require_role(current_user, [UserRole.owner, UserRole.manager])
 

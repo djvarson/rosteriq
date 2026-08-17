@@ -16,10 +16,24 @@ from rosteriq.services.preference_learner import (
 )
 from rosteriq.models import Shift, Roster, ShiftStatus
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import (
+    enforce_venue_access, load_employee_in_scope, load_roster_in_scope,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/preferences", tags=["preferences"])
+
+
+def _scope_venue(venue_id: str) -> None:
+    """Caller must hold this venue; denial is a 404 (no venue-id oracle).
+    Runs BEFORE each handler's try/except."""
+    try:
+        enforce_venue_access(venue_id)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise HTTPException(status_code=404, detail="Venue not found")
+        raise
 
 
 # ============================================================================
@@ -164,6 +178,7 @@ async def train_preferences(
     Returns:
         Training status and number of profiles created
     """
+    _scope_venue(venue_id)
     try:
         started_at = datetime.utcnow()
         learner = PreferenceLearner()
@@ -207,6 +222,7 @@ async def get_preference_profile(
     Returns:
         Preference profile with all learned preferences
     """
+    load_employee_in_scope(get_db(), employee_id)
     try:
         learner = PreferenceLearner()
         profile = learner.get_preference_profile(employee_id)
@@ -243,6 +259,7 @@ async def predict_happiness(
     Returns:
         Happiness prediction with contribution breakdown
     """
+    load_employee_in_scope(get_db(), request.employee_id)
     try:
         learner = PreferenceLearner()
 
@@ -309,6 +326,10 @@ async def rank_employees_for_shift(
     Returns:
         Sorted list of employees with happiness scores (best first)
     """
+    # Every candidate must be in the caller's venues (404 on any foreign id)
+    _db = get_db()
+    for _cid in request.candidates or []:
+        load_employee_in_scope(_db, _cid)
     try:
         learner = PreferenceLearner()
 
@@ -359,6 +380,7 @@ async def suggest_ideal_shifts(
     Returns:
         List of suggested shifts with estimated happiness scores
     """
+    load_employee_in_scope(get_db(), employee_id)
     try:
         learner = PreferenceLearner()
 
@@ -405,10 +427,7 @@ async def get_roster_happiness_score(
     """
     try:
         db = get_db()
-        roster = db.get_roster(roster_id)
-
-        if not roster:
-            raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+        roster = load_roster_in_scope(db, roster_id)  # 404 if missing or another tenant's
 
         learner = PreferenceLearner()
         avg_happiness = learner.roster_happiness_score(roster)
@@ -452,6 +471,7 @@ async def list_venue_profiles(
     Returns:
         List of all preference profiles for the venue
     """
+    _scope_venue(venue_id)
     try:
         learner = PreferenceLearner()
         profiles = learner.list_preference_profiles(venue_id)

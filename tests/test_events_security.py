@@ -418,9 +418,9 @@ def test_first_venue_bootstrap_writes_venue_grant_and_role_change():
     assert db.list_events(venue_id=vid2, action_prefix="user.role_change") == []
 
 
-def test_staff_email_auto_link_writes_venue_grant():
-    """A staff user whose email matches an employee gets the venue granted on
-    first portal use — that implicit grant is on the record."""
+def test_staff_join_code_link_writes_venue_grant():
+    """A staff user who links with their join code gets the venue granted —
+    that grant is on the record (reason=join_code)."""
     c = TestClient(app)
     owner_h = _register_login(c, _email("o"))
     vid = f"al-{uuid.uuid4().hex[:6]}"
@@ -432,14 +432,18 @@ def test_staff_email_auto_link_writes_venue_grant():
     db = get_db()
     staff_id = db.get_user_by_email(staff_email)["id"]
 
+    from rosteriq.services.linking import join_code
     r = c.get("/api/me/profile", headers=staff_h)
+    assert r.status_code == 200 and r.json()["linked"] is False, r.text
+    assert vid not in (db.get_user_by_id(staff_id)["venue_ids"] or [])
+    r = c.post("/api/me/link", json={"code": join_code(eid)}, headers=staff_h)
     assert r.status_code == 200, r.text
     assert vid in db.get_user_by_id(staff_id)["venue_ids"]
 
     rows = db.list_events(venue_id=vid, action_prefix="user.venue_grant")
     assert rows and rows[0]["resource_id"] == staff_id
     d = rows[0]["details"]
-    assert d["reason"] == "staff_email_auto_link"
+    assert d["reason"] == "join_code"
     assert d["employee_id"] == eid and d["email"] == staff_email
     assert d["category"] == "audit"
 

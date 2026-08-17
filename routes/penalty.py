@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field
 
 from rosteriq.services.penalty_calculator import PenaltyCalculator, PenaltyBreakdown
 from rosteriq.models import EmploymentType, State
+from rosteriq.database import get_db
+from rosteriq.middleware.tenant import load_employee_in_scope
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,8 @@ async def calculate_penalty(request: CalculatePenaltyRequest) -> PenaltyBreakdow
     Returns:
         PenaltyBreakdownResponse with complete cost analysis
     """
+    # Pay-rate data: the employee must be in the caller's venues (404 otherwise)
+    load_employee_in_scope(get_db(), request.employee_id)
     try:
         calculator = PenaltyCalculator()
         breakdown = calculator.calculate(
@@ -280,6 +284,8 @@ async def compare_shift_times(
     Returns:
         List of PenaltyBreakdownResponse, one per time option
     """
+    # Pay-rate data: the employee must be in the caller's venues (404 otherwise)
+    load_employee_in_scope(get_db(), request.employee_id)
     try:
         calculator = PenaltyCalculator()
         options = [(opt.start_time, opt.end_time) for opt in request.options]
@@ -318,6 +324,8 @@ async def compare_shift_days(
     Returns:
         List of PenaltyBreakdownResponse, one per date
     """
+    # Pay-rate data: the employee must be in the caller's venues (404 otherwise)
+    load_employee_in_scope(get_db(), request.employee_id)
     try:
         calculator = PenaltyCalculator()
         results = calculator.compare_days(
@@ -353,6 +361,8 @@ async def find_cheapest_slot(
     Returns:
         CheapestSlotResponse with start_time, end_time, and total_cost
     """
+    # Pay-rate data: the employee must be in the caller's venues (404 otherwise)
+    load_employee_in_scope(get_db(), request.employee_id)
     try:
         calculator = PenaltyCalculator()
         start_time, end_time, total_cost = calculator.cheapest_time_slot(

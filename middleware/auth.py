@@ -222,11 +222,34 @@ async def get_api_key_user(
     )
 
 
-def require_role(*allowed_roles: str):
+def _role_name(r) -> str:
+    return str(getattr(r, "value", r))
+
+
+def require_role(*allowed_roles):
     """
-    Decorator to enforce role-based access control.
-    Usage: @require_role("owner", "manager")
+    Enforce role-based access control. Two forms:
+
+      @require_role("owner", "manager")            # decorator
+      require_role(current_user, [UserRole.owner, UserRole.manager])   # inline
+
+    The inline form raises 403 immediately when the user's role is not in
+    the list. (Before this, the inline form silently returned a decorator
+    and never checked anything — 11 changelog/roster-diff routes believed
+    they were manager-only and were open to staff.)
     """
+    if allowed_roles and hasattr(allowed_roles[0], "role") and not callable(allowed_roles[0]):
+        user = allowed_roles[0]
+        roles = allowed_roles[1] if len(allowed_roles) > 1 else ()
+        if isinstance(roles, (str, bytes)) or not hasattr(roles, "__iter__"):
+            roles = [roles]
+        names = [_role_name(r) for r in roles]
+        if _role_name(getattr(user, "role", None)) not in names:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This action requires one of these roles: {', '.join(names)}",
+            )
+        return None
 
     def decorator(func):
         @wraps(func)

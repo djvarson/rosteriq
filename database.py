@@ -991,6 +991,19 @@ class BaseStore:
         """Get a single shift by ID."""
         raise NotImplementedError
 
+    def venue_id_for_shift(self, shift_id: str) -> Optional[str]:
+        """The venue a shift belongs to (via its roster), or None. Shift
+        objects carry no venue_id, so tenancy checks on a shift id must go
+        through this. Default: walk rosters (stores override with a query)."""
+        try:
+            for roster in self.list_rosters() or []:
+                for sh in getattr(roster, "shifts", None) or []:
+                    if getattr(sh, "id", None) == shift_id:
+                        return getattr(roster, "venue_id", None)
+        except Exception:
+            return None
+        return None
+
     def list_shifts(self, venue_id: Optional[str] = None) -> list[Shift]:
         """List shifts, optionally filtered by venue."""
         raise NotImplementedError
@@ -4573,6 +4586,17 @@ class PostgresStore(BaseStore):
             cur.execute("SELECT * FROM shifts WHERE id = %s", (shift_id,))
             row = cur.fetchone()
             return self._row_to_shift(row) if row else None
+
+    def venue_id_for_shift(self, shift_id: str) -> Optional[str]:
+        """Venue of a shift via shifts.roster_id -> rosters.venue_id."""
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT r.venue_id FROM shifts s JOIN rosters r ON r.id = s.roster_id "
+                "WHERE s.id = %s", (shift_id,))
+            row = cur.fetchone()
+            if row:
+                return row[0] if not isinstance(row, dict) else row.get("venue_id")
+        return None
 
     def list_shifts(self, venue_id: Optional[str] = None) -> list[Shift]:
         """List shifts, optionally filtered by venue."""

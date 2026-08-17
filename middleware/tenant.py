@@ -399,3 +399,101 @@ def audit_cross_tenant_attempt(
                 "action": action,
             },
         )
+
+
+# ============================================================================
+# Scoped record loaders — the ONE way a by-id route should fetch a tenant
+# record. Load → check the record's venue against the caller → the SAME 404
+# for "missing" and "not yours", so ids are never an oracle for other tenants.
+# Owners pass everything. Use these instead of a bare db.get_*() in any route
+# that takes a roster/employee/shift id from the request.
+# ============================================================================
+
+def _scoped(record, venue_id: Optional[str], not_found: str, resource_type: str):
+    if record is None:
+        raise HTTPException(status_code=404, detail=not_found)
+    tenant = get_tenant_context_optional()
+    if tenant is not None and venue_id and not tenant.has_access_to(venue_id):
+        audit_cross_tenant_attempt(venue_id, resource_type, "access")
+        try:
+            from rosteriq.services.events import security as _sec
+            _sec("access.cross_tenant", venue_id=venue_id, resource_type=resource_type)
+        except Exception:
+            pass
+        raise HTTPException(status_code=404, detail=not_found)
+    return record
+
+
+def load_roster_in_scope(db, roster_id: str):
+    """Roster by id, or 404 (missing OR belongs to another tenant)."""
+    r = db.get_roster(roster_id)
+    return _scoped(r, getattr(r, "venue_id", None), "Roster not found", "roster")
+
+
+def load_employee_in_scope(db, employee_id: str):
+    """Employee by id, or 404 (missing OR belongs to another tenant)."""
+    e = db.get_employee(employee_id)
+    return _scoped(e, getattr(e, "venue_id", None), "Employee not found", "employee")
+
+
+def load_shift_in_scope(db, shift_id: str):
+    """Shift by id, or 404 (missing OR another tenant's).
+
+    Shift objects carry no venue_id, so the venue is resolved through the
+    roster (db.venue_id_for_shift). If the shift exists but its venue cannot
+    be resolved, a non-owner is DENIED (fail closed) rather than waved
+    through — this guard used to fail open on Postgres for exactly that
+    reason."""
+    s = db.get_shift(shift_id) if hasattr(db, "get_shift") else None
+    venue_id = getattr(s, "venue_id", None) if s is not None else None
+    if not venue_id:
+        try:
+            venue_id = db.venue_id_for_shift(shift_id) if hasattr(db, "venue_id_for_shift") else None
+        except Exception:
+            venue_id = None
+    if s is None and venue_id:
+        # Not in the shifts index (in-memory store keeps shifts inside rosters)
+        try:
+            for roster in db.list_rosters() or []:
+                for sh in getattr(roster, "shifts", None) or []:
+                    if getattr(sh, "id", None) == shift_id:
+                        s = sh
+                        break
+                if s is not None:
+                    break
+        except Exception:
+            s = None
+    if s is None and not venue_id:
+        # Last resort for stores whose venue_id_for_shift is unavailable
+        try:
+            for roster in db.list_rosters() or []:
+                for sh in getattr(roster, "shifts", None) or []:
+                    if getattr(sh, "id", None) == shift_id:
+                        s, venue_id = sh, getattr(roster, "venue_id", None)
+                        break
+                if s is not None:
+                    break
+        except Exception:
+            s = None
+    if s is not None and not venue_id:
+        tenant = get_tenant_context_optional()
+        if tenant is not None and not tenant.is_owner:
+            audit_cross_tenant_attempt("<unresolved>", "shift", "access")
+            raise HTTPException(status_code=404, detail="Shift not found")
+    return _scoped(s, venue_id, "Shift not found", "shift")
+
+
+def scoped_venue_ids(requested: Optional[List[str]] = None) -> Optional[List[str]]:
+    """
+    Venue ids the caller may list. Owners: ``requested`` as-is (None = all).
+    Managers/staff: their venue_ids, intersected with ``requested`` if given.
+    Never returns another tenant's venue; returns [] when the request asks
+    only for venues outside scope (a list route then answers empty, not 403).
+    """
+    tenant = get_tenant_context_optional()
+    if tenant is None or tenant.is_owner:
+        return requested
+    mine = list(tenant.venue_ids or [])
+    if not requested:
+        return mine
+    return [v for v in requested if v in mine]

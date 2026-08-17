@@ -2394,10 +2394,27 @@ def _audit_employee_saved(employee: Employee, previous, via: str = None) -> None
         logger.warning(f"employee audit event not recorded: {e}")
 
 
+def _guard_employee_overwrite(previous) -> None:
+    """An existing employee id may only be overwritten by someone who holds
+    the venue it CURRENTLY belongs to. Denial is 404 so ids are no oracle."""
+    if previous is None:
+        return
+    try:
+        enforce_venue_access(getattr(previous, "venue_id", None))
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        raise
+
+
 @app.post("/employees")
 async def create_employee(employee: Employee):
     enforce_venue_access(getattr(employee, "venue_id", None))
     previous = _store["employees"].get(employee.id)
+    # Upsert-by-id: if this id already exists it must be OURS to overwrite.
+    # Otherwise a manager could re-home (and re-price) another venue's
+    # employee by posting their id under their own venue_id.
+    _guard_employee_overwrite(previous)
     _store["employees"][employee.id] = employee
     _audit_employee_saved(employee, previous)
 
@@ -2417,6 +2434,7 @@ async def create_employee(employee: Employee):
 async def bulk_create_employees(employees: list[Employee]):
     for emp in employees:
         enforce_venue_access(getattr(emp, "venue_id", None))
+        _guard_employee_overwrite(_store["employees"].get(emp.id))
     for emp in employees:
         previous = _store["employees"].get(emp.id)
         _store["employees"][emp.id] = emp
@@ -2508,6 +2526,10 @@ async def get_employee(employee_id: str):
 
 @app.post("/forecasts")
 async def add_forecasts(forecasts: list[DemandForecast]):
+    # Every forecast must target a venue the caller holds (403 otherwise);
+    # checked for ALL rows before ANY row is written.
+    for f in forecasts:
+        enforce_venue_access(getattr(f, "venue_id", None))
     _store["forecasts"].extend(forecasts)
 
     # Invalidate forecast cache
@@ -3134,7 +3156,11 @@ async def import_pos_file(venue_id: str = Query(...), system: Optional[str] = No
 
 @app.post("/demo/load")
 async def load_demo():
-    """Load demo data (same as CLI demo) for quick testing."""
+    """Load demo data (same as CLI demo) for quick testing. Owner only: it
+    overwrites the shared 'demo-venue' venue, its employees and forecasts."""
+    _tenant = get_tenant_context_optional()
+    if _tenant is not None and not _tenant.is_owner:
+        raise HTTPException(status_code=403, detail="Owner only")
     from rosteriq.cli import _build_demo_employees, _build_demo_forecasts, _build_demo_venue
 
     venue = _build_demo_venue()
@@ -3285,13 +3311,11 @@ async def tanda_push_roster(
     except ImportError as e:
         raise HTTPException(500, f"Tanda push service not available: {e}")
 
-    # Get the roster
-    try:
-        roster = _store["rosters"].get(roster_id)
-        if not roster:
-            raise HTTPException(404, f"Roster {roster_id} not found")
-    except Exception as e:
-        raise HTTPException(400, f"Could not load roster: {e}")
+    # Get the roster — it must belong to the venue being pushed to (a roster id
+    # from another tenant is answered exactly like a missing one).
+    roster = _store["rosters"].get(roster_id)
+    if not roster or getattr(roster, "venue_id", None) != venue_id:
+        raise HTTPException(404, f"Roster {roster_id} not found")
 
     # Get stored credentials
     creds = _store.get("tanda_creds", {}).get(venue_id)
@@ -3339,13 +3363,11 @@ async def tanda_diff_roster(
     except ImportError as e:
         raise HTTPException(500, f"Tanda push service not available: {e}")
 
-    # Get the roster
-    try:
-        roster = _store["rosters"].get(roster_id)
-        if not roster:
-            raise HTTPException(404, f"Roster {roster_id} not found")
-    except Exception as e:
-        raise HTTPException(400, f"Could not load roster: {e}")
+    # Get the roster — it must belong to the venue being pushed to (a roster id
+    # from another tenant is answered exactly like a missing one).
+    roster = _store["rosters"].get(roster_id)
+    if not roster or getattr(roster, "venue_id", None) != venue_id:
+        raise HTTPException(404, f"Roster {roster_id} not found")
 
     # Get stored credentials
     creds = _store.get("tanda_creds", {}).get(venue_id)

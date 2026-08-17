@@ -5242,6 +5242,24 @@
 </div>
 
 <!-- MODALS -->
+<div class="modal" id="modal-join-code">
+  <div class="modal-content" style="max-width:420px;">
+    <div class="modal-header">Join code</div>
+    <div class="modal-body">
+      <p id="jc-who" style="color:var(--text-muted); margin-bottom:12px;"></p>
+      <div id="jc-code" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:34px;font-weight:800;letter-spacing:4px;text-align:center;padding:14px;border:1px dashed var(--border);border-radius:12px;background:var(--light-bg);color:var(--text-primary);user-select:all;">····-····</div>
+      <p style="color:var(--text-muted);font-size:13px;margin-top:12px;line-height:1.5;">
+        Give this code to the staff member. They sign up at <b>/login</b> with the email shown, open the staff app and enter it once — that links their login to this record. The code doesn't expire; it changes only if the platform secret is rotated.
+      </p>
+      <p id="jc-email-warn" style="display:none;color:#B45309;font-size:13px;margin-top:8px;">This staff record has no email yet — the code will still work and their login email will be saved onto the record when they link.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-join-code')">Close</button>
+      <button class="btn btn-primary" onclick="copyJoinCode()">Copy code</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal-generate-roster">
   <div class="modal-content">
     <div class="modal-header">Generate AI Roster</div>
@@ -6120,6 +6138,10 @@ function showPage(pageId) {
     loadSetupWizard();
     loadBriefing();
     loadSnapshot();
+  }
+
+  if (pageId === 'staff') {
+    renderStaffTable();
   }
 
   if (pageId === 'compliance') {
@@ -8538,6 +8560,7 @@ async function loadVenueData() {
       populateAlerts();
       populateStaffList();
     }
+    try { renderStaffTable(); } catch (e) { console.warn('staff table:', e); }
     connectionManager.hide();
     checkDeputyStatus();
     checkMYOBStatus();
@@ -8693,6 +8716,129 @@ async function loadRealVenueData(venueId) {
   } catch (err) {
     console.error('Failed to load real venue data:', err);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Staff page table: the REAL employee list for the selected venue (the markup
+// ships with placeholder rows so the page isn't blank before data loads).
+// Search / role filter / sort controls drive this renderer.
+// ---------------------------------------------------------------------------
+var _staffTableWired = false;
+function _jwtRole() {
+  try {
+    var t = state.authToken || localStorage.getItem('jwt_token') || localStorage.getItem('auth_token') || '';
+    var p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return p.role || '';
+  } catch (e) { return ''; }
+}
+function _fmtAward(a) {
+  if (!a) return '—';
+  var m = String(a).match(/(\d+)/);
+  return m ? 'Level ' + m[1] : String(a);
+}
+function _weekHoursByEmployee() {
+  var out = {};
+  var now = new Date();
+  var monday = new Date(now); monday.setHours(0,0,0,0);
+  monday.setDate(now.getDate() + (now.getDay() === 0 ? -6 : 1 - now.getDay()));
+  var sunday = new Date(monday); sunday.setDate(monday.getDate() + 6); sunday.setHours(23,59,59,999);
+  (state.rosters || []).forEach(function(r) {
+    (r.shifts || []).forEach(function(sh) {
+      var d = new Date(sh.date || sh.shift_date);
+      if (isNaN(d) || d < monday || d > sunday) return;
+      var st = (sh.start_time || '').split(':'), en = (sh.end_time || '').split(':');
+      if (st.length < 2 || en.length < 2) return;
+      var hrs = ((+en[0]) * 60 + (+en[1]) - (+st[0]) * 60 - (+st[1])) / 60;
+      if (hrs < 0) hrs += 24;
+      hrs -= (sh.break_minutes || 0) / 60;
+      out[sh.employee_id] = (out[sh.employee_id] || 0) + Math.max(0, hrs);
+    });
+  });
+  return out;
+}
+function renderStaffTable() {
+  var body = document.getElementById('staff-body');
+  if (!body) return;
+  if (!_staffTableWired) {
+    _staffTableWired = true;
+    ['staff-search', 'staff-role-filter', 'staff-sort'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('input', renderStaffTable);
+      if (el) el.addEventListener('change', renderStaffTable);
+    });
+  }
+  var venueId = state.currentVenue;
+  var emps = (state.employees || []).filter(function(e) { return !venueId || !e.venue_id || e.venue_id === venueId; });
+  if (!emps.length) {
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:36px;color:var(--text-muted);">No staff yet. Use <b>Import staff</b> (CSV export from Deputy/Tanda) or add them one by one.</td></tr>';
+    return;
+  }
+  var q = ((document.getElementById('staff-search') || {}).value || '').trim().toLowerCase();
+  var roleF = ((document.getElementById('staff-role-filter') || {}).value || '').toLowerCase();
+  var sort = ((document.getElementById('staff-sort') || {}).value || 'name');
+  var hours = _weekHoursByEmployee();
+  var rows = emps.filter(function(e) {
+    if (q && String(e.name || '').toLowerCase().indexOf(q) < 0 && String(e.email || '').toLowerCase().indexOf(q) < 0) return false;
+    if (roleF) {
+      var sk = (e.skills || []).map(function(x) { return String(x).toLowerCase(); });
+      if (sk.indexOf(roleF) < 0) return false;
+    }
+    return true;
+  });
+  rows.sort(function(a, b) {
+    if (sort === 'rate') return (+b.hourly_base_rate || 0) - (+a.hourly_base_rate || 0);
+    if (sort === 'award') return String(b.award_level || '').localeCompare(String(a.award_level || ''));
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
+  var _r = _jwtRole();
+  var isManager = (_r === 'manager' || _r === 'owner');
+  body.innerHTML = rows.map(function(e) {
+    var role = (e.skills && e.skills.length) ? e.skills.map(function(x) { return String(x).charAt(0).toUpperCase() + String(x).slice(1); }).join(', ') : '—';
+    var rate = e.hourly_base_rate != null ? '$' + Number(e.hourly_base_rate).toFixed(2) : '—';
+    var certs = (e.certifications || e.certs || []);
+    var certTxt = certs.length ? certs.map(function(c) { return esc(c.name || c.type || c); }).join(', ') : '<span style="color:var(--text-muted)">—</span>';
+    var avDays = Object.keys(e.availability || {}).length;
+    var av = avDays === 0 ? '<span class="alert-badge badge-secondary">Not set</span>'
+           : avDays >= 5 ? '<span class="alert-badge badge-success">Available</span>'
+           : '<span class="alert-badge badge-warning">Limited</span>';
+    var h = hours[e.id] || 0;
+    var fat = h === 0 ? '<span style="color:var(--text-muted)">Not rostered</span>'
+            : (h > 38 ? 'High' : h > 30 ? 'Medium' : 'Low') + ' (' + Math.round(h) + 'hrs/wk)';
+    var actions = isManager
+      ? '<button class="btn btn-secondary btn-small" onclick="showJoinCode(\'' + esc(e.id) + '\')" title="Code the staff member enters in the app to link their login">Join code</button>'
+      : '';
+    var emailLine = e.email ? '<div style="font-size:11px;color:var(--text-muted)">' + esc(e.email) + '</div>' : '<div style="font-size:11px;color:#B45309">no email</div>';
+    return '<tr>' +
+      '<td><div style="font-weight:600">' + esc(e.name || '') + '</div>' + emailLine + '</td>' +
+      '<td>' + esc(role) + '</td>' +
+      '<td>' + esc(_fmtAward(e.award_level)) + '</td>' +
+      '<td>' + rate + '</td>' +
+      '<td>' + certTxt + '</td>' +
+      '<td>' + av + '</td>' +
+      '<td>' + fat + '</td>' +
+      '<td>' + actions + '</td>' +
+      '</tr>';
+  }).join('') || '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted);">No staff match.</td></tr>';
+}
+
+var _lastJoinCode = '';
+async function showJoinCode(employeeId) {
+  try {
+    var d = await fetchAPI('/api/employees/' + encodeURIComponent(employeeId) + '/join-code');
+    _lastJoinCode = d.join_code || '';
+    document.getElementById('jc-who').innerHTML = '<b>' + esc(d.name || '') + '</b>' + (d.email ? ' · ' + esc(d.email) : '');
+    document.getElementById('jc-code').textContent = _lastJoinCode || '—';
+    document.getElementById('jc-email-warn').style.display = d.email ? 'none' : 'block';
+    openModal('modal-join-code');
+  } catch (e) {
+    showToastNotification('Join code', e.message || 'Could not load the join code', 'error');
+  }
+}
+function copyJoinCode() {
+  if (!_lastJoinCode) return;
+  var done = function() { showToastNotification('Copied', _lastJoinCode + ' copied to clipboard', 'success'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(_lastJoinCode).then(done, function() { done(); });
+  else done();
 }
 
 function populateRealStaffList(employees) {

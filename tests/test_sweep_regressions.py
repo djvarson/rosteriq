@@ -90,6 +90,11 @@ def test_w4_approved_leave_excluded_from_generation():
     s.post("/api/auth/register", json={"email": staff_email, "password": "Passw0rd!234", "name": "S"})
     stok = s.post("/api/auth/login", json={"email": staff_email, "password": "Passw0rd!234"}).json()["access_token"]
     s_h = {"Authorization": f"Bearer {stok}"}
+    # link with the manager-issued join code (email match alone no longer links)
+    from rosteriq.services.linking import join_code
+    assert s.post("/api/me/link", json={"code": join_code(emp)}, headers=s_h).status_code == 200
+    stok = s.post("/api/auth/login", json={"email": staff_email, "password": "Passw0rd!234"}).json()["access_token"]
+    s_h = {"Authorization": f"Bearer {stok}"}
     lr = s.post("/api/me/leave", json={
         "start_date": monday.isoformat(),
         "end_date": (monday + timedelta(days=6)).isoformat(),
@@ -107,9 +112,11 @@ def test_w4_approved_leave_excluded_from_generation():
     assert emp not in used, "employee rostered onto approved leave"
 
 
-def test_c3_staff_self_registration_auto_links():
+def test_c3_staff_self_registration_links_with_join_code():
     """A staff member who self-registers with the email their manager put on
-    their employee record must link (and durably gain the venue)."""
+    their employee record is NOT linked by the email alone (registration
+    email is unverified) — they are told a join code is waiting, and entering
+    it links them and durably grants the venue."""
     c = TestClient(app)
     h, _ = _owner(c)
     vid = "sr-autolink"
@@ -129,11 +136,22 @@ def test_c3_staff_self_registration_auto_links():
     s_h = {"Authorization": f"Bearer {stok}"}
 
     prof = s.get("/api/me/profile", headers=s_h).json()
-    assert prof["linked"] is True and prof["venue_id"] == vid
+    assert prof["linked"] is False and prof["link_pending"] is True
+    assert "join code" in prof["message"]
+    from rosteriq.services.linking import join_code
+    emp_id = None
+    for e in db.get_employees(vid):
+        if (e.email or "").lower() == staff_email.lower():
+            emp_id = e.id
+    assert s.post("/api/me/link", json={"code": join_code(emp_id)}, headers=s_h).status_code == 200
     # The grant is durable on the user record
     rec2 = db.get_user_by_email(staff_email)
     assert vid in rec2["venue_ids"]
-    # And the rest of the portal now works
+    # And the rest of the portal now works (fresh token carries the venue)
+    stok = s.post("/api/auth/login", json={"email": staff_email, "password": "Passw0rd!234"}).json()["access_token"]
+    s_h = {"Authorization": f"Bearer {stok}"}
+    prof = s.get("/api/me/profile", headers=s_h).json()
+    assert prof["linked"] is True and prof["venue_id"] == vid
     assert s.get("/api/me/shifts", headers=s_h).status_code == 200
 
 
