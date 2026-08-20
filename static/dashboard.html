@@ -8704,6 +8704,10 @@ async function loadVenues() {
       const matchedVenue = savedVenue && state.venues.find(v => v.id === savedVenue);
       state.currentVenue = matchedVenue ? savedVenue : state.venues[0].id;
       select.value = state.currentVenue;
+      // Setting .value does NOT fire 'change', and the live-update socket was
+      // only started from that handler — so a manager who landed on their
+      // venue (rather than switching to it) never got live updates at all.
+      connectWebSocket();
       loadVenueData();
     } else {
       // New user with no venues — show onboarding wizard, NOT demo data
