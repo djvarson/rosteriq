@@ -4652,17 +4652,43 @@ class PostgresStore(BaseStore):
 
     def save_shift(self, shift: Shift) -> None:
         """Save a single shift (convenience method for shift bidding)."""
+        # shifts.roster_id is NOT NULL, and Shift carries no roster_id — this
+        # INSERT omitted the column entirely, so EVERY save_shift raised
+        # NotNullViolation on Postgres (Deputy shift sync reported success while
+        # storing nothing; bid award 500'd). Postgres evaluates NOT NULL before
+        # the ON CONFLICT arbiter, so even a pure update went down with it.
+        # Updates are the real use (status changes, outcome recording): carry
+        # the existing roster_id through, and refuse a genuine insert loudly
+        # instead of with a constraint error.
         with self._cursor() as cur:
+            cur.execute("SELECT roster_id FROM shifts WHERE id = %s", (shift.id,))
+            row = cur.fetchone()
+            existing_roster = (row["roster_id"] if isinstance(row, dict) else row[0]) if row else None
+            roster_id = getattr(shift, "roster_id", None) or existing_roster
+            if not roster_id:
+                raise ValueError(
+                    f"Cannot save shift {shift.id}: it belongs to no roster. "
+                    "Create the roster first (save_roster) — a shift row cannot "
+                    "exist without one."
+                )
             cur.execute("""
                 INSERT INTO shifts
-                    (id, employee_id, shift_date, start_time, end_time, break_minutes,
-                     status, role, cost, penalty_multiplier, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (id, roster_id, employee_id, shift_date, start_time, end_time,
+                     break_minutes, status, role, cost, penalty_multiplier, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     employee_id=EXCLUDED.employee_id,
-                    status=EXCLUDED.status
+                    shift_date=EXCLUDED.shift_date,
+                    start_time=EXCLUDED.start_time,
+                    end_time=EXCLUDED.end_time,
+                    break_minutes=EXCLUDED.break_minutes,
+                    status=EXCLUDED.status,
+                    role=EXCLUDED.role,
+                    cost=EXCLUDED.cost,
+                    penalty_multiplier=EXCLUDED.penalty_multiplier
             """, (
                 shift.id,
+                roster_id,
                 shift.employee_id,
                 shift.date,
                 shift.start_time,
@@ -5173,7 +5199,7 @@ class PostgresStore(BaseStore):
             if not row:
                 return None
             data = dict(row)
-            # JSONB: psycopg2 hands this back already parsed as a list
+            # JSONB — already a list when it comes back from psycopg2
             data["shift_patterns"] = _jsonb(data.get("shift_patterns"), [])
             return data
 
@@ -5846,7 +5872,7 @@ class PostgresStore(BaseStore):
             return [self._event_row(row) for row in cur.fetchall()]
 
     # Keys that may be grouped on. Whitelisted because the value is
-    # interpolated as a JSON key in the query text, never taken raw from a caller.
+    # interpolated into the SQL as a JSON key, never taken raw from a caller.
     _ROLLUP_KEYS = ("action", "fingerprint", "route", "provider", "job",
                     "outcome", "exception", "model")
 

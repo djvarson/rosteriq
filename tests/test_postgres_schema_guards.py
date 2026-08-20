@@ -48,11 +48,52 @@ _CREATE_RE = re.compile(
 )
 
 
+def _strip_python_prose(src: str) -> str:
+    """Remove comments and docstrings before hunting for SQL.
+
+    The reference regex looks for FROM/INTO/UPDATE/JOIN followed by a word,
+    which happily matches ordinary English in a comment ("even a pure update
+    went down with it" -> table `went`). Scanning only real code means an
+    explanatory comment can never fail this test, and the guard stops
+    training people to write worse comments to appease it.
+    """
+    out = []
+    i, n = 0, len(src)
+    triple_quotes = ('"' * 3, "'" * 3)
+    while i < n:
+        ch = src[i]
+        if ch == "#":                                 # comment to end of line
+            j = src.find("\n", i)
+            i = n if j == -1 else j
+            continue
+        tq = next((q for q in triple_quotes if src.startswith(q, i)), None)
+        if tq:                                        # docstring / block string
+            j = src.find(tq, i + 3)
+            i = n if j == -1 else j + 3
+            continue
+        if ch in ('"', "'"):                          # keep literals: SQL lives there
+            quote = ch
+            j = i + 1
+            while j < n:
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == quote:
+                    break
+                j += 1
+            out.append(src[i:j + 1])
+            i = j + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _postgres_store_source() -> str:
     src = open(DATABASE_PY, encoding="utf-8").read()
     idx = src.find("class PostgresStore")
     assert idx != -1, "PostgresStore class not found in database.py"
-    return src[idx:]
+    return _strip_python_prose(src[idx:])
 
 
 def _referenced_tables(pg_src: str) -> set:

@@ -23,6 +23,7 @@ from rosteriq.models import (
 )
 from rosteriq.award_rules import (
     get_day_type, get_penalty_multiplier, get_minimum_break_minutes,
+    split_weekday_hours_by_band,
     PENALTY_MULTIPLIERS, EVENING_LOADING_THRESHOLDS, DayType,
 )
 from rosteriq.database import get_db
@@ -126,7 +127,9 @@ class PenaltyCalculator:
 
         # Calculate penalties
         penalties = self._calculate_penalties(
-            employee, day_type, start_time.hour, net_hours
+            employee, day_type, start_time.hour, net_hours,
+            start_time=start_time, end_time=end_time,
+            hourly_rate=employee.hourly_base_rate,
         )
 
         # Calculate costs
@@ -402,6 +405,9 @@ class PenaltyCalculator:
         day_type: DayType,
         start_hour: int,
         net_hours: float,
+        start_time=None,
+        end_time=None,
+        hourly_rate=None,
     ) -> List[PenaltyDetail]:
         """Calculate all penalties applicable to shift."""
         penalties = []
@@ -463,26 +469,34 @@ class PenaltyCalculator:
                 )
             )
 
-        # Add evening/night loading (Monday-Friday only)
-        if day_type == DayType.weekday:
-            if start_hour >= 19 and start_hour < 24:
+        # Add evening/night loading (Monday-Friday only).
+        # These entries used to carry additional_cost=0.00 and were never
+        # totalled anywhere, so the roster editor SHOWED "Evening loading" and
+        # charged nothing for it — every weekday evening shift was quoted
+        # 15-17.5% under what it costs. The loading now applies to the hours
+        # ACTUALLY worked in each band (a 17:00-23:00 shift is 2 ordinary + 4
+        # evening, not six evening hours because it started before 7pm).
+        if day_type == DayType.weekday and start_time and end_time:
+            bands = split_weekday_hours_by_band(start_time, end_time, net_hours)
+            rate = Decimal(str(hourly_rate or 0))
+            for key, name, mult, desc in (
+                ("evening", "Evening loading (7pm-midnight)", Decimal("1.15"),
+                 "15% loading on hours worked after 7pm"),
+                ("night", "Late night loading (midnight-7am)", Decimal("1.175"),
+                 "17.5% loading on hours worked between midnight and 7am"),
+            ):
+                band_hours = Decimal(str(bands.get(key, 0) or 0))
+                if band_hours <= 0:
+                    continue
                 penalties.append(
                     PenaltyDetail(
-                        name="Evening loading (7pm-midnight)",
-                        multiplier=1.15,
-                        hours_applicable=net_hours,
-                        additional_cost=Decimal("0.00"),
-                        description="15% loading for work after 7pm",
-                    )
-                )
-            elif start_hour >= 0 and start_hour < 7:
-                penalties.append(
-                    PenaltyDetail(
-                        name="Late night loading (midnight-7am)",
-                        multiplier=1.175,
-                        hours_applicable=net_hours,
-                        additional_cost=Decimal("0.00"),
-                        description="17.5% loading for work between midnight and 7am",
+                        name=name,
+                        multiplier=float(mult),
+                        hours_applicable=float(band_hours),
+                        additional_cost=(band_hours * rate * (mult - Decimal("1"))).quantize(
+                            Decimal("0.01"), rounding=ROUND_HALF_UP
+                        ),
+                        description=desc,
                     )
                 )
 
@@ -583,20 +597,29 @@ class PenaltyCalculator:
             self._get_day_type_from_penalties(penalties)
         ]
 
+        # Evening/night loadings are priced per band on the detail rows; add
+        # them on top of the day-type penalty (they are weekday-only, so they
+        # never coexist with a Saturday/Sunday/PH multiplier).
+        band_cost = sum(
+            (p.additional_cost or Decimal("0.00"))
+            for p in penalties
+            if "loading" in p.name.lower() and "casual" not in p.name.lower()
+        )
+
         if employee.employment_type == EmploymentType.casual:
             # For casuals, penalty is above the 1.25 base (which includes 25% loading)
             if multiplier > Decimal("1.25"):
                 return (base_cost * (multiplier - Decimal("1.25"))).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
-                )
-            return Decimal("0.00")
+                ) + band_cost
+            return band_cost
         else:
             # For permanent staff, penalty is above 1.0
             if multiplier > Decimal("1.0"):
                 return (base_cost * (multiplier - Decimal("1.0"))).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
-                )
-            return Decimal("0.00")
+                ) + band_cost
+            return band_cost
 
     def _calculate_penalty_cost_for_type(
         self,

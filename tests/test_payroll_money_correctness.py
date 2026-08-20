@@ -156,3 +156,49 @@ def test_xero_penalty_lines_do_not_collapse_into_ordinary_hours():
         (PenaltyType.night, XeroEarningType.night_loading.value),
     ):
         assert sync._map_penalty_to_xero_type(ptype) == expected, ptype
+
+
+# ---------------------------------------------------------------------------
+# 5. the roster editor's live penalty calculator charges what it displays
+# ---------------------------------------------------------------------------
+
+def test_evening_and_night_loadings_are_actually_charged():
+    """The calculator listed "Evening loading (7pm-midnight)" with
+    additional_cost=0.00 and nothing ever totalled it, so every weekday
+    evening shift was quoted 15-17.5% under what it costs. Loading applies to
+    the hours ACTUALLY worked in each band, not to the whole shift."""
+    from rosteriq.database import get_db
+    from rosteriq.services.penalty_calculator import PenaltyCalculator
+
+    db = get_db()
+    db.save_employee(Employee(
+        id="pcalc", venue_id="v1", name="Eve", employment_type=EmploymentType.full_time,
+        award_level=AwardLevel.level_2, hourly_base_rate=Decimal("30.00"), state=State.wa,
+        email="eve@x.com", skills=["bar"],
+        created_at=datetime(2026, 6, 1), updated_at=datetime(2026, 6, 1)))
+    calc = PenaltyCalculator()
+
+    # Tuesday 17:00-23:00 = 2 ordinary + 4 evening hours
+    b = calc.calculate(employee_id="pcalc", date_str="2026-08-18",
+                       start_time_str="17:00", end_time_str="23:00",
+                       role="bar", break_minutes=0)
+    evening = [p for p in b.penalties_applied if "Evening" in p.name]
+    assert evening, "evening loading not reported"
+    assert evening[0].hours_applicable == 4.0, "loading applied to the whole shift"
+    assert evening[0].additional_cost == Decimal("18.00")     # 4 * 30 * 0.15
+    assert b.penalty_cost == Decimal("18.00"), "displayed but never charged"
+
+    # A plain daytime shift carries none
+    day = calc.calculate(employee_id="pcalc", date_str="2026-08-18",
+                         start_time_str="09:00", end_time_str="17:00",
+                         role="bar", break_minutes=0)
+    assert day.penalty_cost == Decimal("0") and not day.penalties_applied
+
+    # Overnight: 22:00-06:00 = 2 evening + 6 night
+    night = calc.calculate(employee_id="pcalc", date_str="2026-08-18",
+                           start_time_str="22:00", end_time_str="06:00",
+                           role="bar", break_minutes=0)
+    names = {p.name.split(" (")[0]: p for p in night.penalties_applied}
+    assert names["Evening loading"].additional_cost == Decimal("9.00")    # 2 * 30 * .15
+    assert names["Late night loading"].additional_cost == Decimal("31.50")  # 6 * 30 * .175
+    assert night.penalty_cost == Decimal("40.50")
