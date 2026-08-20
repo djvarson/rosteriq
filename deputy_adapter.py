@@ -36,6 +36,17 @@ from rosteriq.models import (
 logger = logging.getLogger(__name__)
 
 
+def _op_name(endpoint: str) -> str:
+    """Low-cardinality operation label: the first path segment, minus ids.
+    "Invoices/abc-123" -> "Invoices"; a full URL -> its first meaningful part."""
+    e = str(endpoint or "").split("?")[0].strip("/")
+    if e.startswith("http"):
+        rest = e.split("://", 1)[-1]
+        e = rest.split("/", 1)[1] if "/" in rest else rest
+    parts = [p for p in e.split("/") if p]
+    return parts[0] if parts else "request"
+
+
 class DeputyAPIError(Exception):
     """Exception raised for Deputy API errors."""
 
@@ -284,7 +295,20 @@ class DeputyAdapter:
         if self._client:
             await self._client.aclose()
 
-    async def _request(
+    async def _request(self, method: str, path: str, *args, **kwargs):
+        """Instrumented entry point — every call to Deputy is timed and
+        recorded (services/events.track) so failures, slowness and success
+        rates are answerable after the fact. The real work is in
+        _request_inner; this wrapper never changes behaviour and never
+        swallows an exception."""
+        from rosteriq.services.events import track
+        op = _op_name(path)
+        with track("deputy", f"{method.upper()} {op}",
+                   venue_id=getattr(self, "venue_id", None)) as _t:
+            result = await self._request_inner(method, path, *args, **kwargs)
+            return result
+
+    async def _request_inner(
         self,
         method: str,
         path: str,

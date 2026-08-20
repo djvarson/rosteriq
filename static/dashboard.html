@@ -2272,6 +2272,16 @@
       cursor: pointer;
       transition: all 0.2s;
     }
+    @media (max-width: 640px) {
+      .setup-step { align-items: flex-start; }
+      .setup-step > .btn { width: 100%; margin-left: 30px; }
+    }
+    .btn-report { background: transparent; border: 1px solid var(--border); color: var(--text-secondary);
+                  border-radius: 8px; padding: 7px 14px; font-size: 12px; font-weight: 600; cursor: pointer;
+                  transition: all .15s; white-space: nowrap; }
+    .btn-report:hover { border-color: var(--accent); color: var(--text-primary); }
+    @media (max-width: 640px) { .btn-report { display: none; } }
+
 
     .btn-setup-wizard:hover {
       background: rgba(245, 158, 11, 0.2);
@@ -2282,6 +2292,13 @@
     .ai-msg { padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; max-width: 90%; word-wrap: break-word; }
     .ai-msg-user { background: var(--accent); color: #111827; align-self: flex-end; border-bottom-right-radius: 4px; }
     .ai-msg-assistant { background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border); align-self: flex-start; border-bottom-left-radius: 4px; }
+    .ai-rate { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+    .ai-rate-q { font-size: 11px; color: var(--text-muted); margin-right: 2px; }
+    .ai-rate-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+                   font-size: 13px; line-height: 1; padding: 4px 8px; transition: all .15s; }
+    .ai-rate-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .ai-rate-btn.chosen { border-color: var(--accent); background: rgba(245,158,11,0.12); }
+    .ai-rate-done { font-size: 11px; color: var(--text-muted); }
     .ai-msg-assistant strong { color: var(--accent); }
     .ai-msg-thinking { background: transparent; color: var(--text-muted); font-style: italic; font-size: 13px; align-self: flex-start; padding: 8px 14px; }
     .ai-quick-btn { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 6px 14px; cursor: pointer; color: var(--text-primary); font-size: 12px; transition: all 0.2s; }
@@ -2465,6 +2482,7 @@
       </div>
       <div class="top-bar-right">
         <button class="btn-setup-wizard" onclick="showOnboardingWizard()">Setup Wizard</button>
+        <button class="btn-report" onclick="openReportProblem()" title="Report a problem or send an idea">Report an issue</button>
         <div class="clock" id="clock"></div>
       </div>
     </div>
@@ -2546,14 +2564,14 @@
         <div class="grid-4">
           <div class="kpi-card">
             <div class="kpi-label">Revenue Forecast</div>
-            <div class="kpi-value success">$<span id="kpi-revenue">0</span></div>
+            <div class="kpi-value success">$<span id="kpi-revenue">—</span></div>
             <div class="kpi-sub" id="kpi-revenue-sub">Today's predicted</div>
             <div class="kpi-detail" id="kpi-revenue-detail">vs $4,200 yesterday</div>
           </div>
 
           <div class="kpi-card">
             <div class="kpi-label">Labour Cost</div>
-            <div class="kpi-value">$<span id="kpi-labour-cost">0</span></div>
+            <div class="kpi-value">$<span id="kpi-labour-cost">—</span></div>
             <div class="kpi-sub" id="kpi-labour-sub">Current on-shift</div>
             <div class="progress-bar">
               <div class="progress-fill" id="labour-progress" style="width: 0%"></div>
@@ -2562,14 +2580,14 @@
 
           <div class="kpi-card">
             <div class="kpi-label">Labour %</div>
-            <div class="kpi-value" id="kpi-labour-pct">0%</div>
+            <div class="kpi-value" id="kpi-labour-pct">—</div>
             <div class="kpi-sub">of revenue</div>
             <div class="kpi-detail" id="kpi-labour-pct-detail">Target: 28-32%</div>
           </div>
 
           <div class="kpi-card">
             <div class="kpi-label">Covers</div>
-            <div class="kpi-value" id="kpi-covers">0</div>
+            <div class="kpi-value" id="kpi-covers">—</div>
             <div class="kpi-sub">today's estimate</div>
             <div class="kpi-detail" id="kpi-covers-detail">Peak: 180 @ 7pm</div>
           </div>
@@ -2580,7 +2598,7 @@
           <div class="kpi-card">
             <div class="kpi-label">Staff On Shift</div>
             <div style="display: flex; align-items: baseline; gap: 8px;">
-              <div class="kpi-value" id="kpi-staff-count">0</div>
+              <div class="kpi-value" id="kpi-staff-count">—</div>
               <div class="kpi-detail">at optimal capacity</div>
             </div>
             <div class="kpi-detail" id="staff-breakdown" style="margin-top: 8px;">—</div>
@@ -3692,6 +3710,10 @@
                   <button class="btn btn-secondary btn-small act-cat" data-cat="audit" onclick="actSetFilter('category', 'audit')">Audit</button>
                   <button class="btn btn-secondary btn-small act-cat" data-cat="security" onclick="actSetFilter('category', 'security')">Security</button>
                   <button class="btn btn-secondary btn-small act-cat" data-cat="error" onclick="actSetFilter('category', 'error')">Errors</button>
+                  <button class="btn btn-secondary btn-small act-cat" data-cat="perf" onclick="actSetFilter('category', 'perf')">Slow</button>
+                  <button class="btn btn-secondary btn-small act-cat" data-cat="integration" onclick="actSetFilter('category', 'integration')">Integrations</button>
+                  <button class="btn btn-secondary btn-small act-cat" data-cat="ai" onclick="actSetFilter('category', 'ai')">AI</button>
+                  <button class="btn btn-secondary btn-small act-cat" data-cat="job" onclick="actSetFilter('category', 'job')">Jobs</button>
                 </div>
                 <div style="display:flex; gap:4px;" id="act-since-filter">
                   <button class="btn btn-secondary btn-small act-since" data-since="24h" onclick="actSetFilter('since', '24h')">24h</button>
@@ -3703,6 +3725,18 @@
             </div>
             <div id="act-summary" style="margin-top:10px; font-size:12px; color:var(--text-muted);"></div>
           </div>
+
+          <!-- SYSTEM HEALTH: the log read back to you as a worklist -->
+          <div class="card" id="act-health-card" style="margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:4px;">
+              <div>
+                <div style="font-weight:700; font-size:15px;">System health</div>
+                <div style="color:var(--text-muted); font-size:13px;">What's actually going wrong, ranked — repeat errors grouped so one bug is one line, plus how the integrations, the AI and the scheduled jobs are behaving.</div>
+              </div>
+            </div>
+            <div id="act-health"><div style="color:var(--text-muted); font-size:13px; padding:10px 0;">Loading…</div></div>
+          </div>
+
           <div id="act-list"></div>
           <div class="card" id="act-platform-card" style="display:none; margin-top:16px; border-color:rgba(220,38,38,0.35);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
@@ -5242,6 +5276,35 @@
 </div>
 
 <!-- MODALS -->
+<div class="modal" id="modal-report-problem">
+  <div class="modal-content" style="max-width:460px;">
+    <div class="modal-header">Report a problem</div>
+    <div class="modal-body">
+      <div class="input-group">
+        <label>What kind?</label>
+        <select id="rp-kind">
+          <option value="bug">Something is broken</option>
+          <option value="confusing">Something is confusing</option>
+          <option value="idea">I have an idea</option>
+          <option value="praise">Something works well</option>
+        </select>
+      </div>
+      <div class="input-group">
+        <label>What happened?</label>
+        <textarea id="rp-message" rows="4" maxlength="2000" placeholder="e.g. The roster wouldn't publish and the button just spun."></textarea>
+      </div>
+      <p id="rp-ref" style="display:none; font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--text-muted);"></p>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:8px; line-height:1.5;">
+        The page you're on and the technical reference for the last error are sent with this, so we can find the exact failure without asking you to reproduce it.
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-report-problem')">Cancel</button>
+      <button class="btn btn-primary" id="rp-send" onclick="submitReportProblem()">Send</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal-join-code">
   <div class="modal-content" style="max-width:420px;">
     <div class="modal-header">Join code</div>
@@ -6060,6 +6123,13 @@ async function fetchAPI(endpoint, options = {}) {
   }
 
   if (!response.ok) {
+    // Remember the server's reference for this failure so "Report a problem"
+    // can quote it — that is what ties a user's complaint to the exact
+    // recorded error event.
+    try {
+      _lastErrorReference = (data && data.error && data.error.reference)
+        || response.headers.get('X-Correlation-ID') || _lastErrorReference;
+    } catch (e) { /* never let reporting break the request path */ }
     // Handle standardised error format
     let errorMessage = `${response.status} ${response.statusText}`;
     if (data && data.error && data.error.message) {
@@ -6123,6 +6193,19 @@ function formatDate(date) {
 // ============================================
 // UI NAVIGATION
 // ============================================
+// Referenced by the AI insight action buttons and by executeAIAction's
+// redirect, but never defined — so every one of those buttons threw
+// "navigateTo is not defined" and did nothing. It is just showPage with a
+// guard for ids that no longer exist.
+function navigateTo(pageId) {
+  if (!pageId) return;
+  if (!document.getElementById('page-' + pageId)) {
+    console.warn('navigateTo: no page "' + pageId + '"');
+    return;
+  }
+  showPage(pageId);
+}
+
 function showPage(pageId) {
   document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
   document.getElementById(`page-${pageId}`).style.display = 'block';
@@ -6529,10 +6612,13 @@ async function loadSetupWizard() {
         : (!step.done && step.cta === 'Connections'
             ? '<button class="btn btn-secondary btn-small" onclick="window.open(\'/connections\',\'_blank\')">Connections →</button>'
             : '');
-      return '<div style="display:flex; align-items:center; gap:12px; padding:9px 0; border-top:1px solid var(--border);' +
+      // flex-wrap + min-width:0 so the text column can shrink and the CTA
+      // drops to its own line on a phone. Without them the button holds its
+      // width and the description wraps two words per line.
+      return '<div class="setup-step" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:9px 0; border-top:1px solid var(--border);' +
         (isNext ? ' background:rgba(51,102,255,.06);' : '') + '">' +
-        '<span style="font-size:16px; width:18px; text-align:center;">' + icon + '</span>' +
-        '<div style="flex:1;">' +
+        '<span style="font-size:16px; width:18px; text-align:center; flex-shrink:0;">' + icon + '</span>' +
+        '<div style="flex:1 1 220px; min-width:0;">' +
           '<div style="font-weight:600;">' + esc(step.label) + (step.optional ? ' <span style="color:var(--text-muted); font-weight:400; font-size:12px;">(optional)</span>' : '') + '</div>' +
           '<div style="font-size:12px; color:var(--text-muted);">' + esc(step.detail) + '</div>' +
         '</div>' + cta +
@@ -7696,8 +7782,95 @@ function eventCopy(e) {
   return who + ' · ' + esc(A) + (e.resource_id ? ' · ' + esc(e.resource_id) : '');
 }
 
+function _healthStat(label, value, tone) {
+  const colour = tone === 'bad' ? 'var(--danger)' : tone === 'warn' ? '#B45309' : 'var(--text-primary)';
+  return '<div style="min-width:120px;">' +
+    '<div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;">' + esc(label) + '</div>' +
+    '<div style="font-size:19px; font-weight:700; color:' + colour + ';">' + esc(String(value)) + '</div>' +
+  '</div>';
+}
+
+function _healthRows(title, rows, render) {
+  if (!rows || !rows.length) return '';
+  return '<div style="margin-top:14px;">' +
+    '<div style="font-size:12px; font-weight:700; color:var(--text-secondary); margin-bottom:6px;">' + esc(title) + '</div>' +
+    rows.map(render).join('') + '</div>';
+}
+
+async function loadSystemHealth() {
+  const box = document.getElementById('act-health');
+  if (!box || !state.currentVenue) return;
+  const days = actFilter.since === '24h' ? 1 : actFilter.since === '30d' ? 30 : 7;
+  try {
+    const d = await fetchAPI('/api/events/insights?venue_id=' + encodeURIComponent(state.currentVenue) + '&days=' + days);
+
+    // The headline: what a person should actually do something about.
+    let html = '';
+    if (d.attention && d.attention.length) {
+      html += '<div style="display:flex; flex-direction:column; gap:8px; margin:12px 0 4px;">' +
+        d.attention.map(function (a) {
+          return '<div style="display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:8px; background:rgba(220,38,38,0.06); border:1px solid rgba(220,38,38,0.2);">' +
+            '<span style="font-size:10px; font-weight:700; letter-spacing:.06em; color:var(--danger); padding-top:2px;">' + esc(String(a.kind || '').toUpperCase()) + '</span>' +
+            '<div style="min-width:0;"><div style="font-size:13px; color:var(--text-primary); font-weight:600;">' + esc(a.text || '') + '</div>' +
+            '<div style="font-size:12px; color:var(--text-muted); margin-top:2px;">' + esc(a.hint || '') + '</div></div>' +
+          '</div>';
+        }).join('') + '</div>';
+    } else {
+      html += '<div style="margin:12px 0 4px; padding:10px 12px; border-radius:8px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); font-size:13px; color:var(--text-primary);">' +
+        'Nothing needs attention in the last ' + days + ' day' + (days === 1 ? '' : 's') + '.</div>';
+    }
+
+    // The numbers behind it
+    const ai = d.ai || {};
+    html += '<div style="display:flex; gap:26px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">' +
+      _healthStat('Repeat errors', (d.errors || []).length, (d.errors || []).length ? 'bad' : 'ok') +
+      _healthStat('Slow routes', (d.slow_routes || []).length, (d.slow_routes || []).length ? 'warn' : 'ok') +
+      _healthStat('AI answers', ai.calls || 0, 'ok') +
+      _healthStat('AI helpful', ai.satisfaction_pct == null ? '—' : (ai.satisfaction_pct + '%'),
+                  ai.satisfaction_pct != null && ai.satisfaction_pct < 60 ? 'warn' : 'ok') +
+      _healthStat('Jobs run', (d.jobs || []).reduce(function (n, j) { return n + (j.runs || 0); }, 0), 'ok') +
+    '</div>';
+
+    html += _healthRows('Repeat errors', (d.errors || []).slice(0, 5), function (e) {
+      return '<div style="display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px;">' +
+        '<div style="min-width:0;"><span style="font-weight:600;">' + esc(e.exception || 'Error') + '</span> ' +
+        '<span style="color:var(--text-muted);">' + esc(String(e.message || '').slice(0, 90)) + '</span></div>' +
+        '<div style="white-space:nowrap; color:var(--text-muted);">×' + esc(String(e.count)) + '</div></div>';
+    });
+
+    html += _healthRows('Integrations', d.integrations || [], function (i) {
+      const bad = (i.failure_pct || 0) >= 20;
+      return '<div style="display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px;">' +
+        '<div style="font-weight:600; text-transform:capitalize;">' + esc(i.provider || '') + '</div>' +
+        '<div style="white-space:nowrap; color:' + (bad ? 'var(--danger)' : 'var(--text-muted)') + ';">' +
+          esc(String(i.calls)) + ' calls · ' + esc(String(i.failure_pct == null ? 0 : i.failure_pct)) + '% failed' +
+          (i.p95_ms ? ' · p95 ' + esc(String(Math.round(i.p95_ms))) + 'ms' : '') +
+        '</div></div>';
+    });
+
+    html += _healthRows('Slowest routes', (d.slow_routes || []).slice(0, 5), function (r) {
+      return '<div style="display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px;">' +
+        '<div style="min-width:0; font-family:ui-monospace,Menlo,monospace; font-size:12px;">' + esc(r.route || '') + '</div>' +
+        '<div style="white-space:nowrap; color:var(--text-muted);">p95 ' + esc(String(Math.round((r.p95_ms || 0) / 100) / 10)) + 's · ' + esc(String(r.count)) + ' hits</div></div>';
+    });
+
+    html += _healthRows('Scheduled jobs', d.jobs || [], function (j) {
+      return '<div style="display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px;">' +
+        '<div style="font-weight:600;">' + esc(String(j.job || '').replace(/_/g, ' ')) + '</div>' +
+        '<div style="white-space:nowrap; color:' + (j.failures ? 'var(--danger)' : 'var(--text-muted)') + ';">' +
+          esc(String(j.runs)) + ' runs' + (j.failures ? ' · ' + esc(String(j.failures)) + ' failed' : '') +
+          (j.last_run ? ' · ' + _ago(j.last_run) : '') + '</div></div>';
+    });
+
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = '<div style="color:var(--text-muted); font-size:13px; padding:8px 0;">Health data unavailable: ' + esc(e.message || 'error') + '</div>';
+  }
+}
+
 async function loadActivity() {
   if (!state.currentVenue) return;
+  loadSystemHealth();          // independent of the event list; never blocks it
   const list = document.getElementById('act-list');
   const sum = document.getElementById('act-summary');
   const q = '?venue_id=' + encodeURIComponent(state.currentVenue) + '&since=' + actFilter.since + '&limit=200' + (actFilter.category ? '&category=' + actFilter.category : '');
@@ -8535,17 +8708,29 @@ async function loadVenueData() {
   showLoading('kpi-row', 'card', 5);
 
   try {
-    const [empResp, rosterResp, forecastResp] = await Promise.all([
+    // allSettled, NOT all: these three are independent, and one of them
+    // failing (a 403 on forecasts for a venue with none, say) used to reject
+    // the whole thing and blank every panel on the page — staff table, KPIs,
+    // charts and alerts — as if the venue had no data at all.
+    const [empRes, rosterRes, forecastRes] = await Promise.allSettled([
       fetchAPI('/employees'),
       fetchAPI('/rosters'),
       fetchAPI(`/forecasts?venue_id=${state.currentVenue}`),
     ]);
+    const unwrap = (res, what) => {
+      if (res.status !== 'fulfilled') {
+        console.warn('Could not load ' + what + ':', res.reason && res.reason.message);
+        return [];
+      }
+      const v = res.value;
+      return Array.isArray(v) ? v : (v.items || []);
+    };
 
     // Extract .items from paginated responses (API returns {items:[], total, limit, offset})
-    state.employees = Array.isArray(empResp) ? empResp : (empResp.items || []);
-    const allRosters = Array.isArray(rosterResp) ? rosterResp : (rosterResp.items || []);
+    state.employees = unwrap(empRes, 'employees');
+    const allRosters = unwrap(rosterRes, 'rosters');
     state.rosters = allRosters.filter(r => r.venue_id === state.currentVenue);
-    state.forecasts = Array.isArray(forecastResp) ? forecastResp : (forecastResp.items || []);
+    state.forecasts = unwrap(forecastRes, 'forecasts');
 
     clearState('kpi-row');
 
@@ -8689,7 +8874,7 @@ async function loadRealVenueData(venueId) {
       select.value = venueId;
 
       // Re-render staff list with real data
-      populateRealStaffList(employees);
+      renderStaffTable();
       // Re-render roster with real shifts
       try {
         const shifts = await fetchAPI('/api/deputy/sync/shifts', {
@@ -8841,23 +9026,6 @@ function copyJoinCode() {
   else done();
 }
 
-function populateRealStaffList(employees) {
-  var staffList = document.getElementById('staff-list-body');
-  if (!staffList) return;
-  staffList.innerHTML = employees.map(function(emp) {
-    var role = emp.skills && emp.skills.length > 0 ? emp.skills[0] : (emp.role || 'General');
-    var type = emp.employment_type || 'casual';
-    var rate = emp.hourly_base_rate || '—';
-    return '<tr>' +
-      '<td>' + esc(emp.name) + '</td>' +
-      '<td>' + esc(role) + '</td>' +
-      '<td><span class="badge">' + esc(type) + '</span></td>' +
-      '<td>$' + rate + '/hr</td>' +
-      '<td><span class="status-badge status-active">Active</span></td>' +
-      '</tr>';
-  }).join('');
-}
-
 function populateRealRoster(employees, shifts) {
   var tbody = document.getElementById('roster-body');
   if (!tbody) return;
@@ -8990,25 +9158,76 @@ function populateDemoReportCharts() {
   }
 }
 
-function updateDashboardKPIs() {
-  // Realistic Saturday figures for pilot venue
-  const revenue = 4850;
-  const labourCost = 1450;
-  const labourPct = (labourCost / revenue).toFixed(1);
-  const covers = 168;
-  const staffCount = state.employees.length;
+function _setKpi(id, value, fallback) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = (value === null || value === undefined || value === '') ? (fallback || '—') : value;
+}
 
-  document.getElementById('kpi-revenue').textContent = Math.floor(revenue).toLocaleString();
-  document.getElementById('kpi-labour-cost').textContent = Math.floor(labourCost).toLocaleString();
-  document.getElementById('kpi-labour-pct').textContent = (labourPct * 100).toFixed(1) + '%';
-  document.getElementById('kpi-covers').textContent = covers;
-  document.getElementById('kpi-staff-count').textContent = staffCount;
+// The KPI row shows THIS VENUE'S numbers, from /api/briefing (today) and
+// /api/snapshot (the 7-day window). It used to render invented "realistic
+// Saturday figures" — a venue reading $4,850 of revenue it never took, and a
+// break-compliance alert about a staff member who doesn't work there, is
+// worse than showing nothing. Anything we don't know is an em dash.
+async function updateDashboardKPIs() {
+  const venueId = _getVenueId();
+  if (!venueId) return;
+  _setKpi('kpi-staff-count', state.employees.length || '—');   // replaced below once the briefing lands
 
-  const labourProgress = Math.min((labourPct / 0.35) * 100, 100);
-  document.getElementById('labour-progress').style.width = labourProgress + '%';
+  let brief = null, snap = null;
+  try {
+    [brief, snap] = await Promise.all([
+      fetchAPI('/api/briefing?venue_id=' + encodeURIComponent(venueId)).catch(function () { return null; }),
+      fetchAPI('/api/snapshot?venue_id=' + encodeURIComponent(venueId)).catch(function () { return null; }),
+    ]);
+  } catch (e) { /* fall through to em dashes */ }
 
-  document.getElementById('staff-breakdown').textContent =
-    `Kitchen: 4 • Bar: 3 • Floor: ${staffCount - 7}`;
+  const today = (brief && brief.today) || {};
+  const cov = (today.coverage && today.coverage.today) || {};
+
+  // A zero that means "no data connected" must not render as "$0" — a venue
+  // reading $0 revenue thinks it took nothing, when the truth is we have no
+  // sales feed. Real zeros (nobody rostered today) still show as 0.
+  // Revenue: the 7-day average of real net sales, labelled as such — we do not
+  // have a per-day forecast for every venue, and a made-up one is a lie.
+  if (snap && typeof snap.net_sales === 'number' && snap.net_sales > 0) {
+    const days = (snap.days && snap.days.length) || 7;
+    _setKpi('kpi-revenue', Math.round(snap.net_sales / days).toLocaleString());
+    _setKpi('kpi-revenue-sub', 'Avg/day, last ' + days + ' days');
+    _setKpi('kpi-revenue-detail', '$' + Math.round(snap.net_sales).toLocaleString() + ' over the window');
+  } else {
+    _setKpi('kpi-revenue', '—');
+    _setKpi('kpi-revenue-sub', 'Connect your POS for sales');
+    _setKpi('kpi-revenue-detail', '');
+  }
+
+  const rostered = today.staff_rostered;
+  if (typeof today.labour_cost === 'number' && (today.labour_cost > 0 || rostered > 0)) {
+    _setKpi('kpi-labour-cost', Math.round(today.labour_cost).toLocaleString());
+    _setKpi('kpi-labour-sub', "Today's rostered labour");
+  } else {
+    _setKpi('kpi-labour-cost', '—');
+    _setKpi('kpi-labour-sub', rostered === 0 ? 'Nobody rostered today' : 'No roster data');
+  }
+
+  const labourPct = (snap && typeof snap.labour_pct === 'number' && snap.net_sales > 0)
+    ? snap.labour_pct : null;
+  _setKpi('kpi-labour-pct', labourPct === null ? '—' : labourPct.toFixed(1) + '%');
+  const bar = document.getElementById('labour-progress');
+  if (bar) bar.style.width = labourPct === null ? '0%' : Math.min((labourPct / 35) * 100, 100) + '%';
+  _setKpi('kpi-labour-pct-detail', labourPct === null ? 'Target: 28-32%' :
+    (labourPct <= 32 ? 'Within target (28-32%)' : 'Above target (28-32%)'));
+
+  // "Covers" is a forecast we only have when demand forecasts exist.
+  const covers = (cov && typeof cov.required === 'number') ? null : null;
+  _setKpi('kpi-covers', covers === null ? '—' : covers);
+  _setKpi('kpi-covers-detail', cov.peak_hour ? ('Busiest hour: ' + cov.peak_hour) : '');
+
+  if (typeof today.staff_rostered === 'number' && today.coverage) {
+    _setKpi('kpi-staff-count', today.staff_rostered);
+    _setKpi('staff-breakdown', cov.status === 'covered'
+      ? 'Covered for today' + (cov.required ? ' (' + cov.rostered + '/' + cov.required + ' needed)' : '')
+      : (cov.gap ? cov.gap + ' short of the ' + cov.required + ' needed today' : ''));
+  }
 }
 
 function updateDemoDashboardKPIs() {
@@ -9042,14 +9261,61 @@ function updateDemoDashboardKPIs() {
   document.getElementById('live-today-count').textContent = demoData.live_revenue.today_total.transaction_count;
 }
 
-function populateAlerts() {
-  const alerts = [
-    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>', title: 'High Demand Forecast', desc: 'Saturday evening expecting +18% covers', badge: 'Forecast' },
-    { type: 'warning', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>', title: 'Weather Alert', desc: 'Heavy rain expected 6-9pm', badge: 'Weather' },
-    { type: 'danger', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>', title: 'Break Compliance', desc: 'Sarah needs break in next 30 mins', badge: 'Urgent' },
-    { type: 'info', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>', title: 'Event Nearby', desc: 'Concert at venue nearby: +15% expected', badge: 'Event' },
-  ];
+var _ICON_WARN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
+var _ICON_URGENT = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
+var _ICON_INFO = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>';
 
+// Alerts are built from THIS VENUE'S live signals (coverage, approvals waiting,
+// unacknowledged procedures, stock below par, prime cost). The previous version
+// showed four invented alerts to every venue — including "Sarah needs break in
+// next 30 mins" for venues with no Sarah. An empty alert panel is honest; a
+// fabricated one costs trust the first time someone acts on it.
+async function populateAlerts() {
+  const venueId = _getVenueId();
+  if (!venueId) return renderAlerts([]);
+  let b = null;
+  try {
+    b = await fetchAPI('/api/briefing?venue_id=' + encodeURIComponent(venueId));
+  } catch (e) {
+    return renderAlerts([]);
+  }
+  const alerts = [];
+  const today = b.today || {};
+  const cov = (today.coverage && today.coverage.today) || {};
+  const appr = b.approvals || {};
+  const team = b.team || {};
+  const kitchen = b.kitchen || {};
+
+  if (cov.gap) {
+    alerts.push({ type: 'danger', icon: _ICON_URGENT, title: 'Short-staffed today',
+      desc: cov.gap + ' fewer than the ' + cov.required + ' needed' + (cov.peak_hour ? ' (peak ' + cov.peak_hour + ')' : ''),
+      badge: 'Coverage' });
+  }
+  if (appr.pending_leave) {
+    alerts.push({ type: 'warning', icon: _ICON_WARN, title: 'Leave waiting on you',
+      desc: appr.pending_leave + ' request' + (appr.pending_leave === 1 ? '' : 's') + ' undecided',
+      badge: 'Approvals' });
+  }
+  if (appr.open_covers) {
+    alerts.push({ type: 'warning', icon: _ICON_WARN, title: 'Shifts up for grabs',
+      desc: appr.open_covers + ' cover request' + (appr.open_covers === 1 ? '' : 's') + ' unfilled',
+      badge: 'Roster' });
+  }
+  if (team.outstanding_acks) {
+    alerts.push({ type: 'info', icon: _ICON_INFO, title: 'Procedures unacknowledged',
+      desc: team.outstanding_acks + ' outstanding across ' + (team.documents_requiring_ack || 0) + ' document' + ((team.documents_requiring_ack || 0) === 1 ? '' : 's'),
+      badge: 'Compliance' });
+  }
+  if (kitchen.below_par_count) {
+    alerts.push({ type: 'warning', icon: _ICON_WARN, title: 'Stock below par',
+      desc: kitchen.below_par_count + ' ingredient' + (kitchen.below_par_count === 1 ? '' : 's') + ' need reordering',
+      badge: 'Kitchen' });
+  }
+  if (typeof b.prime_cost_pct_7d === 'number' && b.prime_cost_pct_7d > 65) {
+    alerts.push({ type: 'danger', icon: _ICON_URGENT, title: 'Prime cost above 65%',
+      desc: b.prime_cost_pct_7d.toFixed(1) + '% over the last 7 days',
+      badge: 'Costs' });
+  }
   renderAlerts(alerts);
 }
 
@@ -9829,6 +10095,13 @@ function sendRenewalReminders() {
 // BACKUP MANAGEMENT FUNCTIONS
 // ============================================================================
 async function loadBackups() {
+  // Owner-only endpoint: a manager opening Settings used to get a 403 and a
+  // red console error for a panel they are not meant to see at all.
+  if (_jwtRole() !== 'owner') {
+    const tbody = document.getElementById('backup-body');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:18px; color:var(--text-muted);">Backups are managed by the account owner.</td></tr>';
+    return;
+  }
   try {
     const response = await fetchAPI('/api/v1/admin/backups');
     displayBackupHistory(response);
@@ -12226,6 +12499,75 @@ function aiQuickQuestion(question) {
   sendAIMessage();
 }
 
+async function rateAIAnswer(rateEl, helpful, question, answer) {
+  // Optimistic: the person has told us what they think, don't make them wait
+  // or make them wonder whether it registered.
+  rateEl.querySelectorAll('.ai-rate-btn').forEach(function (b) { b.disabled = true; });
+  const chosen = rateEl.querySelectorAll('.ai-rate-btn')[helpful ? 0 : 1];
+  if (chosen) chosen.classList.add('chosen');
+  const q = rateEl.querySelector('.ai-rate-q');
+  if (q) q.textContent = helpful ? 'Thanks — noted.' : 'Thanks — we\'ll look at this one.';
+  try {
+    await fetchAPI('/api/ai/feedback', {
+      method: 'POST',
+      body: JSON.stringify({
+        helpful: helpful,
+        venue_id: _getVenueId(),
+        question: (question || '').slice(0, 2000),
+        answer_preview: (answer || '').slice(0, 500),
+      })
+    });
+  } catch (e) {
+    console.warn('AI feedback not recorded:', e);
+  }
+}
+
+// --- Report a problem -------------------------------------------------------
+// A report is only useful if it arrives with the context. This sends the page
+// the user was on and the correlation id of the last failed request, so the
+// report lands next to the recorded error instead of "it broke this morning".
+var _lastErrorReference = null;
+
+function openReportProblem(prefill) {
+  const box = document.getElementById('rp-message');
+  if (box) box.value = prefill || '';
+  const ref = document.getElementById('rp-ref');
+  if (ref) {
+    ref.textContent = _lastErrorReference ? ('Reference: ' + _lastErrorReference) : '';
+    ref.style.display = _lastErrorReference ? 'block' : 'none';
+  }
+  openModal('modal-report-problem');
+  setTimeout(function () { if (box) box.focus(); }, 50);
+}
+
+async function submitReportProblem() {
+  const box = document.getElementById('rp-message');
+  const kind = (document.getElementById('rp-kind') || {}).value || 'bug';
+  const msg = (box.value || '').trim();
+  if (msg.length < 3) { showToastNotification('Report', 'Tell us what happened first', 'error'); return; }
+  const btn = document.getElementById('rp-send');
+  btn.disabled = true;
+  try {
+    await fetchAPI('/api/feedback', {
+      method: 'POST',
+      body: JSON.stringify({
+        kind: kind,
+        message: msg,
+        venue_id: _getVenueId(),
+        page: state.currentPage || location.pathname,
+        reference: _lastErrorReference,
+      })
+    });
+    closeModal('modal-report-problem');
+    box.value = '';
+    showToastNotification('Thank you', "Logged with the technical detail attached — we can see exactly what happened.", 'success');
+  } catch (e) {
+    showToastNotification('Could not send', e.message || 'Try again in a moment', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function addAIChatMessage(role, content, extras) {
   const container = document.getElementById('ai-chat-messages');
   // Remove welcome on first message
@@ -12235,9 +12577,13 @@ function addAIChatMessage(role, content, extras) {
   const div = document.createElement('div');
   div.className = 'ai-msg ' + (role === 'user' ? 'ai-msg-user' : 'ai-msg-assistant');
 
-  // Simple markdown-ish rendering for assistant messages
+  // Simple markdown-ish rendering for assistant messages.
+  // ESCAPE FIRST: the model's reply quotes venue data (staff names, post
+  // bodies, SOP text) that a staff member controls. Rendering it raw would let
+  // a name like <img onerror=...> run script in the owner's session. The
+  // markdown replaces below only ever add tags we wrote ourselves.
   if (role === 'assistant') {
-    let html = content
+    let html = esc(content)
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
       .replace(/`(.*?)`/g, '<code style="background:rgba(17,24,39,0.06); padding:1px 4px; border-radius:3px;">$1</code>')
@@ -12259,8 +12605,26 @@ function addAIChatMessage(role, content, extras) {
     if (extras?.tool_calls?.length) {
       const toolsDiv = document.createElement('div');
       toolsDiv.className = 'ai-tools-used';
-      toolsDiv.textContent = 'Used: ' + extras.tool_calls.map(t => t.tool.replace(/_/g, ' ')).join(', ');
+      toolsDiv.textContent = 'Used: ' + extras.tool_calls
+        .map(t => String(t && t.tool || 'tool').replace(/_/g, ' ')).join(', ');
       div.appendChild(toolsDiv);
+    }
+
+    // Was this answer any good? The thumbs are the only signal that tells us
+    // WHICH answers to improve — latency and error rate can't see a confident
+    // wrong answer.
+    if (!extras || extras.rateable !== false) {
+      const rate = document.createElement('div');
+      rate.className = 'ai-rate';
+      rate.innerHTML =
+        '<span class="ai-rate-q">Was this helpful?</span>' +
+        '<button class="ai-rate-btn" title="Helpful" aria-label="Helpful">&#128077;</button>' +
+        '<button class="ai-rate-btn" title="Not helpful" aria-label="Not helpful">&#128078;</button>';
+      const [upBtn, downBtn] = rate.querySelectorAll('.ai-rate-btn');
+      const send = (helpful) => rateAIAnswer(rate, helpful, extras && extras.question, content);
+      upBtn.onclick = () => send(true);
+      downBtn.onclick = () => send(false);
+      div.appendChild(rate);
     }
   } else {
     div.textContent = content;
@@ -12313,6 +12677,7 @@ async function sendAIMessage() {
     addAIChatMessage('assistant', data.response, {
       actions: data.actions,
       tool_calls: data.tool_calls,
+      question: message,
     });
   } catch (err) {
     const thinking = document.getElementById('ai-thinking');

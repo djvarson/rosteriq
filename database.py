@@ -721,8 +721,27 @@ class BaseStore:
     def list_events(self, venue_id=None, category=None, action_prefix=None,
                     since=None, limit: int = 100, offset: int = 0) -> list[dict]:
         """Event log query. venue_id=None means platform-wide (owner view);
-        category filters details.category ('audit'|'security'|'error');
-        action_prefix matches action LIKE 'prefix%'; since is a datetime."""
+        category filters details.category ('audit'|'security'|'error'|'perf'|
+        'integration'|'ai'|'job'); action_prefix matches action LIKE 'prefix%';
+        since is a datetime."""
+        raise NotImplementedError
+
+    def event_rollup(self, since, venue_id=None, category=None, group_by="action",
+                     limit: int = 20) -> list[dict]:
+        """Aggregate the event log — the query behind every health/insight view.
+
+        group_by is "action" or a key inside details ("fingerprint", "route",
+        "provider", "job", "outcome"). Returns rows of
+        {key, count, failures, last_seen, sample} ordered by count desc.
+        Aggregating in the STORE matters: the alternative is pulling tens of
+        thousands of rows into python on every dashboard load.
+        """
+        raise NotImplementedError
+
+    def prune_events(self, before) -> int:
+        """Delete events older than ``before``; returns the number removed.
+        Traffic-driven categories (perf/integration/ai) are what make the table
+        grow, so retention is what keeps the log affordable."""
         raise NotImplementedError
 
     # --- Credential Management (API Keys & Webhook Secrets) ---
@@ -2159,6 +2178,50 @@ class MemoryStore(BaseStore):
         rows.sort(key=lambda r: str(r.get("created_at")), reverse=True)
         return [dict(r) for r in rows[offset: offset + limit]]
 
+    def event_rollup(self, since, venue_id=None, category=None, group_by="action",
+                     limit=20):
+        rows = self.list_events(venue_id=venue_id, category=category, since=since,
+                                limit=100000)
+        buckets: dict = {}
+        for r in rows:
+            d = r.get("details") or {}
+            key = r.get("action") if group_by == "action" else d.get(group_by)
+            if key is None:
+                continue
+            key = str(key)
+            b = buckets.setdefault(key, {"key": key, "count": 0, "failures": 0,
+                                         "last_seen": None, "sample": None,
+                                         "_durations": []})
+            b["count"] += 1
+            if str(d.get("outcome")) in ("failed", "error", "denied"):
+                b["failures"] += 1
+            if d.get("duration_ms") is not None:
+                try:
+                    b["_durations"].append(float(d["duration_ms"]))
+                except Exception:
+                    pass
+            ts = r.get("created_at")
+            if b["last_seen"] is None or (ts and str(ts) > str(b["last_seen"])):
+                b["last_seen"] = ts
+                b["sample"] = {k: v for k, v in d.items() if k not in ("category",)}
+        out = []
+        for b in buckets.values():
+            durations = sorted(b.pop("_durations"))
+            if durations:
+                b["p95_ms"] = round(durations[min(len(durations) - 1,
+                                                  int(len(durations) * 0.95))], 1)
+                b["max_ms"] = round(durations[-1], 1)
+            out.append(b)
+        out.sort(key=lambda b: b["count"], reverse=True)
+        return out[:limit]
+
+    def prune_events(self, before):
+        keep = [r for r in self._audit_logs
+                if not (r.get("created_at") and r["created_at"] < before)]
+        removed = len(self._audit_logs) - len(keep)
+        self._audit_logs[:] = keep          # in place: other refs stay valid
+        return removed
+
     # --- White-Label Theming ---
 
     def save_theme(self, venue_id: str, theme: dict) -> None:
@@ -3459,6 +3522,12 @@ class PostgresStore(BaseStore):
             "UPDATE venues SET tanda_org_id = NULL WHERE tanda_org_id = ''",
             "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS stock_qty NUMERIC DEFAULT 0",
             "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS par_level NUMERIC DEFAULT 0",
+            # The event log is queried by time, by venue and by category on every
+            # Activity/health view. Without these it is a growing seq-scan.
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_venue_created ON audit_logs (venue_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs ((details->>'category'), created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs (action, created_at DESC)",
         ):
             try:
                 with self._cursor() as cur:
@@ -5743,6 +5812,71 @@ class PostgresStore(BaseStore):
                 LIMIT %s OFFSET %s
             """, (*params, limit, offset))
             return [self._event_row(row) for row in cur.fetchall()]
+
+    # Keys that may be grouped on. Whitelisted because the value is
+    # interpolated as a JSON key in the query text, never taken raw from a caller.
+    _ROLLUP_KEYS = ("action", "fingerprint", "route", "provider", "job",
+                    "outcome", "exception", "model")
+
+    def event_rollup(self, since, venue_id=None, category=None, group_by="action",
+                     limit=20):
+        if group_by not in self._ROLLUP_KEYS:
+            group_by = "action"
+        expr = "action" if group_by == "action" else "details->>%s"
+        clauses, params = ["created_at >= %s"], [since]
+        if venue_id is not None:
+            clauses.append("venue_id = %s"); params.append(venue_id)
+        if category:
+            clauses.append("details->>'category' = %s"); params.append(category)
+        where = " AND ".join(clauses)
+        # Grouping key first in the param list when it is a JSON key
+        head = [] if group_by == "action" else [group_by]
+        with self._cursor() as cur:
+            self._ensure_table(cur, "audit_logs")
+            cur.execute(f"""
+                SELECT {expr} AS key,
+                       COUNT(*) AS count,
+                       COUNT(*) FILTER (
+                           WHERE details->>'outcome' IN ('failed','error','denied')
+                       ) AS failures,
+                       MAX(created_at) AS last_seen,
+                       -- Guarded cast: ONE legacy row with a non-numeric
+                       -- duration must not fail the whole health query.
+                       ROUND(PERCENTILE_DISC(0.95) WITHIN GROUP (
+                           ORDER BY CASE WHEN details->>'duration_ms' ~ '^[0-9]+([.][0-9]+)?$'
+                                    THEN (details->>'duration_ms')::numeric END
+                       ), 1) AS p95_ms,
+                       ROUND(MAX(CASE WHEN details->>'duration_ms' ~ '^[0-9]+([.][0-9]+)?$'
+                                 THEN (details->>'duration_ms')::numeric END), 1) AS max_ms,
+                       (ARRAY_AGG(details ORDER BY created_at DESC))[1] AS sample
+                FROM audit_logs
+                WHERE {where}
+                  AND {expr} IS NOT NULL
+                GROUP BY 1
+                ORDER BY count DESC
+                LIMIT %s
+            """, (*head, *params, *head, limit))
+            out = []
+            for row in cur.fetchall():
+                r = dict(row)
+                sample = r.get("sample")
+                if isinstance(sample, str):
+                    try:
+                        sample = json.loads(sample)
+                    except Exception:
+                        sample = {"raw": sample}
+                r["sample"] = sample
+                for k in ("p95_ms", "max_ms"):
+                    if r.get(k) is not None:
+                        r[k] = float(r[k])
+                out.append(r)
+            return out
+
+    def prune_events(self, before):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "audit_logs")
+            cur.execute("DELETE FROM audit_logs WHERE created_at < %s", (before,))
+            return cur.rowcount or 0
 
     # --- White-Label Theming ---
 

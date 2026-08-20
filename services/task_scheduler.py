@@ -24,6 +24,17 @@ from rosteriq.services.notifications import get_notification_service
 logger = logging.getLogger(__name__)
 
 
+def _record_job(job_id, job, outcome, duration_ms, **extra):
+    """Best-effort durable record of one scheduled run. Never raises."""
+    try:
+        from rosteriq.services.events import job as _job_event
+        _job_event(str(getattr(job, "job_type", "") or job_id),
+                   outcome=outcome, duration_ms=duration_ms,
+                   job_id=job_id, **extra)
+    except Exception:  # noqa: BLE001 — recording must never break the scheduler
+        pass
+
+
 class JobType(str, Enum):
     """Supported background job types."""
     DAILY_DIGEST = "daily_digest"
@@ -31,6 +42,7 @@ class JobType(str, Enum):
     CERT_EXPIRY_CHECK = "cert_expiry_check"
     REVENUE_SYNC = "revenue_sync"
     VARIANCE_MONITOR = "variance_monitor"
+    EVENT_RETENTION = "event_retention"
 
 
 class JobConfig:
@@ -205,6 +217,21 @@ class AsyncTaskScheduler:
         )
         self.register_job(variance_monitor, "variance_monitor")
 
+        # Retention keeps the event log affordable. Enabled by default: it is
+        # the one job whose absence quietly costs money (an ever-growing table
+        # nobody notices until a query times out).
+        event_retention = JobConfig(
+            job_type=JobType.EVENT_RETENTION,
+            enabled=True,
+            interval_hours=24,
+            # next_run defaults to "now", which makes every enabled job fire on
+            # every boot — and with two uvicorn workers, twice. Retention is
+            # idempotent, but there is no reason to spend a DELETE on each
+            # deploy: start the clock an hour out.
+            next_run=datetime.now() + timedelta(hours=1),
+        )
+        self.register_job(event_retention, "event_retention")
+
     async def _run_loop(self):
         """Main scheduler loop — runs jobs as scheduled."""
         while self._running:
@@ -219,17 +246,28 @@ class AsyncTaskScheduler:
             await asyncio.sleep(60)
 
     async def _run_job(self, job_id: str, job: JobConfig):
-        """Execute a single job with error handling."""
+        """Execute a single job with error handling.
+
+        Every run is recorded as a ``job`` event. Without it a scheduled job
+        that quietly stopped running (or has been failing for a week) is
+        invisible — stdout scrolls away, and the in-process job log dies with
+        the worker on every deploy.
+        """
+        import time as _time
+        _t0 = _time.perf_counter()
         try:
             logger.info(f"Running job: {job_id}")
             handler = self._get_job_handler(job.job_type)
             await handler(job)
             job.log_run()
             logger.info(f"Job completed: {job_id}")
+            _record_job(job_id, job, "ok", (_time.perf_counter() - _t0) * 1000)
         except Exception as e:
             error_msg = str(e)
             job.log_run(error=error_msg)
             logger.error(f"Job failed: {job_id} - {error_msg}", exc_info=True)
+            _record_job(job_id, job, "failed", (_time.perf_counter() - _t0) * 1000,
+                        exception=type(e).__name__, message=error_msg[:300])
 
     def _get_job_handler(self, job_type: JobType) -> Callable:
         """Get the handler function for a job type."""
@@ -239,8 +277,29 @@ class AsyncTaskScheduler:
             JobType.CERT_EXPIRY_CHECK: self._handle_cert_expiry_check,
             JobType.REVENUE_SYNC: self._handle_revenue_sync,
             JobType.VARIANCE_MONITOR: self._handle_variance_monitor,
+            JobType.EVENT_RETENTION: self._handle_event_retention,
         }
         return handlers.get(job_type, self._handle_noop)
+
+    async def _handle_event_retention(self, job: JobConfig):
+        """Trim the event log to EVENT_RETENTION_DAYS (default 90).
+
+        Traffic-driven categories (perf/integration/ai) are what make the
+        table grow; without a trim the log becomes an expensive way to store
+        last year's noise. Audit rows worth keeping longer should be exported
+        before they age out — 90 days is a deliberate default, not a limit of
+        the design.
+        """
+        import os
+        from datetime import datetime, timedelta
+
+        days = int(os.environ.get("EVENT_RETENTION_DAYS", "90"))
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        from rosteriq.database import get_db
+
+        removed = get_db().prune_events(cutoff)
+        logger.info(f"Event retention: removed {removed} events older than {days}d")
+        return removed
 
     async def _handle_daily_digest(self, job: JobConfig):
         """

@@ -11,6 +11,12 @@ spine (``services/events.py``). These routes let the dashboard show them:
         on the dashboard is fed).
     GET /api/events/summary?venue_id=&days=7
         Counts by category + top 10 actions over the window. Same scoping.
+    GET /api/events/insights?venue_id=&days=7
+        The self-improvement digest: what is actually going wrong, ranked, with
+        the numbers needed to decide what to fix next — recurring errors grouped
+        by fingerprint, slowest routes, integration reliability per provider,
+        AI success + thumbs, scheduled jobs that stopped running, and the
+        friction signals (denied access, unlinked staff, rate limits).
 
 Nothing here writes; the only side effect is the cross-tenant audit row that
 ``enforce_venue_access`` records on a denial.
@@ -31,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
-CATEGORIES = ("audit", "security", "error")
+CATEGORIES = ("audit", "security", "error", "perf", "integration", "ai", "job")
 MAX_LIMIT = 500
 # Keys the spine stores inside details that are surfaced as top-level fields.
 _META_KEYS = ("category", "outcome", "correlation_id", "ip", "role")
@@ -209,4 +215,155 @@ async def events_summary(
         "by_category": by_category,
         "by_outcome": by_outcome,
         "top_actions": [{"action": a, "count": n} for a, n in top],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Insights — the self-improvement loop
+#
+# The event log is only worth keeping if something reads it. This endpoint is
+# that reader: it turns a week of events into a ranked list of what to fix,
+# and it is what the dashboard's "System health" card and the weekly digest
+# both render. Everything is computed from durable rows, so a deploy (which
+# resets the in-process metrics) never loses the picture.
+# ---------------------------------------------------------------------------
+
+def _pct(part: int, whole: int) -> Optional[float]:
+    return round(100.0 * part / whole, 1) if whole else None
+
+
+@router.get("/insights")
+async def events_insights(
+    venue_id: Optional[str] = Query(None),
+    days: int = Query(7, ge=1, le=90),
+    current_user: UserContext = Depends(get_current_user),
+):
+    scope = _scope(current_user, venue_id)
+    since_dt = datetime.utcnow() - timedelta(days=days)
+    db = get_db()
+
+    def rollup(category, group_by, limit=10):
+        try:
+            return db.event_rollup(since_dt, venue_id=scope, category=category,
+                                   group_by=group_by, limit=limit) or []
+        except Exception as e:  # noqa: BLE001 — a health view must never 500
+            logger.warning(f"event_rollup({category},{group_by}) failed: {e}")
+            return []
+
+    # 1) Recurring errors, grouped so one bug is one line
+    errors = []
+    for row in rollup("error", "fingerprint", 8):
+        sample = row.get("sample") or {}
+        errors.append({
+            "fingerprint": row.get("key"),
+            "count": row.get("count"),
+            "last_seen": _iso(row.get("last_seen")),
+            "exception": sample.get("exception"),
+            "message": sample.get("message"),
+            "action": sample.get("action") or sample.get("path"),
+            "correlation_id": sample.get("correlation_id"),
+        })
+
+    # 2) Slowest routes (only requests that crossed the slow threshold are logged)
+    slow = [{
+        "route": r.get("key"),
+        "count": r.get("count"),
+        "p95_ms": r.get("p95_ms"),
+        "max_ms": r.get("max_ms"),
+        "last_seen": _iso(r.get("last_seen")),
+    } for r in rollup("perf", "route", 8)]
+
+    # 3) Integration reliability per provider — "is Xero down or are we?"
+    integrations = []
+    for r in rollup("integration", "provider", 10):
+        total, fails = r.get("count") or 0, r.get("failures") or 0
+        integrations.append({
+            "provider": r.get("key"),
+            "calls": total,
+            "failures": fails,
+            "failure_pct": _pct(fails, total),
+            "p95_ms": r.get("p95_ms"),
+            "last_seen": _iso(r.get("last_seen")),
+        })
+
+    # 4) AI: did it answer, how fast, and what did people think of it
+    ai_rows = rollup("ai", "action", 10)
+    ai_calls = next((r for r in ai_rows if r.get("key") == "ai.chat"), None)
+    thumbs_up = sum(r.get("count") or 0 for r in ai_rows if r.get("key") == "ai.feedback_up")
+    thumbs_down = sum(r.get("count") or 0 for r in ai_rows if r.get("key") == "ai.feedback_down")
+    ai_total = (ai_calls or {}).get("count") or 0
+    ai_fail = (ai_calls or {}).get("failures") or 0
+    ai = {
+        "calls": ai_total,
+        "failures": ai_fail,
+        "failure_pct": _pct(ai_fail, ai_total),
+        "p95_ms": (ai_calls or {}).get("p95_ms"),
+        "thumbs_up": thumbs_up,
+        "thumbs_down": thumbs_down,
+        "satisfaction_pct": _pct(thumbs_up, thumbs_up + thumbs_down),
+    }
+
+    # 5) Scheduled work: a job that stopped running is the silent failure
+    jobs = [{
+        "job": r.get("key"),
+        "runs": r.get("count"),
+        "failures": r.get("failures"),
+        "last_run": _iso(r.get("last_seen")),
+        "p95_ms": r.get("p95_ms"),
+    } for r in rollup("job", "job", 10)]
+
+    # 6) Friction: what users hit that stopped them
+    friction = {}
+    for r in rollup("security", "action", 10):
+        friction[str(r.get("key"))] = r.get("count")
+
+    # 7) The headline: what a human should do next
+    attention = []
+    for e in errors[:3]:
+        if (e["count"] or 0) >= 3:
+            attention.append({
+                "kind": "error",
+                "text": f"{e['exception'] or 'Error'} × {e['count']} — {(e['message'] or '')[:90]}",
+                "hint": "Same fingerprint, so it is one bug. Search the log by correlation id for a full trace.",
+            })
+    for i in integrations:
+        if (i["failure_pct"] or 0) >= 20 and (i["calls"] or 0) >= 3:
+            attention.append({
+                "kind": "integration",
+                "text": f"{i['provider']} failing {i['failure_pct']}% of {i['calls']} calls",
+                "hint": "Check credentials/expiry first, then whether the provider is down.",
+            })
+    for s_ in slow:
+        if (s_["p95_ms"] or 0) >= 5000:
+            attention.append({
+                "kind": "perf",
+                "text": f"{s_['route']} p95 {round((s_['p95_ms'] or 0) / 1000, 1)}s ({s_['count']} slow hits)",
+                "hint": "Above 5s people assume it is broken and reload, which doubles the load.",
+            })
+    for j in jobs:
+        if (j["failures"] or 0) and (j["failures"] or 0) >= (j["runs"] or 0):
+            attention.append({
+                "kind": "job",
+                "text": f"scheduled job '{j['job']}' failed every run ({j['failures']})",
+                "hint": "Nothing user-visible fails when a job dies — it just silently stops happening.",
+            })
+    if ai["thumbs_down"] and (ai["satisfaction_pct"] is not None) and ai["satisfaction_pct"] < 60:
+        attention.append({
+            "kind": "ai",
+            "text": f"AI answers rated helpful only {ai['satisfaction_pct']}% of the time",
+            "hint": "Read the thumbs-down events — each carries the question that disappointed.",
+        })
+
+    return {
+        "venue_id": scope,
+        "days": days,
+        "since": since_dt.isoformat(),
+        "generated_at": datetime.utcnow().isoformat(),
+        "attention": attention,
+        "errors": errors,
+        "slow_routes": slow,
+        "integrations": integrations,
+        "ai": ai,
+        "jobs": jobs,
+        "friction": friction,
     }

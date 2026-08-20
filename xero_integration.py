@@ -29,6 +29,18 @@ from urllib.parse import urlencode, parse_qs, urlparse
 import httpx
 from pydantic import BaseModel, field_validator
 
+
+def _op_name(endpoint: str) -> str:
+    """Low-cardinality operation label: the first path segment, minus ids.
+    "Invoices/abc-123" -> "Invoices"; a full URL -> its last meaningful part."""
+    e = str(endpoint or "").split("?")[0].strip("/")
+    if e.startswith("http"):
+        e = e.split("://", 1)[-1].split("/", 1)[-1] if "/" in e.split("://", 1)[-1] else e
+    parts = [p for p in e.split("/") if p]
+    return parts[0] if parts else "request"
+
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -374,7 +386,20 @@ class XeroClient:
         except Exception as e:
             logger.warning(f"Failed to persist refreshed Xero credentials: {e}")
 
-    async def _make_request(
+    async def _make_request(self, method: str, endpoint: str, *args, **kwargs):
+        """Instrumented entry point — every call to Xero is timed and
+        recorded (services/events.track) so failures, slowness and success
+        rates are answerable after the fact. The real work is in
+        _make_request_inner; this wrapper never changes behaviour and never
+        swallows an exception."""
+        from rosteriq.services.events import track
+        op = _op_name(endpoint)
+        with track("xero", f"{method.upper()} {op}",
+                   venue_id=getattr(self, "venue_id", None)) as _t:
+            result = await self._make_request_inner(method, endpoint, *args, **kwargs)
+            return result
+
+    async def _make_request_inner(
         self,
         method: str,
         endpoint: str,

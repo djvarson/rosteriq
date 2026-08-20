@@ -1386,7 +1386,13 @@ class RosterIQAgent:
 
     async def chat(self, messages: list[dict], max_tool_rounds: int = 5) -> dict:
         """
-        Send messages to Gemini with tools, handle function calls, return final response.
+        Send messages to the model with tools, handle function calls, return
+        the final response.
+
+        Every call is recorded as an ``ai`` event (model, latency, rounds,
+        which tools ran, whether it errored) so the assistant's real-world
+        behaviour is measurable — that log plus the thumbs from
+        POST /api/ai/feedback is what tells us which answers to improve.
 
         Returns:
             {
@@ -1395,8 +1401,43 @@ class RosterIQAgent:
                 "tool_calls": list[dict],  # Tools that were called (for transparency)
             }
         """
-        if LLM_PROVIDER == "minimax":
-            return await self._chat_openai_compatible(messages, max_tool_rounds)
+        import time as _time
+        _t0 = _time.perf_counter()
+        _model = MINIMAX_MODEL if LLM_PROVIDER == "minimax" else GEMINI_MODEL
+        try:
+            if LLM_PROVIDER == "minimax":
+                result = await self._chat_openai_compatible(messages, max_tool_rounds)
+            else:
+                result = await self._chat_gemini(messages, max_tool_rounds)
+        except Exception as exc:  # noqa: BLE001 — record, then let it propagate
+            try:
+                from rosteriq.services.events import ai as _ai
+                _ai("ai.chat", outcome="error", venue_id=self.context.venue_id,
+                    model=_model, provider=LLM_PROVIDER,
+                    duration_ms=round((_time.perf_counter() - _t0) * 1000, 1),
+                    exception=type(exc).__name__, message=str(exc)[:200])
+            except Exception:
+                pass
+            raise
+        try:
+            from rosteriq.services.events import ai as _ai
+            text = str(result.get("response") or "")
+            # "trouble connecting"/"try again" replies are returned as 200s —
+            # count them as failures or the success rate is a lie.
+            failed = not text or text.startswith("I'm having trouble connecting")
+            _ai("ai.chat", outcome="failed" if failed else "ok",
+                venue_id=self.context.venue_id, model=_model, provider=LLM_PROVIDER,
+                duration_ms=round((_time.perf_counter() - _t0) * 1000, 1),
+                tools=[t.get("tool") for t in (result.get("tool_calls") or [])][:10],
+                tool_count=len(result.get("tool_calls") or []),
+                actions=len(result.get("actions") or []),
+                response_chars=len(text))
+        except Exception:
+            pass
+        return result
+
+    async def _chat_gemini(self, messages: list[dict], max_tool_rounds: int = 5) -> dict:
+        """The Gemini tool-calling loop (see chat() for the recorded wrapper)."""
 
         actions = []
         tool_calls_log = []

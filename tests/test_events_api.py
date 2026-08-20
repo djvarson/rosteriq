@@ -163,7 +163,13 @@ def test_summary_counts():
     top = {t["action"]: t["count"] for t in s["top_actions"]}
     assert top["timesheet.approve"] == 1 and len(s["top_actions"]) <= 10
     m = c.get(f"/api/events/summary?venue_id={va}", headers=mgr_h).json()
-    assert m["venue_id"] == va and m["by_category"] == {"audit": 2, "security": 0, "error": 0}
+    # by_category now spans every category the spine records (audit/security/
+    # error/perf/integration/ai/job); assert the counts that this test creates
+    # and that the rest are present and empty.
+    assert m["venue_id"] == va
+    assert m["by_category"]["audit"] == 2
+    assert m["by_category"]["security"] == 0 and m["by_category"]["error"] == 0
+    assert {"perf", "integration", "ai", "job"} <= set(m["by_category"])
     assert m["total"] == 2
 
 

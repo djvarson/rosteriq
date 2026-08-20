@@ -615,6 +615,56 @@ def _extract_user_from_token(token: Optional[str]) -> Optional[str]:
         return None
 
 
+def _may_watch_venue(token: Optional[str], venue_id: str):
+    """(allowed, user_id) — may this token subscribe to this venue's live feed?
+
+    A socket is a read stream of a venue's operations: roster changes, swaps,
+    labour, alerts. HTTP routes go through TenantMiddleware, but a WebSocket
+    upgrade does NOT — so the same check has to happen here explicitly, or
+    every venue's live feed is readable by anyone holding any valid token.
+    Owners pass; managers/staff must hold the venue. No token = no socket.
+    """
+    if not token:
+        return False, None
+    try:
+        from rosteriq.services.auth import JWT_SECRET, JWT_ALGORITHM
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except Exception as e:
+        logger.info(f"WS refused: undecodable token ({type(e).__name__})")
+        return False, None
+
+    user_id = payload.get("sub")
+    role = payload.get("role")
+    if role == "owner":
+        return True, user_id
+
+    # Read the venues off the user record, not the token: a token minted before
+    # a join-code link would otherwise miss the venue the person now holds.
+    venue_ids = []
+    try:
+        from rosteriq.database import get_db
+        rec = get_db().get_user_by_id(user_id) if user_id else None
+        if rec:
+            if rec.get("role") == "owner" or rec.get("is_owner"):
+                return True, user_id
+            venue_ids = list(rec.get("venue_ids") or [])
+    except Exception as e:  # noqa: BLE001 — fail CLOSED on a lookup failure
+        logger.warning(f"WS venue lookup failed for {user_id}: {e}")
+        return False, user_id
+
+    if venue_id in venue_ids:
+        return True, user_id
+
+    logger.warning(f"WS refused: user {user_id} may not watch venue {venue_id}")
+    try:
+        from rosteriq.services.events import security
+        security("access.denied", venue_id=venue_id, user_id=user_id,
+                 transport="websocket", resource="live_feed")
+    except Exception:
+        pass
+    return False, user_id
+
+
 def create_websocket_router() -> APIRouter:
     """
     Create the WebSocket router with endpoints.
@@ -639,7 +689,12 @@ def create_websocket_router() -> APIRouter:
             token: Optional JWT token passed as query parameter to identify user.
         """
         manager = get_connection_manager()
-        user_id = _extract_user_from_token(token)
+        allowed, user_id = _may_watch_venue(token, venue_id)
+        if not allowed:
+            # 4403: application-level "forbidden". Refuse BEFORE accepting, so
+            # an unauthorised watcher never joins the venue's broadcast group.
+            await websocket.close(code=4403, reason="Not authorised for this venue")
+            return
         await manager.connect(websocket, venue_id, user_id)
 
         try:

@@ -47,6 +47,17 @@ from rosteriq.models import (
 )
 
 
+def _op_name(endpoint: str) -> str:
+    """Low-cardinality operation label: the first path segment, minus ids.
+    "Invoices/abc-123" -> "Invoices"; a full URL -> its first meaningful part."""
+    e = str(endpoint or "").split("?")[0].strip("/")
+    if e.startswith("http"):
+        rest = e.split("://", 1)[-1]
+        e = rest.split("/", 1)[1] if "/" in rest else rest
+    parts = [p for p in e.split("/") if p]
+    return parts[0] if parts else "request"
+
+
 class TandaAPIError(Exception):
     """Exception raised for Tanda API errors."""
 
@@ -303,7 +314,20 @@ class TandaAdapter:
             )
         return self._client
 
-    async def _request(
+    async def _request(self, method: str, endpoint: str, *args, **kwargs):
+        """Instrumented entry point — every call to Tanda is timed and
+        recorded (services/events.track) so failures, slowness and success
+        rates are answerable after the fact. The real work is in
+        _request_inner; this wrapper never changes behaviour and never
+        swallows an exception."""
+        from rosteriq.services.events import track
+        op = _op_name(endpoint)
+        with track("tanda", f"{method.upper()} {op}",
+                   venue_id=getattr(self, "venue_id", None)) as _t:
+            result = await self._request_inner(method, endpoint, *args, **kwargs)
+            return result
+
+    async def _request_inner(
         self,
         method: str,
         endpoint: str,

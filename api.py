@@ -197,6 +197,11 @@ def _requested_venue_id(request) -> Optional[str]:
     return None
 
 
+# A request slower than this is recorded as a durable perf event. 2s is the
+# point where a venue manager notices the app "hanging" on a normal action.
+SLOW_REQUEST_MS = float(os.environ.get("SLOW_REQUEST_MS", "2000"))
+
+
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log structured details for every request (skip /health)."""
 
@@ -240,6 +245,23 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             response.headers["X-Correlation-ID"] = get_correlation_id()
         except Exception:
             pass
+
+        # Slow requests are recorded durably (nothing below the threshold is
+        # written, and the event log throttles per action per minute) so
+        # "the roster page got slow last Tuesday" is answerable later.
+        if duration_ms >= SLOW_REQUEST_MS and request.url.path not in ("/metrics", "/ready"):
+            try:
+                from rosteriq.services.events import perf
+                # The ROUTE TEMPLATE, not the raw path: /venues/{venue_id}/x,
+                # so a thousand venues are one line in the digest.
+                route = request.scope.get("route")
+                name = getattr(route, "path", None) or request.url.path
+                perf("http.slow", duration_ms,
+                     venue_id=_requested_venue_id(request),
+                     method=request.method, route=name,
+                     status=response.status_code)
+            except Exception:
+                pass
 
         # Security events: denied / throttled requests are recorded durably,
         # not just as a stdout line. (401 on the demo/auth endpoints is noise.)
@@ -588,6 +610,29 @@ except ImportError:
     logger.info("Event log routes not available — skipping")
 except Exception as e:
     logger.error(f"Failed to register event log routes: {e}")
+
+# WebSocket live feed. setup_websocket(app) was written but never called, so
+# every live-update feature (roster changes, swaps, labour, alerts) has been
+# dead while the dashboard reconnect-looped against a 404 and showed a
+# permanent "Disconnected". The endpoint now checks venue access on the
+# upgrade — a socket bypasses TenantMiddleware entirely.
+try:
+    from rosteriq.websocket_hub import setup_websocket
+    setup_websocket(app)
+except ImportError:
+    logger.info("WebSocket hub not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to mount WebSocket routes: {e}")
+
+# Feedback (problem reports + AI thumbs — the human half of the improvement loop)
+try:
+    from rosteriq.routes.feedback import router as feedback_router
+    app.include_router(feedback_router)
+    logger.info("Feedback routes registered")
+except ImportError:
+    logger.info("Feedback routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register feedback routes: {e}")
 
 # Inventory (stock levels, stocktakes, supplier orders)
 try:

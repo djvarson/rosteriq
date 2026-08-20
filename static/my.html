@@ -205,6 +205,24 @@
         <div class="section-title">Needs you</div>
         <div class="card" id="home-todo"></div>
       </div>
+
+      <!-- Staff hit problems managers never see. Give them somewhere to say so. -->
+      <div id="report-wrap" style="margin-top:22px; text-align:center;">
+        <button id="report-open" onclick="openReport()"
+                style="background:none; border:none; color:var(--muted); font-size:13px; text-decoration:underline; cursor:pointer; padding:8px;">
+          Something wrong? Tell us
+        </button>
+        <div id="report-form" class="card" style="display:none; text-align:left; margin-top:8px;">
+          <label for="report-text" style="font-size:12px; color:var(--muted); font-weight:600;">What happened?</label>
+          <textarea id="report-text" rows="3" maxlength="2000"
+                    placeholder="e.g. My Saturday shift is missing from the app."
+                    style="width:100%; margin:6px 0 10px;"></textarea>
+          <div style="display:flex; gap:8px;">
+            <button class="btn" id="report-send" onclick="sendReport()">Send</button>
+            <button class="btn" onclick="closeReport()" style="background:var(--card-2); color:var(--text);">Cancel</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="view-shifts" style="display:none;">
@@ -900,6 +918,34 @@ async function submitJoinCode() {
     boot();
   } catch (e) {
     err.textContent = e.message; err.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function openReport() {
+  document.getElementById('report-form').style.display = 'block';
+  document.getElementById('report-open').style.display = 'none';
+  document.getElementById('report-text').focus();
+}
+function closeReport() {
+  document.getElementById('report-form').style.display = 'none';
+  document.getElementById('report-open').style.display = 'inline-block';
+}
+async function sendReport() {
+  var box = document.getElementById('report-text'), btn = document.getElementById('report-send');
+  var msg = (box.value || '').trim();
+  if (msg.length < 3) { toast('Tell us what happened first', 'err'); return; }
+  btn.disabled = true;
+  try {
+    await api('/api/feedback', { method: 'POST', body: {
+      kind: 'bug', message: msg, venue_id: myVenueId, page: 'staff-app',
+    }});
+    box.value = '';
+    closeReport();
+    toast('Thanks — your manager and we can see it', 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
   } finally {
     btn.disabled = false;
   }

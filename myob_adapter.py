@@ -47,6 +47,17 @@ MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 1.0  # seconds — 1s, 2s, 4s
 
 
+def _op_name(endpoint: str) -> str:
+    """Low-cardinality operation label: the first path segment, minus ids.
+    "Invoices/abc-123" -> "Invoices"; a full URL -> its first meaningful part."""
+    e = str(endpoint or "").split("?")[0].strip("/")
+    if e.startswith("http"):
+        rest = e.split("://", 1)[-1]
+        e = rest.split("/", 1)[1] if "/" in rest else rest
+    parts = [p for p in e.split("/") if p]
+    return parts[0] if parts else "request"
+
+
 class MYOBAPIError(Exception):
     """Exception raised for MYOB API errors."""
 
@@ -301,7 +312,20 @@ class MYOBAdapter:
             await self._client.aclose()
             self._client = None
 
-    async def _request(
+    async def _request(self, method: str, url: str, *args, **kwargs):
+        """Instrumented entry point — every call to Myob is timed and
+        recorded (services/events.track) so failures, slowness and success
+        rates are answerable after the fact. The real work is in
+        _request_inner; this wrapper never changes behaviour and never
+        swallows an exception."""
+        from rosteriq.services.events import track
+        op = _op_name(url)
+        with track("myob", f"{method.upper()} {op}",
+                   venue_id=getattr(self, "venue_id", None)) as _t:
+            result = await self._request_inner(method, url, *args, **kwargs)
+            return result
+
+    async def _request_inner(
         self,
         method: str,
         url: str,
