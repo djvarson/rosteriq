@@ -1227,13 +1227,20 @@ except Exception as e:
     logger.error(f"Failed to register skill matrix routes: {e}")
 
 
-# Test reporting and coverage analysis routes (admin endpoints)
+# Test reporting and coverage analysis routes (platform-owner endpoints).
+# These import the pytest suite, so on an image that ships without tests the
+# import fails and the routes are simply absent — which is the current state on
+# Railway. Do NOT treat that ImportError as something to "fix" by adding the
+# test suite to the production image: POST /run-tests executes pytest
+# in-process against whatever database the app is pointed at. The route has its
+# own fail-closed environment gate (routes/test_report.test_runner_enabled),
+# and the absent import is a second, accidental layer on top of it.
 try:
     from rosteriq.routes.test_report import router as test_report_router
     app.include_router(test_report_router)
     logger.info("Test reporting routes registered at /api/v1/admin/test-*")
 except ImportError:
-    logger.warning("Test reporting routes unavailable")
+    logger.info("Test reporting routes unavailable (no test suite in this image) — expected in production")
 except Exception as e:
     logger.error(f"Failed to register test reporting routes: {e}")
 

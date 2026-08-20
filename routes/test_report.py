@@ -5,16 +5,37 @@ Provides:
 - GET /api/v1/admin/test-report — get last test run results
 - POST /api/v1/admin/run-tests — trigger a new test run (async)
 - GET /api/v1/admin/test-coverage — get service coverage report
+
+TWO GUARDS, both deliberate:
+
+1. OWNER ONLY. ``_admin_required`` used to be a stub that let everything
+   through ("assume all requests to /admin are authorized"), so any signed-in
+   user — including a venue's casual staff member — could read internal file
+   paths and coverage, and trigger a test run.
+
+2. THE RUNNER IS OFF IN PRODUCTION, FAIL-CLOSED. ``run_all()`` executes the
+   whole pytest suite IN-PROCESS on the event loop, and those tests create
+   venues, employees and rosters in whatever database the app is pointed at.
+   Against prod that means fixtures written into a customer's data and every
+   request stalled while it runs. The gate asks "is this provably a dev box?"
+   rather than "is this production?" — ENVIRONMENT is not set on Railway, so
+   a negative check would have failed open exactly where it matters.
 """
 
 import asyncio
 import json
+import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from pydantic import BaseModel
+
+from rosteriq.middleware.auth import get_current_user, UserContext
+
+logger = logging.getLogger(__name__)
 
 # Import test runner
 from rosteriq.tests.run_all_tests import TestRunner, TestRunReport
@@ -80,14 +101,32 @@ class CoverageResponse(BaseModel):
     total_test_functions: int
 
 
-async def _admin_required():
+async def _admin_required(user: UserContext = Depends(get_current_user)) -> UserContext:
+    """Platform owner only. These endpoints expose the repository's internals
+    (file paths, per-file test counts, which services lack coverage) and can
+    start a test run — none of that belongs to a venue's manager or staff."""
+    if not (getattr(user, "is_owner", False) or user.role == "owner"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This is a platform-owner endpoint",
+        )
+    return user
+
+
+def test_runner_enabled() -> bool:
+    """May this deployment run the test suite in-process?
+
+    Fail-closed by design: an explicit dev/test ENVIRONMENT enables it, any
+    other explicit value disables it, and when ENVIRONMENT is UNSET (which is
+    the case on Railway today) it is enabled only where there is no real
+    database to damage.
     """
-    Placeholder for admin authorization check.
-    In production, this would verify the user is an admin.
-    """
-    # For now, assume all requests to /admin are authorized
-    # In production, verify JWT token and admin role
-    pass
+    env = (os.environ.get("ENVIRONMENT") or "").strip().lower()
+    if env in ("development", "dev", "test", "testing", "local"):
+        return True
+    if env:                       # production, staging, anything else: no
+        return False
+    return not os.environ.get("DATABASE_URL")
 
 
 @router.get(
@@ -194,6 +233,16 @@ async def run_tests(
     Returns:
         Confirmation that test run was started
     """
+    if not test_runner_enabled():
+        logger.warning("Refused an in-process test run (not a development deployment)")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=("The in-process test runner is disabled on this deployment. "
+                    "It writes test fixtures into the live database and blocks "
+                    "the event loop while it runs — run the suite in CI or "
+                    "locally instead."),
+        )
+
     async with _test_runner_lock:
         runner = get_test_runner()
 
