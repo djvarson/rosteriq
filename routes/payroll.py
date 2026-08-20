@@ -14,7 +14,8 @@ Endpoints:
 import csv
 import io
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from typing import Optional, List
 
@@ -23,6 +24,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.services.clock import venue_timezone
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.models import Shift, ShiftStatus, State
 from rosteriq.services.payroll_export import (
@@ -263,15 +265,31 @@ async def prepare_payroll_from_timesheets(
             detail="Payroll uses approved timesheets only — sort these first: "
                    + "; ".join(sorted(blockers)))
 
+    # Punches are stored as naive UTC (timeclock uses datetime.utcnow()), while
+    # the true local day is stored alongside as work_date. Pricing a shift needs
+    # VENUE-LOCAL wall clock: a Perth Sunday 07:00-15:00 is Saturday 23:00 UTC,
+    # so using the UTC stamps paid it at Saturday rates — and its UTC date could
+    # fall outside the pay period and drop the shift from the run entirely.
+    tz = ZoneInfo(venue_timezone(request.venue_id, db))
+
+    def _to_local(dt: datetime) -> datetime:
+        return dt.replace(tzinfo=timezone.utc).astimezone(tz)
+
     shifts = []
     for t in sheets:
         ci, co = _parse_dt(t["clock_in"]), _parse_dt(t["clock_out"])
+        local_in, local_out = _to_local(ci), _to_local(co)
+        work_date = t.get("work_date")
+        if isinstance(work_date, str):
+            work_date = date.fromisoformat(work_date[:10])
         shifts.append(Shift(
             id=str(t.get("id")),
             employee_id=str(t.get("employee_id")),
-            date=ci.date(),
-            start_time=ci.time(),
-            end_time=co.time(),
+            # work_date is what the venue calls that shift's day (set from the
+            # venue clock at clock-in); fall back to the localised punch.
+            date=work_date or local_in.date(),
+            start_time=local_in.time(),
+            end_time=local_out.time(),
             break_minutes=int(t.get("break_minutes") or 0),
             status=ShiftStatus.completed,
             role="",

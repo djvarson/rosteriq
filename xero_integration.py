@@ -450,8 +450,17 @@ class XeroClient:
                     logger.error(f"Bad request: {response.text}")
                     raise ValueError(f"Xero API error: {response.text}")
                 elif response.status_code == 401:
-                    # Token might be stale
+                    # Expire the token AND actually refresh it, then rebuild the
+                    # Authorization header — the retry used to re-send the same
+                    # stale bearer from the headers dict built before the loop,
+                    # so a 401 just burned the retries and failed.
                     self.credentials.token_expires = datetime.utcnow()
+                    try:
+                        await self._ensure_token_valid()
+                    except Exception as e:  # noqa: BLE001
+                        logger.error(f"Xero token refresh after 401 failed: {e}")
+                        raise
+                    headers["Authorization"] = f"Bearer {self.credentials.access_token}"
                     retry_count += 1
                     continue
                 elif response.status_code == 429:

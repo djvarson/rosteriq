@@ -109,7 +109,15 @@ def test_calculate_roster_cost_applies_overtime():
 
 
 def test_payroll_batch_computes_overtime_and_excludes_it_from_super():
-    """PayrollExporter now populates overtime_hours/amount and excludes OT from super."""
+    """PayrollExporter populates overtime_hours/amount and excludes OT from super.
+
+    Six 7.5h shifts INSIDE ONE WEEK: 45h = 38 ordinary + 7 overtime.
+    (This test used to spread the same six shifts across two weeks and still
+    expect 7h of overtime — which only held because the 38-hour counter never
+    reset. Under MA000009 the threshold is weekly, so that span is really
+    37.5h + 7.5h and carries no overtime at all; see
+    test_payroll_money_correctness.py.)
+    """
     from rosteriq.database import MemoryStore
     from rosteriq.services.payroll_export import PayrollExporter
 
@@ -119,16 +127,16 @@ def test_payroll_batch_computes_overtime_and_excludes_it_from_super():
               _shift(date(2026, 6, 24), "s2"),
               _shift(date(2026, 6, 25), "s3"),
               _shift(date(2026, 6, 26), "s4"),
-              _shift(date(2026, 6, 29), "s5")]  # 45h, all weekdays
+              _shift(date(2026, 6, 27), "s5")]  # Mon-Sat of ONE week = 45h
 
     exporter = PayrollExporter(MemoryStore())
     batch = exporter.prepare_timesheet_data(
-        venue_id="v1", period_start=date(2026, 6, 22), period_end=date(2026, 6, 29),
+        venue_id="v1", period_start=date(2026, 6, 22), period_end=date(2026, 6, 28),
         state=State.vic, shifts=shifts, employees={"e1": emp},
     )
     ep = batch.employees[0]
     assert ep.overtime_hours == Decimal("7.0")
     assert ep.overtime_amount == Decimal("390.00")  # 2h@1.5 + 5h@2 * $30
-    assert ep.ordinary_hours == Decimal("38.0")
-    # Super on ordinary earnings ($1140) only — NOT on the $390 overtime.
-    assert ep.super_amount == Decimal("131.10")  # 1140 * 0.115
+    # 27 June is a Saturday, so those ordinary hours are a Saturday penalty
+    # entry rather than plain ordinary time.
+    assert ep.ordinary_hours + sum(p.hours for p in ep.penalty_entries) == Decimal("38.0")

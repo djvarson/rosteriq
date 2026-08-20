@@ -2017,10 +2017,10 @@ async def ready():
     """
     checks = {}
 
-    # Check database connectivity
+    # Check database connectivity. ping() is a SELECT 1 — the old check pulled
+    # every venue row, on a probe that fires every few seconds.
     try:
-        venues = _db.list_venues()
-        checks["database"] = True
+        checks["database"] = bool(_db.ping())
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
         checks["database"] = False

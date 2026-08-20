@@ -26,6 +26,20 @@ from rosteriq.models import (
 logger = logging.getLogger(__name__)
 
 
+def _json(obj) -> str:
+    """json.dumps for anything that goes into a JSONB column.
+
+    Every blob we store is assembled from live objects, and those carry
+    datetimes (submitted_at, imported_at) and Decimals (costs). Bare
+    json.dumps raises TypeError on both, which surfaces as a 500 on a normal
+    action — the roster approval workflow was dead on Postgres for exactly
+    this reason, and the tests could not see it because MemoryStore keeps the
+    dict as-is. default=str makes the write survive; readers already pass
+    these values through str()/Decimal() anyway.
+    """
+    return json.dumps(obj, default=str)
+
+
 def _jsonb(value, default=None):
     """Tolerant JSON-column read. psycopg2 returns JSONB columns ALREADY
     parsed (dict/list) while TEXT columns come back raw — json.loads() on a
@@ -736,6 +750,11 @@ class BaseStore:
         Aggregating in the STORE matters: the alternative is pulling tens of
         thousands of rows into python on every dashboard load.
         """
+        raise NotImplementedError
+
+    def ping(self) -> bool:
+        """Cheapest possible "is the database answering?" — for readiness
+        probes, which run every few seconds and must not do real work."""
         raise NotImplementedError
 
     def prune_events(self, before) -> int:
@@ -2215,6 +2234,9 @@ class MemoryStore(BaseStore):
         out.sort(key=lambda b: b["count"], reverse=True)
         return out[:limit]
 
+    def ping(self):
+        return True
+
     def prune_events(self, before):
         keep = [r for r in self._audit_logs
                 if not (r.get("created_at") and r["created_at"] < before)]
@@ -3524,6 +3546,10 @@ class PostgresStore(BaseStore):
             "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS par_level NUMERIC DEFAULT 0",
             # The event log is queried by time, by venue and by category on every
             # Activity/health view. Without these it is a growing seq-scan.
+            # Right-to-erasure writes employees.anonymised_at, which existed
+            # only on the side table — so every Privacy Act erasure 500'd and
+            # the PII was never scrubbed.
+            "ALTER TABLE employees ADD COLUMN IF NOT EXISTS anonymised_at TIMESTAMP WITH TIME ZONE",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_venue_created ON audit_logs (venue_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs ((details->>'category'), created_at DESC)",
@@ -3552,7 +3578,7 @@ class PostgresStore(BaseStore):
                 # don't use Tanda, so "" would collide on the second venue ever
                 # created (the production onboarding 500 found in preflight).
                 venue.id, venue.name, venue.tanda_org_id or None, venue.state.value,
-                venue.timezone, json.dumps(venue.min_staff),
+                venue.timezone, _json(venue.min_staff),
                 float(venue.max_labour_pct), venue.pos_system, venue.created_at,
             ))
 
@@ -3599,8 +3625,8 @@ class PostgresStore(BaseStore):
             """, (
                 emp.id, venue_id, emp.tanda_id, emp.name,
                 emp.employment_type.value, emp.award_level.value,
-                float(emp.hourly_base_rate), json.dumps(emp.skills),
-                json.dumps(emp.availability), emp.max_hours_per_week,
+                float(emp.hourly_base_rate), _json(emp.skills),
+                _json(emp.availability), emp.max_hours_per_week,
                 emp.consecutive_days_limit, emp.phone, emp.email,
                 emp.created_at, emp.updated_at,
             ))
@@ -3699,7 +3725,7 @@ class PostgresStore(BaseStore):
                     active=EXCLUDED.active, updated_at=now()
             """, (
                 tpl["id"], tpl["venue_id"], tpl["name"], tpl.get("schedule", "daily"),
-                json.dumps(tpl.get("items", [])), tpl.get("active", True),
+                _json(tpl.get("items", [])), tpl.get("active", True),
                 tpl.get("created_at", datetime.utcnow()),
             ))
 
@@ -3744,7 +3770,7 @@ class PostgresStore(BaseStore):
                 run["id"], run["venue_id"], run["template_id"], run.get("template_name"),
                 run["run_date"], run.get("started_at"), run.get("completed_at"),
                 run.get("completed_by"), run.get("status", "in_progress"),
-                json.dumps(run.get("items", [])), run.get("flags_count", 0),
+                _json(run.get("items", [])), run.get("flags_count", 0),
                 run.get("created_at", datetime.utcnow()),
             ))
 
@@ -3832,7 +3858,7 @@ class PostgresStore(BaseStore):
             """, (
                 recipe["id"], recipe["venue_id"], recipe["name"], recipe.get("category"),
                 float(recipe.get("sell_price_inc_gst", 0)), float(recipe.get("yield_portions", 1)),
-                json.dumps(recipe.get("items", [])), recipe.get("active", True),
+                _json(recipe.get("items", [])), recipe.get("active", True),
                 recipe.get("created_at", datetime.utcnow()),
             ))
 
@@ -3935,8 +3961,8 @@ class PostgresStore(BaseStore):
                 ann["id"], ann["venue_id"], ann["title"], ann["body"],
                 ann.get("author_id"), ann.get("author_name"),
                 bool(ann.get("pinned", False)),
-                json.dumps(ann["sms_result"]) if ann.get("sms_result") is not None else None,
-                json.dumps(list(ann.get("read_by") or [])),
+                _json(ann["sms_result"]) if ann.get("sms_result") is not None else None,
+                _json(list(ann.get("read_by") or [])),
                 ann.get("created_at", datetime.utcnow()),
             ))
 
@@ -3974,7 +4000,7 @@ class PostgresStore(BaseStore):
                     updated_at=now()
             """, (
                 doc["id"], doc["venue_id"], doc["title"], doc.get("category", "sop"),
-                doc["body"], json.dumps(list(doc.get("applies_to") or [])),
+                doc["body"], _json(list(doc.get("applies_to") or [])),
                 int(doc.get("version", 1) or 1), bool(doc.get("requires_ack", True)),
                 bool(doc.get("active", True)), doc.get("author_name"),
                 doc.get("created_at", datetime.utcnow()),
@@ -4056,7 +4082,7 @@ class PostgresStore(BaseStore):
                 post["id"], post["venue_id"], post.get("author_user_id"),
                 post.get("author_name"), post.get("author_role"), post["body"],
                 bool(post.get("pinned", False)), bool(post.get("removed", False)),
-                json.dumps(dict(post.get("reactions") or {})),
+                _json(dict(post.get("reactions") or {})),
                 json.dumps(list(post.get("comments") or []), default=str),
                 post.get("created_at", datetime.utcnow()),
             ))
@@ -4131,7 +4157,7 @@ class PostgresStore(BaseStore):
                     SET reactions = %s::jsonb, updated_at = now()
                     WHERE id = %s
                     RETURNING *
-                """, (json.dumps(reactions), post_id))
+                """, (_json(reactions), post_id))
                 row = cur.fetchone()
                 cur.execute("COMMIT")
             except Exception:
@@ -4156,7 +4182,7 @@ class PostgresStore(BaseStore):
                     total_variance_value=EXCLUDED.total_variance_value, updated_at=now()
             """, (
                 st["id"], st["venue_id"], st.get("status", "open"),
-                json.dumps(st.get("items", [])), st.get("started_by"),
+                _json(st.get("items", [])), st.get("started_by"),
                 st.get("started_at", datetime.utcnow()), st.get("completed_at"),
                 st.get("total_variance_value"),
                 st.get("created_at", datetime.utcnow()),
@@ -4190,7 +4216,7 @@ class PostgresStore(BaseStore):
                     received_at=EXCLUDED.received_at, updated_at=now()
             """, (
                 order["id"], order["venue_id"], order.get("supplier"),
-                order.get("status", "draft"), json.dumps(order.get("items", [])),
+                order.get("status", "draft"), _json(order.get("items", [])),
                 float(order.get("total_cost", 0) or 0),
                 order.get("created_at", datetime.utcnow()),
                 order.get("ordered_at"), order.get("received_at"),
@@ -4243,8 +4269,8 @@ class PostgresStore(BaseStore):
             """, (
                 inv["id"], inv["venue_id"], inv.get("supplier"), inv["invoice_number"],
                 inv.get("invoice_date"), inv.get("order_id"),
-                json.dumps(inv.get("items", [])), float(inv.get("total", 0) or 0),
-                json.dumps(inv.get("price_changes", [])),
+                _json(inv.get("items", [])), float(inv.get("total", 0) or 0),
+                _json(inv.get("price_changes", [])),
                 inv.get("created_at", datetime.utcnow()),
             ))
 
@@ -4439,7 +4465,7 @@ class PostgresStore(BaseStore):
                 WHERE id = %s AND status = 'open'
                   AND items @> %s::jsonb
             """, (ingredient_id, float(counted), st_id,
-                  json.dumps([{"ingredient_id": ingredient_id}])))
+                  _json([{"ingredient_id": ingredient_id}])))
             return cur.rowcount > 0
 
     def get_employees(self, venue_id=None):
@@ -4802,7 +4828,10 @@ class PostgresStore(BaseStore):
         """Check if a webhook has already been processed."""
         with self._cursor() as cur:
             cur.execute(
-                "SELECT id FROM webhook_events WHERE webhook_id = %s",
+                # webhook_events is keyed by webhook_id; there is no `id`
+                # column, so this probe used to raise and every inbound Tanda
+                # webhook was silently dropped by the caller's except.
+                "SELECT webhook_id FROM webhook_events WHERE webhook_id = %s",
                 (webhook_id,)
             )
             return cur.fetchone() is not None
@@ -4833,7 +4862,7 @@ class PostgresStore(BaseStore):
                 user.get("id"), user.get("email"), user.get("password_hash"),
                 user.get("name"), user.get("role"), user.get("api_key_hash", ""),
                 user.get("is_active", True), user.get("created_at"), user.get("last_login"),
-                json.dumps(user.get("venue_ids", []) or []),
+                _json(user.get("venue_ids", []) or []),
             ))
 
     @staticmethod
@@ -4923,7 +4952,7 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, now())
                 ON CONFLICT (venue_id) DO UPDATE SET
                     state_data=EXCLUDED.state_data, updated_at=now()
-            """, (state.get("venue_id"), json.dumps(state)))
+            """, (state.get("venue_id"), _json(state)))
 
     def get_onboarding_state(self, venue_id: str) -> Optional[dict]:
         """Get onboarding state for a venue."""
@@ -5004,7 +5033,7 @@ class PostgresStore(BaseStore):
                 event.get("venue_id"),
                 event.get("event_type"),
                 event.get("stripe_event_id"),
-                json.dumps(event.get("payload", {})),
+                _json(event.get("payload", {})),
                 event.get("processed", False),
                 event.get("created_at", datetime.utcnow()),
             ))
@@ -5026,7 +5055,7 @@ class PostgresStore(BaseStore):
                 install.get("organisation_id"),
                 install.get("venue_id"),
                 install.get("status", "active"),
-                json.dumps(encrypt_tokens(install.get("tokens", {}))),
+                _json(encrypt_tokens(install.get("tokens", {}))),
                 install.get("installed_at", datetime.utcnow()),
                 install.get("updated_at", datetime.utcnow()),
             ))
@@ -5074,7 +5103,7 @@ class PostgresStore(BaseStore):
                 config.get("last_updated_at", datetime.utcnow()),
                 config.get("last_tested_at"),
                 config.get("last_test_status"),
-                json.dumps({k: v for k, v in config.items()
+                _json({k: v for k, v in config.items()
                            if k not in ("venue_id", "feed_name", "enabled", "api_key",
                                       "poll_interval_minutes", "last_updated_at",
                                       "last_tested_at", "last_test_status")}),
@@ -5092,8 +5121,11 @@ class PostgresStore(BaseStore):
             if row:
                 cfg = dict(row)
                 if cfg.get("custom_params"):
-                    custom = json.loads(cfg["custom_params"])
-                    cfg.update(custom)
+                    # JSONB: already parsed by psycopg2 (json.loads on a dict
+                    # raises TypeError and 500s the feeds page).
+                    custom = _jsonb(cfg["custom_params"], {})
+                    if isinstance(custom, dict):
+                        cfg.update(custom)
                     del cfg["custom_params"]
                 return cfg
             return None
@@ -5109,7 +5141,7 @@ class PostgresStore(BaseStore):
             for row in cur.fetchall():
                 cfg = dict(row)
                 if cfg.get("custom_params"):
-                    custom = json.loads(cfg["custom_params"])
+                    custom = _jsonb(cfg["custom_params"], {})
                     cfg.update(custom)
                     del cfg["custom_params"]
                 result.append(cfg)
@@ -5129,7 +5161,7 @@ class PostgresStore(BaseStore):
                 template["id"], template["name"], template["venue_id"],
                 template["description"], template["created_by"],
                 template["created_at"], template.get("updated_at"),
-                json.dumps(template.get("shift_patterns", []))
+                _json(template.get("shift_patterns", []))
             ))
 
     def get_roster_template(self, template_id: str) -> Optional[dict]:
@@ -5141,8 +5173,8 @@ class PostgresStore(BaseStore):
             if not row:
                 return None
             data = dict(row)
-            if data.get("shift_patterns"):
-                data["shift_patterns"] = json.loads(data["shift_patterns"])
+            # JSONB: psycopg2 hands this back already parsed as a list
+            data["shift_patterns"] = _jsonb(data.get("shift_patterns"), [])
             return data
 
     def list_roster_templates(self, venue_id: str) -> list[dict]:
@@ -5157,7 +5189,7 @@ class PostgresStore(BaseStore):
             for row in cur.fetchall():
                 data = dict(row)
                 if data.get("shift_patterns"):
-                    data["shift_patterns"] = json.loads(data["shift_patterns"])
+                    data["shift_patterns"] = _jsonb(data.get("shift_patterns"), [])
                 result.append(data)
             return result
 
@@ -5246,7 +5278,7 @@ class PostgresStore(BaseStore):
                 subscription.get("id"),
                 subscription.get("venue_id"),
                 subscription.get("callback_url"),
-                json.dumps(subscription.get("events", [])),
+                _json(subscription.get("events", [])),
                 subscription.get("secret"),
                 subscription.get("active", True),
                 subscription.get("created_at"),
@@ -5329,11 +5361,11 @@ class PostgresStore(BaseStore):
                 delivery.get("venue_id"),
                 delivery.get("event_type"),
                 delivery.get("url"),
-                json.dumps(delivery.get("payload")) if delivery.get("payload") is not None else None,
-                json.dumps(delivery.get("headers")) if delivery.get("headers") is not None else None,
+                _json(delivery.get("payload")) if delivery.get("payload") is not None else None,
+                _json(delivery.get("headers")) if delivery.get("headers") is not None else None,
                 delivery.get("status"),
                 delivery.get("attempt", 0),
-                json.dumps(delivery.get("attempts", [])),
+                _json(delivery.get("attempts", [])),
                 delivery.get("response_code"),
                 delivery.get("error"),
                 delivery.get("last_attempt_at"),
@@ -5405,14 +5437,14 @@ class PostgresStore(BaseStore):
             """, (
                 dead_letter.get("id"),
                 dead_letter.get("url"),
-                json.dumps(dead_letter.get("payload", {})),
-                json.dumps(dead_letter.get("headers", {})),
+                _json(dead_letter.get("payload", {})),
+                _json(dead_letter.get("headers", {})),
                 dead_letter.get("venue_id"),
                 dead_letter.get("subscription_id"),
                 dead_letter.get("event_type"),
                 dead_letter.get("status"),
                 dead_letter.get("attempt", 0),
-                json.dumps(dead_letter.get("attempts", [])),
+                _json(dead_letter.get("attempts", [])),
                 dead_letter.get("created_at"),
                 dead_letter.get("dead_lettered_at"),
                 dead_letter.get("error"),
@@ -5519,7 +5551,7 @@ class PostgresStore(BaseStore):
             cur.execute("""
                 DELETE FROM webhook_events
                 WHERE processed_at < %s
-                RETURNING id
+                RETURNING webhook_id
             """, (before_date,))
             return len(cur.fetchall())
 
@@ -5575,7 +5607,7 @@ class PostgresStore(BaseStore):
                 entry.get('user_id'),
                 entry.get('action'),
                 entry.get('resource_type'),
-                json.dumps(entry.get('details', {})),
+                _json(entry.get('details', {})),
                 entry.get('logged_at', datetime.utcnow()),
             ))
 
@@ -5709,7 +5741,7 @@ class PostgresStore(BaseStore):
                 snapshot['venue_id'],
                 snapshot.get('date'),
                 snapshot.get('metric_type'),
-                json.dumps(snapshot.get('value')),
+                _json(snapshot.get('value')),
                 snapshot.get('created_at', datetime.utcnow()),
             ))
 
@@ -5758,7 +5790,7 @@ class PostgresStore(BaseStore):
                 entry.get('action'),
                 entry.get('resource_type'),
                 entry.get('resource_id'),
-                json.dumps(entry.get('details', {})),
+                _json(entry.get('details', {})),
                 entry.get('created_at', datetime.utcnow()),
             ))
 
@@ -5872,6 +5904,11 @@ class PostgresStore(BaseStore):
                 out.append(r)
             return out
 
+    def ping(self):
+        with self._cursor() as cur:
+            cur.execute("SELECT 1")
+            return cur.fetchone() is not None
+
     def prune_events(self, before):
         with self._cursor() as cur:
             self._ensure_table(cur, "audit_logs")
@@ -5888,7 +5925,7 @@ class PostgresStore(BaseStore):
                 INSERT INTO themes (venue_id, config)
                 VALUES (%s, %s)
                 ON CONFLICT (venue_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()
-            """, (venue_id, json.dumps(theme)))
+            """, (venue_id, _json(theme)))
 
     def get_theme(self, venue_id: str) -> Optional[dict]:
         """Get a theme configuration for a venue. Returns None if not set."""
@@ -6007,7 +6044,7 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, %s)
                 ON CONFLICT (employee_id) DO UPDATE
                 SET profile_data = EXCLUDED.profile_data, updated_at = EXCLUDED.updated_at
-            """, (employee_id, json.dumps(profile), datetime.utcnow()))
+            """, (employee_id, _json(profile), datetime.utcnow()))
 
     def get_preference_profile(self, employee_id: str) -> Optional[dict]:
         """Get a preference profile for an employee. Returns None if not found."""
@@ -6063,8 +6100,8 @@ class PostgresStore(BaseStore):
                 experiment["status"],
                 experiment["created_at"],
                 experiment["updated_at"],
-                json.dumps(experiment.get("control_venues", [])),
-                json.dumps(experiment.get("variant_venues", [])),
+                _json(experiment.get("control_venues", [])),
+                _json(experiment.get("variant_venues", [])),
                 experiment.get("minimum_sample_size", 30),
             ))
 
@@ -6213,7 +6250,7 @@ class PostgresStore(BaseStore):
                 batch["period_start"],
                 batch["period_end"],
                 batch.get("status", "draft"),
-                json.dumps(batch),
+                _json(batch),
                 batch.get("created_at", datetime.utcnow().isoformat()),
             ))
 
@@ -6259,7 +6296,7 @@ class PostgresStore(BaseStore):
                 export.get("batch_id"),
                 export.get("service"),
                 export.get("status", "success"),
-                json.dumps(export),
+                _json(export),
                 export.get("exported_at", datetime.utcnow().isoformat()),
             ))
 
@@ -6293,7 +6330,7 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT (user_id) DO UPDATE
                 SET preferences=EXCLUDED.preferences, updated_at=CURRENT_TIMESTAMP
-            """, (user_id, json.dumps(prefs)))
+            """, (user_id, _json(prefs)))
 
     def get_notification_preferences(self, user_id: str) -> Optional[dict]:
         """Get notification preferences for a user."""
@@ -6339,9 +6376,9 @@ class PostgresStore(BaseStore):
                 request.get("escalated_at"),
                 request.get("escalated_to"),
                 request.get("tier"),
-                json.dumps(request.get("auto_approved_by_rules", [])),
-                json.dumps(request.get("failed_rules", [])),
-                json.dumps(request),
+                _json(request.get("auto_approved_by_rules", [])),
+                _json(request.get("failed_rules", [])),
+                _json(request),
                 datetime.utcnow(),
             ))
 
@@ -6460,9 +6497,9 @@ class PostgresStore(BaseStore):
                 revision.get("id", str(uuid.uuid4())),
                 revision.get("roster_id"),
                 revision.get("revision_number"),
-                json.dumps(revision.get("changes", {})),
+                _json(revision.get("changes", {})),
                 revision.get("created_at", datetime.utcnow()),
-                json.dumps(revision),
+                _json(revision),
             ))
 
     def list_roster_revisions(self, roster_id: str) -> list[dict]:
@@ -6492,7 +6529,7 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT (user_id) DO UPDATE
                 SET subscription_data=EXCLUDED.subscription_data, updated_at=CURRENT_TIMESTAMP
-            """, (user_id, subscription.get("venue_id"), json.dumps(subscription)))
+            """, (user_id, subscription.get("venue_id"), _json(subscription)))
 
     def get_push_subscription(self, user_id: str) -> Optional[dict]:
         """Get push notification subscription for a user."""
@@ -6543,7 +6580,7 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (venue_id) DO UPDATE
                 SET model_data = EXCLUDED.model_data, updated_at = CURRENT_TIMESTAMP
-            """, (venue_id, json.dumps(model)))
+            """, (venue_id, _json(model)))
 
     def get_revenue_model(self, venue_id: str) -> Optional[dict]:
         """Get trained revenue model for a venue."""
@@ -6575,7 +6612,7 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (venue_id, date) DO UPDATE
                 SET revenue_data = EXCLUDED.revenue_data
-            """, (venue_id, date, json.dumps(revenue)))
+            """, (venue_id, date, _json(revenue)))
 
     def list_revenue_actuals(
         self, venue_id: str, start: str, end: str
@@ -6705,7 +6742,7 @@ class PostgresStore(BaseStore):
                 shift["start_time"],
                 shift["end_time"],
                 shift["role_required"],
-                json.dumps(shift.get("skills_required", [])),
+                _json(shift.get("skills_required", [])),
                 shift["min_rate"],
                 shift.get("max_rate"),
                 shift["posted_by"],

@@ -39,6 +39,25 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
+def _tanda_push_summary(push_result) -> dict:
+    """PushResult -> the dict shape this module reports.
+
+    PushResult exposes success_count / failed_count / errors — NOT
+    .success/.message/.shifts_pushed. Reading the non-existent attributes
+    raised AttributeError inside the publish path, so publishing a roster
+    ALWAYS failed for any venue connected to Tanda, however well the push
+    itself went.
+    """
+    failed = getattr(push_result, "failed_count", 0) or 0
+    errors = list(getattr(push_result, "errors", []) or [])
+    return {
+        "success": failed == 0,
+        "message": "; ".join(errors) if errors else "Pushed to Tanda",
+        "shifts_pushed": getattr(push_result, "success_count", 0) or 0,
+        "shifts_failed": failed,
+    }
+
+
 class RosterPublishState(str, Enum):
     """Roster publishing state."""
     DRAFT = "draft"
@@ -322,14 +341,11 @@ class RosterPublisher:
                     )
                     # Convert PushResult to dict
                     result.tanda_push_result = {
-                        "success": tanda_result.success,
-                        "message": tanda_result.message,
-                        "shifts_pushed": tanda_result.shifts_pushed,
-                        "shifts_failed": tanda_result.shifts_failed,
+                        **_tanda_push_summary(tanda_result),
                     }
 
-                    if not tanda_result.success:
-                        error_msg = tanda_result.message or "Unknown error"
+                    if (getattr(tanda_result, 'failed_count', 0) or 0) > 0:
+                        error_msg = "; ".join(getattr(tanda_result, "errors", []) or []) or "Unknown error"
                         result.message = f"Tanda push failed: {error_msg}"
                         logger.error(result.message)
                         self.transition_state(
@@ -463,14 +479,11 @@ class RosterPublisher:
                             dry_run=False,
                         )
                         result.tanda_push_result = {
-                            "success": tanda_result.success,
-                            "message": tanda_result.message,
-                            "shifts_pushed": tanda_result.shifts_pushed,
-                            "shifts_failed": tanda_result.shifts_failed,
+                            **_tanda_push_summary(tanda_result),
                         }
 
-                        if not tanda_result.success:
-                            error_msg = tanda_result.message or "Unknown error"
+                        if (getattr(tanda_result, 'failed_count', 0) or 0) > 0:
+                            error_msg = "; ".join(getattr(tanda_result, "errors", []) or []) or "Unknown error"
                             result.message = f"Tanda push failed: {error_msg}"
                             self.transition_state(
                                 roster_id,

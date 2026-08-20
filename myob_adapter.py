@@ -343,7 +343,27 @@ class MYOBAdapter:
                 response = await self._client.request(method, url, **kwargs)
             except (httpx.TimeoutException, httpx.ConnectError,
                     httpx.ReadError, httpx.WriteError, httpx.PoolTimeout) as e:
-                # Transient network/timeout error — retry with exponential backoff.
+                # Transient network/timeout error — retry with exponential
+                # backoff, but ONLY when the request cannot already have been
+                # applied. A POST that timed out while READING the response may
+                # have been committed by MYOB: retrying it creates a second
+                # supplier bill, and the push ledger is only written after a
+                # success, so nothing downstream catches the duplicate.
+                # A connection that was never established is always safe.
+                never_sent = isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout,
+                                            httpx.PoolTimeout))
+                idempotent = method.upper() in ("GET", "HEAD", "OPTIONS", "PUT", "DELETE")
+                if not (never_sent or idempotent):
+                    logger.error(
+                        f"MYOB {method} {url} failed mid-flight ({type(e).__name__}); "
+                        "NOT retrying — the write may already have been applied."
+                    )
+                    raise MYOBAPIError(APIError(
+                        status_code=408,
+                        message=(f"MYOB did not answer in time. The request may have "
+                                 f"been applied — check MYOB before retrying."),
+                        detail={"url": url, "error": str(e), "retried": False},
+                    ))
                 if attempt < MAX_RETRIES:
                     wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
                     logger.warning(

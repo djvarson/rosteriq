@@ -6152,15 +6152,27 @@ function setLoading(selector, loading = true) {
 }
 
 function showError(selector, message) {
+  // Same trap as showSuccess: '#page-dashboard' is the whole page.
+  if (_isPageContainer(selector)) return showToastNotification('Something went wrong', message, 'error');
   const el = document.querySelector(selector);
   if (!el) return;
-  el.innerHTML = `<div class="error-message">${message}</div>`;
+  el.innerHTML = `<div class="error-message">${esc(message)}</div>`;
 }
 
 function showSuccess(selector, message) {
+  // These are called with '#page-dashboard' in 19 places — the wrapper for the
+  // WHOLE dashboard page. Replacing its innerHTML wiped every card on the page
+  // (generating a roster left the user staring at a lone success banner until
+  // they navigated away and back). Page containers get a toast instead.
+  if (_isPageContainer(selector)) return showToastNotification('Done', message, 'success');
   const el = document.querySelector(selector);
   if (!el) return;
-  el.innerHTML = `<div class="success-message">${message}</div>`;
+  el.innerHTML = `<div class="success-message">${esc(message)}</div>`;
+}
+
+function _isPageContainer(selector) {
+  const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+  return !!(el && el.classList && el.classList.contains('page'));
 }
 
 function openModal(id) {
@@ -6169,6 +6181,16 @@ function openModal(id) {
 
 function closeModal(id) {
   document.getElementById(id).classList.remove('active');
+}
+
+// A LOCAL calendar date as YYYY-MM-DD. toISOString() converts to UTC first,
+// and every Australian timezone is ahead of it — so a local Monday 00:00
+// serialises as the previous Sunday, and any morning date becomes yesterday.
+function localIso(d) {
+  d = d || new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
 }
 
 function esc(str) {
@@ -6463,8 +6485,11 @@ function initTimesheetDates() {
   const today = new Date();
   const monday = new Date(today);
   monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-  s.value = monday.toISOString().slice(0, 10);
-  e.value = today.toISOString().slice(0, 10);
+  monday.setHours(0, 0, 0, 0);
+  // Local dates: a UTC pay period starts and ends a day early every
+  // Australian morning, which silently drops a day of shifts from the run.
+  s.value = localIso(monday);
+  e.value = localIso(today);
 }
 
 function tsMinutesLabel(mins) {
@@ -6518,7 +6543,7 @@ function renderTimesheets() {
         ? '<span title="' + t.adjustment_note.replace(/"/g, '&quot;') + '" style="color:var(--text-muted); font-size:12px; cursor:help;">✎ corrected</span>'
         : '');
     return '<tr style="border-top:1px solid var(--border);">' +
-      '<td style="padding:10px 8px; font-weight:600;">' + t.employee_name + (t.pin_verified ? '' : ' <span title="No PIN was set for this punch" style="color:var(--text-muted); font-size:11px;">•unverified</span>') + '</td>' +
+      '<td style="padding:10px 8px; font-weight:600;">' + esc(t.employee_name || '') + (t.pin_verified ? '' : ' <span title="No PIN was set for this punch" style="color:var(--text-muted); font-size:11px;">•unverified</span>') + '</td>' +
       '<td style="padding:10px 8px;">' + t.work_date + '</td>' +
       '<td style="padding:10px 8px;">' + tsTimeLabel(t.clock_in) + '</td>' +
       '<td style="padding:10px 8px;">' + tsTimeLabel(t.clock_out) + '</td>' +
@@ -7777,8 +7802,31 @@ function eventCopy(e) {
     'user.venue_grant': function() { return esc(d.email || who) + ' was granted access to this venue' + (d.reason ? ' (' + esc(d.reason).replace(/_/g, ' ') + ')' : ''); },
     'user.role_change': function() { return who + "'s role changed " + esc(d.old_role || '') + ' → ' + esc(d.new_role || ''); },
     'demo.session': function() { return 'Demo session started (' + esc(d.identity || 'manager') + ')'; },
+    // Feedback + the machine categories: these should read as sentences too,
+    // not as action codes with a dot in them.
+    'feedback.bug': function() { return esc(d.reporter_email || who) + ' reported a problem — "' + esc(String(d.message || '').slice(0, 120)) + '"'; },
+    'feedback.confusing': function() { return esc(d.reporter_email || who) + ' found something confusing — "' + esc(String(d.message || '').slice(0, 120)) + '"'; },
+    'feedback.idea': function() { return esc(d.reporter_email || who) + ' suggested — "' + esc(String(d.message || '').slice(0, 120)) + '"'; },
+    'feedback.praise': function() { return esc(d.reporter_email || who) + ' said something works well — "' + esc(String(d.message || '').slice(0, 120)) + '"'; },
+    'ai.feedback_up': function() { return who + ' marked an AI answer helpful' + (d.question ? ' — "' + esc(String(d.question).slice(0, 90)) + '"' : ''); },
+    'ai.feedback_down': function() { return who + ' marked an AI answer unhelpful' + (d.question ? ' — "' + esc(String(d.question).slice(0, 90)) + '"' : ''); },
+    'ai.chat': function() { return 'AI answered a question' + (d.duration_ms ? ' in ' + (Math.round(d.duration_ms / 100) / 10) + 's' : '') + (d.tool_count ? ' using ' + d.tool_count + ' tool' + (d.tool_count === 1 ? '' : 's') : '') + (e.outcome !== 'ok' ? ' — failed' : ''); },
+    'http.slow': function() { return 'Slow request: ' + esc(d.method || '') + ' ' + esc(d.route || '') + (d.duration_ms ? ' took ' + (Math.round(d.duration_ms / 100) / 10) + 's' : ''); },
   };
   try { if (map[A]) return map[A](); } catch (err) { /* fall through */ }
+  // Integrations and jobs are action-shaped ("xero.POST Invoices", "job.x")
+  if (d.provider) {
+    return esc(String(d.provider)) + ' ' + esc(String(d.operation || '')) +
+      (e.outcome === 'ok' ? ' succeeded' : e.outcome === 'slow' ? ' was slow' : ' FAILED') +
+      (d.duration_ms ? ' (' + Math.round(d.duration_ms) + 'ms)' : '') +
+      (d.message ? ' — ' + esc(String(d.message).slice(0, 90)) : '');
+  }
+  if (d.job) {
+    return 'Scheduled job "' + esc(String(d.job).replace(/_/g, ' ')) + '" ' +
+      (e.outcome === 'ok' ? 'ran' : 'FAILED') +
+      (d.duration_ms ? ' in ' + Math.round(d.duration_ms) + 'ms' : '') +
+      (d.message ? ' — ' + esc(String(d.message).slice(0, 90)) : '');
+  }
   return who + ' · ' + esc(A) + (e.resource_id ? ' · ' + esc(e.resource_id) : '');
 }
 
@@ -8881,8 +8929,8 @@ async function loadRealVenueData(venueId) {
           method: 'POST',
           body: JSON.stringify({
             venue_id: venueId,
-            start_date: new Date().toISOString().split('T')[0],
-            end_date: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
+            start_date: localIso(),
+            end_date: localIso(new Date(Date.now() + 14 * 86400000))
           })
         });
         if (shifts && shifts.shifts) {
@@ -9847,7 +9895,7 @@ async function startOptimisation() {
       method: 'POST',
       body: JSON.stringify({
         venue_id: state.currentVenue,
-        week_start: new Date().toISOString().split('T')[0],
+        week_start: localIso(),
         strategy: strategy,
         solver_preference: solver,
         timeout_seconds: 30,
@@ -10888,8 +10936,8 @@ async function syncMYOBEmployees() {
 async function syncMYOBTimesheets() {
   try {
     var venueId = (typeof state.currentVenue === 'object' && state.currentVenue?.id) ? state.currentVenue.id : (state.currentVenue || 'default');
-    var today = new Date().toISOString().split('T')[0];
-    var twoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+    var today = localIso();
+    var twoWeeks = localIso(new Date(Date.now() + 14 * 86400000));
     var data = await fetchAPI('/api/myob/sync/timesheets', {
       method: 'POST',
       body: JSON.stringify({ venue_id: venueId, start_date: today, end_date: twoWeeks })
@@ -12371,7 +12419,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadRosterForWeek() {
   const monday = getWeekMonday(rosterWeekOffset);
-  const dateStr = monday.toISOString().slice(0, 10);
+  const dateStr = localIso(monday);   // local Monday, not the UTC Sunday before it
   const venueId = state.currentVenue;
   if (!venueId) return;
 

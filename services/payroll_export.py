@@ -85,6 +85,11 @@ class EmployeePayroll:
     # Hours worked
     ordinary_hours: Decimal = Decimal("0.00")
     ordinary_rate: Decimal = Decimal("0.00")
+    # Casual loading. ordinary_rate stays the BASE rate (penalty lines are
+    # priced from it, and the casual penalty multipliers already include the
+    # loading); this is the multiplier that applies to ordinary hours alone.
+    # 1.00 for full/part time, 1.25 for casuals.
+    ordinary_multiplier: Decimal = Decimal("1.00")
     ordinary_gross: Decimal = Decimal("0.00")
 
     # Penalty rates
@@ -233,6 +238,7 @@ def _employee_payroll_to_dict(emp: EmployeePayroll) -> Dict[str, Any]:
         "tax_file_number_masked": emp.tax_file_number_masked,
         "ordinary_hours": str(emp.ordinary_hours),
         "ordinary_rate": str(emp.ordinary_rate),
+        "ordinary_multiplier": str(emp.ordinary_multiplier),
         "ordinary_gross": str(emp.ordinary_gross),
         "penalty_entries": [
             {
@@ -281,6 +287,7 @@ def _employee_payroll_from_dict(d: Dict[str, Any]) -> EmployeePayroll:
         tax_file_number_masked=d.get("tax_file_number_masked"),
         ordinary_hours=Decimal(d.get("ordinary_hours", "0.00")),
         ordinary_rate=Decimal(d.get("ordinary_rate", "0.00")),
+        ordinary_multiplier=Decimal(d.get("ordinary_multiplier", "1.00")),
         ordinary_gross=Decimal(d.get("ordinary_gross", "0.00")),
         penalty_entries=[
             PenaltyEntry(
@@ -451,8 +458,18 @@ class PayrollExporter:
         is_casual = employee.employment_type == EmploymentType.casual
         cumulative = Decimal("0")
         ot_used = Decimal("0")  # OT hours costed so far this week (for 1.5x->2x tier)
+        # The 38-hour threshold and the 1.5x->2x overtime tier are WEEKLY under
+        # MA000009. These counters used to run for the whole pay period, so a
+        # fortnightly run gave one 38-hour allowance across two weeks and
+        # invented ~38 hours of overtime. Reset them at each Monday.
+        current_week = None
 
         for shift in sorted(shifts, key=lambda s: (s.date, s.start_time or time(0, 0))):
+            week_start = shift.date - timedelta(days=shift.date.weekday())
+            if week_start != current_week:
+                current_week = week_start
+                cumulative = Decimal("0")
+                ot_used = Decimal("0")
             day_type = get_day_type(shift.date, state)
             net_hours = Decimal(str(shift.net_hours))
             if net_hours <= 0:
@@ -522,10 +539,16 @@ class PayrollExporter:
                 ot_used += ot_hrs
 
         # Calculate ordinary gross (band-split can yield long decimals; round hours).
+        # A casual's ORDINARY hours carry the 25% loading — the multiplier table
+        # has always said so, but this line used to price them at 1.0x, i.e.
+        # every casual's weekday daytime hours were underpaid by 25%.
         ordinary_total = ordinary_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         emp_payroll.ordinary_hours = ordinary_total
+        emp_payroll.ordinary_multiplier = self._get_penalty_multiplier_for_type(
+            employee.employment_type, PenaltyType.ordinary
+        )
         emp_payroll.ordinary_gross = (
-            ordinary_total * employee.hourly_base_rate
+            ordinary_total * employee.hourly_base_rate * emp_payroll.ordinary_multiplier
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         emp_payroll.overtime_hours = overtime_total

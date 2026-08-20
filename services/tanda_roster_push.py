@@ -28,7 +28,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 
 from rosteriq.models import Roster, Shift, Employee
@@ -560,7 +560,10 @@ class TandaRosterPush:
 
         # Handle overnight shifts
         if end_dt < start_dt:
-            end_dt = end_dt.replace(day=end_dt.day + 1)
+            # timedelta, not replace(day=+1): on the 31st that becomes day=32
+            # and raises ValueError, so every month-end overnight shift failed
+            # to reach Tanda.
+            end_dt = end_dt + timedelta(days=1)
 
         return {
             "user_id": int(tanda_user_id),

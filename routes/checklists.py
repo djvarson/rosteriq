@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.services.clock import venue_today
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access
 
@@ -204,7 +205,10 @@ async def today_board(venue_id: str = Query(...)) -> dict:
     """Today's checklist board: each active template with its run status."""
     enforce_venue_access(venue_id)
     db = get_db()
-    today = date.today()
+    # The venue's own day. On the host clock (UTC) the opening checklist a
+    # Perth venue ticked off at 08:00 stops matching "today" at 08:00 local
+    # and the board resets to "not started" in front of them.
+    today = venue_today(venue_id, db)
     runs = {r["template_id"]: r for r in (db.list_checklist_runs(venue_id, today, today) or [])}
     board = []
     for tpl in db.list_checklist_templates(venue_id) or []:
@@ -233,7 +237,7 @@ async def start_run(body: StartRunRequest, user: UserContext = Depends(get_curre
     if not tpl or tpl.get("venue_id") != body.venue_id:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    today = date.today()
+    today = venue_today(body.venue_id, db)
     for r in db.list_checklist_runs(body.venue_id, today, today) or []:
         if r.get("template_id") == body.template_id and r.get("status") != "complete":
             return {"status": "already_started", "run_id": r["id"], "run": r}

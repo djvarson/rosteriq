@@ -425,7 +425,12 @@ class XeroPayrollClient:
                     XeroEarningType.ordinary_hours.value
                 ),
                 "NumberOfUnits": float(emp_payroll.ordinary_hours),
-                "UnitAmount": float(emp_payroll.ordinary_rate),
+                # Casuals' ordinary hours carry the 25% loading (penalty lines
+                # below already price it into their own multipliers).
+                "UnitAmount": float(
+                    emp_payroll.ordinary_rate
+                    * getattr(emp_payroll, "ordinary_multiplier", Decimal("1.00"))
+                ),
             })
 
         # Penalty rates
@@ -466,7 +471,16 @@ class XeroPayrollClient:
             "overtime_1_5": XeroEarningType.overtime_1_5.value,
             "overtime_2_0": XeroEarningType.overtime_2_0.value,
         }
-        return mapping.get(str(penalty_type), XeroEarningType.ordinary_hours.value)
+        # Key on .value, not str(): on Python 3.12 str(PenaltyType.saturday) is
+        # "PenaltyType.saturday", so EVERY penalty line silently fell through to
+        # Ordinary Hours — Saturday, Sunday, public holiday and the loadings all
+        # pushed to Xero at ordinary rates.
+        key = getattr(penalty_type, "value", None) or str(penalty_type)
+        if key not in mapping:
+            logger.warning(
+                f"No Xero earning type for penalty '{key}' — pushing as Ordinary Hours"
+            )
+        return mapping.get(key, XeroEarningType.ordinary_hours.value)
 
     def _find_xero_employee(
         self,

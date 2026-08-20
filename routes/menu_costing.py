@@ -102,13 +102,33 @@ def _cost_recipe(recipe: dict, ingredients_by_id: dict) -> dict:
     """Live costing for one recipe. Missing ingredients are reported, not hidden."""
     total_cost = 0.0
     lines = []
+    unit_errors = []
     missing = []
     for item in recipe.get("items", []):
         ing = ingredients_by_id.get(item.get("ingredient_id"))
         if not ing:
             missing.append(item.get("ingredient_id"))
             continue
-        qty = _qty_in_unit(float(item.get("qty", 0)), item.get("unit"), ing.get("unit", "each"))
+        # A recipe line whose unit no longer converts (the venue switched an
+        # ingredient from litres to cartons) must not 422 the whole menu: one
+        # bad line is reported ON the line, and every other dish still costs.
+        try:
+            qty = _qty_in_unit(float(item.get("qty", 0)), item.get("unit"), ing.get("unit", "each"))
+        except HTTPException as exc:
+            unit_errors.append({
+                "ingredient_id": ing["id"],
+                "name": ing.get("name"),
+                "detail": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            })
+            lines.append({
+                "ingredient_id": ing["id"],
+                "name": ing.get("name"),
+                "qty": item.get("qty"),
+                "unit": item.get("unit") or ing.get("unit"),
+                "line_cost": None,
+                "unit_error": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            })
+            continue
         line_cost = qty * float(ing.get("cost_per_unit", 0))
         total_cost += line_cost
         lines.append({
@@ -139,6 +159,10 @@ def _cost_recipe(recipe: dict, ingredients_by_id: dict) -> dict:
         "food_cost_pct": round(food_cost_pct, 1),
         "flagged": food_cost_pct > DEFAULT_FOOD_COST_TARGET_PCT,
         "missing_ingredients": missing,
+        # Non-empty means this dish's cost is INCOMPLETE — the UI should say so
+        # rather than present a confidently wrong margin.
+        "unit_errors": unit_errors,
+        "cost_incomplete": bool(unit_errors or missing),
         "lines": lines,
     }
 

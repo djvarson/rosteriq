@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.services.clock import venue_today
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.menu_costing import GST_RATE, _cost_recipe, _qty_in_unit
 from rosteriq.services.events import audit
@@ -134,8 +135,12 @@ async def record_sales(body: RecordSalesBody) -> dict:
     """Record what sold and deplete ingredient stock through the recipes."""
     enforce_venue_access(body.venue_id)
     db = get_db()
-    sale_date = body.sale_date or date.today()
-    if sale_date > date.today():
+    # Venue-local: the host is on UTC, so an Australian morning is still
+    # "yesterday" there — today's sales were stamped a day early, and picking
+    # today in the date picker was rejected as a future date.
+    _today = venue_today(body.venue_id, db)
+    sale_date = body.sale_date or _today
+    if sale_date > _today:
         raise HTTPException(status_code=422, detail="Can't record sales for a future date")
 
     recipes = {r["id"]: r for r in (db.list_recipes(body.venue_id) or [])}
@@ -204,8 +209,12 @@ async def import_sales(body: ImportSalesBody) -> dict:
     """
     enforce_venue_access(body.venue_id)
     db = get_db()
-    sale_date = body.sale_date or date.today()
-    if sale_date > date.today():
+    # Venue-local: the host is on UTC, so an Australian morning is still
+    # "yesterday" there — today's sales were stamped a day early, and picking
+    # today in the date picker was rejected as a future date.
+    _today = venue_today(body.venue_id, db)
+    sale_date = body.sale_date or _today
+    if sale_date > _today:
         raise HTTPException(status_code=422, detail="Can't import sales for a future date")
 
     # Batch fingerprint: identical re-imports are refused, not double-counted
@@ -290,7 +299,7 @@ async def sales_summary(venue_id: str = Query(...),
     """Revenue / COGS / gross profit / food-cost % for a period (default 7 days)."""
     enforce_venue_access(venue_id)
     db = get_db()
-    end = end_date or date.today()
+    end = end_date or venue_today(venue_id, db)
     start = start_date or (end - timedelta(days=6))
     if start > end:
         raise HTTPException(status_code=422, detail="start_date is after end_date")

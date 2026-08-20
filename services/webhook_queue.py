@@ -483,6 +483,16 @@ class WebhookRetryQueue:
         delivery["dead_lettered_at"] = datetime.now(timezone.utc).isoformat()
 
         self.db.save_dead_letter(delivery)
+        # Also persist the terminal status on the SOURCE row. Without this the
+        # delivery stays status='pending' with next_retry_at in the past, so
+        # list_pending_retries hands it back on every poll — a permanently
+        # dead endpoint becomes an infinite redelivery loop that spins the
+        # queue worker forever. (MemoryStore mutates the same dict, which is
+        # why tests never saw it.)
+        try:
+            self.db.save_webhook_delivery(delivery)
+        except Exception as e:  # noqa: BLE001 — the DLQ write is what matters
+            logger.error(f"Could not persist dead-letter status for {delivery_id}: {e}")
         logger.error(f"Webhook {delivery_id} moved to dead letter queue after {MAX_ATTEMPTS} attempts")
 
     async def replay_dead_letter(self, delivery_id: str) -> bool:
