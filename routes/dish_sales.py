@@ -77,6 +77,12 @@ def _record_lines(db, venue_id: str, sale_date: date, lines: list, source: str) 
     total_cogs = 0.0
     depleted: dict = {}
 
+    # TWO PASSES. Everything that can fail — costing, unit conversion — happens
+    # BEFORE the first row is written. Each save_dish_sale is its own committed
+    # statement, so a mid-loop error used to leave rows 1..n persisted with no
+    # batch fingerprint recorded; the user re-uploaded the file and those rows
+    # were counted a second time, inflating revenue and COGS for the day.
+    priced = []
     for recipe, qty in lines:
         costing = _cost_recipe(recipe, ingredients)
         revenue = round(float(costing["sell_price_inc_gst"]) * qty, 2)
@@ -93,6 +99,9 @@ def _record_lines(db, venue_id: str, sale_date: date, lines: list, source: str) 
             ) / yield_portions
             depleted[ing["id"]] = depleted.get(ing["id"], 0.0) + per_portion * qty
 
+        priced.append((recipe, qty, revenue, cogs))
+
+    for recipe, qty, revenue, cogs in priced:
         db.save_dish_sale({
             "id": f"ds-{uuid.uuid4().hex[:12]}",
             "venue_id": venue_id,
@@ -272,7 +281,32 @@ async def import_sales(body: ImportSalesBody) -> dict:
             "message": "No rows matched a recipe — map the items below and re-import.",
         }
 
-    result = _record_lines(db, body.venue_id, sale_date, lines, "pos_import")
+    # CLAIM the fingerprint before recording anything. Written afterwards, a
+    # failure part-way through left rows persisted with no batch row, so the
+    # obvious re-upload double-counted them — and two workers handling the same
+    # upload both passed the get_import_batch check above.
+    claimed = db.claim_import_batch({
+        "id": batch_id, "venue_id": body.venue_id, "sale_date": sale_date,
+        "row_count": len(lines), "revenue": 0.0,
+        "imported_at": datetime.utcnow(),
+    })
+    if not claimed:
+        raise HTTPException(
+            status_code=409,
+            detail="This exact batch was already imported for that date — "
+                   "a re-upload would count every sale twice.")
+
+    try:
+        result = _record_lines(db, body.venue_id, sale_date, lines, "pos_import")
+    except Exception:
+        # Nothing was written (the pricing pass runs before any save), so
+        # release the claim and let the caller fix the data and retry.
+        try:
+            db.delete_import_batch(batch_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not release import claim {batch_id}: {e}")
+        raise
+
     db.save_import_batch({
         "id": batch_id, "venue_id": body.venue_id, "sale_date": sale_date,
         "row_count": len(lines), "revenue": result["total_revenue_inc_gst"],

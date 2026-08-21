@@ -206,3 +206,108 @@ async def test_dead_letter_survives_a_failing_source_update():
     q.db = _DB()
     await q._move_to_deadletter({"id": "wh-2", "status": "pending"})   # must not raise
     assert saved["dead_letter"]["status"] == "dead_letter"
+
+
+# ---------------------------------------------------------------------------
+# Sales import must be all-or-nothing
+# ---------------------------------------------------------------------------
+
+def test_a_failing_line_records_nothing_at_all():
+    """Each save_dish_sale is its own committed statement, so a mid-loop error
+    used to leave the earlier rows persisted with no batch fingerprint. The
+    obvious re-upload then counted them twice — real money, wrong."""
+    from rosteriq.routes import dish_sales as ds
+
+    saved = []
+
+    class _DB:
+        def list_ingredients(self, vid):
+            return [{"id": "milk", "name": "Milk", "unit": "carton", "cost_per_unit": 4.0}]
+
+        def save_dish_sale(self, row):
+            saved.append(row)
+
+        def increment_ingredient_stock(self, *a):
+            pass
+
+        def get_ingredient(self, i):
+            return None
+
+    good = {"id": "r-ok", "name": "Toast", "yield_portions": 1, "sell_price_inc_gst": 6.0,
+            "items": []}
+    # second line's unit cannot convert -> raises while pricing
+    bad = {"id": "r-bad", "name": "Latte", "yield_portions": 1, "sell_price_inc_gst": 5.0,
+           "items": [{"ingredient_id": "milk", "qty": 150, "unit": "ml"}]}
+
+    with pytest.raises(Exception):
+        ds._record_lines(_DB(), "v1", date(2026, 8, 20), [(good, 3), (bad, 2)], "pos_import")
+    assert saved == [], f"{len(saved)} row(s) were persisted before the failure"
+
+
+def test_import_claims_its_fingerprint_before_recording():
+    """Claim-then-record, not record-then-claim: the claim is what makes a
+    re-upload a clean 409 instead of a second helping of revenue."""
+    from rosteriq.database import MemoryStore
+
+    db = MemoryStore()
+    batch = {"id": "ib-abc", "venue_id": "v1", "sale_date": date(2026, 8, 20),
+             "row_count": 3, "revenue": 0.0, "imported_at": datetime(2026, 8, 20)}
+    assert db.claim_import_batch(batch) is True     # first caller wins
+    assert db.claim_import_batch(batch) is False    # second is refused
+    db.delete_import_batch("ib-abc")
+    assert db.claim_import_batch(batch) is True     # released after a failure
+
+
+# ---------------------------------------------------------------------------
+# Tanda: an unreadable roster is not "nothing to do"
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_push_aborts_when_the_tanda_roster_cannot_be_read():
+    """diff_roster swallowed the fetch error and returned an EMPTY diff, so a
+    Tanda outage produced a push that wrote nothing and reported success."""
+    from rosteriq.services.tanda_roster_push import TandaRosterPush, RosterDiff
+    from rosteriq.models import Roster
+
+    pusher = TandaRosterPush.__new__(TandaRosterPush)
+
+    async def _diff(roster, venue_id):
+        return RosterDiff(fetch_failed=True, fetch_error="503 from Tanda")
+
+    async def _valid(emp_id):
+        return True
+
+    pusher.diff_roster = _diff
+    pusher._validate_employee_mapping = _valid
+
+    roster = Roster(id="r1", venue_id="v1", week_start=date(2026, 8, 17),
+                    week_end=date(2026, 8, 23), shifts=[], created_at=datetime(2026, 8, 1))
+    result = await pusher.push_roster(roster, venue_id="v1", dry_run=False)
+
+    assert result.failed_count >= 1, "an unreadable roster looked like a clean push"
+    assert any("Could not read" in e for e in result.errors), result.errors
+
+
+# ---------------------------------------------------------------------------
+# Webhook queue: two workers must not deliver the same row
+# ---------------------------------------------------------------------------
+
+def test_polling_claims_deliveries_so_a_second_worker_gets_nothing():
+    """Production runs two uvicorn workers, each with its own queue loop. As a
+    plain SELECT both got the same row and — because the POST happens before
+    the status is written back — both delivered it."""
+    from rosteriq.database import MemoryStore
+
+    db = MemoryStore()
+    now = datetime(2026, 8, 20, 12, 0, 0)
+    db.save_webhook_delivery({
+        "id": "dlv-1", "subscription_id": "s1", "venue_id": "v1",
+        "event_type": "roster.published", "url": "https://example/hook",
+        "status": "pending", "attempt": 1,
+        "next_retry_at": (now - timedelta(minutes=1)).isoformat(),
+    })
+
+    first = db.list_pending_retries(now)
+    second = db.list_pending_retries(now)          # the other worker's poll
+    assert [d["id"] for d in first] == ["dlv-1"]
+    assert second == [], "the same delivery was handed to a second poller"

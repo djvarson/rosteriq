@@ -671,6 +671,21 @@ class BaseStore:
     def delete_pos_item_map(self, venue_id: str, normalized_name: str) -> None:
         raise NotImplementedError
 
+    def claim_import_batch(self, batch: dict) -> bool:
+        """Atomically reserve a sales-import fingerprint.
+
+        True if THIS caller inserted the row, False if it already existed. The
+        claim is taken BEFORE any dish_sales rows are written, so a failure
+        part-way through can never leave recorded rows without a fingerprint
+        (which is what turned an obvious re-upload into double-counted
+        revenue), and two workers handed the same upload cannot both proceed.
+        """
+        raise NotImplementedError
+
+    def delete_import_batch(self, batch_id: str) -> None:
+        """Release a claim taken by claim_import_batch when recording failed."""
+        raise NotImplementedError
+
     def save_import_batch(self, batch: dict) -> None:
         raise NotImplementedError
 
@@ -1537,6 +1552,15 @@ class MemoryStore(BaseStore):
     def delete_pos_item_map(self, venue_id, normalized_name):
         self._pos_item_maps.pop(f"{venue_id}:{normalized_name}", None)
 
+    def claim_import_batch(self, batch):
+        if batch["id"] in self._import_batches:
+            return False
+        self._import_batches[batch["id"]] = dict(batch)
+        return True
+
+    def delete_import_batch(self, batch_id):
+        self._import_batches.pop(batch_id, None)
+
     def save_import_batch(self, batch):
         self._import_batches[batch["id"]] = dict(batch)
 
@@ -1891,7 +1915,12 @@ class MemoryStore(BaseStore):
         return None
 
     def list_pending_retries(self, before: datetime) -> list[dict]:
-        """List pending webhook deliveries ready for retry."""
+        """CLAIM pending webhook deliveries ready for retry.
+
+        Mirrors PostgresStore: the claimed rows flip to 'in_flight' so a second
+        poll cannot pick up the same delivery. (Behaviour drift between the two
+        stores is precisely how the double-delivery bug stayed invisible.)
+        """
         if not hasattr(self, '_webhook_retry_queue'):
             self._webhook_retry_queue = {}
 
@@ -1928,6 +1957,9 @@ class MemoryStore(BaseStore):
             if d.get("next_retry_at") else datetime.now(timezone.utc)
         )
 
+        for delivery in pending:            # claim them
+            delivery["status"] = "in_flight"
+            delivery["last_attempt_at"] = before.isoformat()
         return pending
 
     def save_dead_letter(self, dead_letter: dict) -> None:
@@ -2619,6 +2651,10 @@ class MemoryStore(BaseStore):
 
 class PostgresStore(BaseStore):
     """PostgreSQL-backed storage using psycopg2."""
+
+    # How long a webhook delivery may sit in 'in_flight' before another worker
+    # assumes the one holding it died and reclaims the row.
+    STALE_IN_FLIGHT_SECONDS = 300
 
     def __init__(self, dsn: str, max_retries: int = 3, retry_delay: float = 2.0):
         import time as _time
@@ -4427,7 +4463,9 @@ class PostgresStore(BaseStore):
             cur.execute("DELETE FROM pos_item_maps WHERE id = %s",
                         (f"{venue_id}:{normalized_name}",))
 
-    def save_import_batch(self, batch):
+    def claim_import_batch(self, batch):
+        """INSERT ... ON CONFLICT DO NOTHING RETURNING id — one statement, so
+        two workers racing the same upload cannot both win."""
         with self._cursor() as cur:
             self._ensure_table(cur, "sales_import_batches")
             cur.execute("""
@@ -4435,6 +4473,30 @@ class PostgresStore(BaseStore):
                     revenue, imported_at)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO NOTHING
+                RETURNING id
+            """, (
+                batch["id"], batch["venue_id"], batch.get("sale_date"),
+                batch.get("row_count", 0), float(batch.get("revenue", 0) or 0),
+                batch.get("imported_at", datetime.utcnow()),
+            ))
+            return cur.fetchone() is not None
+
+    def delete_import_batch(self, batch_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sales_import_batches")
+            cur.execute("DELETE FROM sales_import_batches WHERE id = %s", (batch_id,))
+
+    def save_import_batch(self, batch):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sales_import_batches")
+            cur.execute("""
+                INSERT INTO sales_import_batches (id, venue_id, sale_date, row_count,
+                    revenue, imported_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    row_count = EXCLUDED.row_count,
+                    revenue = EXCLUDED.revenue,
+                    imported_at = EXCLUDED.imported_at
             """, (
                 batch["id"], batch["venue_id"], batch.get("sale_date"),
                 batch.get("row_count", 0), float(batch.get("revenue", 0) or 0),
@@ -5436,16 +5498,39 @@ class PostgresStore(BaseStore):
             return self._deserialize_webhook_row(row) if row else None
 
     def list_pending_retries(self, before: datetime) -> list[dict]:
-        """List pending webhook deliveries ready for retry."""
+        """CLAIM pending webhook deliveries ready for retry.
+
+        Production runs two uvicorn workers and each runs its own queue loop.
+        As a plain SELECT this handed the same row to both — and since the POST
+        goes out before the status is written back, both workers delivered it,
+        so a subscriber saw every webhook twice. One statement flips the rows
+        to 'in_flight' and returns only what THIS caller won; SKIP LOCKED means
+        the other worker takes different rows instead of blocking on these.
+        """
+        # A worker that dies mid-delivery would otherwise strand its rows in
+        # 'in_flight' forever, so the same statement also reclaims anything
+        # that has been in flight longer than STALE_IN_FLIGHT (deliveries time
+        # out in seconds; minutes means the worker is gone).
+        stale_before = before - timedelta(seconds=self.STALE_IN_FLIGHT_SECONDS)
         with self._cursor() as cur:
             cur.execute("""
-                SELECT * FROM webhook_deliveries
-                WHERE status = 'pending'
-                  AND next_retry_at IS NOT NULL
-                  AND next_retry_at <= %s
-                ORDER BY next_retry_at ASC
-                LIMIT 100
-            """, (before,))
+                UPDATE webhook_deliveries
+                SET status = 'in_flight', last_attempt_at = %s
+                WHERE id IN (
+                    SELECT id FROM webhook_deliveries
+                    WHERE next_retry_at IS NOT NULL
+                      AND next_retry_at <= %s
+                      AND (
+                        status = 'pending'
+                        OR (status = 'in_flight'
+                            AND (last_attempt_at IS NULL OR last_attempt_at < %s))
+                      )
+                    ORDER BY next_retry_at ASC
+                    LIMIT 100
+                    FOR UPDATE SKIP LOCKED
+                )
+                RETURNING *
+            """, (before, before, stale_before))
             return [self._deserialize_webhook_row(row) for row in cur.fetchall()]
 
     def save_dead_letter(self, dead_letter: dict) -> None:

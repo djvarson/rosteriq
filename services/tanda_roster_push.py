@@ -93,6 +93,11 @@ class RosterDiff:
     removed_shifts: List[Dict] = field(default_factory=list)  # Tanda shift dicts
     changed_shifts: List[Dict] = field(default_factory=list)  # List of {rosteriq, tanda}
     unchanged_count: int = 0
+    # True when we could not READ the current Tanda roster. An empty diff then
+    # means "we don't know", not "nothing to do" — without this flag a Tanda
+    # outage produced a push that wrote nothing and reported success.
+    fetch_failed: bool = False
+    fetch_error: str = ""
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict."""
@@ -101,6 +106,7 @@ class RosterDiff:
             "removed_shifts_count": len(self.removed_shifts),
             "changed_shifts_count": len(self.changed_shifts),
             "unchanged_count": self.unchanged_count,
+            "fetch_failed": self.fetch_failed,
             "summary": {
                 "new": [
                     {
@@ -235,6 +241,15 @@ class TandaRosterPush:
         # Diff against what is currently in Tanda so we only apply deltas.
         diff = await self.diff_roster(roster, venue_id)
 
+        if diff.fetch_failed:
+            # We could not read Tanda, so the deltas are unknown and every list
+            # is empty. Pushing on would write nothing and report success.
+            error = ("Could not read the current Tanda roster, so the push was "
+                     f"aborted rather than applying an unknown diff: {diff.fetch_error}")
+            logger.error(error)
+            result.add_error(error)
+            return result
+
         tanda_roster_id = venue_id
 
         # 1) CREATE new shifts (POST). Record the resulting Tanda schedule id
@@ -354,7 +369,12 @@ class TandaRosterPush:
         try:
             tanda_shifts = await self.tanda.get_shifts(roster.week_start, roster.week_end)
         except TandaAPIError as e:
+            # Do NOT return a silently-empty diff: the caller cannot tell it
+            # apart from "the rosters already match", so a Tanda outage looked
+            # like a successful push that changed nothing.
             logger.error(f"Failed to fetch current Tanda shifts: {e}")
+            diff.fetch_failed = True
+            diff.fetch_error = str(e)
             return diff
 
         # Build mapping of (employee_id, date, time) to Tanda shift
