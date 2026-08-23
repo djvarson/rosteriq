@@ -2665,6 +2665,7 @@ class PostgresStore(BaseStore):
         except ImportError:
             raise RuntimeError("psycopg2 not installed — run: pip install psycopg2-binary")
 
+        self._dsn = dsn          # kept so _cursor() can re-open a dead connection
         last_error = None
         for attempt in range(1, max_retries + 1):
             try:
@@ -2708,9 +2709,43 @@ class PostgresStore(BaseStore):
             except Exception as e:
                 logger.warning("Error closing PostgreSQL connection: %s", e)
 
+    def _reconnect(self):
+        """Re-open the shared connection after the old one died."""
+        import psycopg2
+        try:
+            if getattr(self, "_conn", None) is not None and not self._conn.closed:
+                self._conn.close()
+        except Exception:  # noqa: BLE001 — the old connection is already junk
+            pass
+        self._conn = psycopg2.connect(self._dsn)
+        self._conn.autocommit = True
+        logger.warning("PostgreSQL connection re-established after a dropped connection")
+
     def _cursor(self):
+        """A cursor on the shared connection — SELF-HEALING.
+
+        This store holds ONE psycopg2 connection for the life of the process.
+        When the server drops it (a Railway Postgres restart, a network blip,
+        an idle timeout), psycopg2 marks the connection closed on the next
+        failed operation — and before this guard, every subsequent query in
+        BOTH workers failed forever, so one overnight database hiccup left the
+        whole app returning 500s until someone redeployed. That is exactly
+        what took production down on 2026-08-23.
+
+        The failing statement itself still fails (its request 500s once); the
+        NEXT call lands here, sees the closed connection, and reconnects.
+        """
+        import psycopg2
         import psycopg2.extras
-        return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        conn = getattr(self, "_conn", None)
+        if conn is None or conn.closed:
+            self._reconnect()
+        try:
+            return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            # closed==0 but the socket is gone — one more try on a fresh conn
+            self._reconnect()
+            return self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     # ------------------------------------------------------------------
     # Runtime schema guards
