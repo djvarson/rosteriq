@@ -39,6 +39,31 @@ _DEMO_STAFF = [
     ("David Miller", "kitchen", "35.00"),
 ]
 
+# Availability per demo staffer (day -> [{start,end}] in the resolver's
+# lowercase-day convention). Deliberately varied so "who can cover Saturday
+# night?" has a real answer in the demo — with no availability the AI's
+# find_available_staff comes back empty on the exact beat the runbook demos.
+_ALL_WEEK = {d: [{"start": "09:00", "end": "23:00"}]
+             for d in ("monday", "tuesday", "wednesday", "thursday",
+                       "friday", "saturday", "sunday")}
+_WEEKENDS_AND_NIGHTS = {
+    "thursday": [{"start": "16:00", "end": "23:59"}],
+    "friday": [{"start": "16:00", "end": "23:59"}],
+    "saturday": [{"start": "11:00", "end": "23:59"}],
+    "sunday": [{"start": "11:00", "end": "22:00"}],
+}
+_WEEKDAYS_ONLY = {d: [{"start": "08:00", "end": "18:00"}]
+                  for d in ("monday", "tuesday", "wednesday", "thursday", "friday")}
+_DEMO_AVAILABILITY = {
+    "demo-staff-001": _ALL_WEEK,               # Emma — the showcase staffer
+    "demo-staff-002": _WEEKENDS_AND_NIGHTS,    # James — the Saturday-night answer
+    "demo-staff-003": _WEEKDAYS_ONLY,          # Sarah — weekday kitchen
+    "demo-staff-004": _ALL_WEEK,
+    "demo-staff-005": _WEEKENDS_AND_NIGHTS,    # Lisa — second bar cover
+    "demo-staff-006": _WEEKDAYS_ONLY,
+}
+_DEMO_PHONES = {f"demo-staff-{i:03d}": f"04{i:02d} 555 0{i:02d}{i}" for i in range(1, 7)}
+
 
 def seed_demo_environment(db) -> None:
     """Idempotently seed the demo user, venue, and staff.
@@ -153,6 +178,8 @@ def seed_demo_environment(db) -> None:
                 skills=[role],
                 # Emma carries the staff-demo login email so /my links to her.
                 email=DEMO_STAFF_EMAIL if f"demo-staff-{i:03d}" == DEMO_STAFF_EMPLOYEE_ID else None,
+                availability=_DEMO_AVAILABILITY.get(f"demo-staff-{i:03d}", {}),
+                phone=_DEMO_PHONES.get(f"demo-staff-{i:03d}"),
                 created_at=now,
                 updated_at=now,
             )
@@ -168,6 +195,22 @@ def seed_demo_environment(db) -> None:
                 emma.email = DEMO_STAFF_EMAIL
                 emma.updated_at = now
                 db.save_employee(emma)
+        except Exception:
+            pass
+        # Self-heal: rows seeded before availability/phone existed make the
+        # "who can cover Saturday night?" demo beat come back empty.
+        try:
+            for e in already:
+                changed = False
+                if not getattr(e, "availability", None) and e.id in _DEMO_AVAILABILITY:
+                    e.availability = _DEMO_AVAILABILITY[e.id]
+                    changed = True
+                if not getattr(e, "phone", None) and e.id in _DEMO_PHONES:
+                    e.phone = _DEMO_PHONES[e.id]
+                    changed = True
+                if changed:
+                    e.updated_at = now
+                    db.save_employee(e)
         except Exception:
             pass
 
