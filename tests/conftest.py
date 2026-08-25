@@ -212,3 +212,32 @@ if pytest:
         token = _register_and_login(c)
         c.headers.update({"Authorization": f"Bearer {token}"})
         return c
+
+
+@pytest.fixture(autouse=True)
+def _tests_speak_one_today(request, monkeypatch):
+    """Make "today" mean ONE thing across the suite, at any hour of the day.
+
+    The suite runs under TZ=UTC while every real venue clock is UTC+8..+11
+    (services/clock.py, DEFAULT_TZ Australia/Perth). Between 16:00 UTC and
+    midnight UTC the venue's date is TOMORROW relative to the tests'
+    date.today() — eight hours of every day in which ~35 date-sensitive tests
+    failed (a sale recorded venue-locally on the 26th, asserted against a
+    window built for the 25th). Product code stays venue-local; the tests
+    align the DEFAULT venue timezone with the harness clock instead.
+
+    Venue-SPECIFIC timezone behaviour keeps its real coverage in
+    test_venue_clock.py, which freezes the clock and sets explicit
+    VenueConfig timezones — that module is exempt here.
+    """
+    if "test_venue_clock" in request.node.nodeid:
+        yield
+        return
+    from rosteriq.services import clock
+    # Patch the resolver itself, not just DEFAULT_TZ: VenueConfig.timezone
+    # DEFAULTS to Australia/Melbourne, so every test venue carries an explicit
+    # timezone and the DEFAULT_TZ fallback is never consulted.
+    monkeypatch.setattr(clock, "venue_timezone", lambda venue_id, db=None: "UTC")
+    clock._tz_cache.clear()          # a cached zone from import time must not leak
+    yield
+    clock._tz_cache.clear()

@@ -1,306 +1,324 @@
 """
-RosterIQ SMS Notification Service
+SMS — provider-abstracted, inert until credentials arrive.
 
-Handles SMS notifications via Twilio for shift reminders, swap updates,
-roster publications, and urgent compliance alerts. Gracefully degrades when
-Twilio is not configured.
+The strategy is "Dale pastes creds into Railway and SMS lights up": nothing
+here stores a credential, and with no credentials every send degrades to a
+clean, honest no-op with a reason the UI can show. Two providers are
+supported behind one interface, selected by environment:
 
-Usage:
-    from rosteriq.services.sms import get_sms_service
-    sms = get_sms_service()
-    await sms.send_shift_reminder(employee_dict, shift_dict)
+    Twilio        TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER
+    MessageMedia  MESSAGEMEDIA_API_KEY / MESSAGEMEDIA_API_SECRET
+                  (optional MESSAGEMEDIA_FROM)
+
+    SMS_PROVIDER=twilio|messagemedia forces one; unset picks whichever has
+    credentials (Twilio wins a tie).
+
+Both speak plain HTTPS via httpx with a real timeout — no vendor SDK, so
+there is no "credentials present but package missing" failure mode, and a
+hung provider socket cannot pin an executor thread (the old Twilio-SDK path
+had no timeout at all).
+
+Every send is recorded as an ``integration`` event (provider, outcome,
+duration) with the number MASKED — phone numbers never appear whole in logs
+or the event table. Rate limiting is per RECIPIENT (default one SMS per 5
+minutes, ``SMS_RATE_LIMIT_SECONDS`` to change), keyed on the normalised
+E.164 number so "0412 345 678" and "+61412345678" are the same person.
+
+``send_sms()`` keeps its historical bool contract for existing callers;
+``send_detailed()`` also names WHY nothing was sent ("not_configured",
+"invalid_number", "rate_limited", "failed") so the announcements UI can
+report "2 rate-limited" instead of a misleading "2 failed".
 """
 
-import os
-import logging
+from __future__ import annotations
+
 import asyncio
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
-from time import time
+import logging
+import os
+import time as _time
+from typing import Any, Dict, Optional, Tuple
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
+SEND_TIMEOUT_S = 15.0
+# Three concatenated GSM segments (160 single / 153 each concatenated). The
+# old cap of 160 mangled any real announcement mid-sentence.
+MAX_SMS_CHARS = 459
+
+
+import re as _re
+
+
+def scrub_digits(text: str) -> str:
+    """Replace any 6+ digit run in provider error text — Twilio and
+    MessageMedia both echo the recipient number inside error messages, which
+    would defeat the masking everywhere the detail string travels."""
+    return _re.sub(r"[+]?\d[\d\s\-()]{5,}\d", "[number]", text or "")
+
+
+def mask_number(e164: str) -> str:
+    """"+61412345678" -> "+61…678" — enough to recognise, never the number."""
+    if not e164:
+        return ""
+    return f"{e164[:3]}…{e164[-3:]}" if len(e164) > 6 else "…"
+
+
+def format_au_number(phone: str) -> str:
+    """Best-effort E.164; "" when hopeless.
+
+    Handles the formats people actually type: "0412 345 678", "+61 412…",
+    the common "+61 (0)412…" (the trunk zero must be DROPPED after the
+    country code — "+610412…" is not a number Twilio will deliver), and a
+    foreign number given with its own +country-code, which is passed through
+    rather than mangled into a fake +61.
+    """
+    raw = (phone or "").strip()
+    if not raw:
+        return ""
+    digits = "".join(c for c in raw if c.isdigit())
+    if len(digits) < 8:
+        return ""
+    # An explicit non-AU country code is respected, never rewritten to +61.
+    if raw.startswith("+") and not digits.startswith("61"):
+        return f"+{digits}" if 8 <= len(digits) <= 15 else ""
+    if digits.startswith("61"):
+        rest = digits[2:]
+        if rest.startswith("0"):          # "+61 (0)412…" — drop the trunk zero
+            rest = rest[1:]
+        return f"+61{rest}" if len(rest) == 9 else ""
+    if digits.startswith("0"):
+        rest = digits[1:]
+        return f"+61{rest}" if len(rest) == 9 else ""
+    return f"+61{digits}" if len(digits) == 9 else ""
+
+
+class SMSProvider:
+    """One way to hand a message to a carrier."""
+
+    name = "none"
+
+    async def send(self, to_e164: str, body: str) -> Tuple[bool, str]:
+        """(ok, detail) — detail is a provider message id or an error string."""
+        raise NotImplementedError
+
+
+class TwilioProvider(SMSProvider):
+    name = "twilio"
+
+    def __init__(self, account_sid: str, auth_token: str, from_number: str):
+        self._sid = account_sid
+        self._token = auth_token
+        self._from = from_number
+
+    async def send(self, to_e164: str, body: str) -> Tuple[bool, str]:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{self._sid}/Messages.json"
+        async with httpx.AsyncClient(timeout=SEND_TIMEOUT_S) as client:
+            resp = await client.post(
+                url,
+                auth=(self._sid, self._token),
+                data={"From": self._from, "To": to_e164, "Body": body},
+            )
+        if resp.status_code == 201:
+            try:
+                return True, str(resp.json().get("sid") or "sent")
+            except Exception:  # noqa: BLE001 — a 201 is a send even if unparsable
+                return True, "sent"
+        try:
+            detail = str(resp.json().get("message") or "")[:200]
+        except Exception:  # noqa: BLE001
+            detail = resp.text[:200]
+        return False, f"HTTP {resp.status_code}: {scrub_digits(detail)}"
+
+
+class MessageMediaProvider(SMSProvider):
+    name = "messagemedia"
+
+    def __init__(self, api_key: str, api_secret: str, from_number: str = ""):
+        self._key = api_key
+        self._secret = api_secret
+        self._from = from_number
+
+    async def send(self, to_e164: str, body: str) -> Tuple[bool, str]:
+        message: Dict[str, Any] = {
+            "content": body,
+            "destination_number": to_e164,
+            "format": "SMS",
+        }
+        if self._from:
+            message["source_number"] = self._from
+        async with httpx.AsyncClient(timeout=SEND_TIMEOUT_S) as client:
+            resp = await client.post(
+                "https://api.messagemedia.com/v1/messages",
+                auth=(self._key, self._secret),
+                json={"messages": [message]},
+            )
+        if resp.status_code == 202:
+            try:
+                msgs = resp.json().get("messages") or []
+                return True, str((msgs[0] or {}).get("message_id") or "sent")
+            except Exception:  # noqa: BLE001
+                return True, "sent"
+        return False, f"HTTP {resp.status_code}: {scrub_digits(resp.text[:200])}"
+
+
+def _provider_from_env() -> Optional[SMSProvider]:
+    """Build the configured provider, or None. Credentials are read here and
+    live only inside the provider object — never logged, never returned."""
+    twilio_ok = all(os.environ.get(k) for k in
+                    ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER"))
+    mm_ok = all(os.environ.get(k) for k in
+                ("MESSAGEMEDIA_API_KEY", "MESSAGEMEDIA_API_SECRET"))
+
+    choice = (os.environ.get("SMS_PROVIDER") or "").strip().lower()
+    if choice == "twilio" and not twilio_ok:
+        logger.warning("SMS_PROVIDER=twilio but TWILIO_* credentials are incomplete")
+        return None
+    if choice == "messagemedia" and not mm_ok:
+        logger.warning("SMS_PROVIDER=messagemedia but MESSAGEMEDIA_* credentials are incomplete")
+        return None
+    if not choice:
+        choice = "twilio" if twilio_ok else ("messagemedia" if mm_ok else "")
+
+    if choice == "twilio":
+        return TwilioProvider(os.environ["TWILIO_ACCOUNT_SID"],
+                              os.environ["TWILIO_AUTH_TOKEN"],
+                              os.environ["TWILIO_FROM_NUMBER"])
+    if choice == "messagemedia":
+        return MessageMediaProvider(os.environ["MESSAGEMEDIA_API_KEY"],
+                                    os.environ["MESSAGEMEDIA_API_SECRET"],
+                                    os.environ.get("MESSAGEMEDIA_FROM", ""))
+    return None
+
 
 class SMSService:
-    """
-    SMS notification service using Twilio.
-
-    Handles rate limiting, phone number formatting, and graceful degradation
-    when Twilio is not configured.
-    """
+    """Provider-agnostic sending with rate limiting and honest skip reasons."""
 
     def __init__(self):
-        """Initialize Twilio configuration from environment variables."""
-        self.account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
-        self.auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
-        self.from_number = os.environ.get("TWILIO_FROM_NUMBER", "")
+        self._provider = _provider_from_env()
+        self._rate_window = float(os.environ.get("SMS_RATE_LIMIT_SECONDS", "300"))
+        self._last_send: Dict[str, float] = {}      # E.164 -> monotonic ts
 
-        self._twilio_client = None
-        self._is_configured = bool(
-            self.account_sid and self.auth_token and self.from_number
-        )
-
-        if self._is_configured:
-            try:
-                from twilio.rest import Client
-                self._twilio_client = Client(self.account_sid, self.auth_token)
-            except ImportError:
-                logger.warning(
-                    "Twilio credentials present but twilio-python not installed. "
-                    "Install with: pip install twilio"
-                )
-                self._is_configured = False
-            except Exception as e:
-                logger.warning(f"Failed to initialize Twilio client: {e}")
-                self._is_configured = False
-        else:
-            logger.debug(
-                "Twilio not configured. SMS notifications will be skipped. "
-                "Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER."
-            )
-
-        # Rate limiting: track (phone_number) -> last_send_time
-        self._rate_limit_tracker: Dict[str, float] = {}
-        self._rate_limit_window_seconds = 300  # 5 minutes
+    # ------------------------------------------------------------------ state
 
     @property
     def is_configured(self) -> bool:
-        """True when Twilio creds are present and the client initialised."""
-        return self._is_configured
+        return self._provider is not None
 
-    def _format_phone_number(self, phone: str) -> str:
-        """
-        Format phone number to E.164 format with +61 Australian prefix.
+    def status(self) -> Dict[str, Any]:
+        """What the Connections/Comms UI shows. Never contains a credential."""
+        if self._provider is None:
+            return {
+                "configured": False,
+                "provider": None,
+                "setup": {
+                    "twilio": ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER"],
+                    "messagemedia": ["MESSAGEMEDIA_API_KEY", "MESSAGEMEDIA_API_SECRET"],
+                    "where": "Railway → the service → Variables; redeploy applies them.",
+                },
+            }
+        from_number = getattr(self._provider, "_from", "") or ""
+        return {
+            "configured": True,
+            "provider": self._provider.name,
+            "from": mask_number(from_number) if from_number else None,
+            "rate_limit_seconds": self._rate_window,
+        }
 
-        Args:
-            phone: Phone number in any format (e.g., "0412345678", "412345678", "+61412345678")
+    # ------------------------------------------------------------------ sends
 
-        Returns:
-            Phone number in E.164 format (e.g., "+61412345678")
-        """
-        if not phone:
-            return ""
+    def _rate_limited(self, e164: str) -> bool:
+        now = _time.monotonic()
+        last = self._last_send.get(e164)
+        return last is not None and (now - last) < self._rate_window
 
-        # Remove all non-digit characters
-        digits = "".join(c for c in phone if c.isdigit())
+    def _record_send(self, e164: str) -> None:
+        """Mark the window only for a send that actually HAPPENED — recording
+        on attempt meant one failed send (bad creds, provider blip) blocked
+        the retry with a misleading "rate_limited" for five minutes."""
+        now = _time.monotonic()
+        self._last_send[e164] = now
+        if len(self._last_send) > 5000:             # bound the tracker
+            cutoff = now - self._rate_window
+            self._last_send = {k: v for k, v in self._last_send.items() if v >= cutoff}
 
-        # Handle Australian numbers
-        if digits.startswith("61"):
-            return f"+{digits}"
-        elif digits.startswith("0"):
-            # Replace leading 0 with 61
-            return f"+61{digits[1:]}"
-        else:
-            # Assume it's missing country code
-            return f"+61{digits}"
+    async def send_detailed(self, to_number: str, message: str) -> Tuple[bool, str]:
+        """(sent, reason). reason ∈ sent | not_configured | no_phone |
+        invalid_number | rate_limited | failed."""
+        if self._provider is None:
+            return False, "not_configured"
+        if not (to_number or "").strip():
+            return False, "no_phone"
+        e164 = format_au_number(to_number)
+        if not e164:
+            logger.warning(f"SMS skipped: unusable phone number ({mask_number(to_number)})")
+            return False, "invalid_number"
+        if self._rate_limited(e164):
+            logger.info(f"SMS rate-limited for {mask_number(e164)}")
+            return False, "rate_limited"
 
-    def _truncate_message(self, message: str, max_length: int = 160) -> str:
-        """
-        Truncate message if it exceeds max_length.
-
-        Args:
-            message: Message to truncate
-            max_length: Maximum message length (default 160 for SMS)
-
-        Returns:
-            Truncated message with "..." if needed
-        """
-        if len(message) <= max_length:
-            return message
-
-        # Reserve 3 chars for "..."
-        return message[:max_length - 3] + "..."
-
-    def _is_within_rate_limit(self, phone: str) -> bool:
-        """
-        Check if a phone number is within rate limit.
-
-        Allows 1 SMS per phone number per 5 minutes.
-
-        Args:
-            phone: Formatted phone number
-
-        Returns:
-            True if within limit, False if rate limited
-        """
-        now = time()
-        last_send = self._rate_limit_tracker.get(phone, 0)
-
-        if now - last_send < self._rate_limit_window_seconds:
-            return False
-
-        self._rate_limit_tracker[phone] = now
-        return True
-
-    def _should_send(self, phone: str) -> bool:
-        """Check if SMS should be sent (configured + rate limit + number valid)."""
-        if not self._is_configured:
-            return False
-
-        if not phone:
-            return False
-
-        if not self._is_within_rate_limit(phone):
-            logger.debug(f"Rate limit exceeded for {phone}")
-            return False
-
-        return True
-
-    async def send_sms(self, to_number: str, message: str) -> bool:
-        """
-        Send SMS message via Twilio.
-
-        Args:
-            to_number: Recipient phone number (any format)
-            message: Message content
-
-        Returns:
-            True if sent successfully, False otherwise
-        """
-        if not self._should_send(to_number):
-            return False
+        body = message if len(message) <= MAX_SMS_CHARS else message[:MAX_SMS_CHARS - 1] + "…"
+        t0 = _time.perf_counter()
+        try:
+            ok, detail = await self._provider.send(e164, body)
+        except (httpx.TimeoutException, httpx.HTTPError) as e:
+            ok, detail = False, f"{type(e).__name__}: {str(e)[:150]}"
+        except Exception as e:  # noqa: BLE001 — a send must never crash the caller
+            ok, detail = False, f"{type(e).__name__}: {str(e)[:150]}"
+        ms = (_time.perf_counter() - t0) * 1000
 
         try:
-            formatted_number = self._format_phone_number(to_number)
-            if not formatted_number:
-                logger.warning(f"Invalid phone number format: {to_number}")
-                return False
+            from rosteriq.services.events import integration
+            integration(self._provider.name, "send_sms",
+                        outcome="ok" if ok else "failed", duration_ms=ms,
+                        to=mask_number(e164), chars=len(body),
+                        **({} if ok else {"error": scrub_digits(detail)}))
+        except Exception:  # noqa: BLE001 — recording must never break sending
+            pass
 
-            truncated_message = self._truncate_message(message)
+        if ok:
+            self._record_send(e164)
+            logger.info(f"SMS sent via {self._provider.name} to {mask_number(e164)}")
+            return True, "sent"
+        logger.error(f"SMS failed via {self._provider.name} to {mask_number(e164)}: "
+                     f"{scrub_digits(detail)}")
+        return False, "failed"
 
-            # Run Twilio send in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                self._send_twilio,
-                formatted_number,
-                truncated_message,
-            )
+    async def send_sms(self, to_number: str, message: str) -> bool:
+        """Historical bool contract — see send_detailed for the reason."""
+        ok, _ = await self.send_detailed(to_number, message)
+        return ok
 
-            logger.info(f"SMS sent to {formatted_number}")
-            return True
+    # ------------------------------------------- convenience senders (legacy)
 
-        except Exception as e:
-            logger.error(f"Failed to send SMS to {to_number}: {e}")
-            return False
-
-    def _send_twilio(self, to_number: str, message: str):
-        """Send SMS via Twilio (blocking)."""
-        if not self._twilio_client:
-            raise RuntimeError("Twilio client not initialized")
-
-        self._twilio_client.messages.create(
-            body=message,
-            from_=self.from_number,
-            to=to_number,
-        )
-
-    async def send_shift_reminder(
-        self,
-        employee: Dict[str, Any],
-        shift: Dict[str, Any],
-    ) -> bool:
-        """
-        Send shift reminder 2 hours before start.
-
-        Args:
-            employee: Employee dict with 'phone' key
-            shift: Shift dict with 'venue_name', 'start_time', 'end_time'
-
-        Returns:
-            True if sent successfully
-        """
+    async def send_shift_reminder(self, employee: Dict[str, Any], shift: Dict[str, Any]) -> bool:
         phone = employee.get("phone", "")
         if not phone:
-            logger.debug(f"No phone number for employee {employee.get('id')}")
             return False
-
-        venue_name = shift.get("venue_name", "Unknown Venue")
-        start_time = shift.get("start_time", "")
-        end_time = shift.get("end_time", "")
-
-        message = (
-            f"Reminder: You have a shift at {venue_name} "
-            f"from {start_time} to {end_time} in 2 hours."
-        )
-
+        message = (f"Reminder: You have a shift at {shift.get('venue_name', 'your venue')} "
+                   f"from {shift.get('start_time', '')} to {shift.get('end_time', '')} in 2 hours.")
         return await self.send_sms(phone, message)
 
-    async def send_swap_notification(
-        self,
-        employee: Dict[str, Any],
-        swap: Dict[str, Any],
-    ) -> bool:
-        """
-        Send shift swap status notification.
-
-        Args:
-            employee: Employee dict with 'phone' key
-            swap: Swap dict with 'status' key (approved/rejected)
-
-        Returns:
-            True if sent successfully
-        """
+    async def send_swap_notification(self, employee: Dict[str, Any], swap: Dict[str, Any]) -> bool:
         phone = employee.get("phone", "")
         if not phone:
-            logger.debug(f"No phone number for employee {employee.get('id')}")
             return False
+        status_text = "approved" if (swap.get("status", "").lower() == "approved") else "rejected"
+        return await self.send_sms(phone, f"Your shift swap request was {status_text}.")
 
-        status = swap.get("status", "pending").lower()
-        status_text = "approved" if status == "approved" else "rejected"
-
-        message = f"Your shift swap request was {status_text}."
-
-        return await self.send_sms(phone, message)
-
-    async def send_roster_published(
-        self,
-        employee: Dict[str, Any],
-        venue_name: str,
-        week_start: str,
-    ) -> bool:
-        """
-        Send roster published notification.
-
-        Args:
-            employee: Employee dict with 'phone' key
-            venue_name: Name of venue
-            week_start: Start date of week (ISO format)
-
-        Returns:
-            True if sent successfully
-        """
+    async def send_roster_published(self, employee: Dict[str, Any], venue_name: str,
+                                    week_start: str) -> bool:
         phone = employee.get("phone", "")
         if not phone:
-            logger.debug(f"No phone number for employee {employee.get('id')}")
             return False
+        return await self.send_sms(
+            phone, f"New roster published for {venue_name} week of {week_start}.")
 
-        message = f"New roster published for {venue_name} week of {week_start}."
-
-        return await self.send_sms(phone, message)
-
-    async def send_urgent_alert(
-        self,
-        phone: str,
-        message: str,
-    ) -> bool:
-        """
-        Send urgent compliance/alert SMS.
-
-        Used for critical alerts like compliance violations that need
-        immediate attention.
-
-        Args:
-            phone: Phone number to send to
-            message: Alert message
-
-        Returns:
-            True if sent successfully
-        """
+    async def send_urgent_alert(self, phone: str, message: str) -> bool:
         return await self.send_sms(phone, message)
 
 
-# Singleton instance
 _sms_service: Optional[SMSService] = None
 
 
@@ -310,3 +328,9 @@ def get_sms_service() -> SMSService:
     if _sms_service is None:
         _sms_service = SMSService()
     return _sms_service
+
+
+def reset_sms_service() -> None:
+    """Forget the singleton — tests use this to re-read the environment."""
+    global _sms_service
+    _sms_service = None

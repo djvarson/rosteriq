@@ -19,6 +19,7 @@ staff member — sent / no_phone / failed / not_configured. We never claim a
 text went out when it didn't.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -70,10 +71,20 @@ def _ann_payload(a: dict, staff_count: int) -> dict:
 # Manager-facing
 # ---------------------------------------------------------------------------
 
+def _require_manager(user: UserContext) -> None:
+    """Announcements are the venue speaking to its staff — and with SMS on,
+    each publish can cost real money. Staff have the team feed for their own
+    voice; publishing (and pinning) is manager/owner only. This route only
+    checked the venue, so any linked staff member could blast the venue."""
+    if user.role not in ("manager", "owner") and not getattr(user, "is_owner", False):
+        raise HTTPException(status_code=403, detail="Managers only")
+
+
 @router.post("/api/announcements")
 async def publish_announcement(body: AnnouncementBody,
                                user: UserContext = Depends(get_current_user)) -> dict:
     enforce_venue_access(body.venue_id)
+    _require_manager(user)
     db = get_db()
     staff = db.get_employees(body.venue_id) or []
 
@@ -88,19 +99,46 @@ async def publish_announcement(body: AnnouncementBody,
                 "sent": 0, "no_phone": 0, "failed": 0,
             }
         else:
-            sent, no_phone, failed = [], [], []
+            sent, no_phone, failed, rate_limited = [], [], [], []
             text = f"{body.title}: {body.body}"
+            with_phone = []
             for emp in staff:
                 phone = (getattr(emp, "phone", "") or "").strip()
-                if not phone:
+                if phone:
+                    with_phone.append((emp, phone))
+                else:
                     no_phone.append(emp.name)
-                    continue
-                ok = await sms.send_sms(phone, text)
-                (sent if ok else failed).append(emp.name)
+
+            # Bounded concurrency: sequential awaits held this request open
+            # for minutes when the provider was slow (30 staff × a 15s
+            # timeout each). Eight in flight keeps a full venue under ~10s
+            # even in the worst case.
+            _gate = asyncio.Semaphore(8)
+
+            async def _one(emp, phone):
+                async with _gate:
+                    return emp, await sms.send_detailed(phone, text)
+
+            results = await asyncio.gather(
+                *(_one(emp, phone) for emp, phone in with_phone))
+            for emp, (ok, reason) in results:
+                if ok:
+                    sent.append(emp.name)
+                elif reason == "rate_limited":
+                    # Not a failure: they got an SMS in the last few minutes.
+                    # Reporting this as "failed" made managers re-send, which
+                    # rate-limited MORE people.
+                    rate_limited.append(emp.name)
+                elif reason == "invalid_number":
+                    no_phone.append(emp.name)
+                else:
+                    failed.append(emp.name)
             sms_result = {
                 "attempted": True,
                 "sent": len(sent), "no_phone": len(no_phone), "failed": len(failed),
+                "rate_limited": len(rate_limited),
                 "no_phone_names": no_phone, "failed_names": failed,
+                "rate_limited_names": rate_limited,
             }
 
     ann = {
@@ -127,20 +165,45 @@ async def publish_announcement(body: AnnouncementBody,
     return {"status": "published", "announcement_id": ann["id"], "sms_result": sms_result}
 
 
+@router.get("/api/sms/status")
+async def sms_status(user: UserContext = Depends(get_current_user)) -> dict:
+    """Is SMS live, and if not, exactly which variables light it up.
+
+    Platform-level (env vars in Railway), so there is nothing per-venue to
+    scope — but only managers/owners see it: staff have no send button, and
+    the setup detail is operational metadata. Never returns a credential."""
+    st = get_sms_service().status()
+    if user.role in ("manager", "owner") or getattr(user, "is_owner", False):
+        return st
+    # Staff (the demo dashboard runs as one) get the cosmetic flag only —
+    # never the from-number or the setup variable names.
+    return {"configured": st["configured"], "provider": st.get("provider")}
+
+
 @router.get("/api/announcements")
-async def venue_announcements(venue_id: str = Query(...)) -> dict:
+async def venue_announcements(venue_id: str = Query(...),
+                              user: UserContext = Depends(get_current_user)) -> dict:
     enforce_venue_access(venue_id)
     db = get_db()
     staff_count = len(db.get_employees(venue_id) or [])
     rows = db.list_announcements(venue_id) or []
+    payloads = [_ann_payload(a, staff_count) for a in rows]
+    # The stored sms_result names exactly who has no phone number and whose
+    # send failed — a per-person roster only managers should see. Staff who
+    # can read this listing (the demo account is one) get the announcements
+    # without the delivery detail.
+    if user.role not in ("manager", "owner") and not getattr(user, "is_owner", False):
+        for pl in payloads:
+            pl["sms_result"] = None
     return {"venue_id": venue_id, "count": len(rows),
-            "announcements": [_ann_payload(a, staff_count) for a in rows]}
+            "announcements": payloads}
 
 
 @router.post("/api/announcements/{ann_id}/pin")
 async def pin_announcement(ann_id: str, body: PinBody,
                            user: UserContext = Depends(get_current_user)) -> dict:
     enforce_venue_access(body.venue_id)
+    _require_manager(user)
     db = get_db()
     ann = db.get_announcement(ann_id)
     if not ann or ann.get("venue_id") != body.venue_id:
@@ -150,13 +213,6 @@ async def pin_announcement(ann_id: str, body: PinBody,
     audit("announcement.pin", body.venue_id, "announcement", ann_id,
           title=ann.get("title"), pinned=bool(body.pinned))
     return {"status": "pinned" if body.pinned else "unpinned", "announcement_id": ann_id}
-
-
-@router.get("/api/sms/status")
-async def sms_status(venue_id: str = Query(...)) -> dict:
-    """Whether SMS fan-out is available. Reports state only — never values."""
-    enforce_venue_access(venue_id)
-    return {"configured": get_sms_service().is_configured}
 
 
 # ---------------------------------------------------------------------------

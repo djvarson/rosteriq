@@ -49,8 +49,8 @@ cryptography>=41.0.0,<43.0
 # Stripe for billing and subscription management
 stripe>=7.0.0,<8.0
 
-# Twilio for SMS notifications (optional, gracefully degraded if not configured)
-twilio>=8.0.0,<9.0
+# SMS goes through plain httpx (Twilio / MessageMedia REST) — no vendor SDK,
+# so "credentials present but package missing" cannot happen. services/sms.py.
 
 # Web push notifications
 pywebpush>=1.14.0,<2.0

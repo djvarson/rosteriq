@@ -7552,7 +7552,8 @@ async function loadAnnouncements() {
   try {
     const st = await fetchAPI('/api/sms/status?venue_id=' + encodeURIComponent(state.currentVenue));
     document.getElementById('an-sms-status').textContent =
-      st.configured ? '(configured ✓)' : '(not configured — texts will be skipped)';
+      st.configured ? '(via ' + (st.provider || 'sms') + ' ✓)'
+                    : '(not configured — texts will be skipped)';
   } catch (e) { /* status is cosmetic */ }
   try {
     const data = await fetchAPI('/api/announcements?venue_id=' + encodeURIComponent(state.currentVenue));

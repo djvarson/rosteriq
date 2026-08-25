@@ -184,6 +184,19 @@ async def test_sms(
     Returns:
         Success status and message
     """
+    # Manager/owner only: with credentials configured this texts an ARBITRARY
+    # number from the request body on the venue's account — as a staff-level
+    # endpoint that is a spam-and-cost vector, not a preference check.
+    role = getattr(current_user, "role", None) or (
+        current_user.get("role") if isinstance(current_user, dict) else None)
+    is_owner = bool(getattr(current_user, "is_owner", False) or
+                    (isinstance(current_user, dict) and current_user.get("is_owner")))
+    if role not in ("manager", "owner") and not is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Managers only",
+        )
+
     phone = request.phone.strip()
     if not phone:
         raise HTTPException(
