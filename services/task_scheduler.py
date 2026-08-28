@@ -73,9 +73,16 @@ class JobConfig:
         self.enabled = enabled
         self.run_time = run_time
         self.interval_hours = interval_hours
-        self.next_run = next_run or datetime.now()
         self.last_run: Optional[datetime] = None
         self.last_error: Optional[str] = None
+        if next_run is not None:
+            self.next_run = next_run
+        else:
+            # Defaulting to now() made every enabled job fire on every boot,
+            # in both uvicorn workers — a deploy re-sent the weekly digest.
+            # First run is computed the same way every later run is.
+            self.next_run = datetime.now() + timedelta(minutes=5)
+            self.update_next_run()
 
     def should_run(self) -> bool:
         """Check if this job should run now."""
@@ -84,16 +91,31 @@ class JobConfig:
         return datetime.now() >= self.next_run
 
     def update_next_run(self):
-        """Calculate next run time based on job configuration."""
+        """Calculate next run time based on job configuration.
+
+        run_time is a VENUE wall-clock time: "the 6 AM digest" means 6 AM
+        where the venues are (services/clock DEFAULT_TZ), not 6 AM on the
+        UTC host — which delivered the morning digest at 2 pm Perth.
+        """
         if self.interval_hours is not None:
-            self.next_run = datetime.now() + timedelta(hours=self.interval_hours)
+            self.next_run = datetime.now() + timedelta(hours=max(self.interval_hours, 1))
         elif self.run_time is not None:
-            # Schedule for next occurrence of run_time
-            now = datetime.now()
-            next_run = datetime.combine(now.date(), self.run_time)
-            if next_run <= now:
-                next_run += timedelta(days=1)
-            self.next_run = next_run
+            try:
+                from zoneinfo import ZoneInfo
+                from rosteriq.services.clock import DEFAULT_TZ
+                tz = ZoneInfo(DEFAULT_TZ)
+                now_local = datetime.now(tz)
+                candidate = datetime.combine(now_local.date(), self.run_time, tzinfo=tz)
+                if candidate <= now_local:
+                    candidate += timedelta(days=1)
+                # scheduler compares against naive host-clock datetimes
+                self.next_run = candidate.astimezone().replace(tzinfo=None)
+            except Exception:  # noqa: BLE001 — a bad tz must not kill scheduling
+                now = datetime.now()
+                candidate = datetime.combine(now.date(), self.run_time)
+                if candidate <= now:
+                    candidate += timedelta(days=1)
+                self.next_run = candidate
         else:
             self.next_run = datetime.now() + timedelta(hours=1)
 

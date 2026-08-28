@@ -11,6 +11,7 @@ Routes:
 """
 
 import logging
+import os
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -101,6 +102,42 @@ def _save_conversation(conv_id: str, messages: list[dict]):
 # Chat endpoint
 # ============================================================================
 
+
+# ---------------------------------------------------------------------------
+# Per-venue daily budget. Every venue's questions bill ONE shared MiniMax
+# key, so a single venue's runaway script (or an over-enthusiastic staff
+# member) could exhaust the quota and take the AI down for everyone. The
+# counter is in-process per worker (two workers => an effective cap of up to
+# 2x AI_DAILY_LIMIT) — that coarseness is fine: the point is stopping
+# thousands, not policing the boundary at one.
+# ---------------------------------------------------------------------------
+AI_DAILY_LIMIT = int(os.environ.get("AI_DAILY_LIMIT", "300"))
+_ai_usage: dict = {}      # (venue_id, yyyymmdd) -> count
+
+
+def _check_ai_budget(venue_id: str) -> None:
+    from datetime import datetime as _dt
+    day = _dt.utcnow().strftime("%Y%m%d")
+    key = (venue_id or "?", day)
+    used = _ai_usage.get(key, 0) + 1
+    _ai_usage[key] = used
+    if len(_ai_usage) > 2000:
+        _ai_usage.clear()
+        _ai_usage[key] = used
+    if used > AI_DAILY_LIMIT:
+        try:
+            from rosteriq.services.events import security
+            security("ai.budget_exceeded", venue_id=venue_id, outcome="throttled",
+                     used=used, limit=AI_DAILY_LIMIT)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=429,
+            detail=("This venue has reached today's AI limit "
+                    f"({AI_DAILY_LIMIT} questions). It resets at midnight UTC — "
+                    "the dashboards and reports keep working as normal."),
+        )
+
 @router.post("/chat")
 async def chat(body: ChatRequest) -> dict:
     """
@@ -111,6 +148,7 @@ async def chat(body: ChatRequest) -> dict:
     It can also suggest actions (roster generation, shift changes, messaging).
     """
     _guard_demo_scope(body.venue_id)
+    _check_ai_budget(body.venue_id)
 
     if not llm_configured():
         env = "MINIMAX_API_KEY" if LLM_PROVIDER == "minimax" else "GEMINI_API_KEY"

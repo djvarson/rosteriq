@@ -849,8 +849,18 @@ async def save_xero_credentials(db, credentials: XeroCredentials) -> None:
     For PostgreSQL, uses xero_credentials table (to be created).
     For in-memory, stores in dict.
     """
-    # PostgreSQL
+    # PostgreSQL — secrets sealed at rest with the SAME codec database.py's
+    # store methods use (secret_box). Two codecs used to coexist on this
+    # table: this path wrote raw while routes/payroll read via the decrypting
+    # store, so a row written here decoded fine (legacy pass-through) but a
+    # row written by the store looked like ciphertext to this path's reader.
     if hasattr(db, "_conn"):
+        from rosteriq.services.secret_box import encrypt_tokens
+        sealed = encrypt_tokens({
+            "client_secret": credentials.client_secret,
+            "access_token": credentials.access_token,
+            "refresh_token": credentials.refresh_token,
+        })
         with db._cursor() as cur:
             cur.execute("""
                 INSERT INTO xero_credentials
@@ -865,10 +875,10 @@ async def save_xero_credentials(db, credentials: XeroCredentials) -> None:
             """, (
                 credentials.venue_id,
                 credentials.client_id,
-                credentials.client_secret,
+                sealed["client_secret"],
                 credentials.tenant_id,
-                credentials.access_token,
-                credentials.refresh_token,
+                sealed["access_token"],
+                sealed["refresh_token"],
                 credentials.token_expires,
                 credentials.created_at,
                 credentials.updated_at,
@@ -891,13 +901,20 @@ async def get_xero_credentials(db, venue_id: str) -> Optional[XeroCredentials]:
             )
             row = cur.fetchone()
             if row:
+                # decrypt_tokens passes legacy plaintext rows through untouched
+                from rosteriq.services.secret_box import decrypt_tokens
+                opened = decrypt_tokens({
+                    "client_secret": row["client_secret"],
+                    "access_token": row["access_token"],
+                    "refresh_token": row["refresh_token"],
+                })
                 return XeroCredentials(
                     venue_id=row["venue_id"],
                     client_id=row["client_id"],
-                    client_secret=row["client_secret"],
+                    client_secret=opened["client_secret"],
                     tenant_id=row["tenant_id"],
-                    access_token=row["access_token"],
-                    refresh_token=row["refresh_token"],
+                    access_token=opened["access_token"],
+                    refresh_token=opened["refresh_token"],
                     token_expires=row["token_expires"],
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],

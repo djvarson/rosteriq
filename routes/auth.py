@@ -90,6 +90,32 @@ async def demo_session(
     return {"access_token": access_token, "token_type": "bearer", "demo": True}
 
 
+
+# The event loop holds only a WEAK reference to created tasks: a bare
+# asyncio.create_task(send_email(...)) can be garbage-collected mid-send and
+# any exception inside it disappears. Keep a strong reference until done and
+# log the outcome — an email that silently never sent is the worst failure
+# mode a password-reset flow can have.
+_bg_sends: set = set()
+
+
+def _send_in_background(coro, what: str) -> None:
+    task = asyncio.create_task(coro)
+    _bg_sends.add(task)
+
+    def _done(t):
+        _bg_sends.discard(t)
+        exc = None if t.cancelled() else t.exception()
+        if exc is not None:
+            logger.error(f"Background {what} send failed: {exc}")
+            try:
+                from rosteriq.services.events import error as _record
+                _record(f"notify.{what}", exc)
+            except Exception:
+                pass
+
+    task.add_done_callback(_done)
+
 def _bootstrap_owner_allowed() -> bool:
     """
     Whether the public /register endpoint may auto-grant the global ``owner``
@@ -515,13 +541,14 @@ async def forgot_password(
 
             # Send email asynchronously (don't block response)
             notification_service = get_notification_service()
-            asyncio.create_task(
+            _send_in_background(
                 notification_service.send_password_reset(
                     email=request.email,
                     name=user.get("name", "User"),
                     reset_token=reset_token,
                     reset_url=reset_url,
-                )
+                    ),
+                "password_reset",
             )
 
     # Always return 200 (don't reveal if email exists)
@@ -606,13 +633,14 @@ async def resend_verification(
 
     # Send email asynchronously
     notification_service = get_notification_service()
-    asyncio.create_task(
+    _send_in_background(
         notification_service.send_email_verification(
             email=user["email"],
             name=user.get("name", "User"),
             verification_token=verify_token,
             verification_url=verification_url,
-        )
+        ),
+        "email_verification",
     )
 
     return {"message": "Verification email sent. Please check your inbox."}

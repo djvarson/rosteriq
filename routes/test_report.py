@@ -282,10 +282,11 @@ async def get_coverage_report(
     """
     runner = get_test_runner()
 
-    # If no tests have been run yet, run them first
-    if runner.last_report is None:
-        runner.run_all(verbose=False)
-
+    # NEVER run the suite implicitly. This used to call runner.run_all()
+    # synchronously in the request handler whenever no report existed — the
+    # exact in-process-suite-against-the-live-DB failure the POST /run-tests
+    # gate exists to prevent, reachable by a simple GET. The coverage report
+    # is a static scan of services/ vs tests/; it needs no run.
     coverage = runner.generate_coverage_report()
 
     return CoverageResponse(

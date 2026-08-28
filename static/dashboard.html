@@ -3343,12 +3343,10 @@
           <div class="card">
             <div class="chart-title">AI Recommendations</div>
             <div id="onshift-recommendations" style="display: flex; flex-direction: column; gap: 12px;">
-              <div class="conflict-item info">
-                <div class="conflict-header">
-                  <span></span>
-                  <span>Consider calling in 2 extra floor staff for 7-11pm — derby day + night markets + 36C pushing beer garden demand</span>
-                </div>
-              </div>
+              <!-- Placeholder only until data loads: the real-venue path clears
+                   this — a real venue must never see an invented derby-day
+                   recommendation about staff it doesn't have. -->
+              <div style="color:var(--text-muted); font-size:13px; padding:8px 0;">Loading recommendations…</div>
             </div>
           </div>
         </div>
@@ -8799,6 +8797,10 @@ async function loadVenueData() {
       populateStaffList();
     }
     try { renderStaffTable(); } catch (e) { console.warn('staff table:', e); }
+    if (!state.isDemo) {
+      const rec = document.getElementById('onshift-recommendations');
+      if (rec) rec.innerHTML = '<div style="color:var(--text-muted); font-size:13px; padding:8px 0;">No recommendations right now — ask the AI Agent about tonight.</div>';
+    }
     connectionManager.hide();
     checkDeputyStatus();
     checkMYOBStatus();
@@ -9405,21 +9407,49 @@ function renderAlerts(alerts) {
 
 function populateStaffList() {
   const staffList = document.getElementById('on-shift-list');
-  if (state.employees.length === 0) {
-    staffList.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center;">No staff currently on shift</div>';
+  if (!staffList) return;
+  // REAL data only: who has a rostered shift covering RIGHT NOW, with the
+  // actual end time. The old version listed the first five employees with
+  // invented "Shift ends 9:00 PM" times and a permanent On Shift badge.
+  const now = new Date();
+  const hm = now.getHours() * 60 + now.getMinutes();
+  const todayKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  const byId = {};
+  (state.employees || []).forEach(function (e) { byId[e.id] = e; });
+  const onNow = [];
+  (state.rosters || []).forEach(function (r) {
+    (r.shifts || []).forEach(function (sh) {
+      const d = String(sh.date || sh.shift_date || '').slice(0, 10);
+      if (d !== todayKey) return;
+      const st = String(sh.start_time || '').slice(0, 5).split(':');
+      const en = String(sh.end_time || '').slice(0, 5).split(':');
+      if (st.length < 2 || en.length < 2) return;
+      const s0 = (+st[0]) * 60 + (+st[1]), e0 = (+en[0]) * 60 + (+en[1]);
+      const active = e0 > s0 ? (hm >= s0 && hm < e0) : (hm >= s0 || hm < e0);
+      if (active) {
+        const emp = byId[sh.employee_id];
+        onNow.push({
+          name: emp ? emp.name : 'Staff member',
+          role: sh.role || (emp && emp.skills && emp.skills[0]) || 'Staff',
+          ends: String(sh.end_time || '').slice(0, 5),
+        });
+      }
+    });
+  });
+  if (!onNow.length) {
+    staffList.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center;">Nobody rostered on right now</div>';
     return;
   }
-
-  staffList.innerHTML = state.employees.slice(0, 5).map((emp, idx) => `
-    <div class="staff-item">
-      <div class="staff-avatar">${esc(emp.name.charAt(0))}</div>
-      <div class="staff-info">
-        <div class="staff-name">${esc(emp.name)}</div>
-        <div class="staff-meta">${esc(emp.role || 'Staff')} • Shift ends ${idx % 2 === 0 ? '9:00 PM' : '10:30 PM'}</div>
-      </div>
-      <span class="staff-status on-shift">On Shift</span>
-    </div>
-  `).join('');
+  staffList.innerHTML = onNow.slice(0, 8).map(function (p) {
+    return '<div class="staff-item">' +
+      '<div class="staff-avatar">' + esc((p.name || '?').charAt(0)) + '</div>' +
+      '<div class="staff-info">' +
+        '<div class="staff-name">' + esc(p.name) + '</div>' +
+        '<div class="staff-meta">' + esc(p.role) + ' • ends ' + esc(p.ends) + '</div>' +
+      '</div>' +
+      '<span class="staff-status on-shift">On Shift</span>' +
+    '</div>';
+  }).join('');
 }
 
 function populateDemoDemandSignals() {

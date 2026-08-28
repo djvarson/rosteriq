@@ -618,15 +618,31 @@ class LabourTracker:
             logger.warning(f"Could not fetch revenue for {day}: {e}")
             return Decimal("0.00")
 
+    def _todays_shifts(self, venue_id: str, day: date) -> list:
+        """Today's rostered shifts via the ONE query the store actually has.
+
+        This tracker used to call get_active_shifts / get_shifts_for_date /
+        get_staff_count_by_hour / get_total_staff_hours — none of which exist
+        on any store. Every call raised AttributeError, every except swallowed
+        it, and live labour ops reported an empty venue and 0% labour all
+        day while looking perfectly healthy.
+        """
+        try:
+            return list(self.db.get_shifts(venue_id, day, day) or [])
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not fetch today's shifts: {e}")
+            return []
+
     def _get_staff_on_shift(self, venue_id: str, now: datetime) -> List[Employee]:
         """Get list of employees currently on shift."""
         try:
-            shifts = self.db.get_active_shifts(venue_id, now)
+            current = now.time()
             employees = []
-            for shift in shifts:
-                emp = self.db.get_employee(shift.employee_id)
-                if emp:
-                    employees.append(emp)
+            for shift in self._todays_shifts(venue_id, now.date()):
+                if shift.start_time <= current <= shift.end_time:
+                    emp = self.db.get_employee(shift.employee_id)
+                    if emp:
+                        employees.append(emp)
             return employees
         except Exception as e:
             logger.warning(f"Could not fetch staff on shift: {e}")
@@ -634,21 +650,23 @@ class LabourTracker:
 
     def _get_staff_count_by_hour(self, venue_id: str, day: date) -> Dict[int, int]:
         """Get number of staff on shift for each hour."""
-        try:
-            counts = self.db.get_staff_count_by_hour(venue_id, day)
-            return counts if counts else {}
-        except Exception as e:
-            logger.warning(f"Could not fetch staff counts: {e}")
-            return {}
+        counts: Dict[int, int] = {}
+        for shift in self._todays_shifts(venue_id, day):
+            end_hour = shift.end_time.hour + (1 if shift.end_time.minute else 0)
+            for hour in range(shift.start_time.hour, max(end_hour, shift.start_time.hour + 1)):
+                counts[hour] = counts.get(hour, 0) + 1
+        return counts
 
     def _get_staff_hours_for_date(self, venue_id: str, day: date) -> Decimal:
         """Get total staff hours for a date."""
-        try:
-            hours = self.db.get_total_staff_hours(venue_id, day)
-            return hours if hours else Decimal("0.00")
-        except Exception as e:
-            logger.warning(f"Could not fetch staff hours: {e}")
-            return Decimal("0.00")
+        total = Decimal("0.00")
+        for shift in self._todays_shifts(venue_id, day):
+            minutes = ((shift.end_time.hour - shift.start_time.hour) * 60
+                       + (shift.end_time.minute - shift.start_time.minute)
+                       - (getattr(shift, "break_minutes", 0) or 0))
+            if minutes > 0:
+                total += Decimal(minutes) / Decimal(60)
+        return total
 
     def _calculate_labour_cost_today(
         self, venue_id: str, staff_on_shift: List[Employee], today: date, state: State
@@ -659,7 +677,7 @@ class LabourTracker:
         Includes base wages, penalty multipliers, and casual loading.
         """
         try:
-            shifts = self.db.get_shifts_for_date(venue_id, today)
+            shifts = self._todays_shifts(venue_id, today)
             total_cost = Decimal("0.00")
 
             employees = {s.employee_id: e for e in staff_on_shift for s in [shifts[0]]}
