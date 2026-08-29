@@ -2331,6 +2331,19 @@ async def create_venue(venue: VenueConfig):
         # EXEMPT_PATHS a None tenant would mean an unauthenticated overwrite.
         if _tenant is None:
             raise HTTPException(status_code=401, detail="Authentication required")
+        # Writing over an existing venue is a manager/owner action. Venue
+        # membership alone must not be enough — a linked staff user could
+        # otherwise rewrite the whole VenueConfig (min_staff, max_labour_pct,
+        # name) for a venue they merely work at.
+        if not _tenant.is_owner:
+            _raw = getattr(_db, "_store", _db)
+            _user = _raw.get_user_by_id(_tenant.user_id) or {}
+            _role = getattr(_user.get("role"), "value", _user.get("role"))
+            if _role not in ("manager", "owner"):
+                raise HTTPException(
+                    status_code=403,
+                    detail="This action requires one of these roles: manager, owner",
+                )
         _store["venues"][venue.id] = venue
 
     # Invalidate venue cache

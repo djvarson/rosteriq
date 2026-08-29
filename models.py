@@ -431,6 +431,29 @@ class VenueConfig(BaseModel):
             raise ValueError("max_labour_pct must be between 0 and 100")
         return v
 
+    @field_validator("min_staff")
+    @classmethod
+    def validate_min_staff(cls, v: Dict[str, int]) -> Dict[str, int]:
+        """Normalise and bound min_staff keys — they become section pills
+        across the UI, so no angle brackets/quotes, no 200-char keys."""
+        import re
+        cleaned: Dict[str, int] = {}
+        for key, count in (v or {}).items():
+            key = str(key).strip().lower()
+            if not key:
+                raise ValueError("min_staff keys must not be empty")
+            if len(key) > 40:
+                raise ValueError("min_staff keys must be 40 characters or fewer")
+            if not re.fullmatch(r"[a-z0-9 _/&+.-]+", key):
+                raise ValueError(
+                    f"min_staff key {key!r} may only contain letters, digits, "
+                    "spaces, and _ / & + . -"
+                )
+            if not (0 <= int(count) <= 1000):
+                raise ValueError("min_staff counts must be between 0 and 1000")
+            cleaned[key] = int(count)
+        return cleaned
+
 
 class VenueLocation(BaseModel):
     """Geographic location for a venue, used by data feed adapters."""
