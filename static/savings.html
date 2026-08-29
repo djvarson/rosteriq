@@ -62,7 +62,7 @@
     .big { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--success); }
     .big small { font-size: 15px; font-weight: 600; color: var(--ink-2); letter-spacing: 0; margin-left: 6px; }
     .kpi { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 18px; }
-    .kpi div { background: var(--well); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+    .kpi > div { background: var(--well); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
     .kpi .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
     .kpi .v { font-size: 20px; font-weight: 800; margin-top: 4px; }
     .list { margin-top: 18px; }
@@ -177,7 +177,7 @@
   const TOOLS = [
     { id: 'deputy',   name: 'Deputy',           sub: 'rostering + time & attendance',  mode: 'per_staff', price: 6.50, on: true,  replace: true },
     { id: 'tanda',    name: 'Tanda / Workforce.com', sub: 'rostering + time & attendance', mode: 'per_staff', price: 7.00, on: false, replace: true },
-    { id: 'restoke',  name: 'Restoke',          sub: 'recipe costing + inventory',     mode: 'per_venue', price: 249,  on: false, replace: true },
+    { id: 'restoke',  name: 'Restoke',          sub: 'recipe costing + inventory',     mode: 'per_venue', price: 249,  on: true,  replace: true },
     { id: 'marketman',name: 'MarketMan',        sub: 'inventory + ordering',           mode: 'per_venue', price: 200,  on: false, replace: true },
     { id: 'clock',    name: 'Standalone time clock app', sub: 'e.g. Clockify, TSheets', mode: 'per_staff', price: 4.00, on: false, replace: true },
     { id: 'comms',    name: 'Team messaging',   sub: 'e.g. Slack, WhatsApp Business — RosterIQ has a moderated team feed',  mode: 'per_staff', price: 0,    on: false, replace: true },
@@ -237,6 +237,7 @@
     el.innerHTML = fmt(Math.abs(saving)) + `<small>/ month ${saving >= 0 ? 'saved' : 'more'}</small>`;
     el.style.color = saving >= 0 ? 'var(--success)' : 'var(--danger)';
     document.getElementById('saving-yr').textContent = (saving >= 0 ? '' : '−') + fmt(Math.abs(saving) * 12);
+    document.getElementById('saving-yr').style.color = saving >= 0 ? '' : 'var(--danger)';
     document.getElementById('cancelled').textContent = cancelled;
     document.getElementById('today').textContent = fmt(today) + '/mo';
     document.getElementById('riq').textContent = fmt(riq) + '/mo';

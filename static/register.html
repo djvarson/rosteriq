@@ -9,7 +9,7 @@
         :root {
             --brand-blue: #F59E0B;
             --brand-blue-hover: #D97706;
-            --navy-dark: #F6F7F9;
+            --navy-dark: #F1F3F6;   /* page ground (house token) */
             --panel-bg: #FFFFFF;
             --card-bg: #FFFFFF;
             --white: #FFFFFF;
@@ -129,9 +129,14 @@
         }
 
         .form-container {
-            max-width: 420px;
+            max-width: 440px;
             width: 100%;
             margin: 0 auto;
+            background: var(--card-bg, #FFFFFF);
+            border: 1px solid var(--border-color, #E5E8ED);
+            border-radius: 14px;
+            padding: 40px;
+            box-shadow: 0 1px 3px rgba(17,24,39,0.06), 0 10px 28px rgba(17,24,39,0.05);
         }
 
         .form-header {
@@ -204,11 +209,14 @@
             color: var(--text-secondary);
         }
 
+        /* Hidden until the user types — four empty grey slivers under a blank
+           field read as a rendering bug, not a meter. */
         .password-strength {
-            display: flex;
+            display: none;
             gap: 4px;
-            margin-top: 8px;
+            margin-top: 10px;
         }
+        .password-strength.visible { display: flex; }
 
         .strength-bar {
             flex: 1;
@@ -485,7 +493,7 @@
                             type="text"
                             id="name"
                             name="name"
-                            placeholder="Dale Ingvarson"
+                            placeholder="Alex Taylor"
                             required
                             autocomplete="name"
                         >
@@ -576,6 +584,8 @@
 
         // Password strength indicator
         passwordInput.addEventListener('input', () => {
+            document.getElementById('passwordStrength')
+                .classList.toggle('visible', passwordInput.value.length > 0);
             const val = passwordInput.value;
             const bars = [
                 document.getElementById('str1'),

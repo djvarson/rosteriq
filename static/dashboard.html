@@ -74,6 +74,8 @@
 
     body {
       font-family: 'Manrope', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    /* form controls do NOT inherit fonts by default — Manrope leaked to Arial on every button */
+    button, input, select, textarea { font-family: inherit; }
       background: var(--light-bg);
       color: var(--text-primary);
       letter-spacing: -0.01em; /* Manrope reads best slightly tightened, per the reference look */
@@ -716,6 +718,9 @@
       gap: 8px;
     }
 
+    .btn:hover { filter: brightness(0.96); }
+    .btn:active { transform: translateY(1px); }
+
     .btn-primary {
       background: var(--brand-blue);
       color: #111827;
@@ -1010,7 +1015,7 @@
       height: 40px;
       border-radius: 50%;
       background: var(--brand-blue);
-      color: white;
+      color: #111827;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1162,6 +1167,8 @@
        RESPONSIVE: Mobile (768px and below)
        ============================================ */
     @media (max-width: 768px) {
+      .page-header .page-title { display: none; }
+      .page-header .page-subtitle { margin-top: 0; }
       /* Hamburger menu */
       .hamburger {
         display: flex;
@@ -3172,7 +3179,7 @@
                 Week of <span id="roster-week-date">—</span>
               </div>
               <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
-                <button class="btn btn-primary btn-small" id="btn-prev-week">← Previous</button>
+                <button class="btn btn-secondary btn-small" id="btn-prev-week">← Previous</button>
                 <button class="btn btn-secondary btn-small" id="btn-next-week">Next →</button>
                 <button class="btn btn-secondary btn-small" onclick="openRosterImport()" title="Paste a roster export from Deputy, Tanda, or a spreadsheet">Import roster</button>
                 <button class="btn btn-primary btn-small" id="btn-roster-generate" onclick="openModal('modal-generate-roster')">Generate Roster</button>
@@ -3180,10 +3187,10 @@
                 <button class="btn btn-secondary btn-small" onclick="exportRosterPDF()" title="Download PDF for printing">PDF</button>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterCSV()" title="Download CSV for Excel">CSV</button>
                 <button class="btn btn-primary btn-small" onclick="publishRoster()" id="btn-publish-roster" title="Publish this roster and notify staff (no integration required)">Publish Roster</button>
-                <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" title="Also push roster to a connected rostering system (Tanda/Deputy/Humanforce)" style="background:rgba(245,158,11,0.1); border-color:var(--brand-blue); color:var(--brand-blue);">Push to System</button>
+                <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" title="Also push roster to a connected rostering system (Tanda/Deputy/Humanforce)">Push to System</button>
                 <span style="display:inline-block; width:1px; height:20px; background:var(--border); margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportDailyRunsheet()" title="Print today's shift runsheet">Runsheet</button>
-                <button class="btn btn-secondary btn-small" onclick="sendRosterToStaff()" id="btn-send-roster" title="Email/SMS roster to all staff" style="background:rgba(34,197,94,0.1); border-color:var(--success); color:var(--success);">Send to Staff</button>
+                <button class="btn btn-secondary btn-small" onclick="sendRosterToStaff()" id="btn-send-roster" title="Email/SMS roster to all staff">Send to Staff</button>
               </div>
             </div>
 
@@ -3551,6 +3558,10 @@
 
       <!-- COMPLIANCE PAGE -->
       <div class="page" id="page-timesheets" data-page="timesheets" style="display: none;">
+        <div class="page-header">
+          <h1 class="page-title">Timesheets</h1>
+          <p class="page-subtitle">Review punches against the roster, approve, and prep payroll</p>
+        </div>
         <div class="card" style="margin-bottom:16px;">
           <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
             <div class="input-group" style="margin:0;">
@@ -3576,7 +3587,7 @@
         </div>
         <div class="card">
           <div style="overflow-x:auto;">
-            <table class="data-table" style="width:100%; border-collapse:collapse;">
+            <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
                 <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
                   <th style="padding:10px 8px;">Staff</th>
@@ -3628,7 +3639,7 @@
             <span id="cv-summary" style="color:var(--text-muted); font-size:13px;"></span>
           </div>
           <div style="overflow-x:auto;">
-            <table class="data-table" style="width:100%; border-collapse:collapse;">
+            <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
                 <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
                   <th style="padding:10px 8px;">Shift</th>
@@ -3662,7 +3673,7 @@
         </div>
         <div class="card">
           <div style="overflow-x:auto;">
-            <table class="data-table" style="width:100%; border-collapse:collapse;">
+            <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
                 <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
                   <th style="padding:10px 8px;">Staff</th>
@@ -3890,7 +3901,7 @@
             <button class="btn btn-primary btn-small" onclick="completeStocktake()">Complete stocktake</button>
           </div>
           <div style="overflow-x:auto;">
-            <table class="data-table" style="width:100%; border-collapse:collapse;">
+            <table class="table" style="width:100%; border-collapse:collapse;">
               <thead><tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
                 <th style="padding:8px;">Item</th><th style="padding:8px;">Expected</th><th style="padding:8px;">Counted</th></tr></thead>
               <tbody id="iv-st-rows"></tbody>
@@ -3901,7 +3912,7 @@
         <div class="card" style="margin-bottom:16px;">
           <h3 style="font-size:15px; margin-bottom:10px;">Stock on hand</h3>
           <div style="overflow-x:auto;">
-            <table class="data-table" style="width:100%; border-collapse:collapse;">
+            <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
                 <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
                   <th style="padding:10px 8px;">Item</th>
@@ -3982,7 +3993,7 @@
             </div>
           </div>
           <div style="overflow-x:auto;">
-            <table class="data-table" style="width:100%; border-collapse:collapse;">
+            <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
                 <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
                   <th style="padding:10px 8px;">Dish</th>
@@ -4008,7 +4019,7 @@
             <code>Item name, qty</code> per line. Names matching your dishes map themselves; strangers come back
             for a one-click mapping that's remembered. The same batch can never be imported twice.
           </p>
-          <textarea id="pi-text" rows="4" placeholder="Chicken Parmigiana, 14&#10;Bowl of Chips, 22&#10;Flat White, 61" style="width:100%;"></textarea>
+          <textarea id="pi-text" rows="4" placeholder="Chicken Parmigiana, 14&#10;Bowl of Chips, 22&#10;Flat White, 61" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); color:var(--text-primary); font-family:ui-monospace,Menlo,monospace; font-size:12.5px; resize:vertical;"></textarea>
           <div style="display:flex; gap:10px; align-items:flex-end; margin-top:8px; flex-wrap:wrap;">
             <div class="input-group" style="margin:0;">
               <label>Sales date</label>
@@ -4044,7 +4055,7 @@
             <button class="btn btn-secondary" onclick="addIngredient()">Add ingredient</button>
           </div>
           <div style="overflow-x:auto;">
-            <table class="data-table" style="width:100%; border-collapse:collapse;">
+            <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
                 <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
                   <th style="padding:10px 8px;">Ingredient</th>
@@ -4831,9 +4842,9 @@
           <!-- Chat Column -->
           <div style="display:flex; flex-direction:column; background:var(--card-bg); border:1px solid var(--border); border-radius:12px; overflow:hidden;">
             <!-- Chat Header -->
-            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--border); background:rgba(14,165,233,0.05);">
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--dark-bg);">
               <div style="display:flex; align-items:center; gap:10px;">
-                <div style="width:36px; height:36px; border-radius:10px; background:linear-gradient(135deg, var(--accent), #0284c7); display:flex; align-items:center; justify-content:center;">
+                <div style="width:36px; height:36px; border-radius:10px; background:var(--brand-blue); display:flex; align-items:center; justify-content:center;">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#fff"/><circle cx="14" cy="10" r="1" fill="#fff"/></svg>
                 </div>
                 <div>
@@ -4847,7 +4858,7 @@
             <!-- Chat Messages -->
             <div id="ai-chat-messages" style="flex:1; overflow-y:auto; padding:20px 24px; display:flex; flex-direction:column; gap:14px;">
               <div class="ai-welcome" style="text-align:center; padding:60px 40px; color:var(--text-muted);">
-                <div style="width:64px; height:64px; border-radius:16px; background:linear-gradient(135deg, var(--accent), #0284c7); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+                <div style="width:64px; height:64px; border-radius:16px; background:var(--brand-blue); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#fff"/><circle cx="14" cy="10" r="1" fill="#fff"/><path d="M9 14h6"/></svg>
                 </div>
                 <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px; font-size:16px;">How can I help?</div>
@@ -4857,7 +4868,7 @@
 
             <!-- Chat Input -->
             <div style="padding:16px 20px; border-top:1px solid var(--border); display:flex; gap:10px; background:rgba(17,24,39,0.03);">
-              <input type="text" id="ai-chat-input" placeholder="Ask RosterIQ AI anything..." style="flex:1; background:var(--sidebar-bg); border:1px solid var(--border); border-radius:10px; padding:12px 16px; color:var(--text-primary); font-size:14px; outline:none; transition:border-color 0.2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendAIMessage();}">
+              <input type="text" id="ai-chat-input" placeholder="Ask RosterIQ AI anything..." style="flex:1; background:var(--dark-bg); border:1px solid var(--border); border-radius:10px; padding:12px 16px; color:var(--text-primary); font-size:14px; outline:none; transition:border-color 0.2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendAIMessage();}">
               <button onclick="sendAIMessage()" id="ai-send-btn" style="background:var(--accent); border:none; border-radius:10px; padding:12px 20px; cursor:pointer; color:#111827; font-weight:600; font-size:14px; white-space:nowrap; transition:opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">Send</button>
             </div>
           </div>
@@ -5853,7 +5864,7 @@ if (state.isDemo) {
   // Add demo banner
   var demoBanner = document.createElement('div');
   demoBanner.id = 'demo-banner';
-  demoBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:linear-gradient(90deg,#F59E0B,#D97706);color:#000;text-align:center;padding:6px 16px;font-size:13px;font-weight:600;letter-spacing:0.5px;';
+  demoBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:#F59E0B;color:#111827;text-align:center;padding:6px 16px;font-size:13px;font-weight:600;letter-spacing:0.5px;';
   demoBanner.innerHTML = 'DEMO MODE — Sample data only. <a href="/static/login.html" style="color:#000;text-decoration:underline;margin-left:8px;">Sign in</a> or <a href="/static/register.html" style="color:#000;text-decoration:underline;">Create an account</a> to connect your real systems.';
   document.body.prepend(demoBanner);
   // Shift everything down so banner doesn't cover logo/content
@@ -6532,7 +6543,7 @@ function renderTimesheets() {
     const chip = t.status === 'approved'
       ? '<span style="background:rgba(34,197,94,.15); color:var(--success); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">APPROVED</span>'
       : (t.status === 'open'
-        ? '<span style="background:rgba(56,189,248,.15); color:#38BDF8; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">ON SHIFT</span>'
+        ? '<span style="background:rgba(34,197,94,.12); color:#15803D; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">ON SHIFT</span>'
         : '<span style="background:rgba(245,158,11,.15); color:var(--brand-blue); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">TO APPROVE</span>');
     const actions = t.status === 'closed'
       ? '<button class="btn btn-primary btn-small" onclick="approveTimesheet(' + i + ')">Approve</button> ' +
@@ -6655,6 +6666,14 @@ async function loadSetupWizard() {
 // ============================================
 // TODAY BRIEFING (morning attention list)
 // ============================================
+function fixPlural(str) {
+  // "1 leave request(s)" -> "1 leave request"; "3 shift(s)" -> "3 shifts".
+  // Nothing says unfinished software like programmer pluralisation in the
+  // first card a venue owner reads.
+  return String(str).replace(/(\d[\d,]*)([^.()]*?)\(s\)/g,
+    (m, n, words) => n.replace(/,/g, '') === '1' ? n + words : n + words + 's');
+}
+
 async function loadBriefing() {
   const vid = (typeof state.currentVenue === 'object' && state.currentVenue?.id)
     ? state.currentVenue.id : state.currentVenue;
@@ -6682,7 +6701,7 @@ async function loadBriefing() {
       html += '<div style="color:var(--success); font-weight:600;">✓ All clear — nothing needs your attention right now.</div>';
     } else {
       html += '<ul style="margin:0; padding-left:18px;">' +
-        b.attention.map(function(a) { return '<li style="padding:2px 0;">' + esc(a) + '</li>'; }).join('') +
+        b.attention.map(function(a) { return '<li style="padding:2px 0;">' + esc(fixPlural(a)) + '</li>'; }).join('') +
         '</ul>';
     }
     body.innerHTML = html;
@@ -7506,7 +7525,7 @@ async function loadUsage() {
         esc(String(r.from).slice(0, 16).replace('T', ' ')) + ' → ' + esc(String(r.to).slice(0, 16).replace('T', ' ')) +
         ' · unexplained variance total: <strong style="color:' + (r.total_variance_value > 0 ? 'var(--danger)' : 'var(--success)') + ';">' +
         formatCurrency(r.total_variance_value) + '</strong> (positive = waste/shrinkage; basis: ' + esc(r.basis) + ')</div>' +
-      '<div style="overflow-x:auto;"><table class="data-table" style="width:100%; border-collapse:collapse;">' +
+      '<div style="overflow-x:auto;"><table class="table" style="width:100%; border-collapse:collapse;">' +
       '<thead><tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">' +
       '<th style="padding:8px;">Item</th><th style="padding:8px;">Opening</th><th style="padding:8px;">Received</th>' +
       '<th style="padding:8px;">Closing</th><th style="padding:8px;">Actual use</th><th style="padding:8px;">Should be</th>' +
@@ -7562,6 +7581,16 @@ async function loadAnnouncements() {
   }
 }
 
+function fmtWhenLocal(iso) {
+  // "29 Aug, 2:15 pm" local — naive server stamps are UTC
+  if (!iso) return '';
+  try {
+    const z = String(iso);
+    const d = new Date(/Z|\+/.test(z) ? z : z + 'Z');
+    return d.toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  } catch (e) { return String(iso).slice(0, 16).replace('T', ' '); }
+}
+
 function renderAnnouncements() {
   const list = document.getElementById('an-list');
   if (!anRows.length) {
@@ -7581,7 +7610,7 @@ function renderAnnouncements() {
         '<div>' +
           '<div style="font-weight:700; font-size:15px;">' + (a.pinned ? '📌 ' : '') + esc(a.title) + '</div>' +
           '<div style="color:var(--text-muted); font-size:13px; margin:6px 0; white-space:pre-wrap;">' + esc(a.body) + '</div>' +
-          '<div style="font-size:12px; color:var(--text-muted);">' + esc(String(a.created_at).slice(0, 16).replace('T', ' ')) + ' · read by ' + a.read_count + '/' + a.staff_count + ' staff · ' + sms + '</div>' +
+          '<div style="font-size:12px; color:var(--text-muted);">' + esc(fmtWhenLocal(a.created_at)) + ' · read by ' + a.read_count + '/' + a.staff_count + ' staff' + (sms ? ' · ' + sms : '') + '</div>' +
         '</div>' +
         '<button class="btn btn-secondary btn-small" onclick="togglePin(' + i + ')">' + (a.pinned ? 'Unpin' : 'Pin') + '</button>' +
       '</div>' +
@@ -8339,11 +8368,11 @@ document.getElementById('ets-save').addEventListener('click', async function() {
 // ============================================
 function updateClock() {
   const now = new Date();
-  const formatted = now.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' }) + ' ' + now.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const formatted = now.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' }) + ' ' + now.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
   document.getElementById('clock').textContent = formatted;
 }
 
-setInterval(updateClock, 1000);
+setInterval(updateClock, 30000);   // minutes display — no per-second flicker
 updateClock();
 
 // Sidebar toggle lives in the mobile-menu init above — a second listener
@@ -8869,6 +8898,18 @@ function showEmptyVenueStates() {
 function loadDemoVenueData() {
   state.employees = demoData.staff;
 
+  // Demo-only recommendations: sample data is clearly bannered as sample, so
+  // showing the venue what this panel DOES is honest here — a real venue
+  // still gets the truthful empty state.
+  var rec = document.getElementById('onshift-recommendations');
+  if (rec) {
+    rec.innerHTML =
+      '<div class="conflict-item warning"><div class="conflict-header"><span></span>' +
+      '<span>Derby crowd surge expected 8–10pm — hold both bar staff past 9:00</span></div></div>' +
+      '<div class="conflict-item info"><div class="conflict-header"><span></span>' +
+      '<span>Kitchen quiet after 8:30 — offering Sarah an early cut saves ~$54</span></div></div>';
+  }
+
   clearState('kpi-row');
   updateDemoDashboardKPIs();
   populateDemoAlerts();
@@ -8891,10 +8932,15 @@ function loadDemoVenueData() {
   if (cpsEl) cpsEl.value = '8';
 
   // Pre-fill Report date fields
+  // Relative dates: a demo whose report ends three months before the header
+  // clock reads as stale canned data in one glance.
+  var _re = new Date(); _re.setDate(_re.getDate() - 1);
+  var _rs = new Date(); _rs.setDate(_rs.getDate() - 30);
+  var _iso = function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   var rsEl = document.getElementById('report-start-date');
-  if (rsEl) rsEl.value = '2026-05-01';
+  if (rsEl) rsEl.value = _iso(_rs);
   var reEl = document.getElementById('report-end-date');
-  if (reEl) reEl.value = '2026-05-30';
+  if (reEl) reEl.value = _iso(_re);
 
   // Pre-fill Notification Dispatch stats for demo
   var seEl = document.getElementById('stat-email');
@@ -8997,6 +9043,9 @@ function _weekHoursByEmployee() {
   return out;
 }
 function renderStaffTable() {
+  // Demo mode keeps the hand-authored rows (award levels, certs, rates) —
+  // re-rendering from the thin demoData wiped them into a page of em-dashes.
+  if (state.isDemo) return;
   var body = document.getElementById('staff-body');
   if (!body) return;
   if (!_staffTableWired) {
@@ -9047,7 +9096,7 @@ function renderStaffTable() {
     var actions = isManager
       ? '<button class="btn btn-secondary btn-small" onclick="showJoinCode(\'' + esc(e.id) + '\')" title="Code the staff member enters in the app to link their login">Join code</button>'
       : '';
-    var emailLine = e.email ? '<div style="font-size:11px;color:var(--text-muted)">' + esc(e.email) + '</div>' : '<div style="font-size:11px;color:#B45309">no email</div>';
+    var emailLine = e.email ? '<div style="font-size:11px;color:var(--text-muted)">' + esc(e.email) + '</div>' : '<div style="font-size:11px;color:var(--text-muted)">invite pending</div>';
     return '<tr>' +
       '<td><div style="font-weight:600">' + esc(e.name || '') + '</div>' + emailLine + '</td>' +
       '<td>' + esc(role) + '</td>' +
@@ -9383,6 +9432,7 @@ function renderAlerts(alerts) {
   if (!container) return;
   const badge = document.getElementById('alerts-count-badge');
   if (alerts.length > 0) {
+    alerts = alerts.slice().sort((a, b) => (a.type === 'danger' ? 0 : 1) - (b.type === 'danger' ? 0 : 1));
     container.innerHTML = alerts.map(a => `
       <div class="alert-item">
         <div class="alert-icon">${a.icon}</div>
@@ -9395,7 +9445,7 @@ function renderAlerts(alerts) {
     `).join('');
     if (badge) {
       var urgentCount = alerts.filter(function(a){ return a.type === 'danger'; }).length;
-      badge.textContent = urgentCount || alerts.length;
+      badge.textContent = alerts.length;
       badge.className = 'dash-section-badge ' + (urgentCount > 0 ? 'danger' : 'warning');
       badge.style.display = 'inline-flex';
     }
@@ -12569,7 +12619,7 @@ function clearAIChat() {
   const container = document.getElementById('ai-chat-messages');
   container.innerHTML = `
     <div class="ai-welcome" style="text-align:center; padding:60px 40px; color:var(--text-muted);">
-      <div style="width:64px; height:64px; border-radius:16px; background:linear-gradient(135deg, var(--accent), #0284c7); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+      <div style="width:64px; height:64px; border-radius:16px; background:var(--brand-blue); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#fff"/><circle cx="14" cy="10" r="1" fill="#fff"/><path d="M9 14h6"/></svg>
       </div>
       <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px; font-size:16px;">How can I help?</div>

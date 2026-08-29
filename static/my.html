@@ -69,6 +69,10 @@
 
     /* Leave form */
     label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 5px; }
+    .btn { transition: filter .15s, transform .1s; }
+    .btn:hover { filter: brightness(0.96); }
+    .btn:active { transform: translateY(1px); }
+    #feed-body { resize: none; }
     input, textarea { width: 100%; background: var(--card-2); border: 1px solid var(--border);
       color: var(--text); border-radius: 10px; padding: 11px 12px; font-size: 15px;
       font-family: inherit; }
@@ -79,6 +83,7 @@
     .leave-row { padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
     .leave-row:last-child { border-bottom: none; }
     .leave-row .dates { font-weight: 600; }
+    .note { color: var(--muted); font-size: 13px; margin-top: 2px; }
     .leave-row .note { color: var(--muted); font-size: 13px; margin-top: 3px; }
 
     /* Tab bar */
@@ -148,7 +153,7 @@
     .sop-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
     .sop-title { font-weight: 700; font-size: 14px; }
     .sop-cat { font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 2px 7px; border-radius: 8px;
-      background: rgba(2,132,199,0.10); color: #0284C7; margin-right: 6px; vertical-align: 1px; }
+      background: var(--card-2); color: var(--muted); margin-right: 6px; vertical-align: 1px; }
     .sop-body { display: none; margin-top: 10px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; color: var(--text); }
     .sop.open .sop-body { display: block; }
     .nolink { text-align: center; padding: 40px 20px; }
@@ -364,6 +369,16 @@ function localIso(d) {
 // Format a server timestamp as a local en-AU short date. Timezone-less strings
 // (e.g. "2026-08-15 23:30:00.123456") are treated as UTC, which is how the
 // backend stores them.
+function fmtWhen(iso) {
+  // "29 Aug, 2:15 pm" in the reader's local time — naive server stamps are UTC
+  if (!iso) return '';
+  try {
+    var z = String(iso);
+    var d = new Date(/Z|\+/.test(z) ? z : z + 'Z');
+    return d.toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  } catch (e) { return String(iso).slice(0, 16).replace('T', ' '); }
+}
+
 function localDay(iso) {
   if (!iso) return '';
   let s = String(iso).trim().replace(' ', 'T');
@@ -512,7 +527,7 @@ async function loadSops() {
       return '<div class="sop" id="sop-' + esc(d.id) + '">' +
         '<div class="sop-head" onclick="document.getElementById(\'sop-' + esc(d.id) + '\').classList.toggle(\'open\')">' +
           '<div><span class="sop-cat">' + esc((d.category || 'sop').toUpperCase()) + '</span><span class="sop-title">' + esc(d.title) + '</span>' +
-            '<div class="note">v' + esc(d.version) + (d.acknowledged ? ' &middot; acknowledged ' + esc(localDay(d.acknowledged_at)) : (needs ? ' &middot; <span style="color:var(--red); font-weight:600;">needs your acknowledgement</span>' : '')) + '</div></div>' +
+            '<div class="note">v' + esc(d.version) + (d.acknowledged ? ' &middot; acknowledged ' + esc(localDay(d.acknowledged_at)) : (needs ? ' &middot; needs your acknowledgement' : '')) + '</div></div>' +
           '<span class="badge ' + (d.acknowledged ? 'approved' : (needs ? 'pending' : 'today')) + '">' + (d.acknowledged ? 'Done' : (needs ? 'Read me' : 'Info')) + '</span>' +
         '</div>' +
         '<div class="sop-body">' + esc(d.body) +
@@ -585,7 +600,7 @@ async function loadHome() {
     const s = byDate[iso];
     cells.push('<div class="week-day' + (s ? ' on' : '') + (iso === todayIso ? ' today' : '') + '">' +
       '<div class="d">' + DOW[d.getDay()] + '</div><div class="n">' + d.getDate() + '</div>' +
-      '<div class="t">' + (s ? esc(s.start.replace(/:00$/, '')) : '&nbsp;') + '</div></div>');
+      '<div class="t">' + (s ? esc(s.start) : '&nbsp;') + '</div></div>');
   }
   week.innerHTML = '<div class="week-strip">' + cells.join('') + '</div>';
 
@@ -710,7 +725,7 @@ async function loadNews() {
           (a.read ? '' : '<span class="badge pending">New</span>') +
         '</div>' +
         '<div class="note" style="white-space:pre-wrap;">' + esc(a.body) + '</div>' +
-        '<div class="note">' + esc(String(a.created_at).slice(0, 16).replace('T', ' ')) + '</div>' +
+        '<div class="note">' + esc(fmtWhen(a.created_at)) + '</div>' +
       '</div>';
     }).join('');
     // Opening the tab counts as reading — receipt back to the manager
