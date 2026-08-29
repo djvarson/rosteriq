@@ -3181,6 +3181,7 @@ class PostgresStore(BaseStore):
                 id TEXT PRIMARY KEY,
                 venue_id TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'open',
+                section TEXT,
                 items JSONB NOT NULL DEFAULT '[]',
                 started_by TEXT,
                 started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -3617,6 +3618,8 @@ class PostgresStore(BaseStore):
             "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS stock_qty NUMERIC DEFAULT 0",
             "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS par_level NUMERIC DEFAULT 0",
             "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS section TEXT DEFAULT 'kitchen'",
+            # NULL section = a whole-venue stocktake (pre-sections behaviour)
+            "ALTER TABLE stocktakes ADD COLUMN IF NOT EXISTS section TEXT",
             # The event log is queried by time, by venue and by category on every
             # Activity/health view. Without these it is a growing seq-scan.
             # Right-to-erasure writes employees.anonymised_at, which existed
@@ -4247,15 +4250,16 @@ class PostgresStore(BaseStore):
         with self._cursor() as cur:
             self._ensure_table(cur, "stocktakes")
             cur.execute("""
-                INSERT INTO stocktakes (id, venue_id, status, items, started_by,
+                INSERT INTO stocktakes (id, venue_id, status, section, items, started_by,
                     started_at, completed_at, total_variance_value, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
                     status=EXCLUDED.status, items=EXCLUDED.items,
                     completed_at=EXCLUDED.completed_at,
                     total_variance_value=EXCLUDED.total_variance_value, updated_at=now()
             """, (
                 st["id"], st["venue_id"], st.get("status", "open"),
+                st.get("section"),
                 _json(st.get("items", [])), st.get("started_by"),
                 st.get("started_at", datetime.utcnow()), st.get("completed_at"),
                 st.get("total_variance_value"),
