@@ -220,6 +220,16 @@ def seed_demo_environment(db) -> None:
     try:
         from rosteriq.routes.menu_costing import seed_starter_menu
         seed_starter_menu(db, DEMO_VENUE_ID)
+        # Self-heal: ingredients seeded before sections existed all backfilled
+        # to "kitchen" — put the coffee stock behind the machine so the demo's
+        # section pills have something to show.
+        try:
+            for ing in db.list_ingredients(DEMO_VENUE_ID) or []:
+                if ing.get("name") in ("Coffee beans", "Milk") and                         (ing.get("section") or "kitchen") == "kitchen":
+                    ing["section"] = "bar"
+                    db.save_ingredient(ing)
+        except Exception:
+            pass
     except Exception:
         pass
 
