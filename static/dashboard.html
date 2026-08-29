@@ -2418,12 +2418,12 @@
           <span>Timesheets</span>
         </div>
         <div class="nav-item" data-page="leave">
-          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M2 12c0-5 4-9 10-9M2 12c0 5 4 9 10 9m10-9c0-5-4-9-10-9m10 9c0 5-4 9-10 9M12 3c2.5 2.4 4 5.5 4 9s-1.5 6.6-4 9c-2.5-2.4-4-5.5-4-9s1.5-6.6 4-9z"/></svg></span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2a.5.5 0 0 0-.5.1l-.4.4a.5.5 0 0 0 .1.8L9 10.5 6.5 14H3.7a.5.5 0 0 0-.35.15l-.3.3a.5.5 0 0 0 .1.8L6 17l1.7 2.85a.5.5 0 0 0 .8.1l.3-.3a.5.5 0 0 0 .15-.35V16.5l3.5-2.5 3.1 5a.5.5 0 0 0 .8.1l.4-.4a.5.5 0 0 0 .1-.5z"/></svg></span>
           <span>Leave</span>
         </div>
         <div class="nav-item" data-page="announcements">
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg></span>
-          <span>Comms &amp; SOPs</span>
+          <span>Comms &amp; Procedures</span>
         </div>
         <div class="nav-item" data-page="inventory">
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg></span>
@@ -3186,6 +3186,7 @@
                 Week of <span id="roster-week-date">—</span>
               </div>
               <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                <span id="roster-section-pills" style="display:inline-flex; gap:6px; margin-right:10px;"></span>
                 <button class="btn btn-secondary btn-small" id="btn-prev-week">← Previous</button>
                 <button class="btn btn-secondary btn-small" id="btn-next-week">Next →</button>
                 <button class="btn btn-secondary btn-small" onclick="openRosterImport()" title="Paste a roster export from Deputy, Tanda, or a spreadsheet">Import roster</button>
@@ -3917,7 +3918,10 @@
         </div>
 
         <div class="card" style="margin-bottom:16px;">
-          <h3 style="font-size:15px; margin-bottom:10px;">Stock on hand</h3>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+            <h3 style="font-size:15px; margin:0;">Stock on hand</h3>
+            <div id="iv-section-pills" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+          </div>
           <div style="overflow-x:auto;">
             <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
@@ -4056,6 +4060,8 @@
             <div class="input-group" style="margin:0;"><label>Name</label><input type="text" id="mi-name" placeholder="Chicken breast" style="width:150px;"></div>
             <div class="input-group" style="margin:0;"><label>Unit</label>
               <select id="mi-unit" style="width:80px;"><option>kg</option><option>g</option><option>l</option><option>ml</option><option>each</option></select></div>
+            <div class="input-group" style="margin:0;"><label>Section</label>
+              <select id="mi-section" style="width:110px;"><option value="kitchen">Kitchen</option><option value="bar">Bar</option><option value="cellar">Cellar</option><option value="front of house">Front of house</option></select></div>
             <div class="input-group" style="margin:0;"><label>Pack size</label><input type="number" id="mi-size" min="0.01" step="0.01" value="1" style="width:90px;"></div>
             <div class="input-group" style="margin:0;"><label>Pack cost $</label><input type="number" id="mi-cost" min="0" step="0.01" style="width:100px;"></div>
             <div class="input-group" style="margin:0;"><label>Supplier</label><input type="text" id="mi-supplier" placeholder="optional" style="width:130px;"></div>
@@ -6261,6 +6267,11 @@ function showPage(pageId) {
     loadSnapshot();
   }
 
+  if (pageId === 'roster') {
+    rosterSectionPills();
+    rosterSetSection(rosterSection);
+  }
+
   if (pageId === 'staff') {
     renderStaffTable();
   }
@@ -7062,6 +7073,7 @@ async function addIngredient() {
         unit: document.getElementById('mi-unit').value,
         purchase_size: size, purchase_cost: cost,
         supplier: document.getElementById('mi-supplier').value.trim(),
+        section: document.getElementById('mi-section').value,
       }),
     });
     showToast(name + ' added ✓', 'success');
@@ -7191,18 +7203,44 @@ async function saveWaste() {
   }
 }
 
+var ivSection = '';               // '' = all sections
+
+function ivSectionPills() {
+  const host = document.getElementById('iv-section-pills');
+  if (!host) return;
+  const sections = Array.from(new Set(ivRows.map(function (r) { return r.section || 'kitchen'; }))).sort();
+  if (sections.length < 2 && !ivSection) { host.innerHTML = ''; return; }
+  const mk = function (val, label) {
+    const on = ivSection === val;
+    return '<button class="btn btn-secondary btn-small" onclick="ivSetSection(\'' + val + '\')" style="' +
+      (on ? 'background:rgba(245,158,11,0.14); border-color:var(--brand-blue); color:var(--text-primary); font-weight:700;' : '') +
+      'text-transform:capitalize;">' + esc(label) + '</button>';
+  };
+  host.innerHTML = mk('', 'All') + sections.map(function (x) { return mk(x, x); }).join('');
+}
+
+function ivSetSection(sec) { ivSection = sec; renderInventory(); }
+
 function renderInventory() {
   const tbody = document.getElementById('iv-rows');
+  ivSectionPills();
   if (!ivRows.length) {
     tbody.innerHTML = '<tr><td colspan="7" style="padding:24px; text-align:center; color:var(--text-muted);">Add ingredients in Menu &amp; Costing, then set stock and par here</td></tr>';
     return;
   }
-  tbody.innerHTML = ivRows.map(function(r, i) {
+  const visible = ivSection ? ivRows.filter(function (r) { return (r.section || 'kitchen') === ivSection; }) : ivRows;
+  if (!visible.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:24px; text-align:center; color:var(--text-muted);">Nothing in this section yet — new ingredients pick their section in Menu &amp; Sales.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = visible.map(function(r) {
+    const i = ivRows.indexOf(r);
+    const chip = '<span style="background:var(--card-2, #F1F3F6); color:var(--text-muted); font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; padding:2px 7px; border-radius:8px; margin-left:6px; vertical-align:1px;">' + esc(r.section || 'kitchen') + '</span>';
     return '<tr style="border-top:1px solid var(--border);">' +
-      '<td style="padding:10px 8px; font-weight:600;">' + esc(r.name) + ' <span style="color:var(--text-muted); font-size:12px;">(' + esc(r.unit || '') + ')</span></td>' +
+      '<td style="padding:10px 8px; font-weight:600;">' + esc(r.name) + ' <span style="color:var(--text-muted); font-size:12px;">(' + esc(r.unit || '') + ')</span>' + chip + '</td>' +
       '<td style="padding:10px 8px; color:var(--text-muted);">' + esc(r.supplier || '—') + '</td>' +
-      '<td style="padding:6px 8px;"><input type="number" min="0" step="0.1" id="iv-stock-' + i + '" value="' + r.stock_qty + '" style="width:80px; padding:6px;"></td>' +
-      '<td style="padding:6px 8px;"><input type="number" min="0" step="0.1" id="iv-par-' + i + '" value="' + r.par_level + '" style="width:80px; padding:6px;"></td>' +
+      '<td style="padding:6px 8px;"><input type="number" min="0" step="0.1" id="iv-stock-' + i + '" value="' + r.stock_qty + '" style="width:80px;"></td>' +
+      '<td style="padding:6px 8px;"><input type="number" min="0" step="0.1" id="iv-par-' + i + '" value="' + r.par_level + '" style="width:80px;"></td>' +
       '<td style="padding:10px 8px;">' + formatCurrency(r.stock_value || 0) + '</td>' +
       '<td style="padding:10px 8px;">' + (r.low ? '<span style="background:rgba(239,68,68,.15); color:var(--danger); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">LOW</span>' : '') + '</td>' +
       '<td style="padding:10px 8px;"><button class="btn btn-secondary btn-small" onclick="saveLevels(' + i + ')">Save</button></td>' +
@@ -9190,7 +9228,10 @@ function populateRealRoster(employees, shifts) {
         cells += '<td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>';
       }
     }
-    return '<tr><td>' + esc(emp.name) + '</td>' + cells + '</tr>';
+    var section = ((emp.skills && emp.skills[0]) || emp.role || '').toLowerCase();
+    return '<tr data-section="' + esc(section) + '"><td>' + esc(emp.name) +
+      (section ? ' <span style="color:var(--text-muted); font-size:11px; text-transform:capitalize;">' + esc(section) + '</span>' : '') +
+      '</td>' + cells + '</tr>';
   }).join('');
 
   tbody.innerHTML = rows;
@@ -9210,6 +9251,41 @@ function populateDemoOnShift() {
 
   const capacity = Math.min((total / 10) * 100, 100);
   document.getElementById('capacity-bar').style.width = capacity + '%';
+}
+
+var rosterSection = '';           // '' = whole venue
+
+function rosterSectionPills() {
+  const host = document.getElementById('roster-section-pills');
+  if (!host) return;
+  // Sections = the venue's roles. Demo and real venues both staff these three;
+  // real venues extend via min_staff keys when present.
+  let sections = ['kitchen', 'bar', 'floor'];
+  try {
+    const venue = state.venues && state.venues.find && state.venues.find(v => v.id === state.currentVenue);
+    const keys = venue && venue.min_staff ? Object.keys(venue.min_staff) : [];
+    if (keys.length) sections = keys;
+  } catch (e) { /* defaults hold */ }
+  const mk = function (val, label) {
+    const on = rosterSection === val;
+    return '<button class="btn btn-secondary btn-small" onclick="rosterSetSection(\'' + val + '\')" style="' +
+      (on ? 'background:rgba(245,158,11,0.14); border-color:var(--brand-blue); color:var(--text-primary); font-weight:700;' : '') +
+      'text-transform:capitalize;">' + esc(label) + '</button>';
+  };
+  host.innerHTML = mk('', 'All') + sections.map(function (x) { return mk(x, x); }).join('');
+}
+
+function rosterSetSection(sec) {
+  rosterSection = sec;
+  rosterSectionPills();
+  // Filter rows: real rows carry data-section; the demo's hand-authored rows
+  // carry the role in their first cell ("Floor (L3)") — match either.
+  document.querySelectorAll('#roster-body tr').forEach(function (tr) {
+    if (!sec) { tr.style.display = ''; return; }
+    const tagged = (tr.getAttribute('data-section') || '').toLowerCase();
+    const firstCell = (tr.cells && tr.cells[0] ? tr.cells[0].textContent : '').toLowerCase();
+    tr.style.display = (tagged === sec || firstCell.indexOf(sec) !== -1) ? '' : 'none';
+  });
 }
 
 function populateDemoRoster() {

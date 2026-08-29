@@ -54,12 +54,18 @@ class IngredientRequest(BaseModel):
     purchase_cost: float = Field(..., ge=0, description="What that purchase costs ($)")
     supplier: str = Field(default="", max_length=120)
     active: bool = True
+    # Which part of the venue owns this stock — "kitchen", "bar", "cellar",
+    # "front of house"… Free strings like roster roles; None on an EDIT means
+    # "keep what it had" (mirroring how stock_qty/par_level survive edits).
+    section: Optional[str] = Field(default=None, max_length=40)
 
     def model_post_init(self, __context) -> None:
         u = self.unit.strip().lower()
         if u not in _VALID_UNITS:
             raise ValueError(f"unit must be one of {sorted(_VALID_UNITS)}")
         object.__setattr__(self, "unit", u)
+        if self.section is not None:
+            object.__setattr__(self, "section", self.section.strip().lower() or None)
 
 
 class RecipeItem(BaseModel):
@@ -204,6 +210,7 @@ async def upsert_ingredient(body: IngredientRequest) -> dict:
         "active": body.active,
         "stock_qty": float((prior or {}).get("stock_qty") or 0),
         "par_level": float((prior or {}).get("par_level") or 0),
+        "section": body.section or (prior or {}).get("section") or "kitchen",
         "created_at": datetime.utcnow(),
     })
     if prior is None:
@@ -313,8 +320,12 @@ _SEED_INGREDIENTS = [
     {"name": "Napoli sauce", "unit": "l", "purchase_size": 3, "purchase_cost": 13.50},
     {"name": "Mozzarella", "unit": "kg", "purchase_size": 2, "purchase_cost": 24.00},
     {"name": "Chips (frozen)", "unit": "kg", "purchase_size": 10, "purchase_cost": 32.00},
-    {"name": "Coffee beans", "unit": "kg", "purchase_size": 1, "purchase_cost": 38.00},
-    {"name": "Milk", "unit": "l", "purchase_size": 10, "purchase_cost": 15.50},
+    # Coffee stock lives behind the machine, not in the kitchen — the seed
+    # demonstrates sections working from the first click.
+    {"name": "Coffee beans", "unit": "kg", "purchase_size": 1, "purchase_cost": 38.00,
+     "section": "bar"},
+    {"name": "Milk", "unit": "l", "purchase_size": 10, "purchase_cost": 15.50,
+     "section": "bar"},
 ]
 
 _SEED_RECIPES = [
@@ -341,6 +352,7 @@ def seed_starter_menu(db, venue_id: str) -> dict:
             "id": f"ing-{uuid.uuid4().hex[:10]}",
             "venue_id": venue_id,
             "name": d["name"], "unit": d["unit"],
+            "section": d.get("section", "kitchen"),
             "purchase_size": d["purchase_size"], "purchase_cost": d["purchase_cost"],
             "cost_per_unit": d["purchase_cost"] / d["purchase_size"],
             "supplier": "", "active": True, "created_at": datetime.utcnow(),

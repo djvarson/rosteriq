@@ -3155,6 +3155,7 @@ class PostgresStore(BaseStore):
                 active BOOLEAN DEFAULT true,
                 stock_qty NUMERIC DEFAULT 0,
                 par_level NUMERIC DEFAULT 0,
+                section TEXT DEFAULT 'kitchen',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
@@ -3615,6 +3616,7 @@ class PostgresStore(BaseStore):
             "UPDATE venues SET tanda_org_id = NULL WHERE tanda_org_id = ''",
             "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS stock_qty NUMERIC DEFAULT 0",
             "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS par_level NUMERIC DEFAULT 0",
+            "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS section TEXT DEFAULT 'kitchen'",
             # The event log is queried by time, by venue and by category on every
             # Activity/health view. Without these it is a growing seq-scan.
             # Right-to-erasure writes employees.anonymised_at, which existed
@@ -3869,20 +3871,21 @@ class PostgresStore(BaseStore):
             self._ensure_table(cur, "ingredients")
             cur.execute("""
                 INSERT INTO ingredients (id, venue_id, name, unit, purchase_size, purchase_cost,
-                    cost_per_unit, supplier, active, stock_qty, par_level, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    cost_per_unit, supplier, active, stock_qty, par_level, section, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, unit=EXCLUDED.unit,
                     purchase_size=EXCLUDED.purchase_size, purchase_cost=EXCLUDED.purchase_cost,
                     cost_per_unit=EXCLUDED.cost_per_unit, supplier=EXCLUDED.supplier,
                     active=EXCLUDED.active, stock_qty=EXCLUDED.stock_qty,
-                    par_level=EXCLUDED.par_level, updated_at=now()
+                    par_level=EXCLUDED.par_level, section=EXCLUDED.section, updated_at=now()
             """, (
                 ing["id"], ing["venue_id"], ing["name"], ing.get("unit", "each"),
                 float(ing.get("purchase_size", 1)), float(ing.get("purchase_cost", 0)),
                 float(ing.get("cost_per_unit", 0)), ing.get("supplier"),
                 ing.get("active", True), float(ing.get("stock_qty", 0) or 0),
                 float(ing.get("par_level", 0) or 0),
+                ing.get("section") or "kitchen",
                 ing.get("created_at", datetime.utcnow()),
             ))
 

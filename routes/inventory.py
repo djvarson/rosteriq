@@ -140,6 +140,7 @@ async def stock_list(venue_id: str = Query(...)) -> dict:
             "name": ing["name"],
             "unit": ing.get("unit"),
             "supplier": ing.get("supplier"),
+            "section": ing.get("section") or "kitchen",
             "stock_qty": stock,
             "par_level": par,
             "cost_per_unit": cpu,
