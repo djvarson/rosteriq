@@ -45,6 +45,28 @@ class AnnouncementBody(BaseModel):
     body: str = Field(..., min_length=1, max_length=2000)
     pinned: bool = False
     send_sms: bool = Field(default=False, description="Also text every staff member with a phone number")
+    # Sections/roles this speaks to (matched against employee roles, same
+    # rule as procedures' applies_to). Empty = the whole venue.
+    audience: list[str] = Field(default_factory=list, max_length=10)
+
+    def model_post_init(self, __context) -> None:
+        cleaned = []
+        for r in self.audience:
+            r = str(r).strip().lower()[:40]
+            if r and r not in cleaned:
+                cleaned.append(r)
+        self.audience = cleaned
+
+
+def _audience_match(audience, emp) -> bool:
+    """Empty audience = everyone. Otherwise the employee's roles (skills)
+    must intersect it, case-insensitively — the same applicability rule
+    procedures use (routes/sops.py), so "bar" means the same people in both."""
+    roles = [str(r).strip().lower() for r in (audience or []) if str(r).strip()]
+    if not roles:
+        return True
+    skills = {str(sk).strip().lower() for sk in (getattr(emp, "skills", None) or [])}
+    return any(r in skills for r in roles)
 
 
 class PinBody(BaseModel):
@@ -52,8 +74,12 @@ class PinBody(BaseModel):
     pinned: bool
 
 
-def _ann_payload(a: dict, staff_count: int) -> dict:
+def _ann_payload(a: dict, staff: list) -> dict:
     read_by = list(a.get("read_by") or [])
+    audience = [str(r) for r in (a.get("audience") or [])]
+    # "3 of 12 read" must count only the people the notice was FOR — a
+    # bar-only notice fully read by the bar shows 2 of 2, not 2 of 12.
+    targeted = [e for e in staff if _audience_match(audience, e)]
     return {
         "id": a["id"],
         "title": a["title"],
@@ -61,8 +87,9 @@ def _ann_payload(a: dict, staff_count: int) -> dict:
         "author_name": a.get("author_name"),
         "pinned": bool(a.get("pinned")),
         "created_at": str(a.get("created_at")),
+        "audience": audience,
         "read_count": len(read_by),
-        "staff_count": staff_count,
+        "staff_count": len(targeted),
         "sms_result": a.get("sms_result"),
     }
 
@@ -87,6 +114,12 @@ async def publish_announcement(body: AnnouncementBody,
     _require_manager(user)
     db = get_db()
     staff = db.get_employees(body.venue_id) or []
+    targeted = [e for e in staff if _audience_match(body.audience, e)]
+    if body.audience and not targeted:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No current staff work {', '.join(body.audience)} — "
+                   "check the section names or send to everyone")
 
     sms_result = None
     if body.send_sms:
@@ -102,7 +135,7 @@ async def publish_announcement(body: AnnouncementBody,
             sent, no_phone, failed, rate_limited = [], [], [], []
             text = f"{body.title}: {body.body}"
             with_phone = []
-            for emp in staff:
+            for emp in targeted:
                 phone = (getattr(emp, "phone", "") or "").strip()
                 if phone:
                     with_phone.append((emp, phone))
@@ -149,6 +182,7 @@ async def publish_announcement(body: AnnouncementBody,
         "author_id": user.user_id,
         "author_name": user.email,
         "pinned": body.pinned,
+        "audience": body.audience,
         "sms_result": sms_result,
         "read_by": [],
         "created_at": datetime.utcnow(),
@@ -156,7 +190,8 @@ async def publish_announcement(body: AnnouncementBody,
     db.save_announcement(ann)
     logger.info(f"Announcement published at {body.venue_id}: {body.title!r}")
     audit("announcement.publish", body.venue_id, "announcement", ann["id"],
-          title=body.title, pinned=body.pinned, staff_count=len(staff),
+          title=body.title, pinned=body.pinned, staff_count=len(targeted),
+          audience=body.audience or None,
           sms_requested=body.send_sms,
           sms_attempted=bool(sms_result and sms_result.get("attempted")),
           sms_sent=(sms_result or {}).get("sent", 0),
@@ -185,14 +220,22 @@ async def venue_announcements(venue_id: str = Query(...),
                               user: UserContext = Depends(get_current_user)) -> dict:
     enforce_venue_access(venue_id)
     db = get_db()
-    staff_count = len(db.get_employees(venue_id) or [])
+    staff = db.get_employees(venue_id) or []
     rows = db.list_announcements(venue_id) or []
-    payloads = [_ann_payload(a, staff_count) for a in rows]
+    is_manager = user.role in ("manager", "owner") or getattr(user, "is_owner", False)
+    if not is_manager:
+        # Staff read this listing too (the demo account is one). A targeted
+        # notice must look the same here as in their /my feed: addressed to
+        # them or to everyone — never someone else's. Their mark-read 404s
+        # on it, so showing it here would be a notice they can't dismiss.
+        emp, evid = _linked_employee(db, user)
+        if evid != venue_id:
+            emp = None  # linked elsewhere: only whole-venue notices here
+        rows = [a for a in rows if _audience_match(a.get("audience"), emp)]
+    payloads = [_ann_payload(a, staff) for a in rows]
     # The stored sms_result names exactly who has no phone number and whose
-    # send failed — a per-person roster only managers should see. Staff who
-    # can read this listing (the demo account is one) get the announcements
-    # without the delivery detail.
-    if user.role not in ("manager", "owner") and not getattr(user, "is_owner", False):
+    # send failed — a per-person roster only managers should see.
+    if not is_manager:
         for pl in payloads:
             pl["sms_result"] = None
     return {"venue_id": venue_id, "count": len(rows),
@@ -229,12 +272,15 @@ async def my_announcements(user: UserContext = Depends(get_current_user)) -> dic
     feed = []
     unread = 0
     for a in rows:
+        if not _audience_match(a.get("audience"), emp):
+            continue
         read = emp.id in (a.get("read_by") or [])
         if not read:
             unread += 1
         feed.append({
             "id": a["id"], "title": a["title"], "body": a["body"],
             "pinned": bool(a.get("pinned")), "created_at": str(a.get("created_at")),
+            "audience": [str(r) for r in (a.get("audience") or [])],
             "read": read,
         })
     return {"linked": True, "count": len(feed), "unread": unread, "announcements": feed}
@@ -248,7 +294,7 @@ async def mark_announcement_read(ann_id: str,
     if not emp:
         raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
     ann = db.get_announcement(ann_id)
-    if not ann or ann.get("venue_id") != vid:
+    if not ann or ann.get("venue_id") != vid or not _audience_match(ann.get("audience"), emp):
         raise HTTPException(status_code=404, detail="Announcement not found")
     read_by = list(ann.get("read_by") or [])
     if emp.id not in read_by:

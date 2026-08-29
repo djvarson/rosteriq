@@ -721,7 +721,8 @@ async function loadNews() {
     card.innerHTML = data.announcements.map(function (a) {
       return '<div class="leave-row">' +
         '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">' +
-          '<span class="dates">' + (a.pinned ? '&#128204; ' : '') + esc(a.title) + '</span>' +
+          '<span class="dates">' + (a.pinned ? '&#128204; ' : '') + esc(a.title) +
+            ((a.audience && a.audience.length) ? ' <span class="badge" style="background:rgba(245,158,11,0.14); text-transform:capitalize;">' + esc(a.audience.join(', ')) + '</span>' : '') + '</span>' +
           (a.read ? '' : '<span class="badge pending">New</span>') +
         '</div>' +
         '<div class="note" style="white-space:pre-wrap;">' + esc(a.body) + '</div>' +

@@ -3321,6 +3321,7 @@ class PostgresStore(BaseStore):
                 author_id TEXT,
                 author_name TEXT,
                 pinned BOOLEAN DEFAULT false,
+                audience JSONB DEFAULT '[]'::jsonb,
                 sms_result JSONB,
                 read_by JSONB DEFAULT '[]'::jsonb,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -3620,6 +3621,8 @@ class PostgresStore(BaseStore):
             "ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS section TEXT DEFAULT 'kitchen'",
             # NULL section = a whole-venue stocktake (pre-sections behaviour)
             "ALTER TABLE stocktakes ADD COLUMN IF NOT EXISTS section TEXT",
+            # [] audience = an announcement for everyone (pre-audience behaviour)
+            "ALTER TABLE announcements ADD COLUMN IF NOT EXISTS audience JSONB DEFAULT '[]'::jsonb",
             # The event log is queried by time, by venue and by category on every
             # Activity/health view. Without these it is a growing seq-scan.
             # Right-to-erasure writes employees.anonymised_at, which existed
@@ -4028,16 +4031,18 @@ class PostgresStore(BaseStore):
             self._ensure_table(cur, "announcements")
             cur.execute("""
                 INSERT INTO announcements (id, venue_id, title, body, author_id,
-                    author_name, pinned, sms_result, read_by, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    author_name, pinned, audience, sms_result, read_by, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
                     title=EXCLUDED.title, body=EXCLUDED.body, pinned=EXCLUDED.pinned,
+                    audience=EXCLUDED.audience,
                     sms_result=EXCLUDED.sms_result, read_by=EXCLUDED.read_by,
                     updated_at=now()
             """, (
                 ann["id"], ann["venue_id"], ann["title"], ann["body"],
                 ann.get("author_id"), ann.get("author_name"),
                 bool(ann.get("pinned", False)),
+                _json(list(ann.get("audience") or [])),
                 _json(ann["sms_result"]) if ann.get("sms_result") is not None else None,
                 _json(list(ann.get("read_by") or [])),
                 ann.get("created_at", datetime.utcnow()),

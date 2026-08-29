@@ -3802,7 +3802,9 @@
                 <select id="sop-category" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; background:var(--dark-bg); color:var(--text-primary);">
                   <option value="sop">SOP — how we do it</option><option value="jsp">JSP — safe work procedure</option><option value="policy">Policy</option><option value="other">Other</option>
                 </select></div>
-              <div class="input-group" style="margin:0;"><label>Applies to (roles, comma-separated; blank = everyone)</label><input type="text" id="sop-roles" placeholder="e.g. kitchen, bar"></div>
+              <div class="input-group" style="margin:0;"><label>Applies to (blank = everyone)</label>
+                <div id="sop-role-pills" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;"></div>
+                <input type="text" id="sop-roles" placeholder="other roles, comma-separated" oninput="sopRolePills()"></div>
             </div>
             <div class="input-group" style="margin-top:12px;"><label>Procedure text</label>
               <textarea id="sop-body" rows="10" maxlength="20000" placeholder="Write it the way you'd say it on the floor. Headings in CAPS, steps as dashes."></textarea></div>
@@ -3827,6 +3829,10 @@
           <div class="input-group">
             <label>Message</label>
             <textarea id="an-body" rows="3" maxlength="2000" placeholder="What the team needs to know"></textarea>
+          </div>
+          <div class="input-group">
+            <label>Send to</label>
+            <div id="an-audience-pills" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
           </div>
           <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap;">
             <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
@@ -7205,19 +7211,22 @@ async function saveWaste() {
 }
 
 var ivSection = '';               // '' = all sections
+var ivPillSections = [];
+function ivPillClick(i) { ivSetSection(i < 0 ? '' : (ivPillSections[i] || '')); }
 
 function ivSectionPills() {
   const host = document.getElementById('iv-section-pills');
   if (!host) return;
   const sections = Array.from(new Set(ivRows.map(function (r) { return r.section || 'kitchen'; }))).sort();
   if (sections.length < 2 && !ivSection) { host.innerHTML = ''; return; }
-  const mk = function (val, label) {
-    const on = ivSection === val;
-    return '<button class="btn btn-secondary btn-small" onclick="ivSetSection(\'' + val + '\')" style="' +
+  ivPillSections = sections;
+  const mk = function (idx, label, on) {
+    return '<button class="btn btn-secondary btn-small" onclick="ivPillClick(' + idx + ')" style="' +
       (on ? 'background:rgba(245,158,11,0.14); border-color:var(--brand-blue); color:var(--text-primary); font-weight:700;' : '') +
       'text-transform:capitalize;">' + esc(label) + '</button>';
   };
-  host.innerHTML = mk('', 'All') + sections.map(function (x) { return mk(x, x); }).join('');
+  host.innerHTML = mk(-1, 'All', ivSection === '') +
+    sections.map(function (x, i) { return mk(i, x, ivSection === x); }).join('');
 }
 
 function ivSetSection(sec) { ivSection = sec; renderInventory(); renderStocktake(); }
@@ -7637,6 +7646,7 @@ async function loadAnnouncements() {
     document.getElementById('an-sms').disabled = !st.configured;
   } catch (e) { /* status is cosmetic */ }
   try {
+    annAudiencePills();
     const data = await fetchAPI('/api/announcements?venue_id=' + encodeURIComponent(state.currentVenue));
     anRows = data.announcements || [];
     renderAnnouncements();
@@ -7672,7 +7682,7 @@ function renderAnnouncements() {
     return '<div class="card" style="margin-bottom:12px;">' +
       '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">' +
         '<div>' +
-          '<div style="font-weight:700; font-size:15px;">' + (a.pinned ? '📌 ' : '') + esc(a.title) + '</div>' +
+          '<div style="font-weight:700; font-size:15px;">' + (a.pinned ? '📌 ' : '') + esc(a.title) + ((a.audience && a.audience.length) ? ' <span style="background:rgba(245,158,11,0.14); color:var(--text-primary); padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; text-transform:capitalize; vertical-align:middle;">' + esc(a.audience.join(', ')) + '</span>' : '') + '</div>' +
           '<div style="color:var(--text-muted); font-size:13px; margin:6px 0; white-space:pre-wrap;">' + esc(a.body) + '</div>' +
           '<div style="font-size:12px; color:var(--text-muted);">' + esc(fmtWhenLocal(a.created_at)) + ' · read by ' + a.read_count + '/' + a.staff_count + ' staff' + (sms ? ' · ' + sms : '') + '</div>' +
         '</div>' +
@@ -7680,6 +7690,32 @@ function renderAnnouncements() {
       '</div>' +
     '</div>';
   }).join('');
+}
+
+let annAudience = [];  // [] = everyone
+let annPillSections = [];
+function annPillClick(i) { annToggleAudience(i < 0 ? '' : (annPillSections[i] || '')); }
+
+function annAudiencePills() {
+  const host = document.getElementById('an-audience-pills');
+  if (!host) return;
+  annPillSections = venueSections();
+  const mk = function (idx, label, on) {
+    return '<button class="btn btn-secondary btn-small" onclick="annPillClick(' + idx + ')" style="' +
+      (on ? 'background:rgba(245,158,11,0.14); border-color:var(--brand-blue); color:var(--text-primary); font-weight:700;' : '') +
+      'text-transform:capitalize;">' + esc(label) + '</button>';
+  };
+  host.innerHTML = mk(-1, 'Everyone', annAudience.length === 0) +
+    annPillSections.map(function (x, i) { return mk(i, x, annAudience.indexOf(x) >= 0); }).join('');
+}
+
+function annToggleAudience(sec) {
+  if (!sec) annAudience = [];
+  else {
+    const i = annAudience.indexOf(sec);
+    if (i >= 0) annAudience.splice(i, 1); else annAudience.push(sec);
+  }
+  annAudiencePills();
 }
 
 async function publishAnnouncement() {
@@ -7694,15 +7730,19 @@ async function publishAnnouncement() {
         venue_id: state.currentVenue, title: title, body: body,
         pinned: document.getElementById('an-pinned').checked,
         send_sms: document.getElementById('an-sms').checked,
+        audience: annAudience,
       }),
     });
     const sms = r.sms_result;
-    showToast('Published' + (sms ? (sms.attempted ? ' · SMS sent to ' + sms.sent : ' · SMS skipped (not configured)') : ''),
+    showToast('Published' + (annAudience.length ? ' to ' + annAudience.join(', ') : '') +
+      (sms ? (sms.attempted ? ' · SMS sent to ' + sms.sent : ' · SMS skipped (not configured)') : ''),
       sms && !sms.attempted ? 'warning' : 'success');
     document.getElementById('an-title').value = '';
     document.getElementById('an-body').value = '';
     document.getElementById('an-pinned').checked = false;
     document.getElementById('an-sms').checked = false;
+    annAudience = [];
+    annAudiencePills();
     loadAnnouncements();
   } catch (e) {
     showToast('Publish failed: ' + e.message, 'error');
@@ -8119,6 +8159,39 @@ async function loadSopLibrary() {
   }).join('');
 }
 
+let sopPillSections = [];
+function sopPillClick(i) { if (i < 0) sopTogglePill(''); else if (sopPillSections[i]) sopTogglePill(sopPillSections[i]); }
+
+function sopRolePills() {
+  const host = document.getElementById('sop-role-pills');
+  if (!host) return;
+  const current = document.getElementById('sop-roles').value.split(',')
+    .map(function (x) { return x.trim().toLowerCase(); }).filter(Boolean);
+  sopPillSections = venueSections();
+  const mk = function (idx, label, on) {
+    return '<button type="button" class="btn btn-secondary btn-small" onclick="sopPillClick(' + idx + ')" style="' +
+      (on ? 'background:rgba(245,158,11,0.14); border-color:var(--brand-blue); color:var(--text-primary); font-weight:700;' : '') +
+      'text-transform:capitalize;">' + esc(label) + '</button>';
+  };
+  host.innerHTML = mk(-1, 'Everyone', current.length === 0) +
+    sopPillSections.map(function (x, i) { return mk(i, x, current.indexOf(x.toLowerCase()) >= 0); }).join('');
+}
+
+function sopTogglePill(sec) {
+  const inp = document.getElementById('sop-roles');
+  let cur = inp.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+  if (!sec) cur = [];
+  else {
+    // Compare lowercased both sides: a venue configured with "Kitchen"
+    // must still toggle, never accumulate duplicates.
+    const low = cur.map(function (x) { return x.toLowerCase(); });
+    const i = low.indexOf(sec.toLowerCase());
+    if (i >= 0) cur.splice(i, 1); else cur.push(sec);
+  }
+  inp.value = cur.join(', ');
+  sopRolePills();
+}
+
 function openSopEditor(i) {
   const ed = document.getElementById('sop-editor');
   const d = (i == null) ? null : sopDocs[i];
@@ -8129,6 +8202,7 @@ function openSopEditor(i) {
   document.getElementById('sop-body').value = d ? d.body : '';
   document.getElementById('sop-req').checked = d ? d.requires_ack !== false : true;
   document.getElementById('sop-editor-note').textContent = d ? 'Changing the title or text publishes v' + (d.version + 1) + ' and asks staff to acknowledge again.' : '';
+  sopRolePills();
   ed.style.display = 'block';
   ed.scrollIntoView({ behavior: 'smooth', block: 'start' });
   document.getElementById('sop-title').focus();
@@ -8849,6 +8923,11 @@ function loadDemoVenue() {
 async function loadVenueData() {
   if (!state.currentVenue) return;
 
+  // A compose audience picked for the old venue must not silently target
+  // the new one.
+  annAudience = [];
+  annAudiencePills();
+
   showLoading('kpi-row', 'card', 5);
 
   try {
@@ -9273,9 +9352,7 @@ function populateDemoOnShift() {
 
 var rosterSection = '';           // '' = whole venue
 
-function rosterSectionPills() {
-  const host = document.getElementById('roster-section-pills');
-  if (!host) return;
+function venueSections() {
   // Sections = the venue's roles. Demo and real venues both staff these three;
   // real venues extend via min_staff keys when present.
   let sections = ['kitchen', 'bar', 'floor'];
@@ -9284,13 +9361,24 @@ function rosterSectionPills() {
     const keys = venue && venue.min_staff ? Object.keys(venue.min_staff) : [];
     if (keys.length) sections = keys;
   } catch (e) { /* defaults hold */ }
-  const mk = function (val, label) {
-    const on = rosterSection === val;
-    return '<button class="btn btn-secondary btn-small" onclick="rosterSetSection(\'' + val + '\')" style="' +
+  return sections;
+}
+
+var rosterPillSections = [];
+function rosterPillClick(i) { rosterSetSection(i < 0 ? '' : (rosterPillSections[i] || '')); }
+
+function rosterSectionPills() {
+  const host = document.getElementById('roster-section-pills');
+  if (!host) return;
+  const sections = venueSections();
+  rosterPillSections = sections;
+  const mk = function (idx, label, on) {
+    return '<button class="btn btn-secondary btn-small" onclick="rosterPillClick(' + idx + ')" style="' +
       (on ? 'background:rgba(245,158,11,0.14); border-color:var(--brand-blue); color:var(--text-primary); font-weight:700;' : '') +
       'text-transform:capitalize;">' + esc(label) + '</button>';
   };
-  host.innerHTML = mk('', 'All') + sections.map(function (x) { return mk(x, x); }).join('');
+  host.innerHTML = mk(-1, 'All', rosterSection === '') +
+    sections.map(function (x, i) { return mk(i, x, rosterSection === x); }).join('');
 }
 
 function rosterSetSection(sec) {
