@@ -127,13 +127,13 @@
             padding: 60px 50px;
             display: flex;
             flex-direction: column;
-            justify-content: center;
+            overflow-y: auto;   /* auto margins centre when there's room, never clip */
         }
 
         .form-container {
             max-width: 440px;
             width: 100%;
-            margin: 0 auto;
+            margin: auto;
             background: var(--card-bg, #FFFFFF);
             border: 1px solid var(--border-color, #E5E8ED);
             border-radius: 14px;
@@ -161,7 +161,7 @@
             margin-bottom: 20px;
         }
 
-        label {
+        .form-group > label {
             display: block;
             font-size: 13px;
             font-weight: 600;
@@ -387,6 +387,7 @@
 
         /* Mobile Responsive */
         @media (max-width: 768px) {
+            .footer-text { margin-top: 28px; }
             .login-container {
                 grid-template-columns: 1fr;
                 height: auto;

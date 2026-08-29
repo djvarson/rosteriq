@@ -40,7 +40,10 @@
     h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 6px; }
     .lede { color: var(--ink-2); font-size: 15px; max-width: 640px; margin-bottom: 26px; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: 1fr; }
+      .grid > div:last-child { order: -1; }   /* the saving headline leads on a phone */
+    }
     .riq-price-grid input { min-width: 0; width: 100%; }
     @media (max-width: 420px) { .riq-price-grid { grid-template-columns: 1fr !important; } }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 22px; box-shadow: var(--shadow); }
@@ -72,7 +75,8 @@
     .row .val { font-weight: 700; }
     .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
     .pill.go { background: rgba(22,163,74,0.12); color: var(--success); }
-    .pill.keep { background: rgba(2,132,199,0.10); color: #0284C7; }
+    .pill.keep { background: var(--well); color: var(--ink-2, #55606E); border: 1px solid var(--border); }
+    .keep-note { font-size: 12px; color: var(--ink-2, #55606E); align-self: center; white-space: nowrap; }
     .note { color: var(--muted); font-size: 12px; margin-top: 16px; }
     .keeps { margin-top: 20px; }
     .keeps .row { font-size: 13px; }
@@ -204,8 +208,10 @@
           <small>${t.sub}</small>
         </div>
         <div class="price">
-          <label>${t.mode === 'per_staff' ? '$ / staff / mo' : t.mode === 'per_venue' ? '$ / venue / mo' : '$ / month'}</label>
-          <input type="number" min="0" step="0.5" data-price="${t.id}" value="${t.price}" ${t.replace ? '' : 'disabled title="Kept, not counted"'}>
+          ${t.replace
+            ? `<label>${t.mode === 'per_staff' ? '$ / staff / mo' : t.mode === 'per_venue' ? '$ / venue / mo' : '$ / month'}</label>
+               <input type="number" min="0" step="0.5" data-price="${t.id}" value="${t.price}">`
+            : '<span class="keep-note">RosterIQ connects to it</span>'}
         </div>
       </div>`).join('');
     box.querySelectorAll('input').forEach(i => i.addEventListener('input', calc));

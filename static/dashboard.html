@@ -76,6 +76,13 @@
       font-family: 'Manrope', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     /* form controls do NOT inherit fonts by default — Manrope leaked to Arial on every button */
     button, input, select, textarea { font-family: inherit; }
+    /* in-table editors (stocktake counts, par levels) — never browser-default */
+    .table input[type="number"], .table input[type="text"],
+    table input[type="number"], table input[type="text"] {
+      font-size: 13px; color: var(--text-primary); background: #FFFFFF;
+      border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; max-width: 110px;
+    }
+    table input:focus { outline: none; border-color: var(--brand-blue); box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
       background: var(--light-bg);
       color: var(--text-primary);
       letter-spacing: -0.01em; /* Manrope reads best slightly tightened, per the reference look */
@@ -3322,7 +3329,7 @@
               <div>
                 <div class="kpi-label">Capacity</div>
                 <div class="progress-bar" style="height: 12px; margin-bottom: 8px;">
-                  <div class="progress-fill" id="capacity-bar" style="width: 0%; background: linear-gradient(90deg, var(--success), var(--warning));"></div>
+                  <div class="progress-fill" id="capacity-bar" style="width: 0%; background: var(--brand-blue);"></div>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; font-size: 12px;">
                   <div><strong id="kitchen-count">0</strong> kitchen</div>
@@ -7570,7 +7577,8 @@ async function loadAnnouncements() {
     const st = await fetchAPI('/api/sms/status?venue_id=' + encodeURIComponent(state.currentVenue));
     document.getElementById('an-sms-status').textContent =
       st.configured ? '(via ' + (st.provider || 'sms') + ' ✓)'
-                    : '(not configured — texts will be skipped)';
+                    : '(connect Twilio or MessageMedia to enable)';
+    document.getElementById('an-sms').disabled = !st.configured;
   } catch (e) { /* status is cosmetic */ }
   try {
     const data = await fetchAPI('/api/announcements?venue_id=' + encodeURIComponent(state.currentVenue));
@@ -8768,7 +8776,7 @@ function loadDemoVenue() {
   state.currentVenue = demoData.venue.id;
   state.isDemo = true;
   const select = document.getElementById('venue-select');
-  select.innerHTML = `<option value="${esc(demoData.venue.id)}">${esc(demoData.venue.name)} (Demo)</option>`;
+  select.innerHTML = `<option value="${esc(demoData.venue.id)}">${esc(demoData.venue.name)}</option>`;
   select.value = state.currentVenue;
   connectionManager.hide();
   loadDemoVenueData();
@@ -8941,6 +8949,27 @@ function loadDemoVenueData() {
   if (rsEl) rsEl.value = _iso(_rs);
   var reEl = document.getElementById('report-end-date');
   if (reEl) reEl.value = _iso(_re);
+  // Rows that end YESTERDAY — a summary ending months before the header
+  // clock reads as canned data at a glance.
+  var repBody = document.getElementById('report-body');
+  if (repBody) {
+    var repRows = [
+      { rev: 4850, lab: 1420, pct: 29.3, cov: 142, staff: 8, ok: true },
+      { rev: 5210, lab: 1655, pct: 31.8, cov: 156, staff: 9, ok: false },
+      { rev: 4420, lab: 1265, pct: 28.6, cov: 128, staff: 7, ok: true },
+      { rev: 4980, lab: 1515, pct: 30.4, cov: 149, staff: 8, ok: true },
+      { rev: 4310, lab: 1200, pct: 27.9, cov: 121, staff: 7, ok: true },
+    ];
+    repBody.innerHTML = repRows.map(function (r, i) {
+      var d = new Date(); d.setDate(d.getDate() - 1 - i);
+      var label = d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      var badge = r.ok ? '<span class="alert-badge badge-success">✓ Optimal</span>'
+                       : '<span class="alert-badge badge-warning">Watch</span>';
+      return '<tr><td>' + label + '</td><td>$' + r.rev.toLocaleString() + '</td><td>$' +
+        r.lab.toLocaleString() + '</td><td>' + r.pct.toFixed(1) + '%</td><td>' + r.cov +
+        '</td><td>' + r.staff + '</td><td>' + badge + '</td></tr>';
+    }).join('');
+  }
 
   // Pre-fill Notification Dispatch stats for demo
   var seEl = document.getElementById('stat-email');
@@ -9190,21 +9219,9 @@ function populateDemoRoster() {
   monday.setDate(now.getDate() + (now.getDay() === 0 ? -6 : 1 - now.getDay()));
   document.getElementById('roster-week-date').textContent = monday.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 
-  const rosterData = demoData.roster_week.staff;
-  const tbody = document.getElementById('roster-body');
-  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-  const shifts = { 'shift-optimal': ['9-5pm', '5-11pm', '6-11pm', '10-5pm'], 'off': 'Off' };
-
-  tbody.innerHTML = rosterData.map((row, idx) => {
-    const cells = days.map(day => {
-      if (row[day] === 'off') {
-        return '<td style="background: var(--dark-bg); color: var(--text-muted);">Off</td>';
-      }
-      const shiftTime = shifts['shift-optimal'][idx % shifts['shift-optimal'].length];
-      return '<td><span class="shift-cell shift-optimal">' + shiftTime + '</span></td>';
-    }).join('');
-    return '<tr><td>' + esc(row.name) + '</td>' + cells + '</tr>';
-  }).join('');
+  // The hand-authored tbody (role sublabels, AI-suggested badges, penalty
+  // notes) tells a richer story than anything generated from the thin
+  // demoData — keep it; only the date and the cost summary are dynamic.
 
   // Populate cost summary
   const totalCost = 8420;
@@ -9226,7 +9243,7 @@ function populateDemoReportCharts() {
         labels: days,
         datasets: [
           { label: 'Revenue', data: [3200, 3800, 4100, 3900, 5200, 6100, 4800], backgroundColor: 'rgba(245,158,11,0.7)', borderRadius: 4 },
-          { label: 'Labour Cost', data: [960, 1140, 1230, 1170, 1560, 1830, 1440], backgroundColor: 'rgba(239,68,68,0.7)', borderRadius: 4 },
+          { label: 'Labour Cost', data: [960, 1140, 1230, 1170, 1560, 1830, 1440], backgroundColor: 'rgba(17,24,39,0.45)', borderRadius: 4 },
         ],
       },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } },
@@ -9244,7 +9261,7 @@ function populateDemoReportCharts() {
         labels: days,
         datasets: [{
           label: 'Labour %',
-          data: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0],
+          data: [29.1, 31.4, 28.6, 30.2, 27.9, 32.8, 30.5],
           borderColor: '#F59E0B',
           backgroundColor: 'rgba(245,158,11,0.1)',
           fill: true,
