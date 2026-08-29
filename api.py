@@ -1530,6 +1530,11 @@ class GenerateRosterRequest(BaseModel):
     venue_id: str
     week_start: date
     covers_per_staff: float = DEFAULT_COVERS_PER_STAFF
+    # Weekly labour budget cap in AUD. The generator trims to fit — most
+    # expensive shifts first — but never below the venue's min_staff coverage;
+    # an unmeetable budget is REPORTED, not silently satisfied by an unsafe
+    # roster.
+    weekly_budget: Optional[float] = None
 
 
 class DailyRosterRequest(BaseModel):
@@ -2782,6 +2787,16 @@ async def generate_roster(req: GenerateRosterRequest):
         if removed_for_leave:
             roster.shifts = kept
 
+    budget_report = None
+    if req.weekly_budget is not None and req.weekly_budget <= 0:
+        raise HTTPException(400, "weekly_budget must be a positive AUD amount")
+    if req.weekly_budget:
+        from rosteriq.roster_optimiser import apply_budget_cap
+        budget_report = apply_budget_cap(
+            roster, employees, venue.state, Decimal(str(req.weekly_budget)),
+            min_staff_by_role=getattr(venue, "min_staff", None) or {},
+        )
+
     _store["rosters"][roster.id] = roster
     try:
         from rosteriq.services.events import audit as _audit
@@ -2790,7 +2805,10 @@ async def generate_roster(req: GenerateRosterRequest):
                week_end=roster.week_end.isoformat(),
                shifts=len(roster.shifts), employees=len(employees),
                removed_for_leave=len(removed_for_leave),
-               total_cost=str(roster.total_cost) if roster.total_cost is not None else None)
+               total_cost=str(roster.total_cost) if roster.total_cost is not None else None,
+               budget_cap=req.weekly_budget,
+               budget_met=(budget_report or {}).get("met"),
+               budget_cuts=len((budget_report or {}).get("removed", [])))
     except Exception:
         pass
 
@@ -2806,6 +2824,13 @@ async def generate_roster(req: GenerateRosterRequest):
     except Exception as e:
         logger.warning(f"Failed to broadcast roster update: {e}")
 
+    if budget_report is not None:
+        # Same payload as ever, plus the budget outcome — an unmet budget must
+        # arrive as words a manager sees, not vanish into a saved roster.
+        from fastapi.encoders import jsonable_encoder
+        out = jsonable_encoder(roster)
+        out["budget"] = budget_report
+        return out
     return roster
 
 

@@ -266,13 +266,13 @@ GEMINI_TOOLS = [
         },
         {
             "name": "generate_roster",
-            "description": "Generate an optimised roster for a date range using RosterIQ's AI engine. Returns the proposed roster with cost estimates.",
+            "description": "Generate an optimised roster for a date range using RosterIQ's AI engine. Accepts an optional weekly labour budget cap — the engine trims the most expensive shifts to fit but NEVER cuts below the venue's minimum coverage, and says so when a budget can't be met. Returns the proposed roster with cost estimates; nothing is created until the manager approves.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {
                     "start_date": {"type": "STRING", "description": "Start date YYYY-MM-DD"},
                     "end_date": {"type": "STRING", "description": "End date YYYY-MM-DD"},
-                    "budget_limit": {"type": "NUMBER", "description": "Optional daily labour budget cap in AUD"},
+                    "budget_limit": {"type": "NUMBER", "description": "Optional WEEKLY labour budget cap in AUD (e.g. 8000). The engine trims to fit, never below minimum coverage."},
                 },
                 "required": ["start_date", "end_date"],
             },

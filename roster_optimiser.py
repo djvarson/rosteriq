@@ -859,3 +859,101 @@ def suggest_improvements(
             )
 
     return suggestions
+
+
+# ============================================================================
+# Budget reconciliation
+# ============================================================================
+
+def apply_budget_cap(
+    roster: Roster,
+    employees: list[Employee],
+    state: State,
+    weekly_budget: Decimal,
+    min_staff_by_role: dict = None,
+) -> dict:
+    """Trim a generated roster to a weekly labour budget — Tanda-style
+    "auto-adjust to budget", with one integrity rule theirs doesn't state:
+    NEVER cut below the venue's minimum coverage. If the budget can't be met
+    without breaking coverage, the roster stops at the coverage floor and the
+    report says so plainly, instead of silently rostering an unsafe service.
+
+    Cuts remove whole shifts, most expensive first (biggest savings, fewest
+    people affected). A shift is removable only if, for every hour it spans,
+    the remaining same-role shifts still meet the venue's min_staff for that
+    role. Mutates roster.shifts / roster.total_cost in place.
+
+    Returns a report dict:
+        {"cap", "initial_cost", "final_cost", "met", "removed": [...], "note"}
+    """
+    min_staff_by_role = min_staff_by_role or {}
+    emp_dict = {e.id: e for e in employees}
+    initial_cost = roster.total_cost if roster.total_cost is not None else \
+        calculate_roster_cost(roster, emp_dict, state)
+    weekly_budget = Decimal(str(weekly_budget))
+
+    report = {
+        "cap": float(weekly_budget),
+        "initial_cost": float(initial_cost),
+        "final_cost": float(initial_cost),
+        "met": initial_cost <= weekly_budget,
+        "removed": [],
+        "note": "",
+    }
+    if report["met"]:
+        report["note"] = "Already within budget — nothing was cut."
+        return report
+
+    def _covering(shifts, day, role):
+        """hour -> count of shifts of this role covering that hour on day."""
+        cover = defaultdict(int)
+        for s in shifts:
+            if s.date != day or s.role != role:
+                continue
+            end_hour = s.end_time.hour + (1 if s.end_time.minute else 0)
+            for h in range(s.start_time.hour, max(end_hour, s.start_time.hour + 1)):
+                cover[h] += 1
+        return cover
+
+    def _removable(shift, shifts):
+        floor = int(min_staff_by_role.get(shift.role, 0) or 0)
+        if floor <= 0:
+            return True
+        cover = _covering(shifts, shift.date, shift.role)
+        end_hour = shift.end_time.hour + (1 if shift.end_time.minute else 0)
+        for h in range(shift.start_time.hour, max(end_hour, shift.start_time.hour + 1)):
+            if cover[h] - 1 < floor:
+                return False
+        return True
+
+    current_cost = initial_cost
+    while current_cost > weekly_budget:
+        candidates = [s for s in roster.shifts if _removable(s, roster.shifts)]
+        if not candidates:
+            break
+        # most expensive first: fastest route under the cap
+        victim = max(candidates, key=lambda s: s.cost or Decimal("0"))
+        roster.shifts = [s for s in roster.shifts if s.id != victim.id]
+        emp = emp_dict.get(victim.employee_id)
+        report["removed"].append({
+            "shift_id": victim.id,
+            "employee": emp.name if emp else victim.employee_id,
+            "date": victim.date.isoformat(),
+            "role": victim.role,
+            "cost": float(victim.cost or 0),
+        })
+        # weekly OT means cost must be recomputed, not decremented
+        current_cost = calculate_roster_cost(roster, emp_dict, state)
+
+    roster.total_cost = current_cost
+    report["final_cost"] = float(current_cost)
+    report["met"] = current_cost <= weekly_budget
+    if report["met"]:
+        report["note"] = (f"Cut {len(report['removed'])} shift(s) to come in "
+                          f"under ${float(weekly_budget):,.0f}.")
+    else:
+        report["note"] = (f"Could not reach ${float(weekly_budget):,.0f} without "
+                          "dropping below your minimum coverage — stopped at the "
+                          f"coverage floor (${float(current_cost):,.0f}). Raise the "
+                          "budget or lower min staff in venue settings.")
+    return report

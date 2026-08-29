@@ -237,23 +237,55 @@ async def execute_action(body: ActionRequest) -> dict:
     """
     db = get_db()
     action_type = body.action_type
+    from rosteriq.middleware.tenant import enforce_venue_access
+    enforce_venue_access(body.venue_id)
 
-    # NOTE: these AI-suggested actions are not yet wired to the execution engines.
-    # They previously returned a fabricated success ("Message sent to 8 staff",
-    # "Roster generation queued") while doing NOTHING — dangerous on the messaging
-    # path especially. Until they're wired to the real engines (roster generator /
-    # shift update / notification hub) they FAIL LOUD and point at the working UI,
-    # so a manager is never misled into thinking staff were notified.
     try:
-        known = {"generate_roster", "adjust_shift", "send_message"}
+        if action_type == "generate_roster":
+            # WIRED to the real engine: same path as POST /rosters/generate,
+            # so venue scoping, cold-start forecasts, approved-leave removal,
+            # audit events and the budget cap all apply identically. Clicking
+            # the confirmation button IS the approval — nothing was created
+            # before it.
+            from datetime import date as _date, timedelta as _td
+            from rosteriq.api import generate_roster as _generate, GenerateRosterRequest
+
+            params = body.params or {}
+            try:
+                start = _date.fromisoformat(str(params.get("start_date")))
+            except Exception:
+                raise HTTPException(status_code=400,
+                                    detail="generate_roster needs start_date (YYYY-MM-DD)")
+            week_start = start - _td(days=start.weekday())    # clamp to Monday
+            budget = params.get("budget_limit")
+            req = GenerateRosterRequest(
+                venue_id=body.venue_id,
+                week_start=week_start,
+                **({"weekly_budget": float(budget)} if budget else {}),
+            )
+            result = await _generate(req)
+            if isinstance(result, dict):
+                shifts = len(result.get("shifts") or [])
+                cost = result.get("total_cost")
+                budget_rep = result.get("budget")
+            else:
+                shifts = len(result.shifts)
+                cost = result.total_cost
+                budget_rep = None
+            msg = (f"Roster generated for the week of {week_start}: "
+                   f"{shifts} shifts, ${float(cost):,.0f} labour.")
+            if budget_rep:
+                msg += " " + budget_rep.get("note", "")
+            return {"status": "done", "action_type": action_type,
+                    "message": msg, "budget": budget_rep, "redirect": "roster"}
+
+        known = {"adjust_shift", "send_message"}
         if action_type in known:
-            redirect = {
-                "generate_roster": "roster",
-                "adjust_shift": "roster",
-                "send_message": "staff",
-            }[action_type]
+            # Still deliberately unwired: these mutate individual shifts /
+            # message real people. They FAIL LOUD and point at the working UI
+            # rather than fabricate success.
+            redirect = {"adjust_shift": "roster", "send_message": "staff"}[action_type]
             guidance = {
-                "generate_roster": "Open the Roster tab and click Generate to build the roster.",
                 "adjust_shift": "Edit the shift directly in the Roster tab.",
                 "send_message": "Use the Staff tab to message your team — the AI shortcut isn't wired yet.",
             }[action_type]
