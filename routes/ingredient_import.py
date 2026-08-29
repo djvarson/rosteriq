@@ -42,6 +42,7 @@ _SIZE_KEYS = {"pack size", "size", "purchase size", "pack qty", "quantity",
 _COST_KEYS = {"cost", "price", "pack cost", "purchase cost", "unit cost",
               "buy price", "cost price"}
 _SUPPLIER_KEYS = {"supplier", "vendor", "brand"}
+_SECTION_KEYS = {"section", "department", "dept", "area", "station"}
 
 # Normalise messy unit strings onto the 5 costing units.
 _UNIT_ALIASES = {
@@ -88,10 +89,12 @@ async def import_ingredients(body: IngredientImportBody) -> dict:
         return str(h).strip().lower()
     header = [_norm(h) for h in rows[0]]
     has_header = any(h in (_NAME_KEYS | _COST_KEYS | _SIZE_KEYS) for h in header)
-    col = {"name": None, "unit": None, "size": None, "cost": None, "supplier": None}
+    col = {"name": None, "unit": None, "size": None, "cost": None,
+           "supplier": None, "section": None}
     if has_header:
         keymap = [("name", _NAME_KEYS), ("unit", _UNIT_KEYS), ("size", _SIZE_KEYS),
-                  ("cost", _COST_KEYS), ("supplier", _SUPPLIER_KEYS)]
+                  ("cost", _COST_KEYS), ("supplier", _SUPPLIER_KEYS),
+                  ("section", _SECTION_KEYS)]
         for idx, h in enumerate(header):
             for field, keys in keymap:
                 if col[field] is None and h in keys:
@@ -129,6 +132,7 @@ async def import_ingredients(body: IngredientImportBody) -> dict:
         if cost is None:
             cost = 0.0  # unknown cost -> 0, owner fills it in later
         supplier = cell("supplier")
+        section = cell("section").strip().lower() or "kitchen"
 
         try:
             db.save_ingredient({
@@ -137,13 +141,14 @@ async def import_ingredients(body: IngredientImportBody) -> dict:
                 "name": name, "unit": unit,
                 "purchase_size": size, "purchase_cost": cost,
                 "cost_per_unit": (cost / size) if size else 0.0,
-                "supplier": supplier, "active": True,
+                "supplier": supplier, "section": section, "active": True,
                 "stock_qty": 0, "par_level": 0,
                 "created_at": now,
             })
             existing_names.add(name.lower())
             created.append({"name": name, "unit": unit, "pack_size": size,
-                            "pack_cost": cost, "supplier": supplier or None})
+                            "pack_cost": cost, "supplier": supplier or None,
+                            "section": section})
         except Exception as e:
             skipped.append({"row": i, "name": name, "reason": f"invalid: {e}"})
 

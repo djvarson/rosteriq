@@ -52,6 +52,9 @@ class LevelsBody(BaseModel):
 
 class StocktakeStartBody(BaseModel):
     venue_id: str
+    # Count ONE part of the venue: the chef takes the kitchen while the bar
+    # manager takes the cellar. None = the whole venue, as before.
+    section: Optional[str] = None
 
 
 class StocktakeCountBody(BaseModel):
@@ -68,6 +71,9 @@ class StocktakeCompleteBody(BaseModel):
 
 class OrderDraftBody(BaseModel):
     venue_id: str
+    # Draft only one section's below-par stock (the bar manager orders the
+    # bar). None = everything, as before.
+    section: Optional[str] = None
 
 
 class OrderStatusBody(BaseModel):
@@ -179,20 +185,42 @@ async def start_stocktake(body: StocktakeStartBody) -> dict:
     """Open a stocktake: snapshots every ingredient's expected level."""
     enforce_venue_access(body.venue_id)
     db = get_db()
+    section = (body.section or "").strip().lower() or None
+
+    # Concurrency rules mirror the real ritual: the chef counts the kitchen
+    # WHILE the bar manager counts the cellar — different sections may run at
+    # once. But two counts of the SAME stock can't (their snapshots would
+    # fight), so: a whole-venue stocktake blocks everything, and any open
+    # count blocks a whole-venue start.
     for st in db.list_stocktakes(body.venue_id) or []:
-        if st.get("status") == "open":
+        if st.get("status") != "open":
+            continue
+        open_section = st.get("section") or None
+        if open_section is None:
             raise HTTPException(status_code=409,
-                                detail="A stocktake is already open — complete it first")
+                                detail="A whole-venue stocktake is already open — complete it first")
+        if section is None:
+            raise HTTPException(status_code=409,
+                                detail=f"A {open_section} stocktake is open — complete it "
+                                       "before starting a whole-venue count")
+        if open_section == section:
+            raise HTTPException(status_code=409,
+                                detail=f"A {section} stocktake is already open — complete it first")
+
     ingredients = [i for i in (db.list_ingredients(body.venue_id) or [])
-                   if i.get("active", True)]
+                   if i.get("active", True)
+                   and (section is None or (i.get("section") or "kitchen") == section)]
     if not ingredients:
         raise HTTPException(status_code=422,
-                            detail="No ingredients to count — add them in Menu & Costing first")
+                            detail=(f"No ingredients in the {section} section yet"
+                                    if section else
+                                    "No ingredients to count — add them in Menu & Costing first"))
     tenant = get_tenant_context_optional()
     st = {
         "id": f"st-{uuid.uuid4().hex[:10]}",
         "venue_id": body.venue_id,
         "status": "open",
+        "section": section,
         "started_by": tenant.user_id if tenant else None,
         "items": [{
             "ingredient_id": i["id"],
@@ -209,7 +237,8 @@ async def start_stocktake(body: StocktakeStartBody) -> dict:
     }
     db.save_stocktake(st)
     audit("stocktake.start", body.venue_id, "stocktake", st["id"], item_count=len(st["items"]))
-    return {"status": "open", "stocktake_id": st["id"], "item_count": len(st["items"])}
+    return {"status": "open", "stocktake_id": st["id"], "section": section,
+            "item_count": len(st["items"])}
 
 
 @router.post("/stocktake/count")
@@ -292,6 +321,7 @@ async def stocktake_history(venue_id: str = Query(...)) -> dict:
     rows = db.list_stocktakes(venue_id) or []
     return {"venue_id": venue_id, "count": len(rows), "stocktakes": [{
         "id": s["id"], "status": s.get("status"),
+        "section": s.get("section"),
         "started_at": str(s.get("started_at")),
         "completed_at": str(s.get("completed_at")) if s.get("completed_at") else None,
         "total_variance_value": s.get("total_variance_value"),
@@ -317,9 +347,12 @@ async def draft_orders(body: OrderDraftBody) -> dict:
             for item in existing.get("items", []):
                 already_covered.add(item.get("ingredient_id"))
 
+    section = (body.section or "").strip().lower() or None
     by_supplier: dict = {}
     for ing in db.list_ingredients(body.venue_id) or []:
         if not ing.get("active", True) or ing["id"] in already_covered:
+            continue
+        if section is not None and (ing.get("section") or "kitchen") != section:
             continue
         stock = float(ing.get("stock_qty") or 0)
         par = float(ing.get("par_level") or 0)

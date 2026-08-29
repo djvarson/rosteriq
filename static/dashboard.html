@@ -3905,7 +3905,7 @@
 
         <div class="card" id="iv-st-card" style="margin-bottom:16px; display:none;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <h3 style="font-size:15px;">Stocktake in progress — count what's actually there</h3>
+            <h3 style="font-size:15px;" id="iv-st-title">Stocktake in progress — count what's actually there</h3>
             <button class="btn btn-primary btn-small" onclick="completeStocktake()">Complete stocktake</button>
           </div>
           <div style="overflow-x:auto;">
@@ -7111,6 +7111,7 @@ async function savePrice(i) {
 // ============================================
 let ivRows = [];
 let ivOpenStocktake = null;
+let ivOpenStocktakes = [];
 let ivOrders = [];
 let siLines = [];
 
@@ -7127,7 +7128,7 @@ async function loadInventory() {
   }
   try {
     const st = await fetchAPI('/api/inventory/stocktakes?venue_id=' + encodeURIComponent(state.currentVenue));
-    ivOpenStocktake = (st.stocktakes || []).find(function(s) { return s.status === 'open'; }) || null;
+    ivOpenStocktakes = (st.stocktakes || []).filter(function(s) { return s.status === 'open'; });
     renderStocktake();
   } catch (e) { /* card stays hidden */ }
   try {
@@ -7219,7 +7220,7 @@ function ivSectionPills() {
   host.innerHTML = mk('', 'All') + sections.map(function (x) { return mk(x, x); }).join('');
 }
 
-function ivSetSection(sec) { ivSection = sec; renderInventory(); }
+function ivSetSection(sec) { ivSection = sec; renderInventory(); renderStocktake(); }
 
 function renderInventory() {
   const tbody = document.getElementById('iv-rows');
@@ -7270,12 +7271,27 @@ async function saveLevels(i) {
   }
 }
 
+function ivPickStocktake() {
+  // Sections count concurrently: show the one matching the active pill.
+  if (ivSection) return ivOpenStocktakes.find(function(s) { return (s.section || null) === ivSection; }) || null;
+  return ivOpenStocktakes.find(function(s) { return !s.section; }) || ivOpenStocktakes[0] || null;
+}
+
 function renderStocktake() {
   const card = document.getElementById('iv-st-card');
   const btn = document.getElementById('iv-st-btn');
-  if (!ivOpenStocktake) { card.style.display = 'none'; btn.disabled = false; return; }
-  btn.disabled = true;
+  ivOpenStocktake = ivPickStocktake();
+  btn.textContent = ivSection ? ('Start ' + ivSection + ' stocktake') : 'Start stocktake';
+  // Blocked when this scope already has an open count, a whole-venue count is
+  // open, or "All" is selected while any section is mid-count.
+  btn.disabled = !!ivOpenStocktake ||
+    ivOpenStocktakes.some(function(s) { return !s.section; }) ||
+    (!ivSection && ivOpenStocktakes.length > 0);
+  if (!ivOpenStocktake) { card.style.display = 'none'; return; }
   card.style.display = 'block';
+  document.getElementById('iv-st-title').textContent = ivOpenStocktake.section
+    ? (ivOpenStocktake.section.charAt(0).toUpperCase() + ivOpenStocktake.section.slice(1) + " stocktake in progress — count what's actually there")
+    : "Stocktake in progress — count what's actually there";
   document.getElementById('iv-st-rows').innerHTML = ivOpenStocktake.items.map(function(it, i) {
     return '<tr style="border-top:1px solid var(--border);">' +
       '<td style="padding:8px; font-weight:600;">' + esc(it.name) + ' <span style="color:var(--text-muted); font-size:12px;">(' + esc(it.unit || '') + ')</span></td>' +
@@ -7288,9 +7304,11 @@ function renderStocktake() {
 async function startStocktake() {
   try {
     await fetchAPI('/api/inventory/stocktake/start', {
-      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue }),
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue, section: ivSection || null }),
     });
-    showToast('Stocktake started — count everything, then Complete', 'success');
+    showToast(ivSection
+      ? (ivSection.charAt(0).toUpperCase() + ivSection.slice(1) + ' stocktake started — count that section, then Complete')
+      : 'Stocktake started — count everything, then Complete', 'success');
     loadInventory();
   } catch (e) {
     showToast(e.message, 'error');
@@ -7583,9 +7601,9 @@ async function loadUsage() {
 async function draftOrders() {
   try {
     const r = await fetchAPI('/api/inventory/order/draft', {
-      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue }),
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue, section: ivSection || null }),
     });
-    showToast('Drafted ' + r.orders.length + ' order(s) — review below', 'success');
+    showToast('Drafted ' + r.orders.length + ' order(s)' + (ivSection ? ' for ' + ivSection : '') + ' — review below', 'success');
     loadInventory();
   } catch (e) {
     showToast(e.message, 'error');
