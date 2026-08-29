@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#F6F7F9">
+  <meta name="theme-color" content="#F1F3F6">
   <title>What you can cancel — RosterIQ</title>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #F6F7F9;
+      --bg: #F1F3F6;
       --card: #FFFFFF;
       --well: #F1F3F6;
       --border: #E5E8ED;
@@ -26,11 +26,12 @@
       font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: var(--bg); color: var(--ink);
       letter-spacing: -0.01em; line-height: 1.45;
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility;
     }
     .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 20px 64px; }
     header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
     .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; }
-    .brand span { color: var(--amber); }
+    .brand-name span { color: var(--amber); }
     .brand svg { width: 32px; height: 36px; }
     .btn { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); background: var(--card);
       color: var(--ink); border-radius: 10px; padding: 9px 16px; font: inherit; font-weight: 600; font-size: 14px; cursor: pointer; text-decoration: none; }
@@ -51,33 +52,34 @@
     .field { margin-bottom: 14px; }
     .field label { display: block; font-size: 12px; font-weight: 600; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
     .field input[type=number], .field select { width: 100%; font: inherit; font-size: 15px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--ink); }
+    .field input[type=number] { text-align: right; font-variant-numeric: tabular-nums; }
     .field input:focus, .field select:focus { outline: none; border-color: var(--amber); box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
     .tool { display: grid; grid-template-columns: 1fr 120px; gap: 10px; align-items: end; padding: 12px 0; border-top: 1px solid var(--border); }
     .tool:first-of-type { border-top: 0; padding-top: 0; }
     .tool .name { font-weight: 600; font-size: 14px; }
-    .tool .name small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .tool .name small { display: block; font-weight: 500; color: var(--ink-2); font-size: 12px; margin-top: 2px; }
     .tool .price { text-align: right; }
-    .tool .price label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; display: block; margin-bottom: 4px; }
-    .tool .price input { width: 100%; font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; text-align: right; }
+    .tool .price label { font-size: 12px; color: var(--ink-2); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 4px; }
+    .tool .price input { width: 100%; font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; text-align: right; font-variant-numeric: tabular-nums; }
     .chk { display: flex; align-items: center; gap: 10px; }
     .chk input { width: 18px; height: 18px; accent-color: var(--amber); }
     .totals { position: sticky; top: 20px; }
-    .big { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--success); }
+    .big { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--success); font-variant-numeric: tabular-nums; }
     .big small { font-size: 15px; font-weight: 600; color: var(--ink-2); letter-spacing: 0; margin-left: 6px; }
     .kpi { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 18px; }
-    .kpi > div { background: var(--well); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
-    .kpi .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
-    .kpi .v { font-size: 20px; font-weight: 800; margin-top: 4px; }
+    .kpi > div { background: var(--well); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between; }
+    .kpi .l { font-size: 11px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+    .kpi .v { font-size: 20px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
     .list { margin-top: 18px; }
-    .list h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
+    .list h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); font-weight: 700; margin-bottom: 8px; }
     .row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
     .row:last-child { border-bottom: 0; }
-    .row .val { font-weight: 700; }
+    .row .val { font-weight: 700; font-variant-numeric: tabular-nums; }
     .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
     .pill.go { background: rgba(22,163,74,0.12); color: var(--success); }
     .pill.keep { background: var(--well); color: var(--ink-2, #55606E); border: 1px solid var(--border); }
     .keep-note { font-size: 12px; color: var(--ink-2, #55606E); align-self: center; white-space: nowrap; }
-    .note { color: var(--muted); font-size: 12px; margin-top: 16px; }
+    .note { color: var(--ink-2); font-size: 12px; margin-top: 16px; }
     .keeps { margin-top: 20px; }
     .keeps .row { font-size: 13px; }
     .hub { margin-top: 20px; padding: 16px 18px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3); border-radius: 12px; font-size: 14px; }
@@ -102,7 +104,7 @@
         <line x1="4" y1="32" x2="34" y2="32" stroke="#f59e0b" stroke-width="1.5"/>
         <line x1="8" y1="37" x2="30" y2="37" stroke="#d97706" stroke-width="1.5"/>
       </svg>
-      Roster<span>IQ</span>
+      <span class="brand-name">Roster<span>IQ</span></span>
     </div>
     <div class="no-print" style="display:flex; gap:8px;">
       <button class="btn" onclick="window.print()">Print / PDF</button>
@@ -210,7 +212,7 @@
         <div class="price">
           ${t.replace
             ? `<label>${t.mode === 'per_staff' ? '$ / staff / mo' : t.mode === 'per_venue' ? '$ / venue / mo' : '$ / month'}</label>
-               <input type="number" min="0" step="0.5" data-price="${t.id}" value="${t.price}">`
+               <input type="number" min="0" step="0.5" data-price="${t.id}" value="${t.price.toFixed(2)}">`
             : '<span class="keep-note">RosterIQ connects to it</span>'}
         </div>
       </div>`).join('');
@@ -226,7 +228,10 @@
     TOOLS.forEach(t => {
       const on = document.querySelector(`[data-id="${t.id}"]`).checked;
       t.on = on;
-      const p = +document.querySelector(`[data-price="${t.id}"]`).value || 0;
+      // Keep-tools render no price input — reading .value off null killed
+      // calc() mid-loop and froze the headline at $0/month saved.
+      const priceEl = document.querySelector(`[data-price="${t.id}"]`);
+      const p = priceEl ? (+priceEl.value || 0) : 0;
       t.price = p;
       if (!on) return;
       if (t.replace) {

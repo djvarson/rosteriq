@@ -20,7 +20,9 @@
       window._chartReady = true;
       Chart.defaults.color = '#55606E';
       Chart.defaults.borderColor = 'rgba(17,24,39,0.08)';
-      Chart.defaults.plugins.legend.labels.color = '#94A3B8';
+      Chart.defaults.font.family = "'Manrope', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+      Chart.defaults.font.size = 12;
+      Chart.defaults.plugins.legend.labels.color = '#55606E';
       console.log('Chart.js loaded from: ' + src);
       window._chartCallbacks.forEach(function(fn) { try { fn(); } catch(e) { console.warn('Chart callback error:', e); } });
       window._chartCallbacks = [];
@@ -52,7 +54,7 @@
       --light-bg: #F6F7F9;
       --text-primary: #111827;
       --text-secondary: #55606E;
-      --text-muted: #8A94A1;
+      --text-muted: #6B7280; /* gray-500: 4.8:1 on white — muted, never mushy */
       --brand-blue: #F59E0B;
       --brand-accent: #D97706;
       --success: #16A34A;
@@ -74,6 +76,12 @@
 
     body {
       font-family: 'Manrope', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--light-bg);
+      color: var(--text-primary);
+      letter-spacing: -0.01em; /* Manrope reads best slightly tightened, per the reference look */
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
     /* form controls do NOT inherit fonts by default — Manrope leaked to Arial on every button */
     button, input, select, textarea { font-family: inherit; }
     /* in-table editors (stocktake counts, par levels) — never browser-default */
@@ -83,9 +91,6 @@
       border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; max-width: 110px;
     }
     table input:focus { outline: none; border-color: var(--brand-blue); box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
-      background: var(--light-bg);
-      color: var(--text-primary);
-      letter-spacing: -0.01em; /* Manrope reads best slightly tightened, per the reference look */
     }
 
     /* ============================================
@@ -362,7 +367,7 @@
 
     .page-title {
       font-size: 20px;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: -0.3px;
       color: var(--text-primary);
       margin-bottom: 4px;
@@ -416,6 +421,7 @@
     }
 
     .kpi-value {
+      font-variant-numeric: tabular-nums;
       font-size: 24px;
       font-weight: 700;
       color: var(--text-primary);
@@ -502,10 +508,10 @@
 
     .chart-title {
       font-size: 12px;
-      font-weight: 500;
+      font-weight: 700;
       color: var(--text-secondary);
       text-transform: uppercase;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.05em;
       margin-bottom: 10px;
       display: flex;
       align-items: center;
@@ -546,6 +552,7 @@
       border: 1px solid var(--border);
       padding: 12px;
       color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
     }
 
     .roster-table tbody tr:nth-child(even) {
@@ -557,6 +564,7 @@
     }
 
     .shift-cell {
+      display: inline-block;
       padding: 8px 12px;
       border-radius: 6px;
       font-weight: 600;
@@ -572,7 +580,7 @@
 
     .shift-warning {
       background: rgba(245, 158, 11, 0.1);
-      color: var(--warning);
+      color: #B45309; /* amber text on amber tint must darken to stay legible */
     }
 
     .shift-danger {
@@ -622,10 +630,10 @@
       position: absolute;
       top: -6px;
       right: -4px;
-      font-size: 8px;
+      font-size: 9px;
       font-weight: 700;
       background: var(--brand-blue);
-      color: #000;
+      color: var(--text-primary);
       padding: 1px 4px;
       border-radius: 3px;
       line-height: 1;
@@ -832,6 +840,7 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
+      font-variant-numeric: tabular-nums;
     }
 
     .table th {
@@ -843,6 +852,8 @@
       color: var(--text-muted);
       text-align: left;
       white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
 
     .table td {
@@ -1590,10 +1601,10 @@
     }
 
     .dash-section-title {
-      font-size: 13px;
-      font-weight: 600;
+      font-size: 12px;
+      font-weight: 700;
       color: var(--text-primary);
-      letter-spacing: 0.3px;
+      letter-spacing: 0.05em;
       text-transform: uppercase;
     }
 
@@ -2358,18 +2369,13 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-logo">
       <svg viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="14" cy="10" r="5" fill="none" stroke="#f59e0b" stroke-width="1.5"/>
-        <path d="M8 22 Q8 16 14 16 Q20 16 20 22" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round"/>
-        <circle cx="26" cy="12" r="4" fill="none" stroke="#d97706" stroke-width="1.2"/>
-        <path d="M21 22 Q21 18 26 18 Q31 18 31 22" fill="none" stroke="#d97706" stroke-width="1.2" stroke-linecap="round"/>
-        <circle cx="6" cy="14" r="3.5" fill="none" stroke="#d97706" stroke-width="1.0" opacity="0.6"/>
-        <path d="M1 24 Q1 20 6 20 Q11 20 11 24" fill="none" stroke="#d97706" stroke-width="1.0" stroke-linecap="round" opacity="0.6"/>
-        <rect x="0" y="29" width="32" height="1" rx="0.5" fill="#f59e0b" opacity="0.3"/>
-        <rect x="0" y="32" width="32" height="1" rx="0.5" fill="#f59e0b" opacity="0.2"/>
-        <rect x="0" y="35" width="32" height="1" rx="0.5" fill="#f59e0b" opacity="0.15"/>
-        <rect x="2" y="29" width="8" height="1" rx="0.5" fill="#f59e0b" opacity="0.8"/>
-        <rect x="14" y="32" width="10" height="1" rx="0.5" fill="#d97706" opacity="0.7"/>
-        <rect x="6" y="35" width="6" height="1" rx="0.5" fill="#f59e0b" opacity="0.6"/>
+        <circle cx="14" cy="10" r="5" fill="none" stroke="#f59e0b" stroke-width="2"/>
+        <path d="M8 22 Q8 16 14 16 Q20 16 20 22" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="26" cy="12" r="4" fill="none" stroke="#d97706" stroke-width="1.75"/>
+        <path d="M21 22 Q21 18 26 18 Q31 18 31 22" fill="none" stroke="#d97706" stroke-width="1.75" stroke-linecap="round"/>
+        <rect x="2" y="28" width="12" height="2" rx="1" fill="#f59e0b"/>
+        <rect x="14" y="32" width="14" height="2" rx="1" fill="#d97706" opacity="0.8"/>
+        <rect x="6" y="36" width="8" height="2" rx="1" fill="#f59e0b" opacity="0.6"/>
       </svg>
       <div class="sidebar-logo-text">Roster<span>IQ</span></div>
     </div>
@@ -2418,7 +2424,7 @@
           <span>Timesheets</span>
         </div>
         <div class="nav-item" data-page="leave">
-          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2a.5.5 0 0 0-.5.1l-.4.4a.5.5 0 0 0 .1.8L9 10.5 6.5 14H3.7a.5.5 0 0 0-.35.15l-.3.3a.5.5 0 0 0 .1.8L6 17l1.7 2.85a.5.5 0 0 0 .8.1l.3-.3a.5.5 0 0 0 .15-.35V16.5l3.5-2.5 3.1 5a.5.5 0 0 0 .8.1l.4-.4a.5.5 0 0 0 .1-.5z"/></svg></span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2a.5.5 0 0 0-.5.1l-.4.4a.5.5 0 0 0 .1.8L9 10.5 6.5 14H3.7a.5.5 0 0 0-.35.15l-.3.3a.5.5 0 0 0 .1.8L6 17l1.7 2.85a.5.5 0 0 0 .8.1l.3-.3a.5.5 0 0 0 .15-.35V16.5l3.5-2.5 3.1 5a.5.5 0 0 0 .8.1l.4-.4a.5.5 0 0 0 .1-.5z"/></svg></span>
           <span>Leave</span>
         </div>
         <div class="nav-item" data-page="announcements">
@@ -2442,7 +2448,7 @@
           <span>Reports</span>
         </div>
         <div class="nav-item" onclick="window.open('/timeclock','_blank')" style="cursor:pointer;">
-          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg></span>
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2h4"/><path d="m12 14 3-3"/><circle cx="12" cy="14" r="8"/></svg></span>
           <span>Time Clock</span>
         </div>
         <div class="nav-item" onclick="window.location.href='/connections'" style="cursor:pointer;">
@@ -3597,7 +3603,7 @@
           <div style="overflow-x:auto;">
             <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
-                <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                <tr>
                   <th style="padding:10px 8px;">Staff</th>
                   <th style="padding:10px 8px;">Date</th>
                   <th style="padding:10px 8px;">In</th>
@@ -3649,7 +3655,7 @@
           <div style="overflow-x:auto;">
             <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
-                <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                <tr>
                   <th style="padding:10px 8px;">Shift</th>
                   <th style="padding:10px 8px;">Who can't work</th>
                   <th style="padding:10px 8px;">Reason</th>
@@ -3683,7 +3689,7 @@
           <div style="overflow-x:auto;">
             <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
-                <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                <tr>
                   <th style="padding:10px 8px;">Staff</th>
                   <th style="padding:10px 8px;">From</th>
                   <th style="padding:10px 8px;">To</th>
@@ -3856,11 +3862,11 @@
         </div>
         <div class="card" style="margin-bottom:16px;">
           <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
-            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Stock value</div>
+            <div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Stock value</div>
               <div style="font-size:22px; font-weight:800;" id="iv-value">—</div></div>
-            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Below par</div>
+            <div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Below par</div>
               <div style="font-size:22px; font-weight:800;" id="iv-low">—</div></div>
-            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Waste (30d)</div>
+            <div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Waste (30d)</div>
               <div style="font-size:22px; font-weight:800; color:var(--danger);" id="iv-waste">—</div></div>
             <div style="margin-left:auto; display:flex; gap:10px;">
               <button class="btn btn-secondary" id="iv-st-btn" onclick="startStocktake()">Start stocktake</button>
@@ -3916,7 +3922,7 @@
           </div>
           <div style="overflow-x:auto;">
             <table class="table" style="width:100%; border-collapse:collapse;">
-              <thead><tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+              <thead><tr>
                 <th style="padding:8px;">Item</th><th style="padding:8px;">Expected</th><th style="padding:8px;">Counted</th></tr></thead>
               <tbody id="iv-st-rows"></tbody>
             </table>
@@ -3931,7 +3937,7 @@
           <div style="overflow-x:auto;">
             <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
-                <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                <tr>
                   <th style="padding:10px 8px;">Item</th>
                   <th style="padding:10px 8px;">Supplier</th>
                   <th style="padding:10px 8px;">On hand</th>
@@ -3974,13 +3980,13 @@
         </div>
         <div class="card" style="margin-bottom:16px;">
           <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
-            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Revenue (7d, inc GST)</div>
+            <div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Revenue (7d, inc GST)</div>
               <div style="font-size:22px; font-weight:800;" id="ms-rev">—</div></div>
-            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">COGS (7d)</div>
+            <div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">COGS (7d)</div>
               <div style="font-size:22px; font-weight:800;" id="ms-cogs">—</div></div>
-            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Gross profit (7d)</div>
+            <div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Gross profit (7d)</div>
               <div style="font-size:22px; font-weight:800;" id="ms-gp">—</div></div>
-            <div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Food cost %</div>
+            <div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Food cost %</div>
               <div style="font-size:22px; font-weight:800;" id="ms-fc">—</div></div>
             <button class="btn btn-secondary" id="ms-seed-btn" style="margin-left:auto; display:none;" onclick="seedMenu()">Seed starter menu</button>
           </div>
@@ -4012,7 +4018,7 @@
           <div style="overflow-x:auto;">
             <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
-                <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                <tr>
                   <th style="padding:10px 8px;">Dish</th>
                   <th style="padding:10px 8px;">Cost/portion</th>
                   <th style="padding:10px 8px;">Sell (inc GST)</th>
@@ -4076,7 +4082,7 @@
           <div style="overflow-x:auto;">
             <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
-                <tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">
+                <tr>
                   <th style="padding:10px 8px;">Ingredient</th>
                   <th style="padding:10px 8px;">Pack</th>
                   <th style="padding:10px 8px;">Pack cost</th>
@@ -4404,7 +4410,7 @@
         <!-- Date Range Picker -->
         <div class="grid-1">
           <div class="card">
-            <div class="chart-title">Report Filters</div>
+            <h3 style="font-size:15px; margin-bottom:10px;">Report filters</h3>
             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
               <div class="input-group">
                 <label>Start Date</label>
@@ -4451,7 +4457,7 @@
         <div class="grid-1">
           <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-              <div class="chart-title" style="margin: 0;">Performance Summary</div>
+              <h3 style="font-size:15px; margin:0;">Performance summary</h3>
               <button class="btn btn-secondary btn-small" id="btn-export-csv">Export CSV</button>
             </div>
             <div class="table-container">
@@ -4896,7 +4902,7 @@
           <div style="display:flex; flex-direction:column; gap:16px; overflow-y:auto;">
             <!-- Quick Questions -->
             <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px;">
-              <div style="font-weight:600; font-size:13px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px;">Quick Questions</div>
+              <div style="font-weight:600; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px;">Quick Questions</div>
               <div style="display:flex; flex-direction:column; gap:8px;">
                 <button onclick="aiQuickQuestion('Am I adequately staffed this week?')" class="ai-quick-btn" style="text-align:left; width:100%; padding:10px 14px; border-radius:8px;">Staffing this week?</button>
                 <button onclick="aiQuickQuestion('What are my labour costs looking like?')" class="ai-quick-btn" style="text-align:left; width:100%; padding:10px 14px; border-radius:8px;">Labour costs?</button>
@@ -4910,7 +4916,7 @@
             <!-- AI Insights -->
             <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px;" id="ai-page-insights">
               <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
-                <div style="font-weight:600; font-size:13px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">AI Insights</div>
+                <div style="font-weight:600; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">AI Insights</div>
                 <button onclick="loadAIInsights()" style="background:none; border:1px solid var(--border); border-radius:6px; padding:3px 8px; cursor:pointer; color:var(--text-muted); font-size:11px; transition:all 0.2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">Refresh</button>
               </div>
               <div id="ai-page-insights-cards" style="display:flex; flex-direction:column; gap:10px;">
@@ -4920,22 +4926,22 @@
 
             <!-- Capabilities -->
             <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:16px;">
-              <div style="font-weight:600; font-size:13px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px;">What I Can Do</div>
+              <div style="font-weight:600; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px;">What I Can Do</div>
               <div style="display:flex; flex-direction:column; gap:10px; font-size:13px; color:var(--text-secondary);">
                 <div style="display:flex; align-items:flex-start; gap:8px;">
-                  <span style="color:var(--accent); font-size:16px; line-height:1;">&#9679;</span>
+                  <span style="width:7px; height:7px; border-radius:50%; background:var(--accent); flex:none; margin-top:6px;"></span>
                   <span>Analyse staffing levels and labour costs in real time</span>
                 </div>
                 <div style="display:flex; align-items:flex-start; gap:8px;">
-                  <span style="color:#22c55e; font-size:16px; line-height:1;">&#9679;</span>
+                  <span style="width:7px; height:7px; border-radius:50%; background:var(--accent); flex:none; margin-top:6px;"></span>
                   <span>Generate optimised rosters based on demand</span>
                 </div>
                 <div style="display:flex; align-items:flex-start; gap:8px;">
-                  <span style="color:#f59e0b; font-size:16px; line-height:1;">&#9679;</span>
+                  <span style="width:7px; height:7px; border-radius:50%; background:var(--accent); flex:none; margin-top:6px;"></span>
                   <span>Flag compliance risks and award breaches</span>
                 </div>
                 <div style="display:flex; align-items:flex-start; gap:8px;">
-                  <span style="color:#ef4444; font-size:16px; line-height:1;">&#9679;</span>
+                  <span style="width:7px; height:7px; border-radius:50%; background:var(--accent); flex:none; margin-top:6px;"></span>
                   <span>Find available staff for emergency cover</span>
                 </div>
               </div>
@@ -6757,7 +6763,7 @@ async function loadSnapshot() {
     chip.textContent = s.prime_cost_pct == null ? '' : ('Prime cost ' + s.prime_cost_pct + '% · ' + bandLabel);
     chip.style.color = bandColor;
     const cell = function(label, value, sub) {
-      return '<div style="background:var(--card-2,#F1F3F6); border:1px solid var(--border); border-radius:12px; padding:14px;">' +
+      return '<div style="background:var(--card-2,#F1F3F6); border:1px solid var(--border); border-radius:8px; padding:14px;">' +
         '<div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;">' + label + '</div>' +
         '<div style="font-size:22px; font-weight:800; margin-top:4px;">' + value + '</div>' +
         (sub ? '<div style="font-size:12px; color:var(--text-muted); margin-top:2px;">' + sub + '</div>' : '') +
@@ -7598,7 +7604,7 @@ async function loadUsage() {
         ' · unexplained variance total: <strong style="color:' + (r.total_variance_value > 0 ? 'var(--danger)' : 'var(--success)') + ';">' +
         formatCurrency(r.total_variance_value) + '</strong> (positive = waste/shrinkage; basis: ' + esc(r.basis) + ')</div>' +
       '<div style="overflow-x:auto;"><table class="table" style="width:100%; border-collapse:collapse;">' +
-      '<thead><tr style="text-align:left; color:var(--text-muted); font-size:12px; text-transform:uppercase;">' +
+      '<thead><tr>' +
       '<th style="padding:8px;">Item</th><th style="padding:8px;">Opening</th><th style="padding:8px;">Received</th>' +
       '<th style="padding:8px;">Closing</th><th style="padding:8px;">Actual use</th><th style="padding:8px;">Should be</th>' +
       '<th style="padding:8px;">Variance</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
@@ -7682,7 +7688,7 @@ function renderAnnouncements() {
     return '<div class="card" style="margin-bottom:12px;">' +
       '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">' +
         '<div>' +
-          '<div style="font-weight:700; font-size:15px;">' + (a.pinned ? '📌 ' : '') + esc(a.title) + ((a.audience && a.audience.length) ? ' <span style="background:rgba(245,158,11,0.14); color:var(--text-primary); padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; text-transform:capitalize; vertical-align:middle;">' + esc(a.audience.join(', ')) + '</span>' : '') + '</div>' +
+          '<div style="font-weight:700; font-size:15px;">' + (a.pinned ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2" stroke-linejoin="round" style="vertical-align:-2px; margin-right:3px;"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg> ' : '') + esc(a.title) + ((a.audience && a.audience.length) ? ' <span style="background:rgba(245,158,11,0.14); color:var(--text-primary); padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; text-transform:capitalize; vertical-align:middle;">' + esc(a.audience.join(', ')) + '</span>' : '') + '</div>' +
           '<div style="color:var(--text-muted); font-size:13px; margin:6px 0; white-space:pre-wrap;">' + esc(a.body) + '</div>' +
           '<div style="font-size:12px; color:var(--text-muted);">' + esc(fmtWhenLocal(a.created_at)) + ' · read by ' + a.read_count + '/' + a.staff_count + ' staff' + (sms ? ' · ' + sms : '') + '</div>' +
         '</div>' +
@@ -7819,7 +7825,7 @@ async function loadManagerFeed() {
     return '<div class="card" style="margin-bottom:12px;' + (p.pinned ? ' border-color:rgba(245,158,11,0.5);' : '') + '">' +
       '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">' +
         '<div style="flex:1; min-width:0;">' +
-          '<div style="font-weight:700; font-size:14px;">' + (p.pinned ? '📌 ' : '') + esc(p.author_name) +
+          '<div style="font-weight:700; font-size:14px;">' + (p.pinned ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2" stroke-linejoin="round" style="vertical-align:-2px; margin-right:3px;"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg> ' : '') + esc(p.author_name) +
             '<span style="font-weight:600; font-size:11px; color:var(--text-muted); margin-left:6px;">' + (p.author_role === 'manager' ? 'Manager' : 'Staff') + ' · ' + _ago(p.created_at) + '</span></div>' +
           '<div style="font-size:14px; margin:6px 0 8px; white-space:pre-wrap;">' + esc(p.body) + '</div>' +
           '<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">' + reacts + '</div>' +
@@ -8411,9 +8417,9 @@ async function preparePayroll() {
       : '';
     box.innerHTML =
       '<div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">' +
-        '<div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Staff</div><div style="font-size:20px; font-weight:800;">' + batch.employee_count + '</div></div>' +
-        '<div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Gross</div><div style="font-size:20px; font-weight:800;">' + formatCurrency(parseFloat(batch.total_gross)) + '</div></div>' +
-        '<div><div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Super</div><div style="font-size:20px; font-weight:800;">' + formatCurrency(parseFloat(batch.total_super)) + '</div></div>' +
+        '<div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Staff</div><div style="font-size:20px; font-weight:800;">' + batch.employee_count + '</div></div>' +
+        '<div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Gross</div><div style="font-size:20px; font-weight:800;">' + formatCurrency(parseFloat(batch.total_gross)) + '</div></div>' +
+        '<div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Super</div><div style="font-size:20px; font-weight:800;">' + formatCurrency(parseFloat(batch.total_super)) + '</div></div>' +
         '<a class="btn btn-secondary" style="margin-left:auto;" href="/api/payroll/batch/' + esc(batch.batch_id) + '/csv?venue_id=' + encodeURIComponent(state.currentVenue) + '" onclick="return downloadPayrollCsv(event, \'' + esc(batch.batch_id) + '\')">Download accountant CSV</a>' +
       '</div>' +
       '<div style="color:var(--text-muted); font-size:12px; margin-top:8px;">Figures are prepared for review — RosterIQ never pays anyone. Have your payroll advisor sign off award rates before running pays.</div>' +
@@ -9428,7 +9434,7 @@ function populateDemoReportCharts() {
           { label: 'Labour Cost', data: [960, 1140, 1230, 1170, 1560, 1830, 1440], backgroundColor: 'rgba(17,24,39,0.45)', borderRadius: 4 },
         ],
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, pointStyle: 'line', boxWidth: 24 } } } },
     });
   }
 
@@ -9452,11 +9458,12 @@ function populateDemoReportCharts() {
           label: 'Target Max (32%)',
           data: [32, 32, 32, 32, 32, 32, 32],
           borderColor: 'rgba(245,158,11,0.5)',
+          backgroundColor: 'transparent',
           borderDash: [5, 5],
           pointRadius: 0,
         }],
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { min: 20, max: 40, ticks: { callback: v => v + '%' } } } },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, pointStyle: 'line', boxWidth: 24 } } }, scales: { y: { min: 20, max: 40, ticks: { callback: v => v + '%' } } } },
     });
   }
 }
