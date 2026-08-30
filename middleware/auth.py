@@ -64,9 +64,14 @@ SKIP_AUTH_PREFIXES = {
     "/api/v1/costing/health",
 }
 
-# Paths that don't require auth but are webhook-related
+# Public inbound webhook receivers — no JWT, authenticated by a provider
+# signature (HMAC) in the handler. Must stay an EXACT-PATH allowlist: a
+# "/api/webhooks" prefix also skipped auth on the admin routes mounted under it
+# (queue management, register/deregister, outbound-webhook management), which is
+# how those became reachable unauthenticated. Kept in sync with
+# middleware/tenant.py WEBHOOK_EXEMPT.
 WEBHOOK_PATHS = {
-    "/api/webhooks",
+    "/api/webhooks/tanda",
 }
 
 

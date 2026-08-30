@@ -27,9 +27,30 @@ except ImportError:
     BackgroundTasks = None
     BaseModel = object
 
+try:
+    from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
+except ImportError:
+    enforce_venue_access = None
+    enforce_venue_manager = None
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/webhooks", tags=["outbound-webhooks"])
+
+
+def _subscription_venue_or_404(subscription_id: str) -> str:
+    """Resolve a subscription's venue_id, 404 if it doesn't exist. Used to scope
+    by-id operations to the caller's tenant (the id alone is not proof of
+    ownership — the raw store is unscoped)."""
+    from rosteriq.database import get_db
+
+    sub = get_db().get_webhook_subscription(subscription_id)
+    if not sub:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Subscription {subscription_id} not found",
+        )
+    return sub.get("venue_id")
 
 
 # ============================================================================
@@ -108,6 +129,8 @@ async def subscribe_webhook(request: SubscribeRequest) -> Dict[str, Any]:
     if not (APIRouter and HTTPException):
         raise HTTPException(status_code=503, detail="FastAPI not available")
 
+    enforce_venue_manager(request.venue_id)
+
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
     except ImportError:
@@ -168,6 +191,8 @@ async def list_subscriptions(venue_id: str) -> Dict[str, Any]:
     if not (APIRouter and HTTPException):
         raise HTTPException(status_code=503, detail="FastAPI not available")
 
+    enforce_venue_access(venue_id)
+
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
     except ImportError:
@@ -207,6 +232,8 @@ async def delete_subscription(subscription_id: str) -> Dict[str, Any]:
     """
     if not (APIRouter and HTTPException):
         raise HTTPException(status_code=503, detail="FastAPI not available")
+
+    enforce_venue_manager(_subscription_venue_or_404(subscription_id))
 
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
@@ -260,6 +287,8 @@ async def update_subscription(
     """
     if not (APIRouter and HTTPException):
         raise HTTPException(status_code=503, detail="FastAPI not available")
+
+    enforce_venue_manager(_subscription_venue_or_404(subscription_id))
 
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
@@ -316,6 +345,8 @@ async def get_deliveries(
     """
     if not (APIRouter and HTTPException):
         raise HTTPException(status_code=503, detail="FastAPI not available")
+
+    enforce_venue_access(_subscription_venue_or_404(subscription_id))
 
     try:
         from rosteriq.services.outbound_webhooks import get_outbound_webhook_service
@@ -387,6 +418,8 @@ async def send_test_event(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Subscription {subscription_id} not found",
             )
+
+        enforce_venue_manager(subscription.get("venue_id"))
 
         # Build test payload
         test_data = request.data or {

@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from rosteriq.services.webhook_queue import get_webhook_queue
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_owner
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ async def list_dead_letters(
     Returns:
         List of dead letter deliveries with metadata
     """
+    enforce_owner()
     queue = get_webhook_queue()
 
     try:
@@ -130,6 +132,7 @@ async def replay_dead_letter(delivery_id: str) -> dict:
     Returns:
         Replay status
     """
+    enforce_owner()
     queue = get_webhook_queue()
 
     try:
@@ -167,6 +170,7 @@ async def purge_old_dead_letters(
     Returns:
         Count of entries deleted
     """
+    enforce_owner()
     queue = get_webhook_queue()
 
     try:
@@ -197,6 +201,7 @@ async def get_circuit_status(url: Optional[str] = Query(None)) -> dict:
     Returns:
         List of circuit breaker statuses
     """
+    enforce_owner()
     queue = get_webhook_queue()
 
     try:
@@ -227,6 +232,7 @@ async def reset_circuit_breaker(url: str) -> dict:
     Returns:
         Reset status
     """
+    enforce_owner()
     queue = get_webhook_queue()
 
     # URL may come URL-encoded from the path parameter

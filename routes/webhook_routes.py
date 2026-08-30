@@ -35,6 +35,11 @@ except ImportError:
     Depends = None
     status = None
 
+try:
+    from rosteriq.middleware.tenant import enforce_venue_manager
+except ImportError:
+    enforce_venue_manager = None
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
@@ -372,6 +377,7 @@ async def register_webhook(
     Returns:
         WebhookSubscription details
     """
+    enforce_venue_manager(venue_id)
     try:
         from rosteriq.services.tanda_webhook_manager import get_webhook_manager
     except ImportError:
@@ -417,6 +423,7 @@ async def deregister_webhook(
     Returns:
         Success confirmation
     """
+    enforce_venue_manager(venue_id)
     try:
         from rosteriq.services.tanda_webhook_manager import get_webhook_manager
     except ImportError:

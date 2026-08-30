@@ -59,7 +59,8 @@ _tenant_context = _TenantContextProxy()
 class TenantContext:
     """Holds the current request's tenant (venue) context."""
 
-    def __init__(self, user_id: str, venue_ids: List[str], is_owner: bool = False):
+    def __init__(self, user_id: str, venue_ids: List[str], is_owner: bool = False,
+                 role: Optional[str] = None):
         """
         Initialize tenant context.
 
@@ -67,10 +68,18 @@ class TenantContext:
             user_id: ID of the authenticated user
             venue_ids: List of venue IDs the user has access to
             is_owner: Whether the user is a system owner (unrestricted access)
+            role: The user's role ("owner"/"manager"/"staff"). Carried so
+                role-gated helpers (enforce_venue_manager) don't need a DB hit.
         """
         self.user_id = user_id
         self.venue_ids = venue_ids
         self.is_owner = is_owner
+        self.role = role
+
+    def is_manager_or_owner(self) -> bool:
+        """True if the user may perform manager-level actions (role manager or
+        owner, or the platform-owner flag)."""
+        return self.is_owner or self.role in ("manager", "owner")
 
     def has_access_to(self, venue_id: str) -> bool:
         """Check if user has access to a specific venue."""
@@ -116,7 +125,12 @@ EXEMPT_PATHS = {
 # Path prefixes exempt from tenant validation
 EXEMPT_PREFIXES = {"/static/", "/api/auth/"}
 
-WEBHOOK_EXEMPT = {"/api/webhooks", "/api/events"}
+# Truly public inbound receivers: no JWT, authenticated by a provider signature
+# (HMAC) inside the handler. This must be an EXACT-PATH allowlist, not a prefix —
+# a prefix like "/api/webhooks" also matched the admin routes mounted under it
+# (/api/webhooks/queue/*, /api/webhooks/register, the outbound-webhook manager,
+# and /api/events read APIs), waving them through with no auth at all.
+WEBHOOK_EXEMPT = {"/api/webhooks/tanda"}
 
 
 class TenantMiddleware(BaseHTTPMiddleware):
@@ -163,6 +177,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
                         user_id=user.user_id,
                         venue_ids=user.venue_ids,
                         is_owner=user.is_owner,
+                        role=getattr(user, "role", None),
                     )
                 )
 
@@ -230,8 +245,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _is_webhook_exempt(path: str) -> bool:
-        """Check if path is webhook-related and exempt from auth."""
-        return any(path.startswith(p) for p in WEBHOOK_EXEMPT)
+        """Check if path is a public inbound receiver (exact match only — see
+        WEBHOOK_EXEMPT). Admin routes under /api/webhooks are NOT exempt."""
+        return path in WEBHOOK_EXEMPT
 
 
 def get_tenant_context() -> TenantContext:
@@ -287,6 +303,60 @@ def enforce_venue_access(venue_id: Optional[str]) -> None:
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You do not have access to this venue",
+    )
+
+
+def enforce_venue_manager(venue_id: Optional[str]) -> None:
+    """
+    Like ``enforce_venue_access`` but ALSO requires the caller to be a manager or
+    owner of the venue — venue membership alone is not enough. Use for every
+    manager-level mutation: venue/org config, integration credentials, data
+    imports, payroll, roster publishing, templates, webhooks, broadcast
+    messaging, billing, backups.
+
+    Order matters: membership is checked first (a non-member gets the same
+    "no access to this venue" 403 as ``enforce_venue_access``, not a role hint
+    that would confirm the venue exists), then role. Owners (platform admins)
+    pass both. Raises HTTP 403 on denial.
+
+    Fail-open on a missing tenant context is deliberate and matches
+    ``enforce_venue_access``: there is no context only outside an authenticated
+    HTTP request (a direct unit call, background task, or scheduler), never on a
+    real venue-scoped route — TenantMiddleware always sets it first.
+    """
+    enforce_venue_access(venue_id)
+    tenant = get_tenant_context_optional()
+    if tenant is None:
+        return
+    if tenant.is_manager_or_owner():
+        return
+    audit_cross_tenant_attempt(venue_id, "venue_scoped", "role_denied")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This action requires one of these roles: manager, owner",
+    )
+
+
+def enforce_owner() -> None:
+    """
+    Require the caller to be a platform owner. Use for global, non-venue-scoped
+    admin actions (DB pool resize, security-log purge, webhook dead-letter
+    purge/circuit reset) — actions that touch shared infrastructure or every
+    tenant at once. Raises HTTP 403 on denial.
+
+    Fail-open on a missing tenant context matches ``enforce_venue_access`` (no
+    context = not a real authenticated request). Any HTTP route reaching this is
+    behind TenantMiddleware, so an unauthenticated request never gets here — it
+    is rejected with 401 before the handler runs.
+    """
+    tenant = get_tenant_context_optional()
+    if tenant is None:
+        return
+    if tenant.is_owner or tenant.role == "owner":
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This action requires the owner role",
     )
 
 
