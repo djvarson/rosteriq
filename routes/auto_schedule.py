@@ -39,7 +39,9 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import (
+    enforce_venue_access, enforce_venue_manager, load_roster_in_scope,
+)
 from rosteriq.models import Roster, Employee
 from rosteriq.auth import get_current_user
 from rosteriq.services.auto_scheduler import (
@@ -223,15 +225,12 @@ async def generate_schedule(
     Returns 400 if week_start is invalid or not a Monday.
     Returns 404 if venue not found.
     """
+    enforce_venue_manager(venue_id)
     try:
         # Verify venue exists
         venue = db.get_venue(venue_id)
         if not venue:
             raise HTTPException(status_code=404, detail=f"Venue {venue_id} not found")
-
-        # Verify user has access to venue (owners pass; staff/managers are
-        # limited to their venues — the raw venue_ids check locked owners out)
-        enforce_venue_access(venue_id)
 
         # Parse week_start
         try:
@@ -346,15 +345,15 @@ async def fill_gaps(
     Returns 200 with number of shifts added.
     Returns 404 if roster not found.
     """
+    # Gate on the ROSTER's own venue, not the caller-supplied venue_id (that was
+    # an IDOR: any venue_id the caller could access passed the check while
+    # roster_id targeted another tenant). fill-gaps mutates the roster -> manager.
+    roster = load_roster_in_scope(db, roster_id)
+    enforce_venue_manager(getattr(roster, "venue_id", None))
+    if venue_id != getattr(roster, "venue_id", None):
+        raise HTTPException(
+            status_code=400, detail="venue_id does not match the roster's venue")
     try:
-        # Verify roster exists
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
-
-        # Verify user has access (owners pass)
-        enforce_venue_access(venue_id)
-
         # Fill gaps
         scheduler = AutoScheduler(db)
         new_shifts = scheduler.fill_gaps(roster_id, venue_id)

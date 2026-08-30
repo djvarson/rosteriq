@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ async def list_ingredients(venue_id: str = Query(...)) -> dict:
 
 @router.post("/ingredients")
 async def upsert_ingredient(body: IngredientRequest) -> dict:
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     if body.id:
         existing = db.get_ingredient(body.id)
@@ -249,7 +249,7 @@ async def list_recipes(venue_id: str = Query(...)) -> dict:
 
 @router.post("/recipes")
 async def upsert_recipe(body: RecipeRequest) -> dict:
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     if body.id:
         existing = db.get_recipe(body.id)

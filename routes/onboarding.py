@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.onboarding import OnboardingService, OnboardingStep
 from rosteriq.models import TandaCredentials
 
@@ -98,6 +99,7 @@ async def start_onboarding(req: OnboardingStartRequest, background_tasks: Backgr
 
     Response: OnboardingStatusResponse
     """
+    enforce_venue_manager(req.venue_id)
     try:
         service = get_onboarding_service()
 
@@ -164,6 +166,7 @@ async def run_step(venue_id: str, step: str, req: OnboardingStepRequest):
 
     Response: {success: bool, message: str}
     """
+    enforce_venue_manager(venue_id)
     try:
         service = get_onboarding_service()
 
@@ -216,6 +219,7 @@ async def retry_step(venue_id: str, req: OnboardingStepRequest):
 
     Response: {success: bool, message: str}
     """
+    enforce_venue_manager(venue_id)
     try:
         service = get_onboarding_service()
 

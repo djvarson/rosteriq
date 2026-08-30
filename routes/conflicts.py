@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import load_roster_in_scope, enforce_venue_manager
 from rosteriq.models import Roster, VenueConfig, Employee
 from rosteriq.services.conflict_detector import (
     ConflictDetector, ConflictType, ConflictSeverity, RosterConflict, ConflictSummary
@@ -108,12 +109,10 @@ async def detect_conflicts(
         List of detected conflicts with details and suggestions
     """
     db = get_db()
+    # 404 if missing or another tenant's (membership scope), before any work.
+    roster = load_roster_in_scope(db, roster_id)
 
     try:
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(404, f"Roster {roster_id} not found")
-
         venue = db.get_venue(roster.venue_id)
         if not venue:
             raise HTTPException(404, f"Venue {roster.venue_id} not found")
@@ -179,12 +178,10 @@ async def get_conflicts_summary(roster_id: str) -> ConflictSummaryResponse:
         Conflict counts grouped by type and severity
     """
     db = get_db()
+    # 404 if missing or another tenant's (membership scope), before any work.
+    roster = load_roster_in_scope(db, roster_id)
 
     try:
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(404, f"Roster {roster_id} not found")
-
         venue = db.get_venue(roster.venue_id)
         if not venue:
             raise HTTPException(404, f"Venue {roster.venue_id} not found")
@@ -233,12 +230,11 @@ async def auto_fix_conflicts(
         Summary of changes made
     """
     db = get_db()
+    # 404 if missing or another tenant's; auto-fix mutates the roster -> manager.
+    roster = load_roster_in_scope(db, roster_id)
+    enforce_venue_manager(getattr(roster, "venue_id", None))
 
     try:
-        roster = db.get_roster(roster_id)
-        if not roster:
-            raise HTTPException(404, f"Roster {roster_id} not found")
-
         venue = db.get_venue(roster.venue_id)
         if not venue:
             raise HTTPException(404, f"Venue {roster.venue_id} not found")

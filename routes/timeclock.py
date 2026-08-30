@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
@@ -250,7 +250,7 @@ async def clock_out(body: PunchRequest) -> dict:
 @router.post("/pin")
 async def set_pin(body: SetPinRequest) -> dict:
     """Set/replace an employee's kiosk PIN (manager action, venue-scoped)."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     emp = _employee_or_404(db, body.venue_id, body.employee_id)
     db.set_timeclock_pin(body.venue_id, body.employee_id,
@@ -267,7 +267,7 @@ async def review_timesheet(
     """Manager reviews a closed timesheet: optionally corrects the punch times
     or break, then approves. Corrections recompute worked time and variance and
     are recorded with who/when/why — approved time is what payroll exports use."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     ts = db.get_timesheet(ts_id)
     if not ts or ts.get("venue_id") != body.venue_id:

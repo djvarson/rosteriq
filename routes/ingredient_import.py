@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_manager
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def _num(v: str):
 
 @router.post("/import-ingredients")
 async def import_ingredients(body: IngredientImportBody) -> dict:
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     if not db.get_venue(body.venue_id):
         raise HTTPException(status_code=404, detail="Venue not found")

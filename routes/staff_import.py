@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.models import Employee, EmploymentType, AwardLevel, State
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def _emp_type(v: str) -> EmploymentType:
 
 @router.post("/import-staff")
 async def import_staff(body: StaffImportBody) -> dict:
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     venue = db.get_venue(body.venue_id)
     if not venue:

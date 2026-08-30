@@ -27,6 +27,7 @@ from rosteriq.services.forecast_v2 import (
     WeatherForecast,
 )
 from rosteriq.database import get_db, BaseStore
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.models import VenueConfig
 
 logger = logging.getLogger(__name__)
@@ -196,6 +197,7 @@ async def train_forecaster(
 
     Extracts seasonal patterns from historical data.
     """
+    enforce_venue_manager(venue_id)
     try:
         forecaster = _get_forecaster(venue_id, db)
 

@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field
 
 from rosteriq.middleware.auth import get_current_user
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.message_templates import (
     get_message_template_service, MessageTemplate, RenderedMessage
 )
@@ -231,6 +232,7 @@ async def customize_message_template(
     Returns:
         Updated MessageTemplateResponse
     """
+    enforce_venue_manager(venue_id)
     try:
         svc = get_message_template_service()
 
@@ -285,6 +287,7 @@ async def reset_message_template(
         template_id: Template ID
         current_user: Current authenticated user
     """
+    enforce_venue_manager(venue_id)
     try:
         svc = get_message_template_service()
         success = svc.reset_template(venue_id, template_id)
@@ -385,6 +388,7 @@ async def send_message_from_template(
     Returns:
         SendResultResponse with send status and counts
     """
+    enforce_venue_manager(venue_id)
     try:
         if not request.recipients:
             raise HTTPException(

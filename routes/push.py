@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from rosteriq.database import get_db
 from rosteriq.services.push_notifications import get_push_service
-from rosteriq.middleware.tenant import get_tenant_context
+from rosteriq.middleware.tenant import get_tenant_context, enforce_venue_manager
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +197,8 @@ async def broadcast_to_venue(
         if not user_id:
             raise HTTPException(status_code=401, detail="Not authenticated")
 
-        # TODO: Check permissions (must be venue manager/admin)
+        # Broadcasting to a venue's staff is a manager action, scoped to venue.
+        enforce_venue_manager(venue_id)
 
         db = get_db()
         push_service = get_push_service(db)

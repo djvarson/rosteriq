@@ -29,6 +29,7 @@ from pydantic import BaseModel
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext, check_venue_access
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.billing import billing_service
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ async def create_checkout_session(
 
     Query the returned `url` to redirect the user to the Stripe checkout page.
     """
+    enforce_venue_manager(req.venue_id)
     # Verify user has access to this venue
     if not check_venue_access(current_user, req.venue_id):
         raise HTTPException(
@@ -195,6 +197,7 @@ async def change_tier(
 
     Changes take effect immediately with proration.
     """
+    enforce_venue_manager(req.venue_id)
     if not check_venue_access(current_user, req.venue_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -236,6 +239,7 @@ async def cancel_subscription(
     By default, cancels at the end of the current billing period.
     Set `immediate=true` to cancel immediately (not refundable).
     """
+    enforce_venue_manager(venue_id)
     if not check_venue_access(current_user, venue_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import BaseStore, get_db
+from rosteriq.middleware.tenant import enforce_venue_manager, enforce_venue_access
 from rosteriq.data_feeds.reservations import DirectBookingImporter
 from rosteriq.data_feeds.base import Location
 
@@ -75,6 +76,7 @@ def _normalise(b: dict) -> Optional[dict]:
 @router.post("/ingest")
 async def ingest(body: IngestRequest, db: BaseStore = Depends(get_db)):
     """Ingest bookings as JSON (e.g. from a venue's booking-system webhook)."""
+    enforce_venue_access(body.venue_id)
     rows = [_normalise(b.model_dump()) for b in body.bookings]
     rows = [r for r in rows if r]
     if not rows:
@@ -87,6 +89,7 @@ async def ingest(body: IngestRequest, db: BaseStore = Depends(get_db)):
 @router.post("/upload")
 async def upload(body: UploadRequest, db: BaseStore = Depends(get_db)):
     """Ingest bookings from a base64-encoded CSV (date, party_size|covers, time?)."""
+    enforce_venue_access(body.venue_id)
     try:
         decoded = base64.b64decode(body.csv_data).decode("utf-8-sig")
     except Exception:

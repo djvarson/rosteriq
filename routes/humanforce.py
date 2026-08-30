@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.humanforce_adapter import (
     HumanForceAdapter,
     HumanForceOAuth,
@@ -166,6 +167,7 @@ async def install(body: InstallRequest) -> dict:
 
     Returns the authorize URL to redirect the venue owner to.
     """
+    enforce_venue_manager(body.venue_id)
     oauth = _get_oauth()
     authorize_url = oauth.get_auth_url(scope=body.scope)
 
@@ -264,6 +266,7 @@ async def uninstall(body: UninstallRequest) -> dict:
     """
     Remove the HumanForce connection for a venue.
     """
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
 
     install["status"] = "uninstalled"
@@ -326,6 +329,7 @@ async def sync_employees(body: SyncEmployeesRequest) -> dict:
     """
     Pull employees from HumanForce and return them as RosterIQ Employee models.
     """
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
     credentials = _build_credentials(install)
 
@@ -355,6 +359,7 @@ async def sync_shifts(body: SyncShiftsRequest) -> dict:
     """
     Pull shifts from HumanForce for a date range.
     """
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
     credentials = _build_credentials(install)
 
@@ -393,6 +398,7 @@ async def push_roster(body: PushRosterRequest) -> dict:
     """
     Push an optimised roster back to HumanForce.
     """
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
     credentials = _build_credentials(install)
 

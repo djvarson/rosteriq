@@ -34,7 +34,8 @@ from rosteriq.models import (
 )
 from rosteriq.middleware.api_version import APIVersionMiddleware
 from rosteriq.middleware.tenant import (
-    TenantMiddleware, enforce_venue_access, get_tenant_context_optional,
+    TenantMiddleware, enforce_venue_access, enforce_venue_manager,
+    get_tenant_context_optional,
 )
 from rosteriq.roster_optimiser import (
     generate_weekly_roster, generate_daily_roster,
@@ -2479,7 +2480,7 @@ def _guard_employee_overwrite(previous) -> None:
 
 @app.post("/employees")
 async def create_employee(employee: Employee):
-    enforce_venue_access(getattr(employee, "venue_id", None))
+    enforce_venue_manager(getattr(employee, "venue_id", None))
     previous = _store["employees"].get(employee.id)
     # Upsert-by-id: if this id already exists it must be OURS to overwrite.
     # Otherwise a manager could re-home (and re-price) another venue's
@@ -2503,7 +2504,7 @@ async def create_employee(employee: Employee):
 @app.post("/employees/bulk")
 async def bulk_create_employees(employees: list[Employee]):
     for emp in employees:
-        enforce_venue_access(getattr(emp, "venue_id", None))
+        enforce_venue_manager(getattr(emp, "venue_id", None))
         _guard_employee_overwrite(_store["employees"].get(emp.id))
     for emp in employees:
         previous = _store["employees"].get(emp.id)
@@ -2596,10 +2597,10 @@ async def get_employee(employee_id: str):
 
 @app.post("/forecasts")
 async def add_forecasts(forecasts: list[DemandForecast]):
-    # Every forecast must target a venue the caller holds (403 otherwise);
+    # Every forecast must target a venue the caller MANAGES (403 otherwise);
     # checked for ALL rows before ANY row is written.
     for f in forecasts:
-        enforce_venue_access(getattr(f, "venue_id", None))
+        enforce_venue_manager(getattr(f, "venue_id", None))
     _store["forecasts"].extend(forecasts)
 
     # Invalidate forecast cache
@@ -2763,7 +2764,7 @@ def _venue_employees(venue_id: str) -> list:
 
 @app.post("/rosters/generate")
 async def generate_roster(req: GenerateRosterRequest):
-    enforce_venue_access(req.venue_id)
+    enforce_venue_manager(req.venue_id)
     venue = _store["venues"].get(req.venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")
@@ -2888,7 +2889,7 @@ async def generate_forecasts_endpoint(req: GenerateForecastRequest):
     so the very first roster has something to optimise against. Idempotent — if
     forecasts already exist for the week, returns them unchanged.
     """
-    enforce_venue_access(req.venue_id)
+    enforce_venue_manager(req.venue_id)
     venue = _store["venues"].get(req.venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")
@@ -3176,7 +3177,7 @@ class POSImportRequest(BaseModel):
 
 @app.post("/pos/import")
 async def import_pos(req: POSImportRequest):
-    enforce_venue_access(req.venue_id)
+    enforce_venue_manager(req.venue_id)
     """
     Import POS transaction data from a CSV string.
 
@@ -3336,7 +3337,7 @@ async def tanda_callback(code: str, state: str = ""):
 
 @app.post("/tanda/sync/{venue_id}")
 async def tanda_sync(venue_id: str):
-    enforce_venue_access(venue_id)
+    enforce_venue_manager(venue_id)
     """
     Sync employees and shifts from Tanda for a connected venue.
 
@@ -3383,7 +3384,7 @@ async def tanda_push_roster(
     venue_id: str = Query(...),
     dry_run: bool = Query(True),
 ):
-    enforce_venue_access(venue_id)
+    enforce_venue_manager(venue_id)
     """
     Push a RosterIQ roster back to Tanda.
 
@@ -4198,7 +4199,7 @@ async def dashboard_signals_history(
 
 @app.post("/dashboard/{venue_id}/configure-feeds")
 async def configure_feeds(venue_id: str, config: DataFeedConfig):
-    enforce_venue_access(venue_id)  # explicit, not just path-prefix middleware (stores feed API keys)
+    enforce_venue_manager(venue_id)  # manager action: stores feed API keys
     """
     POST /dashboard/{venue_id}/configure-feeds
 
@@ -4270,7 +4271,7 @@ async def send_test_notification(req: NotificationTestRequest):
 
 @app.post("/api/notifications/digest/{venue_id}")
 async def trigger_daily_digest(venue_id: str, manager_email: str = Query(...)):
-    enforce_venue_access(venue_id)
+    enforce_venue_manager(venue_id)  # emails confidential venue data to an arbitrary address
     """
     POST /api/notifications/digest/{venue_id}?manager_email=manager@example.com
 

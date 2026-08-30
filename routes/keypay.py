@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.keypay_export import KeyPayClient
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ async def _validate(api_key: str, business_id: str) -> bool:
 @router.post("/install")
 async def install(body: KeyPayInstallRequest):
     """Connect KeyPay for a venue (validates the key, then stores it)."""
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     if not await _validate(body.api_key, body.business_id):
         raise HTTPException(
@@ -98,6 +100,7 @@ async def status(venue_id: str):
 @router.post("/uninstall")
 async def uninstall(body: KeyPayVenueRequest):
     """Disconnect KeyPay for a venue."""
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     org_key = _org_key(body.venue_id)
     install = db.get_plugin_install(org_key)

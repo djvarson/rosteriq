@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 
 from rosteriq.middleware.auth import get_current_user
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.notification_hub import (
     get_notification_hub,
     NotificationEventType,
@@ -159,6 +160,8 @@ async def dispatch_notification(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not identified",
         )
+    # Dispatching to a venue's staff is a manager action, scoped to that venue.
+    enforce_venue_manager(request.venue_id)
 
     # Validate event type
     try:
@@ -233,6 +236,9 @@ async def bulk_dispatch(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not identified",
         )
+    # Every venue targeted in the batch must be one the caller manages.
+    for _req in request.events:
+        enforce_venue_manager(_req.venue_id)
 
     try:
         hub = get_notification_hub()
@@ -400,10 +406,17 @@ async def get_preferences(
             detail="User not identified",
         )
 
-    # Allow access if user is the employee or is admin
+    # Allow access if the caller IS the employee; otherwise it's an admin view/
+    # edit of someone else's preferences and requires manager/owner of the
+    # employee's venue (a linked staff member uses the self endpoint).
     if user_id != employee_id:
-        # TODO: Check if user is admin/manager of employee's venue
-        pass
+        emp = get_db().get_employee(employee_id)
+        if not emp:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Employee {employee_id} not found",
+            )
+        enforce_venue_manager(getattr(emp, "venue_id", None))
 
     try:
         prefs_svc = get_preferences_service()
@@ -452,10 +465,17 @@ async def update_preferences(
             detail="User not identified",
         )
 
-    # Allow access if user is the employee or is admin
+    # Allow access if the caller IS the employee; otherwise it's an admin view/
+    # edit of someone else's preferences and requires manager/owner of the
+    # employee's venue (a linked staff member uses the self endpoint).
     if user_id != employee_id:
-        # TODO: Check if user is admin/manager of employee's venue
-        pass
+        emp = get_db().get_employee(employee_id)
+        if not emp:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Employee {employee_id} not found",
+            )
+        enforce_venue_manager(getattr(emp, "venue_id", None))
 
     try:
         # Build update dict from request

@@ -21,6 +21,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from rosteriq.middleware.tenant import enforce_venue_manager
+
 logger = logging.getLogger(__name__)
 
 # This will be injected by api.py after modules are loaded
@@ -298,6 +300,7 @@ def create_pos_realtime_router(pos_feed_instance):
               "forecast_revenue": 3000.00
             }
         """
+        enforce_venue_manager(venue_id)  # controls a venue's live POS polling
         if not pos_feed:
             raise HTTPException(status_code=500, detail="POS feed not initialized")
 
@@ -329,6 +332,7 @@ def create_pos_realtime_router(pos_feed_instance):
         Example:
             POST /api/pos/live/stop/venue-123
         """
+        enforce_venue_manager(venue_id)  # controls a venue's live POS polling
         if not pos_feed:
             raise HTTPException(status_code=500, detail="POS feed not initialized")
 

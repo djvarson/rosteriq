@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_timezone
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.models import Shift, ShiftStatus, State
 from rosteriq.services.payroll_export import (
     PayrollExporter, PayrollBatch, PayrollStatus
@@ -146,8 +146,8 @@ async def prepare_payroll_batch(
 
     Returns payroll batch ready for approval and export.
     """
+    enforce_venue_manager(request.venue_id)
     try:
-        enforce_venue_access(request.venue_id)
         # Fetch shifts and employees for the period
         venue = db.get_venue(request.venue_id)
         if not venue:
@@ -237,7 +237,7 @@ async def prepare_payroll_from_timesheets(
     with each one named. Approve everything on the Timesheets page first —
     payroll built on unreviewed punches is how venues get burned.
     """
-    enforce_venue_access(request.venue_id)
+    enforce_venue_manager(request.venue_id)
     venue = db.get_venue(request.venue_id)
     if not venue:
         raise HTTPException(status_code=404, detail=f"Venue {request.venue_id} not found")
@@ -420,7 +420,7 @@ async def approve_payroll_batch(
         batch_dict = db.get_payroll_batch(batch_id)
         if not batch_dict:
             raise HTTPException(status_code=404, detail=f"Batch {batch_id} not found")
-        enforce_venue_access(batch_dict.get("venue_id"))
+        enforce_venue_manager(batch_dict.get("venue_id"))  # dual-control gate
 
         if batch_dict["status"] != "draft":
             raise HTTPException(
@@ -469,7 +469,7 @@ async def export_to_xero(
         batch_dict = db.get_payroll_batch(request.batch_id)
         if not batch_dict:
             raise HTTPException(status_code=404, detail=f"Batch {request.batch_id} not found")
-        enforce_venue_access(batch_dict.get("venue_id"))
+        enforce_venue_manager(batch_dict.get("venue_id"))  # real pay run -> manager
 
         if batch_dict["status"] != "approved":
             raise HTTPException(
@@ -595,7 +595,7 @@ async def export_to_keypay(
         batch_dict = db.get_payroll_batch(request.batch_id)
         if not batch_dict:
             raise HTTPException(status_code=404, detail=f"Batch {request.batch_id} not found")
-        enforce_venue_access(batch_dict.get("venue_id"))
+        enforce_venue_manager(batch_dict.get("venue_id"))  # real pay run -> manager
 
         if batch_dict["status"] != "approved":
             raise HTTPException(

@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import load_roster_in_scope, enforce_venue_manager
 from rosteriq.services.break_scheduler import (
     BreakScheduler, BreakConfig, Break, BreakComplianceReport
 )
@@ -103,10 +104,9 @@ async def schedule_breaks(roster_id: str) -> Dict:
         Updated roster with breaks inserted and list of scheduled breaks
     """
     db = get_db()
-    roster = db.get_roster(roster_id)
-
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # 404 if missing or another tenant's; then require manager/owner of the venue.
+    roster = load_roster_in_scope(db, roster_id)
+    enforce_venue_manager(getattr(roster, "venue_id", None))
 
     try:
         scheduler = BreakScheduler(config=BreakConfig())
@@ -159,10 +159,8 @@ async def validate_breaks(roster_id: str) -> Dict:
         BreakComplianceReport with violations and compliance score
     """
     db = get_db()
-    roster = db.get_roster(roster_id)
-
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # Read: 404 if missing or another tenant's (membership scope; no role gate).
+    roster = load_roster_in_scope(db, roster_id)
 
     try:
         scheduler = BreakScheduler(config=BreakConfig())

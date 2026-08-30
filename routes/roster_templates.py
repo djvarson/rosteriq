@@ -22,12 +22,25 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.roster_templates import (
     RosterTemplateService, RosterTemplate, ShiftPattern,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["templates"])
+
+
+def _template_venue_or_404(db, template_id: str) -> str:
+    """Resolve a template's venue_id, 404 if it doesn't exist. Scopes by-id
+    template ops to the caller's tenant (the id alone isn't proof of ownership
+    against the unscoped store)."""
+    tmpl = db.get_roster_template(template_id)
+    if not tmpl:
+        raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
+    if isinstance(tmpl, dict):
+        return tmpl.get("venue_id")
+    return getattr(tmpl, "venue_id", None)
 
 
 # ============================================================================
@@ -133,6 +146,7 @@ async def create_template(req: RosterTemplateRequest):
 
     Returns the created template with all details.
     """
+    enforce_venue_manager(req.venue_id)
     try:
         db = get_db()
         service = RosterTemplateService(db)
@@ -166,6 +180,11 @@ async def create_template_from_roster(req: CreateFromRosterRequest):
 
     Analyzes the roster and creates a reusable template based on its shift patterns.
     """
+    _db0 = get_db()
+    _roster = _db0.get_roster(req.roster_id)
+    if not _roster:
+        raise HTTPException(status_code=404, detail=f"Roster {req.roster_id} not found")
+    enforce_venue_manager(getattr(_roster, "venue_id", None))
     try:
         db = get_db()
         service = RosterTemplateService(db)
@@ -191,6 +210,7 @@ async def create_template_from_roster(req: CreateFromRosterRequest):
 @router.get("/api/templates", response_model=List[RosterTemplateResponse])
 async def list_templates(venue_id: str = Query(...)):
     """List all templates for a specific venue."""
+    enforce_venue_access(venue_id)
     try:
         db = get_db()
         service = RosterTemplateService(db)
@@ -204,6 +224,7 @@ async def list_templates(venue_id: str = Query(...)):
 @router.get("/api/templates/{template_id}", response_model=RosterTemplateResponse)
 async def get_template(template_id: str):
     """Get a single template by ID."""
+    enforce_venue_access(_template_venue_or_404(get_db(), template_id))
     try:
         db = get_db()
         service = RosterTemplateService(db)
@@ -228,6 +249,7 @@ async def apply_template(template_id: str, req: ApplyTemplateRequest):
     The template defines the shift patterns, which are scheduled for the
     corresponding day in the requested week.
     """
+    enforce_venue_manager(_template_venue_or_404(get_db(), template_id))
     try:
         db = get_db()
         service = RosterTemplateService(db)
@@ -271,6 +293,7 @@ async def apply_template(template_id: str, req: ApplyTemplateRequest):
 @router.delete("/api/templates/{template_id}", status_code=204)
 async def delete_template(template_id: str):
     """Delete a template by ID."""
+    enforce_venue_manager(_template_venue_or_404(get_db(), template_id))
     try:
         db = get_db()
         service = RosterTemplateService(db)
@@ -284,6 +307,7 @@ async def delete_template(template_id: str):
 @router.post("/api/templates/{template_id}/duplicate", response_model=RosterTemplateResponse)
 async def duplicate_template(template_id: str, req: DuplicateTemplateRequest):
     """Create a copy of an existing template with a new name."""
+    enforce_venue_manager(_template_venue_or_404(get_db(), template_id))
     try:
         db = get_db()
         service = RosterTemplateService(db)

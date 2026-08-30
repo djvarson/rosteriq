@@ -20,6 +20,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Path, Query, Body
 from pydantic import BaseModel, Field
 
+from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.services.handover_notes import (
     get_handover_service,
     HandoverNote,
@@ -375,6 +376,9 @@ async def create_handover_note(
     Raises:
         HTTPException: If shift not found or invalid priority
     """
+    # Membership scope: staff may write a handover for their OWN venue, never
+    # inject one into another tenant's shift. Before the try (broad except).
+    enforce_venue_access(request.venue_id)
     try:
         service = get_handover_service()
 

@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.demo import (
     DEMO_USER_ID, DEMO_USER_EMAIL, DEMO_VENUE_ID,
     DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL,
@@ -610,7 +610,7 @@ def _reassign_shift(db, venue_id: str, shift_id: str, new_employee_id: str) -> b
 async def decide_cover(cover_id: str, body: CoverDecision,
                        user: UserContext = Depends(get_current_user)) -> dict:
     """Approve (reassigns the shift on the roster) or decline a claimed cover."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     cover = db.get_shift_cover(cover_id)
     if not cover or cover.get("venue_id") != body.venue_id:
@@ -672,7 +672,7 @@ def _audit_cover_decision(db, cover: dict, cover_id: str, decision: str,
 @router.post("/api/leave/{req_id}/decide")
 async def decide_leave(req_id: str, body: LeaveDecision,
                        user: UserContext = Depends(get_current_user)) -> dict:
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     req = db.get_leave_request(req_id)
     if not req or req.get("venue_id") != body.venue_id:

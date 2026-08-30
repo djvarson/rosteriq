@@ -20,6 +20,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import (
+    load_roster_in_scope, load_shift_in_scope, enforce_venue_manager,
+)
 from rosteriq.services.shift_splitter import (
     ShiftSplitter, SplitResult, ShiftSplit, ShiftSegment
 )
@@ -140,10 +143,8 @@ async def preview_roster_splits(roster_id: str) -> Dict:
         SplitResultResponse with all suggested splits and estimated cost impact
     """
     db = get_db()
-    roster = db.get_roster(roster_id)
-
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # 404 if missing or another tenant's (membership scope), before any work.
+    roster = load_roster_in_scope(db, roster_id)
 
     try:
         splitter = ShiftSplitter()
@@ -208,10 +209,9 @@ async def apply_roster_splits(roster_id: str, request: ApplySplitsRequest) -> Di
         Updated Roster with splits applied
     """
     db = get_db()
-    roster = db.get_roster(roster_id)
-
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # 404 if missing or another tenant's; apply-splits persists -> manager.
+    roster = load_roster_in_scope(db, roster_id)
+    enforce_venue_manager(getattr(roster, "venue_id", None))
 
     if request.roster_id != roster_id:
         raise HTTPException(
@@ -262,10 +262,8 @@ async def split_single_shift(
         Dict with original shift details and suggested segments
     """
     db = get_db()
-    shift = db.get_shift(shift_id)
-
-    if not shift:
-        raise HTTPException(status_code=404, detail=f"Shift {shift_id} not found")
+    # 404 if missing or another tenant's (membership scope via the shift's venue).
+    shift = load_shift_in_scope(db, shift_id)
 
     roster = db.get_roster(request.roster_id)
     if not roster:
@@ -353,10 +351,8 @@ async def check_roster_compliance(roster_id: str) -> Dict:
         ComplianceCheckResponse with violations and suggested fixes
     """
     db = get_db()
-    roster = db.get_roster(roster_id)
-
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # 404 if missing or another tenant's (membership scope), before any work.
+    roster = load_roster_in_scope(db, roster_id)
 
     try:
         violations_by_type = {

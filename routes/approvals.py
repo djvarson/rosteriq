@@ -24,7 +24,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.database import get_db
 from rosteriq.services.approval_workflow import (
     approval_workflow,
@@ -161,6 +161,9 @@ async def submit_for_approval(
     if not roster:
         raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
     _enforce_venue_or_404(roster.venue_id, f"Roster {roster_id} not found")
+    # Submitting activates the roster on Starter tier and drives the approval
+    # pipeline on higher tiers — a manager action, not a staff one.
+    enforce_venue_manager(roster.venue_id)
 
     try:
         request = await approval_workflow.submit_for_approval(
@@ -278,7 +281,8 @@ async def approve_roster(
         Updated ApprovalResponse
     """
     # Tenant gate BEFORE acting: 404 if missing or outside the caller's venues.
-    _load_approval_request_scoped(request_id)
+    _approval_req = _load_approval_request_scoped(request_id)
+    enforce_venue_manager(_approval_req.get("venue_id"))  # review/escalate = manager
 
     try:
         request = await approval_workflow.review(
@@ -338,7 +342,8 @@ async def reject_roster(
         Updated ApprovalResponse
     """
     # Tenant gate BEFORE acting: 404 if missing or outside the caller's venues.
-    _load_approval_request_scoped(request_id)
+    _approval_req = _load_approval_request_scoped(request_id)
+    enforce_venue_manager(_approval_req.get("venue_id"))  # review/escalate = manager
 
     try:
         if body.approved:
@@ -396,7 +401,8 @@ async def escalate_approval(
         Updated ApprovalResponse
     """
     # Tenant gate BEFORE acting: 404 if missing or outside the caller's venues.
-    _load_approval_request_scoped(request_id)
+    _approval_req = _load_approval_request_scoped(request_id)
+    enforce_venue_manager(_approval_req.get("venue_id"))  # review/escalate = manager
 
     try:
         request = await approval_workflow.escalate(request_id=request_id)

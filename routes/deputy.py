@@ -28,7 +28,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.deputy_adapter import (
     DeputyAdapter,
     DeputyOAuth,
@@ -232,7 +232,7 @@ async def install(body: InstallRequest) -> dict:
     The venue_id is encoded into the OAuth ``state`` parameter so it
     survives the redirect through Deputy and back to our callback.
     """
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     oauth = _get_oauth()
     state = _encode_state(body.venue_id)
     authorize_url = oauth.get_authorize_url(scope=body.scope, state=state)
@@ -273,7 +273,7 @@ async def install_token(body: InstallTokenRequest) -> dict:
     No DEPUTY_CLIENT_ID or DEPUTY_CLIENT_SECRET required — the token
     is self-contained and long-lived.
     """
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     org_key = _org_key(body.venue_id)
 
@@ -554,7 +554,7 @@ async def uninstall(body: UninstallRequest) -> dict:
     """
     Remove the Deputy connection for a venue.
     """
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
 
     install["status"] = "uninstalled"
@@ -639,7 +639,7 @@ async def sync_employees(body: SyncEmployeesRequest) -> dict:
     """
     Pull employees from Deputy, persist to DB, and return them.
     """
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
     db = get_db()
 
@@ -697,7 +697,7 @@ async def sync_shifts(body: SyncShiftsRequest) -> dict:
     """
     Pull shifts from Deputy for a date range, persist to DB, and return them.
     """
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
     db = get_db()
 
@@ -752,7 +752,7 @@ async def push_roster(body: PushRosterRequest) -> dict:
     """
     Push a roster back to Deputy (publish shifts for a date range).
     """
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
 
     try:

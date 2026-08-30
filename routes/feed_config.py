@@ -14,6 +14,7 @@ from typing import Optional
 from rosteriq.database import get_db
 from rosteriq.services.feed_config import feed_config_service, AVAILABLE_FEEDS
 from rosteriq.middleware.auth import get_current_user, UserContext
+from rosteriq.middleware.tenant import enforce_venue_manager
 
 router = APIRouter(prefix="/api/feeds", tags=["feeds"])
 
@@ -150,6 +151,7 @@ async def update_feed_config(
 
     Response includes masked API key (last 4 chars only).
     """
+    enforce_venue_manager(venue_id)
     try:
         config_dict = {}
         if request.enabled is not None:
@@ -203,6 +205,7 @@ async def test_feed_connection(
 
     Returns status (success/failure), message, HTTP status code, and latency.
     """
+    enforce_venue_manager(venue_id)
     try:
         result = await feed_config_service.test_feed(venue_id, feed_name)
         return FeedTestResponse(

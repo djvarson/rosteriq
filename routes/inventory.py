@@ -35,7 +35,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access, get_tenant_context_optional
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager, get_tenant_context_optional
 from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ async def stock_list(venue_id: str = Query(...)) -> dict:
 @router.post("/levels")
 async def set_levels(body: LevelsBody) -> dict:
     """Set stock on hand and/or par level for one ingredient."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     if body.stock_qty is None and body.par_level is None:
         raise HTTPException(status_code=422, detail="Provide stock_qty and/or par_level")
     db = get_db()
@@ -266,7 +266,7 @@ async def complete_stocktake(body: StocktakeCompleteBody) -> dict:
     """Close the stocktake: value the variance and correct stock levels.
     Uncounted items are flagged and keep their expected level — we never
     invent a count that nobody took."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     st = db.get_stocktake(body.stocktake_id)
     if not st or st.get("venue_id") != body.venue_id:
@@ -337,7 +337,7 @@ async def stocktake_history(venue_id: str = Query(...)) -> dict:
 async def draft_orders(body: OrderDraftBody) -> dict:
     """Draft one order per supplier for everything below par, quantities
     rounded UP to whole purchase packs with real pack costs."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     # Ingredients already on an open (draft/ordered) order are covered — never
     # draft the same shortfall twice, or a double-click double-orders it.
@@ -406,7 +406,7 @@ async def draft_orders(body: OrderDraftBody) -> dict:
 async def set_order_status(order_id: str, body: OrderStatusBody) -> dict:
     """draft -> ordered -> received (receiving books the stock in);
     draft/ordered -> cancelled. Anything else is refused."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)  # commits supplier spend / books stock
     db = get_db()
     order = db.get_supplier_order(order_id)
     if not order or order.get("venue_id") != body.venue_id:
@@ -459,7 +459,7 @@ async def enter_invoice(body: InvoiceBody) -> dict:
       the invoice's quantities are the truth, the order's are ignored).
     - Same invoice number from the same supplier twice is refused.
     """
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
 
     # A delivery landing mid-stocktake corrupts the count — same guard as receive

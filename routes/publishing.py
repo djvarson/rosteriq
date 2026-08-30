@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Depends, Path, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.database import get_db
 from rosteriq.services.roster_publisher import (
     publisher,
@@ -212,6 +212,11 @@ async def publish_roster(
 
     # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
     roster = _load_roster_scoped(roster_id)
+
+    # Publishing (validate -> approval -> Tanda push -> staff notify) is a
+    # manager action on EITHER path; the skip_approval branch below is an extra
+    # constraint on top, not the only role gate.
+    enforce_venue_manager(getattr(roster, "venue_id", None))
 
     # Verify permissions
     if user.role not in ("owner", "manager") and body.skip_approval:

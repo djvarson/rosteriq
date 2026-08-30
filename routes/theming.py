@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.services.theming import ThemeService, ThemeConfig
 from rosteriq.middleware.auth import get_current_user
+from rosteriq.middleware.tenant import enforce_venue_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/theme", tags=["theming"])
@@ -122,6 +123,7 @@ async def update_theme(
 
     Validates colors and other fields before saving.
     """
+    enforce_venue_manager(venue_id)
     _check_venue_auth(venue_id, current_user)
 
     # Get existing config (or defaults)
@@ -163,6 +165,7 @@ async def upload_logo(
     Validates format and size (max 500KB).
     Stores as data: URL for immediate use.
     """
+    enforce_venue_manager(venue_id)
     _check_venue_auth(venue_id, current_user)
 
     # Validate logo
@@ -241,6 +244,7 @@ async def reset_theme(
     theme_svc: ThemeService = Depends(_get_theme_service),
 ):
     """Reset a venue's theme to defaults."""
+    enforce_venue_manager(venue_id)
     _check_venue_auth(venue_id, current_user)
 
     theme_svc.delete_theme(venue_id)

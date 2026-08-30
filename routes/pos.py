@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.data_feeds.swiftpos import SwiftPOSAdapter
 from rosteriq.data_feeds.lightspeed import LightspeedAdapter
 from rosteriq.data_feeds.kounta import KountaAdapter
@@ -150,6 +151,7 @@ async def install(provider: PosProvider, body: PosInstallRequest) -> dict:
     Accepts API key or OAuth credentials depending on the provider.
     Validates connectivity before saving.
     """
+    enforce_venue_manager(body.venue_id)
     # Build tokens dict from supplied credentials
     tokens: dict = {}
 
@@ -226,6 +228,7 @@ async def uninstall(provider: PosProvider, body: PosUninstallRequest) -> dict:
     """
     Remove the POS connection for a venue.
     """
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(provider, body.venue_id)
 
     install["status"] = "uninstalled"
@@ -350,6 +353,7 @@ async def sync_sales(provider: PosProvider, body: PosSyncRequest) -> dict:
     sales as observed actuals (revenue_actuals) so forecasts can be graded against
     real takings.
     """
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(provider, body.venue_id)
     adapter = _build_adapter(provider, install)
 
@@ -479,6 +483,7 @@ async def import_csv(provider: PosProvider, body: PosCsvImportRequest) -> dict:
 
     Expects base64-encoded CSV with columns: date, hour, revenue, items, transactions.
     """
+    enforce_venue_manager(body.venue_id)
     # Decode CSV
     try:
         csv_bytes = base64.b64decode(body.csv_data)

@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from rosteriq.database import BaseStore, get_db
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.connector_registry import (
     get_catalog, get_connector, generic_method, CATEGORIES, SCHEMA_VERSION,
 )
@@ -135,7 +135,7 @@ async def generic_connect(
 ):
     """Connect a framework-managed connector: validate required fields, run the
     connector's validate/on_connect hooks, persist (encrypted), return status."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     method = _require_generic(key)
     fields = body.resolved_fields()
     required = [f["name"] for f in method.get("fields", []) if f.get("required")]
@@ -181,7 +181,7 @@ async def generic_disconnect(
     db: BaseStore = Depends(get_db),
 ):
     """Disconnect a framework-managed connector."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     _require_generic(key)
     org_key = _org_key(key, body.venue_id)
     install = db.get_plugin_install(org_key)

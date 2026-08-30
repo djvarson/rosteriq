@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.weekly_digest import (
     WeeklyDigestGenerator, WeeklyDigest, MultiVenueDigest
 )
@@ -155,6 +156,7 @@ async def send_digest(
     Returns:
         Status and confirmation
     """
+    enforce_venue_manager(venue_id)
     try:
         if not request.recipients:
             raise HTTPException(status_code=400, detail="No recipients specified")

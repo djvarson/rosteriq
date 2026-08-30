@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from rosteriq.middleware.auth import get_current_user, UserContext
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.credential_manager import credential_manager
 from rosteriq.database import get_db
 
@@ -252,6 +253,9 @@ async def rotate_webhook_secret(
     - New secret takes effect immediately
     - Both secrets accepted during grace period
     """
+    # Rotating a venue's webhook signing secret is a manager action (membership
+    # AND role). Before the try (broad except would otherwise mask the 403).
+    enforce_venue_manager(venue_id)
     try:
         # Check authorization: user must have access to this venue
         db = get_db()

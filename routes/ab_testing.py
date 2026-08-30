@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_owner, enforce_venue_access
 from rosteriq.services.ab_testing import (
     ExperimentEngine, StrategyType, ExperimentStatus, ExperimentResult
 )
@@ -147,6 +148,7 @@ async def create_experiment(request: CreateExperimentRequest):
     - **start_date**: Experiment start date
     - **end_date**: Experiment end date
     """
+    enforce_owner()  # experiments span venues / steer roster-gen platform-wide
     try:
         db = get_db()
         engine = ExperimentEngine(db)
@@ -235,6 +237,7 @@ async def assign_venues_random(
     - **control_ratio**: Proportion for control group (default 0.5 = 50%)
     - **seed**: Optional random seed for reproducibility
     """
+    enforce_owner()
     try:
         db = get_db()
         engine = ExperimentEngine(db)
@@ -266,6 +269,7 @@ async def assign_venues_manual(
     - **control_venues**: Venue IDs for control group
     - **variant_venues**: Venue IDs for variant group
     """
+    enforce_owner()
     try:
         db = get_db()
         engine = ExperimentEngine(db)
@@ -328,6 +332,8 @@ async def record_outcome(
     - **overtime_hours**: Total overtime hours
     - **penalty_hours**: Hours subject to penalty rates
     """
+    # Outcomes are recorded against a venue the caller must hold.
+    enforce_venue_access(request.venue_id)
     try:
         db = get_db()
         engine = ExperimentEngine(db)
@@ -417,6 +423,7 @@ async def end_experiment(experiment_id: str):
 
     You can still view results of ended experiments.
     """
+    enforce_owner()
     try:
         db = get_db()
         engine = ExperimentEngine(db)

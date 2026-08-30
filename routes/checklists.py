@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ async def list_templates(venue_id: str = Query(...)) -> dict:
 
 @router.post("/templates")
 async def upsert_template(body: TemplateRequest) -> dict:
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     tpl_id = body.id or f"ckt-{uuid.uuid4().hex[:10]}"
     if body.id:
@@ -174,7 +174,7 @@ async def upsert_template(body: TemplateRequest) -> dict:
 async def seed_default_templates(body: SeedRequest) -> dict:
     """One click: give the venue the standard AU hospo checklists (idempotent —
     skips any template name that already exists)."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     existing_names = {t.get("name") for t in (db.list_checklist_templates(body.venue_id) or [])}
     created = []

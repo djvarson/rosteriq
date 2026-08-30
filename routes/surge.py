@@ -25,6 +25,7 @@ from rosteriq.services.surge_detector import (
     OnCallEmployee,
 )
 from rosteriq.services.ws_events import get_dispatcher
+from rosteriq.middleware.tenant import enforce_venue_manager
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,7 @@ async def call_in_staff(
     Triggers immediate call-in for specified employees and logs the action.
     Broadcasts notification via WebSocket to on-duty managers.
     """
+    enforce_venue_manager(venue_id)
     if not request:
         request = CallInStaffRequest(employee_ids=[])
 

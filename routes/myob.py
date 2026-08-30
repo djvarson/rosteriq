@@ -30,7 +30,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.events import audit, record_event
 from rosteriq.myob_adapter import (
     MYOBAdapter,
@@ -192,6 +192,7 @@ async def install_token(body: MYOBInstallTokenRequest) -> dict:
     If an access_token is provided (from a prior OAuth flow), it will be
     used directly. Otherwise, the venue can authenticate via OAuth later.
     """
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     org_key = _org_key(body.venue_id)
 
@@ -285,6 +286,7 @@ async def install_token(body: MYOBInstallTokenRequest) -> dict:
 @router.post("/install")
 async def install(body: MYOBInstallRequest) -> dict:
     """Start the MYOB OAuth install flow."""
+    enforce_venue_manager(body.venue_id)
     if not MYOB_API_KEY or not MYOB_API_SECRET:
         raise HTTPException(
             status_code=500,
@@ -376,6 +378,7 @@ async def oauth_callback(
 @router.post("/uninstall")
 async def uninstall(body: MYOBUninstallRequest) -> dict:
     """Remove the MYOB connection for a venue."""
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
     install["status"] = "uninstalled"
     install["tokens"] = {}
@@ -446,6 +449,7 @@ async def list_company_files(
 @router.post("/sync/employees")
 async def sync_employees(body: MYOBSyncEmployeesRequest) -> dict:
     """Pull employees from MYOB and save to RosterIQ database."""
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
     credentials = _build_credentials(install)
 
@@ -484,6 +488,7 @@ async def sync_employees(body: MYOBSyncEmployeesRequest) -> dict:
 @router.post("/sync/timesheets")
 async def sync_timesheets(body: MYOBTimesheetSyncRequest) -> dict:
     """Pull timesheets from MYOB for a date range."""
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
     credentials = _build_credentials(install)
 
@@ -510,6 +515,7 @@ async def sync_timesheets(body: MYOBTimesheetSyncRequest) -> dict:
 @router.post("/push/timesheet")
 async def push_timesheet(body: MYOBTimesheetPushRequest) -> dict:
     """Push timesheet entries to MYOB for an employee."""
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
     credentials = _build_credentials(install)
 
@@ -614,7 +620,7 @@ async def push_bill(body: PushBillRequest) -> dict:
     creates a real open bill, which is correct because a RosterIQ supplier
     invoice is already the verified actual delivery.
     """
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
 
     db = get_db()
     install = db.get_plugin_install(_org_key(body.venue_id))

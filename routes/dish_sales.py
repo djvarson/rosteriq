@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.routes.menu_costing import GST_RATE, _cost_recipe, _qty_in_unit
 from rosteriq.services.events import audit
 
@@ -185,7 +185,7 @@ async def list_mappings(venue_id: str = Query(...)) -> dict:
 @router.post("/mapping")
 async def set_mapping(body: MappingBody) -> dict:
     """Map a POS item name to a recipe (empty recipe_id removes the mapping)."""
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     norm = _normalize(body.item_name)
     if not body.recipe_id:
@@ -216,7 +216,7 @@ async def import_sales(body: ImportSalesBody) -> dict:
     - The same batch (same venue+date+rows) is refused on re-import so a
       double upload can never deplete stock twice.
     """
-    enforce_venue_access(body.venue_id)
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     # Venue-local: the host is on UTC, so an Australian morning is still
     # "yesterday" there — today's sales were stamped a day early, and picking

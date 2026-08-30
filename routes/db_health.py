@@ -18,6 +18,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
+from rosteriq.middleware.tenant import enforce_owner
+
 logger = logging.getLogger(__name__)
 
 # Will be injected by api.py
@@ -203,6 +205,7 @@ def create_db_health_router(pool: object) -> APIRouter:
         Note: This is a placeholder. Actual implementation would require
         gradual connection migration or pool replacement.
         """
+        enforce_owner()  # global infra change across all tenants
         if not _pool:
             raise HTTPException(status_code=503, detail="Pool not initialized")
 

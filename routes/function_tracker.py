@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.data_feeds.function_tracker import FunctionTrackerAdapter
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,7 @@ async def install(body: FTInstallRequest) -> dict:
 
     Stores API credentials and verifies connectivity.
     """
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     org_key = _org_key(body.venue_id)
 
@@ -170,6 +172,7 @@ async def install(body: FTInstallRequest) -> dict:
 @router.post("/uninstall")
 async def uninstall(body: FTUninstallRequest) -> dict:
     """Remove the Function Tracker connection for a venue."""
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
 
     install["status"] = "uninstalled"
@@ -235,6 +238,7 @@ async def sync_events(body: FTSyncRequest) -> dict:
 
     Returns demand signals based on event size, type, and timing.
     """
+    enforce_venue_manager(body.venue_id)
     install = _get_install_or_404(body.venue_id)
 
     tokens = install.get("tokens", {})

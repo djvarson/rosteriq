@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Path
 from pydantic import BaseModel, Field
 
 from rosteriq.services.labour_tracker import LabourTracker
+from rosteriq.middleware.tenant import enforce_venue_manager
 
 logger = logging.getLogger(__name__)
 
@@ -410,6 +411,7 @@ def create_labour_router(labour_tracker: LabourTracker) -> APIRouter:
               "red_max": 35.0
             }
         """
+        enforce_venue_manager(venue_id)
         try:
             # Build update dict from non-None values
             update_dict = {}

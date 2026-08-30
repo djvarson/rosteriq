@@ -17,7 +17,8 @@ from rosteriq.services.preference_learner import (
 from rosteriq.models import Shift, Roster, ShiftStatus
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import (
-    enforce_venue_access, load_employee_in_scope, load_roster_in_scope,
+    enforce_venue_access, enforce_venue_manager,
+    load_employee_in_scope, load_roster_in_scope,
 )
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,7 @@ async def train_preferences(
         Training status and number of profiles created
     """
     _scope_venue(venue_id)
+    enforce_venue_manager(venue_id)  # venue-wide model retrain = manager
     try:
         started_at = datetime.utcnow()
         learner = PreferenceLearner()

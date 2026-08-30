@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from fastapi import APIRouter, HTTPException, Depends, Request, Header
 from pydantic import BaseModel, Field
 
+from rosteriq.middleware.tenant import enforce_owner
+
 logger = logging.getLogger(__name__)
 
 # Will be injected by api.py
@@ -301,6 +303,7 @@ def create_security_router(security_middleware: object) -> APIRouter:
         Returns:
         - status: "cleared" on success
         """
+        enforce_owner()  # platform security log, not tenant-scoped
         try:
             _violation_store.clear()
             logger.info("CSP violations cleared by admin")

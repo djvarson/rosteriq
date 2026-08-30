@@ -20,6 +20,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Query, Header
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_owner
 from rosteriq.services.tanda_plugin import TandaPluginService
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,11 @@ async def handle_install(request: Request) -> dict:
         401: If OAuth token exchange fails
         500: If venue creation fails
     """
+    # Interim hardening (2026-08-30): a marketplace install creates a venue and
+    # stores org credentials — restrict to platform owners until the Tanda HMAC
+    # signature check (verify_tanda_signature, currently unwired) is properly
+    # wired and this route is moved to the signed-webhook auth path.
+    enforce_owner()
     try:
         payload = await request.json()
     except Exception as e:
@@ -157,6 +163,8 @@ async def handle_uninstall(request: Request) -> dict:
         404: If organisation not found
         500: If uninstall fails
     """
+    # Interim hardening: platform-owner-only (see handle_install note).
+    enforce_owner()
     try:
         payload = await request.json()
     except Exception as e:

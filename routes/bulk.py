@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.roster_templates import RosterTemplateService
 from rosteriq.roster_optimiser import generate_weekly_roster
 
@@ -116,6 +117,8 @@ async def bulk_generate_rosters(req: BulkGenerateRostersRequest):
     Returns:
         BulkGenerateRostersResponse with per-venue results
     """
+    for v in req.venue_ids:
+        enforce_venue_manager(v)
     try:
         # Validate request
         if len(req.venue_ids) > 10:
@@ -201,6 +204,8 @@ async def bulk_apply_templates(req: BulkApplyTemplatesRequest):
     Returns:
         BulkApplyTemplatesResponse with per-application results
     """
+    for app in req.template_applications:
+        enforce_venue_manager(app.venue_id)
     try:
         # Validate request
         if len(req.template_applications) > 20:

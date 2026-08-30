@@ -23,7 +23,10 @@ def test_demo_endpoint_mints_token_and_seeds():
 
     db = get_db()
     user = db.get_user_by_id(DEMO_USER_ID)
-    assert user and user["email"] == DEMO_USER_EMAIL and user["role"] == "staff"
+    # The demo DASHBOARD identity is a manager (its screens — roster generation,
+    # forecasts, labour — are manager-gated). The staff-side demo is Emma
+    # (DEMO_STAFF_USER), asserted separately below.
+    assert user and user["email"] == DEMO_USER_EMAIL and user["role"] == "manager"
     assert user.get("venue_ids") == [DEMO_VENUE_ID]
 
     venue = db.get_venue(DEMO_VENUE_ID)

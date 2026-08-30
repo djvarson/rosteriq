@@ -24,7 +24,7 @@ from rosteriq.services.employee_onboarding import (
     OnboardingItemCategory,
 )
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access, get_tenant_context_optional
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager, get_tenant_context_optional
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +235,7 @@ async def create_onboarding(employee_id: str, req: CreateOnboardingRequest):
     # they must belong to that venue (no cross-venue checklist injection).
     _scope_venue(req.venue_id)
     _scope_employee(employee_id, req.venue_id)
+    enforce_venue_manager(req.venue_id)  # HR onboarding record = manager
 
     try:
         service = get_onboarding_service()
@@ -348,6 +349,9 @@ async def update_item(
         Updated OnboardingItemResponse
     """
     venue_id = _scope_employee(employee_id, venue_id) or venue_id
+    # Completing/waiving a mandatory compliance item (RSA/WHS/food-safety) is a
+    # manager sign-off, not a self-serve action.
+    enforce_venue_manager(venue_id)
     try:
         service = get_onboarding_service()
 
@@ -517,6 +521,7 @@ async def update_venue_template(venue_id: str, req: UpdateVenueTemplateRequest):
         Updated VenueTemplateResponse
     """
     _scope_venue(venue_id)
+    enforce_venue_manager(venue_id)  # venue-wide compliance config = manager
     try:
         service = get_onboarding_service()
         templates = service.update_venue_template(venue_id, req.items)

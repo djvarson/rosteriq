@@ -77,9 +77,11 @@ def seed_demo_environment(db) -> None:
 
     # Scoped, non-owner demo user limited to the demo venue. Role is
     # "manager" (NOT owner): managers are venue_ids-scoped exactly like staff,
-    # so the sandbox holds — but the demo can showcase the manager side
-    # (publishing procedures, moderating the feed) that role-gated routes
-    # require.
+    # so the sandbox holds — but the demo dashboard IS the manager view
+    # (roster generation, forecasts, labour, publishing, feed moderation) and
+    # those are role-gated as of the 2026-08-30 authz pass, so the demo user
+    # must be a manager to exercise them. The staff-side demo has its own
+    # identity (DEMO_STAFF_USER / Emma, role "staff") for the /my portal.
     try:
         existing = db.get_user_by_id(DEMO_USER_ID)
         if not existing:
@@ -88,20 +90,21 @@ def seed_demo_environment(db) -> None:
                 "email": DEMO_USER_EMAIL,
                 "name": "Demo User",
                 "password_hash": "",      # login-by-password disabled for demo
-                "role": "staff",
+                "role": "manager",
                 "is_active": True,
                 "venue_ids": [DEMO_VENUE_ID],
                 "created_at": now,
             })
         elif (
             existing.get("venue_ids") != [DEMO_VENUE_ID]
-            or existing.get("role") != "staff"
+            or existing.get("role") != "manager"
             or not existing.get("is_active")
         ):
             # Self-heal a demo user created before venue_ids persisted (it
-            # otherwise 403s on its own venue) or otherwise drifted.
+            # otherwise 403s on its own venue) or one seeded as staff before the
+            # dashboard's manager actions were role-gated.
             existing["venue_ids"] = [DEMO_VENUE_ID]
-            existing["role"] = "staff"
+            existing["role"] = "manager"
             existing["is_active"] = True
             db.save_user(existing)
     except Exception:

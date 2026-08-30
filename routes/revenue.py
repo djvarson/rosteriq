@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.revenue_forecast import (
     RevenueForecaster, RevenueEstimate, BudgetCheckResult
 )
@@ -114,6 +115,7 @@ async def train_revenue_model(
     Returns:
         Model dict with learned parameters and confidence score
     """
+    enforce_venue_manager(venue_id)
     try:
         forecaster = RevenueForecaster()
         model = forecaster.train(venue_id, lookback_days=lookback_days)
@@ -307,6 +309,7 @@ async def record_actual(request: RecordActualRequest) -> RecordActualResponse:
     Returns:
         Confirmation and any accuracy metrics
     """
+    enforce_venue_manager(request.venue_id)
     try:
         target_date = datetime.fromisoformat(request.date).date()
     except ValueError:

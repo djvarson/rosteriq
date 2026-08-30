@@ -147,6 +147,8 @@ async def chat(body: ChatRequest) -> dict:
     to look up employees, shifts, costs, compliance, and more.
     It can also suggest actions (roster generation, shift changes, messaging).
     """
+    from rosteriq.middleware.tenant import enforce_venue_access
+    enforce_venue_access(body.venue_id)  # AI reads real venue data -> members only
     _guard_demo_scope(body.venue_id)
     _check_ai_budget(body.venue_id)
 
@@ -237,8 +239,10 @@ async def execute_action(body: ActionRequest) -> dict:
     """
     db = get_db()
     action_type = body.action_type
-    from rosteriq.middleware.tenant import enforce_venue_access
-    enforce_venue_access(body.venue_id)
+    # Actions are manager operations (roster generation, shift changes,
+    # broadcast messaging) — venue membership alone is not enough.
+    from rosteriq.middleware.tenant import enforce_venue_manager
+    enforce_venue_manager(body.venue_id)
 
     try:
         if action_type == "generate_roster":

@@ -38,7 +38,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import load_roster_in_scope
+from rosteriq.middleware.tenant import load_roster_in_scope, enforce_venue_manager
 from rosteriq.models import (
     VenueConfig, Employee, DemandForecast, Roster, State,
     User, UserRole,
@@ -225,6 +225,10 @@ async def optimise_roster(
     Raises:
         HTTPException if venue not found or invalid parameters
     """
+    # Generating/optimising a roster is a manager action, scoped to the venue
+    # (get_venue below does not enforce venue access on its own).
+    enforce_venue_manager(request.venue_id)
+
     # Validate strategy
     if request.strategy not in ["cost_optimized", "coverage_first", "balanced"]:
         raise HTTPException(

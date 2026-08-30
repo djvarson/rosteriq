@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.data_feeds.reservations import (
     NowBookItAdapter,
     ResDiaryAdapter,
@@ -149,6 +150,7 @@ async def install(
     Stores API credentials and verifies connectivity by checking
     the provider's health endpoint.
     """
+    enforce_venue_manager(body.venue_id)
     provider = _validate_provider(provider)
     display_name = PROVIDER_DISPLAY_NAMES[provider]
     db = get_db()
@@ -205,6 +207,7 @@ async def uninstall(
     """
     Remove the reservation provider connection for a venue.
     """
+    enforce_venue_manager(body.venue_id)
     provider = _validate_provider(provider)
     display_name = PROVIDER_DISPLAY_NAMES[provider]
     install = _get_install_or_404(provider, body.venue_id)
@@ -282,6 +285,7 @@ async def sync_reservations(
 
     Returns demand signals (bookings, covers, party sizes) aggregated per day.
     """
+    enforce_venue_manager(body.venue_id)
     provider = _validate_provider(provider)
     display_name = PROVIDER_DISPLAY_NAMES[provider]
     install = _get_install_or_404(provider, body.venue_id)
