@@ -217,6 +217,15 @@ async def import_staff(body: StaffImportBody) -> dict:
         except Exception as e:
             skipped.append({"row": i, "name": name, "reason": f"invalid: {e}"})
 
+    if created:
+        # The employees list is cached for 2 minutes — a manager who imports
+        # staff must see them immediately, not after the TTL.
+        try:
+            from rosteriq.middleware.cache import get_cache_manager
+            await get_cache_manager().invalidate_all("employee_lists")
+        except Exception:
+            pass
+
     logger.info(f"Staff import at {body.venue_id}: {len(created)} created, "
                 f"{len(skipped)} skipped")
     return {
