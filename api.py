@@ -2423,6 +2423,7 @@ _EMPLOYEE_AUDIT_FIELDS = (
     "name", "employment_type", "award_level", "state", "hourly_base_rate",
     "skills", "email", "phone", "max_hours_per_week", "consecutive_days_limit",
     "venue_id", "availability",
+    "visa_status", "visa_expiry", "visa_work_limit_fortnight",
 )
 
 
@@ -2537,6 +2538,11 @@ async def list_employees(
     enforce_venue_access(venue_id)
     _tenant = get_tenant_context_optional()
     _scope = "owner" if (_tenant is None or _tenant.is_owner) else ",".join(sorted(_tenant.venue_ids))
+    # Work-rights data is sensitive: staff-role callers see colleagues without
+    # visa fields. The role is part of the cache key so payloads never mix.
+    _is_mgr = (_tenant is None or _tenant.is_owner
+               or getattr(_tenant, "role", None) in ("manager", "owner"))
+    _scope += "_mgr" if _is_mgr else "_staff"
 
     # Use cache if available
     if get_cache_manager and request:
@@ -2562,6 +2568,8 @@ async def list_employees(
 
     total = len(all_employees)
     items = all_employees[offset:offset + limit]
+    if not _is_mgr:
+        items = [_strip_visa_fields(e) for e in items]
     result = {
         "items": items,
         "total": total,
@@ -2582,12 +2590,23 @@ async def list_employees(
     return result
 
 
+def _strip_visa_fields(emp: Employee) -> Employee:
+    """Copy without work-rights data — a staff login can see who works with
+    them, never a colleague's visa record."""
+    return emp.model_copy(update={"visa_status": None, "visa_expiry": None,
+                                  "visa_work_limit_fortnight": None})
+
+
 @app.get("/employees/{employee_id}")
 async def get_employee(employee_id: str):
     if employee_id not in _store["employees"]:
         raise HTTPException(404, f"Employee {employee_id} not found")
     emp = _store["employees"][employee_id]
     enforce_venue_access(getattr(emp, "venue_id", None))
+    _tenant = get_tenant_context_optional()
+    if not (_tenant is None or _tenant.is_owner
+            or getattr(_tenant, "role", None) in ("manager", "owner")):
+        return _strip_visa_fields(emp)
     return emp
 
 
@@ -2811,6 +2830,27 @@ async def generate_roster(req: GenerateRosterRequest):
             min_staff_by_role=getattr(venue, "min_staff", None) or {},
         )
 
+    # Work-rights check against what the venue RECORDED from VEVO: this
+    # week's roster plus the stored previous week vs each employee's
+    # fortnight cap, and any expired/expiring visas among rostered staff.
+    from rosteriq.services.visa import fortnight_cap_flags, visa_alerts
+    prev_week_start = req.week_start - timedelta(days=7)
+    # Regenerating a week accumulates drafts — the fortnight must count the
+    # NEWEST roster for the previous week, never a stale first attempt.
+    def _roster_age(r):
+        try:
+            return r.created_at.timestamp()
+        except Exception:
+            return 0.0
+    _prev_candidates = [r for r in _store["rosters"].values()
+                        if getattr(r, "venue_id", None) == req.venue_id
+                        and getattr(r, "week_start", None) == prev_week_start]
+    prev_roster = max(_prev_candidates, key=_roster_age, default=None)
+    visa_flags = fortnight_cap_flags(roster, employees, prev_roster)
+    rostered_ids = {str(sh.employee_id) for sh in roster.shifts}
+    visa_expiry_alerts = [a for a in visa_alerts(employees)
+                          if a["employee_id"] in rostered_ids]
+
     _store["rosters"][roster.id] = roster
     try:
         from rosteriq.services.events import audit as _audit
@@ -2822,7 +2862,9 @@ async def generate_roster(req: GenerateRosterRequest):
                total_cost=str(roster.total_cost) if roster.total_cost is not None else None,
                budget_cap=req.weekly_budget,
                budget_met=(budget_report or {}).get("met"),
-               budget_cuts=len((budget_report or {}).get("removed", [])))
+               budget_cuts=len((budget_report or {}).get("removed", [])),
+               visa_cap_flags=len(visa_flags),
+               visa_expiry_alerts=len(visa_expiry_alerts))
     except Exception:
         pass
 
@@ -2838,12 +2880,20 @@ async def generate_roster(req: GenerateRosterRequest):
     except Exception as e:
         logger.warning(f"Failed to broadcast roster update: {e}")
 
+    extras = {}
     if budget_report is not None:
-        # Same payload as ever, plus the budget outcome — an unmet budget must
-        # arrive as words a manager sees, not vanish into a saved roster.
+        # An unmet budget must arrive as words a manager sees, not vanish
+        # into a saved roster.
+        extras["budget"] = budget_report
+    if visa_flags or visa_expiry_alerts:
+        # Same rule for work rights: a roster that busts a recorded visa cap
+        # or rosters someone whose visa has lapsed says so out loud.
+        extras["visa_flags"] = visa_flags
+        extras["visa_expiry_alerts"] = visa_expiry_alerts
+    if extras:
         from fastapi.encoders import jsonable_encoder
         out = jsonable_encoder(roster)
-        out["budget"] = budget_report
+        out.update(extras)
         return out
     return roster
 

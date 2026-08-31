@@ -170,6 +170,15 @@ class Employee(BaseModel):
     availability: Dict[str, List[Dict[str, str]]] = {}  # day -> list of {start, end} ranges
     max_hours_per_week: float = 38.0
     consecutive_days_limit: int = 6
+    # Work rights: captured from the venue's own VEVO check — RosterIQ never
+    # asserts what the law allows, it enforces what the manager recorded.
+    # visa_status: citizen | permanent_resident | student | working_holiday |
+    # temporary_other (free string, normalised). None = not recorded yet.
+    visa_status: Optional[str] = None
+    visa_expiry: Optional[date] = None
+    # Fortnightly work-hour cap from the visa condition (e.g. a student
+    # visa's cap). None = no cap recorded.
+    visa_work_limit_fortnight: Optional[float] = None
     created_at: datetime
     updated_at: datetime
 
@@ -188,6 +197,23 @@ class Employee(BaseModel):
         if not (1 <= v <= 60):
             raise ValueError("max_hours_per_week must be between 1 and 60")
         return v
+
+    @field_validator("visa_status")
+    @classmethod
+    def normalise_visa_status(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = str(v).strip().lower().replace(" ", "_")[:40]
+        return v or None
+
+    @field_validator("visa_work_limit_fortnight")
+    @classmethod
+    def validate_visa_work_limit(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return None
+        if not (1 <= v <= 152):  # a fortnight has 336 hours; 152 = 2x76h weeks
+            raise ValueError("visa_work_limit_fortnight must be between 1 and 152")
+        return float(v)
 
 
 class Shift(BaseModel):

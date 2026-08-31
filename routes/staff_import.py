@@ -50,6 +50,34 @@ _ROLE_KEYS = {"role", "position", "job", "job title", "title", "skill",
               "skills", "team", "department", "area"}
 _TYPE_KEYS = {"employment type", "type", "employment", "contract"}
 _LAST_KEYS = {"last name", "surname", "lastname"}
+_VISA_KEYS = {"visa", "visa status", "visa type", "work rights", "working rights"}
+_VISA_EXPIRY_KEYS = {"visa expiry", "visa expiry date", "visa end", "visa end date"}
+
+
+def _clean_date(v: str):
+    """'01/03/2027' / '2027-03-01' / '' -> date or None. Ambiguous or
+    unparseable dates import as None rather than guessing — a wrong visa
+    expiry is worse than a blank one."""
+    v = str(v or "").strip()
+    if not v:
+        return None
+    from datetime import date as _date
+    m = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", v)
+    if m:
+        try:
+            return _date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", v)
+    if m:
+        d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        # AU exports write day/month/year; a "month" over 12 means the
+        # columns were the other way round — refuse rather than guess.
+        try:
+            return _date(y, mth, d)
+        except ValueError:
+            return None
+    return None
 
 
 def _clean_rate(v: str):
@@ -103,7 +131,7 @@ async def import_staff(body: StaffImportBody) -> dict:
     has_header = any(h in (_NAME_KEYS | _EMAIL_KEYS | _RATE_KEYS | _ROLE_KEYS)
                      for h in header_norm)
     col = {"name": None, "email": None, "rate": None, "role": None,
-           "type": None, "last": None}
+           "type": None, "last": None, "visa": None, "visa_expiry": None}
     if has_header:
         for idx, h in enumerate(header_norm):
             if col["name"] is None and h in _NAME_KEYS:
@@ -118,6 +146,10 @@ async def import_staff(body: StaffImportBody) -> dict:
                 col["type"] = idx
             elif col["last"] is None and h in _LAST_KEYS:
                 col["last"] = idx
+            elif col["visa"] is None and h in _VISA_KEYS:
+                col["visa"] = idx
+            elif col["visa_expiry"] is None and h in _VISA_EXPIRY_KEYS:
+                col["visa_expiry"] = idx
         data_rows = rows[1:]
     else:
         data_rows = rows  # no header — infer per row below
@@ -140,6 +172,8 @@ async def import_staff(body: StaffImportBody) -> dict:
         rate_cell = cells[col["rate"]] if col["rate"] is not None and col["rate"] < len(cells) else ""
         role = cells[col["role"]] if col["role"] is not None and col["role"] < len(cells) else ""
         type_cell = cells[col["type"]] if col["type"] is not None and col["type"] < len(cells) else ""
+        visa_cell = cells[col["visa"]] if col["visa"] is not None and col["visa"] < len(cells) else ""
+        visa_exp_cell = cells[col["visa_expiry"]] if col["visa_expiry"] is not None and col["visa_expiry"] < len(cells) else ""
 
         if col["name"] is None:  # no header — infer from the row
             non_email = [c for c in cells if "@" not in c]
@@ -171,6 +205,8 @@ async def import_staff(body: StaffImportBody) -> dict:
                 hourly_base_rate=rate,
                 email=email or None,
                 skills=[role] if role else [],
+                visa_status=(visa_cell or None),
+                visa_expiry=_clean_date(visa_exp_cell),
                 created_at=now, updated_at=now,
             )
             db.save_employee(emp)

@@ -939,6 +939,10 @@
       max-width: 500px;
       width: 90%;
       box-shadow: 0 20px 60px rgba(16, 24, 40, 0.2);
+      /* taller forms (Add Employee with work rights) must scroll, never
+         push the submit button off a laptop screen */
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
     }
 
     .modal-header {
@@ -5464,6 +5468,31 @@
         <label>Email</label>
         <input type="email" id="add-emp-email" placeholder="e.g., jane@example.com">
       </div>
+      <div style="border-top:1px solid var(--border); margin:14px 0 12px; padding-top:12px;">
+        <div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Work rights (from your VEVO check)</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+          <div class="input-group" style="margin:0;">
+            <label>Visa status</label>
+            <select id="add-emp-visa">
+              <option value="">Not recorded</option>
+              <option value="citizen">Citizen</option>
+              <option value="permanent_resident">Permanent resident</option>
+              <option value="student">Student visa</option>
+              <option value="working_holiday">Working holiday</option>
+              <option value="temporary_other">Other temporary visa</option>
+            </select>
+          </div>
+          <div class="input-group" style="margin:0;">
+            <label>Visa expiry</label>
+            <input type="date" id="add-emp-visa-expiry">
+          </div>
+          <div class="input-group" style="margin:0;">
+            <label>Hour cap / fortnight</label>
+            <input type="number" id="add-emp-visa-cap" min="1" max="152" step="1" placeholder="from VEVO">
+          </div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">Record what VEVO says — RosterIQ flags rosters that break the recorded cap and warns before the expiry date. Leave blank for citizens/PRs.</div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-add-employee')">Cancel</button>
@@ -9260,6 +9289,18 @@ function renderStaffTable() {
     var av = avDays === 0 ? '<span class="alert-badge badge-secondary">Not set</span>'
            : avDays >= 5 ? '<span class="alert-badge badge-success">Available</span>'
            : '<span class="alert-badge badge-warning">Limited</span>';
+    // Work-rights chip: expired = red, expiring within 28 days = amber,
+    // capped visa = neutral note. Citizens/PRs and unrecorded stay quiet.
+    var visaChip = '';
+    if (e.visa_expiry) {
+      var vdays = Math.floor((new Date(e.visa_expiry + 'T23:59:59') - new Date()) / 86400000);
+      if (vdays < 0) visaChip = ' <span class="alert-badge badge-danger" title="Visa expired ' + esc(e.visa_expiry) + '">Visa expired</span>';
+      else if (vdays <= 28) visaChip = ' <span class="alert-badge badge-warning" title="Visa expires ' + esc(e.visa_expiry) + '">Visa ' + vdays + 'd</span>';
+    }
+    if (!visaChip && e.visa_work_limit_fortnight) {
+      visaChip = ' <span class="alert-badge badge-secondary" title="Recorded work-rights cap">' + (+e.visa_work_limit_fortnight) + 'h/fn</span>';
+    }
+    av += visaChip;
     var h = hours[e.id] || 0;
     var fat = h === 0 ? '<span style="color:var(--text-muted)">Not rostered</span>'
             : (h > 38 ? 'High' : h > 30 ? 'Medium' : 'Low') + ' (' + Math.round(h) + 'hrs/wk)';
@@ -9940,6 +9981,19 @@ document.getElementById('btn-modal-generate').addEventListener('click', async ()
     });
     showSuccess('#page-dashboard', 'Roster generated successfully!');
     closeModal('modal-generate-roster');
+    // Work-rights flags arrive with the roster — say them out loud before
+    // anyone publishes a fortnight that breaks a recorded visa cap.
+    var vf = (result && result.visa_flags) || [];
+    var ve = (result && result.visa_expiry_alerts) || [];
+    if (vf.length) {
+      showToast(vf[0].message + (vf.length > 1 ? ' (+' + (vf.length - 1) + ' more)' : ''), 'warning');
+    }
+    if (ve.length) {
+      var a = ve[0];
+      showToast(a.kind === 'expired'
+        ? a.name + "'s visa has EXPIRED — confirm work rights before publishing."
+        : a.name + "'s visa expires " + a.expiry + ' — re-check VEVO.', 'warning');
+    }
     loadVenueData();
     if (result && result.id) checkRosterCoverage(result.id, coversPerStaff);
   } catch (error) {
@@ -10091,6 +10145,9 @@ document.getElementById('btn-add-staff').addEventListener('click', () => {
   document.getElementById('add-emp-role').value = '';
   document.getElementById('add-emp-phone').value = '';
   document.getElementById('add-emp-email').value = '';
+  document.getElementById('add-emp-visa').value = '';
+  document.getElementById('add-emp-visa-expiry').value = '';
+  document.getElementById('add-emp-visa-cap').value = '';
   openModal('modal-add-employee');
 });
 
@@ -10127,6 +10184,17 @@ document.getElementById('btn-modal-add-employee').addEventListener('click', asyn
   };
   if (phone) payload.phone = phone;
   if (email) payload.email = email;
+  const visa = document.getElementById('add-emp-visa').value;
+  const visaExpiry = document.getElementById('add-emp-visa-expiry').value;
+  const visaCapRaw = document.getElementById('add-emp-visa-cap').value.trim();
+  const visaCap = parseFloat(visaCapRaw);
+  if (visaCapRaw && (isNaN(visaCap) || visaCap < 1 || visaCap > 152)) {
+    showToast('Hour cap must be between 1 and 152 hours per fortnight', 'error');
+    return;
+  }
+  if (visa) payload.visa_status = visa;
+  if (visaExpiry) payload.visa_expiry = visaExpiry;
+  if (visaCapRaw && !isNaN(visaCap)) payload.visa_work_limit_fortnight = visaCap;
 
   const btn = document.getElementById('btn-modal-add-employee');
   btn.disabled = true;

@@ -23,6 +23,7 @@ from rosteriq.services.backup import (
     RestoreResult, ImportResult,
 )
 from rosteriq.middleware.auth import require_owner, get_current_user
+from rosteriq.middleware.tenant import enforce_venue_manager
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +324,9 @@ async def export_venue_data(
     Raises:
         404: If venue not found
     """
-    # Verify user has access to this venue
+    # A venue export is the whole tenant's data (staff records including
+    # work rights, rosters, forecasts) — managers/owners of THIS venue only.
+    enforce_venue_manager(venue_id)
     db = get_db()
     venue = db.get_venue(venue_id)
     if not venue:

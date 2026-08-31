@@ -10,7 +10,9 @@ import logging
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from rosteriq.middleware.auth import get_current_user
 
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
@@ -24,7 +26,8 @@ router = APIRouter(prefix="/api/briefing", tags=["briefing"])
 
 
 @router.get("")
-async def daily_briefing(venue_id: str = Query(...)) -> dict:
+async def daily_briefing(venue_id: str = Query(...),
+                         user=Depends(get_current_user)) -> dict:
     enforce_venue_access(venue_id)
     db = get_db()
     today = venue_today(venue_id, db)  # venue-local: 6am Perth is still yesterday in UTC
@@ -107,6 +110,31 @@ async def daily_briefing(venue_id: str = Query(...)) -> dict:
         attention.append(f"{pending_leave} leave request(s) awaiting your decision.")
     if open_covers:
         attention.append(f"{open_covers} shift(s) up for cover need approval.")
+
+    # --- Work rights: visas expired or expiring (from the venue's own VEVO
+    # records) — an expired one leads the whole list ------------------------
+    try:
+        # Named visa alerts are sensitive personal data — manager eyes only
+        # (the demo account and linked staff read this briefing too).
+        _is_mgr = user.role in ("manager", "owner") or getattr(user, "is_owner", False)
+        from rosteriq.services.visa import visa_alerts
+        alerts = (visa_alerts(db.get_employees(venue_id) or [], today=today)
+                  if _is_mgr else [])
+        expired = [a for a in alerts if a["kind"] == "expired"]
+        expiring = [a for a in alerts if a["kind"] == "expiring"]
+        if expired:
+            worst = expired[0]
+            attention.insert(0,
+                f"{worst['name']}'s visa expired {abs(worst['days'])} day(s) ago"
+                + (f" (and {len(expired) - 1} more)" if len(expired) > 1 else "")
+                + " — confirm work rights before rostering them.")
+        if expiring:
+            soonest = expiring[0]
+            attention.append(
+                f"{len(expiring)} visa(s) expire within 28 days — "
+                f"{soonest['name']}'s on {soonest['expiry']}. Re-check VEVO.")
+    except Exception as e:
+        logger.warning(f"Briefing visa check failed for {venue_id}: {e}")
 
     # --- Team pulse: procedure compliance + unanswered staff posts --------
     # Same engine the AI copilot's tools use, so the numbers never disagree.

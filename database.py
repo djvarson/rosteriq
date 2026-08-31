@@ -2133,6 +2133,9 @@ class MemoryStore(BaseStore):
             emp.name = f"Anonymised Employee #{employee_id[:8]}"
             emp.email = f"anon_{employee_id[:8]}@deleted.local"
             emp.phone = None
+            emp.visa_status = None
+            emp.visa_expiry = None
+            emp.visa_work_limit_fortnight = None
             self.save_employee(emp)
 
     def get_anonymised_employees(self) -> list[dict]:
@@ -3433,6 +3436,9 @@ class PostgresStore(BaseStore):
                 consecutive_days INTEGER DEFAULT 6,
                 phone TEXT,
                 email TEXT,
+                visa_status TEXT,
+                visa_expiry DATE,
+                visa_work_limit_fortnight NUMERIC(5, 2),
                 active BOOLEAN DEFAULT true,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -3629,6 +3635,10 @@ class PostgresStore(BaseStore):
             # only on the side table — so every Privacy Act erasure 500'd and
             # the PII was never scrubbed.
             "ALTER TABLE employees ADD COLUMN IF NOT EXISTS anonymised_at TIMESTAMP WITH TIME ZONE",
+            # Work-rights capture (visa status/expiry + recorded fortnight cap)
+            "ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_status TEXT",
+            "ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_expiry DATE",
+            "ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_work_limit_fortnight NUMERIC(5, 2)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_venue_created ON audit_logs (venue_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs ((details->>'category'), created_at DESC)",
@@ -3694,19 +3704,25 @@ class PostgresStore(BaseStore):
         with self._cursor() as cur:
             cur.execute("""
                 INSERT INTO employees (id, venue_id, tanda_id, name, employment_type, award_level,
-                    hourly_base_rate, skills, availability, max_hours_per_week, consecutive_days, phone, email, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    hourly_base_rate, skills, availability, max_hours_per_week, consecutive_days, phone, email,
+                    visa_status, visa_expiry, visa_work_limit_fortnight, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, employment_type=EXCLUDED.employment_type,
                     hourly_base_rate=EXCLUDED.hourly_base_rate, skills=EXCLUDED.skills,
                     availability=EXCLUDED.availability, max_hours_per_week=EXCLUDED.max_hours_per_week,
-                    phone=EXCLUDED.phone, email=EXCLUDED.email, updated_at=now()
+                    phone=EXCLUDED.phone, email=EXCLUDED.email,
+                    visa_status=EXCLUDED.visa_status, visa_expiry=EXCLUDED.visa_expiry,
+                    visa_work_limit_fortnight=EXCLUDED.visa_work_limit_fortnight,
+                    updated_at=now()
             """, (
                 emp.id, venue_id, emp.tanda_id, emp.name,
                 emp.employment_type.value, emp.award_level.value,
                 float(emp.hourly_base_rate), _json(emp.skills),
                 _json(emp.availability), emp.max_hours_per_week,
                 emp.consecutive_days_limit, emp.phone, emp.email,
+                emp.visa_status, emp.visa_expiry,
+                emp.visa_work_limit_fortnight,
                 emp.created_at, emp.updated_at,
             ))
 
@@ -4632,6 +4648,10 @@ class PostgresStore(BaseStore):
             availability=avail,
             max_hours_per_week=float(row["max_hours_per_week"]),
             consecutive_days_limit=row.get("consecutive_days", 6),
+            visa_status=row.get("visa_status"),
+            visa_expiry=row.get("visa_expiry"),
+            visa_work_limit_fortnight=(float(row["visa_work_limit_fortnight"])
+                                       if row.get("visa_work_limit_fortnight") is not None else None),
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
 
@@ -5801,7 +5821,10 @@ class PostgresStore(BaseStore):
 
             cur.execute("""
                 UPDATE employees
-                SET name = %s, email = %s, phone = NULL, anonymised_at = %s, updated_at = now()
+                SET name = %s, email = %s, phone = NULL,
+                    visa_status = NULL, visa_expiry = NULL,
+                    visa_work_limit_fortnight = NULL,
+                    anonymised_at = %s, updated_at = now()
                 WHERE id = %s
             """, (anon_name, anon_email, datetime.utcnow(), employee_id))
 
