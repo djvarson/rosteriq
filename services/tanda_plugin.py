@@ -240,6 +240,18 @@ class TandaPluginService:
             if not install:
                 raise ValueError(f"No install found for org {organisation_id}")
 
+            # Replay containment: the marketplace signature carries no
+            # timestamp, so an identical signed uninstall verifies forever.
+            # Once uninstalled, further uninstalls are an acknowledged no-op —
+            # they must never re-revoke a reinstalled org's fresh tokens.
+            if install.get("status") == "uninstalled":
+                logger.info(
+                    f"Uninstall for {organisation_id} ignored — already uninstalled")
+                return {
+                    "status": "already_uninstalled",
+                    "organisation_id": organisation_id,
+                }
+
             venue_id = install["venue_id"]
 
             # Step 2: Revoke OAuth tokens at Tanda (best-effort).

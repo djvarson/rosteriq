@@ -17,10 +17,11 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query, Header
+from fastapi import APIRouter, HTTPException, Request, Query, Header, Depends
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_owner
+from rosteriq.middleware.tenant import enforce_owner, enforce_venue_access
+from rosteriq.routes.webhook_routes import verify_hmac_signature
 from rosteriq.services.tanda_plugin import TandaPluginService
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,76 @@ def get_plugin_service() -> TandaPluginService:
 
 
 # ============================================================================
+# Marketplace request authentication (HMAC signature)
+# ============================================================================
+#
+# Who calls install/uninstall: the Tanda Marketplace itself, directly. At
+# install time no RosterIQ venue or user exists yet (the install is what CREATES
+# the venue), so there is no JWT to present — these routes therefore live on the
+# signed-webhook auth path (see WEBHOOK_EXEMPT in middleware/tenant.py and
+# WEBHOOK_PATHS in middleware/auth.py, which wave them past TenantMiddleware's
+# JWT check) and are authenticated solely by Tanda's HMAC signature here.
+
+
+async def verify_tanda_signature(
+    request: Request,
+    x_tanda_signature: str = Header(None),
+) -> bool:
+    """
+    Dependency that authenticates an inbound Tanda Marketplace call.
+
+    Tanda signs the raw request body with HMAC-SHA256 (keyed on
+    TANDA_WEBHOOK_SECRET) and sends the hex digest in X-Tanda-Signature. That
+    signature is the ONLY authentication install/uninstall have, so this fails
+    CLOSED, mirroring the inbound webhook receiver (routes/webhook_routes.py):
+
+      - no TANDA_WEBHOOK_SECRET configured -> reject with 503, UNLESS ENVIRONMENT
+        is an explicit dev/test value. An unset ENVIRONMENT counts as production,
+        so a deploy that forgets the secret rejects rather than accepting forged,
+        unsigned marketplace calls;
+      - secret set but signature header missing -> 401;
+      - secret set but signature does not match the body -> 401.
+
+    The secret is read live from the environment (not from the cached plugin
+    service singleton, whose secret is captured at construction time) so the
+    check is correct even if the singleton was built before the secret was set.
+
+    Returns True on success so it can gate a route via ``Depends``.
+    """
+    secret = os.environ.get("TANDA_WEBHOOK_SECRET", "")
+
+    if not secret:
+        if os.environ.get("ENVIRONMENT", "").lower() not in (
+            "development", "dev", "test", "local"
+        ):
+            logger.error(
+                "TANDA_WEBHOOK_SECRET not set — rejecting Tanda plugin call "
+                "(fail closed; unset ENVIRONMENT is treated as production)."
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Marketplace signature verification not configured",
+            )
+        logger.warning(
+            "TANDA_WEBHOOK_SECRET not set — Tanda plugin call signatures are NOT "
+            "verified (dev mode). Set it in production to reject forged calls."
+        )
+        return True
+
+    if not x_tanda_signature:
+        raise HTTPException(status_code=401, detail="Missing X-Tanda-Signature header")
+
+    # HMAC is computed over the exact raw body bytes Tanda signed. request.body()
+    # caches the body, so the handler's later request.json() reads the same bytes.
+    body = await request.body()
+    if not verify_hmac_signature(body, x_tanda_signature, secret):
+        logger.warning("Invalid X-Tanda-Signature on Tanda plugin call")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    return True
+
+
+# ============================================================================
 # Install Handler
 # ============================================================================
 
@@ -63,7 +134,10 @@ class InstallRequest:
 
 
 @router.post("/install")
-async def handle_install(request: Request) -> dict:
+async def handle_install(
+    request: Request,
+    _verified: bool = Depends(verify_tanda_signature),
+) -> dict:
     """
     Handle plugin installation from Tanda Marketplace.
 
@@ -92,11 +166,8 @@ async def handle_install(request: Request) -> dict:
         401: If OAuth token exchange fails
         500: If venue creation fails
     """
-    # Interim hardening (2026-08-30): a marketplace install creates a venue and
-    # stores org credentials — restrict to platform owners until the Tanda HMAC
-    # signature check (verify_tanda_signature, currently unwired) is properly
-    # wired and this route is moved to the signed-webhook auth path.
-    enforce_owner()
+    # Authenticated by Tanda's HMAC signature (verify_tanda_signature dependency
+    # above); this route is on the signed-webhook auth path, not the JWT path.
     try:
         payload = await request.json()
     except Exception as e:
@@ -137,7 +208,10 @@ async def handle_install(request: Request) -> dict:
 
 
 @router.post("/uninstall")
-async def handle_uninstall(request: Request) -> dict:
+async def handle_uninstall(
+    request: Request,
+    _verified: bool = Depends(verify_tanda_signature),
+) -> dict:
     """
     Handle plugin uninstallation from Tanda Marketplace.
 
@@ -163,8 +237,8 @@ async def handle_uninstall(request: Request) -> dict:
         404: If organisation not found
         500: If uninstall fails
     """
-    # Interim hardening: platform-owner-only (see handle_install note).
-    enforce_owner()
+    # Authenticated by Tanda's HMAC signature (verify_tanda_signature dependency
+    # above); this route is on the signed-webhook auth path, not the JWT path.
     try:
         payload = await request.json()
     except Exception as e:
@@ -221,6 +295,15 @@ async def get_status(org_id: str) -> dict:
                 detail=f"No plugin installation found for {org_id}"
             )
 
+        # An install record is tenant data (venue id, tier, subscription,
+        # token expiry). Only members of the mapped venue may read it; an
+        # install with no venue mapping is platform-owner territory.
+        venue_id = status.get("venue_id")
+        if venue_id:
+            enforce_venue_access(venue_id)
+        else:
+            enforce_owner()
+
         return status
 
     except HTTPException:
@@ -265,51 +348,12 @@ async def health_check() -> dict:
             "timestamp": datetime.utcnow().isoformat(),
             "database": "ok" if db_ok else "error",
             "oauth": "configured" if service.client_id else "unconfigured",
+            # install/uninstall fail closed (503) in production until this is
+            # configured — surface it so "healthy" can't hide a dead install path
+            "marketplace_signature": ("configured" if os.environ.get("TANDA_WEBHOOK_SECRET")
+                                      else "unconfigured"),
         }
 
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=500, detail="Health check failed")
-
-
-# ============================================================================
-# Utility: Parse and validate callback signature (middleware)
-# ============================================================================
-
-
-async def verify_tanda_signature(
-    request: Request,
-    x_tanda_signature: str = Header(None),
-) -> bool:
-    """
-    Verify that an incoming request came from Tanda.
-
-    Tanda sends X-Tanda-Signature header with HMAC-SHA256 hash of request body.
-    This can be used as a middleware to protect install/uninstall endpoints.
-
-    Args:
-        request: HTTP request
-        x_tanda_signature: X-Tanda-Signature header value
-
-    Returns:
-        True if signature is valid
-
-    Raises:
-        HTTPException: If signature is invalid or missing
-    """
-    if not x_tanda_signature:
-        # In development, allow requests without signature
-        if os.environ.get("ENV") == "development":
-            return True
-        raise HTTPException(status_code=401, detail="Missing X-Tanda-Signature header")
-
-    # Get request body
-    body = await request.body()
-    signature = x_tanda_signature
-
-    service = get_plugin_service()
-    if not service.validate_marketplace_token(body.decode(), signature):
-        logger.warning(f"Invalid signature in request: {x_tanda_signature[:20]}...")
-        raise HTTPException(status_code=401, detail="Invalid signature")
-
-    return True

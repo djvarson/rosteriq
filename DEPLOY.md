@@ -89,7 +89,16 @@ certbot --nginx -d api.rosteriq.com.au -d app.rosteriq.com.au
 | TANDA_CLIENT_ID      | No       | From Tanda partner portal            |
 | TANDA_CLIENT_SECRET  | No       | From Tanda partner portal            |
 | TANDA_REDIRECT_URI   | No       | OAuth callback URL                   |
-| TANDA_WEBHOOK_SECRET | No       | For verifying webhook signatures     |
+| TANDA_WEBHOOK_SECRET | Yes (prod) | Marketplace install/uninstall + webhook signatures — fail closed without it |
+
+> **TANDA_WEBHOOK_SECRET is a hard prerequisite in production**: the Tanda
+> Marketplace install/uninstall endpoints and the inbound webhook receiver
+> fail CLOSED (503) when it is unset, unless `ENVIRONMENT` is set to
+> `development`/`dev`/`test`/`local`. The gate reads `ENVIRONMENT` (which
+> railway.json sets to `production`), not `ROSTERIQ_ENV`. Paste the secret in
+> Railway variables to light up the marketplace install path; check
+> `GET /api/tanda/plugin/health` → `marketplace_signature`.
+
 | CORS_ORIGINS         | No       | Comma-separated allowed origins      |
 | ROSTERIQ_ENV         | No       | "production" or "development"        |
 

@@ -1075,6 +1075,21 @@ class BaseStore:
         """List all shifts for an employee, optionally filtered by venue."""
         raise NotImplementedError
 
+    def get_employee_shifts(self, employee_id: str, venue_id: Optional[str] = None,
+                            start_date: Optional[date] = None,
+                            end_date: Optional[date] = None,
+                            status_filter: Optional[list] = None) -> list[Shift]:
+        """An employee's shifts with optional date-window and status filters."""
+        raise NotImplementedError
+
+    def save_to_key(self, key: str, value: dict) -> None:
+        """Generic keyed blob storage (handover notes live here)."""
+        raise NotImplementedError
+
+    def load_from_key(self, key: str) -> Optional[dict]:
+        """Read a keyed blob; None when absent."""
+        raise NotImplementedError
+
 
 # ============================================================================
 # In-memory store (development / testing)
@@ -1089,6 +1104,7 @@ class MemoryStore(BaseStore):
         self._forecasts: list[DemandForecast] = []
         self._rosters: dict[str, Roster] = {}
         self._shifts: dict[str, Shift] = {}  # Key: shift_id (for individual shift operations)
+        self._kv: dict[str, dict] = {}  # generic keyed blobs (handover notes)
         self._users: dict[str, dict] = {}
         self._refresh_tokens: dict[str, dict] = {}
         self._login_attempts: list[dict] = []
@@ -1651,6 +1667,25 @@ class MemoryStore(BaseStore):
         if venue_id:
             shifts = [s for s in shifts if getattr(s, 'venue_id', None) == venue_id]
         return shifts
+
+    def get_employee_shifts(self, employee_id, venue_id=None, start_date=None,
+                            end_date=None, status_filter=None):
+        shifts = self.list_shifts_by_employee(employee_id, venue_id)
+        if start_date:
+            shifts = [s for s in shifts if s.date >= start_date]
+        if end_date:
+            shifts = [s for s in shifts if s.date <= end_date]
+        if status_filter:
+            wanted = {str(x) for x in status_filter}
+            shifts = [s for s in shifts
+                      if getattr(s.status, "value", str(s.status)) in wanted]
+        return sorted(shifts, key=lambda s: (s.date, s.start_time))
+
+    def save_to_key(self, key, value):
+        self._kv[key] = value
+
+    def load_from_key(self, key):
+        return self._kv.get(key)
 
     def is_webhook_processed(self, webhook_id: str) -> bool:
         """Check if a webhook has already been processed."""
@@ -3315,6 +3350,13 @@ class PostgresStore(BaseStore):
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """,
+        "kv_store": """
+            CREATE TABLE IF NOT EXISTS kv_store (
+                key TEXT PRIMARY KEY,
+                value JSONB NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """,
         "announcements": """
             CREATE TABLE IF NOT EXISTS announcements (
                 id TEXT PRIMARY KEY,
@@ -4902,6 +4944,47 @@ class PostgresStore(BaseStore):
                     ORDER BY shift_date, start_time
                 """, (employee_id,))
             return [self._row_to_shift(r) for r in cur.fetchall()]
+
+    def get_employee_shifts(self, employee_id, venue_id=None, start_date=None,
+                            end_date=None, status_filter=None):
+        q = ["SELECT s.* FROM shifts s"]
+        params = []
+        if venue_id:
+            q.append("JOIN rosters r ON s.roster_id = r.id")
+        q.append("WHERE s.employee_id = %s")
+        params.append(employee_id)
+        if venue_id:
+            q.append("AND r.venue_id = %s")
+            params.append(venue_id)
+        if start_date:
+            q.append("AND s.shift_date >= %s")
+            params.append(start_date)
+        if end_date:
+            q.append("AND s.shift_date <= %s")
+            params.append(end_date)
+        if status_filter:
+            q.append("AND s.status = ANY(%s)")
+            params.append([str(x) for x in status_filter])
+        q.append("ORDER BY s.shift_date, s.start_time")
+        with self._cursor() as cur:
+            cur.execute(" ".join(q), tuple(params))
+            return [self._row_to_shift(r) for r in cur.fetchall()]
+
+    def save_to_key(self, key, value):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "kv_store")
+            cur.execute("""
+                INSERT INTO kv_store (key, value, updated_at)
+                VALUES (%s, %s, now())
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+            """, (key, _json(value)))
+
+    def load_from_key(self, key):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "kv_store")
+            cur.execute("SELECT value FROM kv_store WHERE key = %s", (key,))
+            row = cur.fetchone()
+            return row["value"] if row else None
 
     # --- Xero Credentials ---
 

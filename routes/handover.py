@@ -460,8 +460,19 @@ async def acknowledge_handover(
     Raises:
         HTTPException: If note not found
     """
+    service = get_handover_service()
+
+    # Membership scope: the acknowledge body carries only employee_id (no
+    # venue_id), so resolve the note's own venue and gate on it BEFORE the try —
+    # the broad `except Exception` below would otherwise convert the 403 into a
+    # 500. A missing note is left to acknowledge_note (which raises the 404); we
+    # never surface a 403 for a note that doesn't exist, so cross-tenant callers
+    # can't probe note existence.
+    note = service.get_note(note_id)
+    if note is not None:
+        enforce_venue_access(note.venue_id)
+
     try:
-        service = get_handover_service()
         note = service.acknowledge_note(note_id, request.employee_id)
         return _to_response(note)
     except ValueError as e:

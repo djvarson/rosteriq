@@ -91,8 +91,13 @@ def verify_hmac_signature(payload: bytes, signature: str, secret: str) -> bool:
         hashlib.sha256,
     ).hexdigest()
 
-    # Constant-time comparison
-    return hmac.compare_digest(expected, signature)
+    # Constant-time comparison. compare_digest raises TypeError on non-ASCII
+    # str input (a hostile header byte >= 0x80 arrives latin-1 decoded), and
+    # an unauthenticated caller must get "invalid", never a 500.
+    try:
+        return hmac.compare_digest(expected, signature)
+    except TypeError:
+        return False
 
 
 def is_webhook_duplicate(webhook_id: str, raw_payload: bytes, event_type: str) -> bool:

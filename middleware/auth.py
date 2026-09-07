@@ -68,10 +68,15 @@ SKIP_AUTH_PREFIXES = {
 # signature (HMAC) in the handler. Must stay an EXACT-PATH allowlist: a
 # "/api/webhooks" prefix also skipped auth on the admin routes mounted under it
 # (queue management, register/deregister, outbound-webhook management), which is
-# how those became reachable unauthenticated. Kept in sync with
+# how those became reachable unauthenticated. The Tanda Marketplace
+# install/uninstall receivers sit here too — Tanda calls them directly with no
+# JWT (no venue exists yet at install) and they are gated by the
+# X-Tanda-Signature HMAC check in routes/tanda_plugin.py. Kept in sync with
 # middleware/tenant.py WEBHOOK_EXEMPT.
 WEBHOOK_PATHS = {
     "/api/webhooks/tanda",
+    "/api/tanda/plugin/install",
+    "/api/tanda/plugin/uninstall",
 }
 
 
@@ -95,7 +100,7 @@ async def get_current_user(
 
     # Skip auth for certain paths
     if request.url.path in SKIP_AUTH_PATHS or any(
-        request.url.path.startswith(p) for p in WEBHOOK_PATHS
+        request.url.path == p for p in WEBHOOK_PATHS
     ) or any(
         request.url.path.startswith(p) for p in SKIP_AUTH_PREFIXES
     ):

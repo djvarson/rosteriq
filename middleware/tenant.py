@@ -130,7 +130,17 @@ EXEMPT_PREFIXES = {"/static/", "/api/auth/"}
 # a prefix like "/api/webhooks" also matched the admin routes mounted under it
 # (/api/webhooks/queue/*, /api/webhooks/register, the outbound-webhook manager,
 # and /api/events read APIs), waving them through with no auth at all.
-WEBHOOK_EXEMPT = {"/api/webhooks/tanda"}
+#
+# Tanda Marketplace install/uninstall are here for the same reason: they are
+# called by Tanda directly (no venue/user exists yet at install, so there is no
+# JWT) and are authenticated by the X-Tanda-Signature HMAC check in
+# routes/tanda_plugin.py (verify_tanda_signature). Kept in sync with
+# middleware/auth.py WEBHOOK_PATHS.
+WEBHOOK_EXEMPT = {
+    "/api/webhooks/tanda",
+    "/api/tanda/plugin/install",
+    "/api/tanda/plugin/uninstall",
+}
 
 
 class TenantMiddleware(BaseHTTPMiddleware):
