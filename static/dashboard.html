@@ -49,9 +49,9 @@
          --dark-navy = sidebar/top surfaces, --card-bg = cards, --dark-bg =
          inset wells, --light-bg = app background. */
       --dark-navy: #FFFFFF;
-      --dark-bg: #F1F3F6;
+      --dark-bg: #F1EFEA; /* warm well — the reference's grey axis, not blue */
       --card-bg: #FFFFFF;
-      --light-bg: #F6F7F9;
+      --light-bg: #F5F3EF; /* warm near-white page ground */
       --text-primary: #111827;
       --text-secondary: #55606E;
       --text-muted: #6B7280; /* gray-500: 4.8:1 on white — muted, never mushy */
@@ -61,11 +61,11 @@
       --warning: #F59E0B;
       --danger: #DC2626;
       --info: #F59E0B;
-      --border: #E5E8ED;
-      --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
-      --hover-fill: rgba(17, 24, 39, 0.04);
+      --border: #E8E4DC; /* warm hairline */
+      --shadow-card: none; /* hairline borders carry the edge — no shadows */
+      --hover-fill: rgba(41, 37, 36, 0.04);
       --accent: #F59E0B; /* was referenced but never defined — AI chat styles silently fell back */
-      --card-2: #F1F3F6; /* snapshot KPI tiles — was undefined, fell back to dark #242E44 */
+      --card-2: #F1EFEA; /* warm well, matches --dark-bg */
     }
 
     * {
@@ -385,7 +385,7 @@
     .card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 12px;
       padding: 20px;
       transition: all 0.2s;
       box-shadow: var(--shadow-card);
@@ -398,7 +398,7 @@
     .kpi-card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 12px;
       padding: 18px 20px;
       display: flex;
       flex-direction: column;
@@ -408,7 +408,6 @@
 
     .kpi-card:hover {
       border-color: rgba(245, 158, 11, 0.3);
-      box-shadow: 0 2px 8px rgba(245, 158, 11, 0.06);
     }
 
     .kpi-label {
@@ -422,8 +421,9 @@
 
     .kpi-value {
       font-variant-numeric: tabular-nums;
-      font-size: 24px;
-      font-weight: 700;
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
       color: var(--text-primary);
       line-height: 1.1;
       margin-bottom: 4px;
@@ -452,6 +452,22 @@
       color: var(--text-muted);
     }
 
+    /* Tiny change pills, reference-style: green up / red down. Only ever
+       rendered from a REAL computed comparison — never decorative. */
+    .delta-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-variant-numeric: tabular-nums;
+      vertical-align: middle;
+    }
+    .delta-chip.up { background: rgba(22, 163, 74, 0.12); color: #15803D; }
+    .delta-chip.down { background: rgba(220, 38, 38, 0.10); color: #B91C1C; }
+
     .progress-bar {
       width: 100%;
       height: 5px;
@@ -478,22 +494,22 @@
     .grid-3 {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      margin-bottom: 16px;
+      gap: 16px;
+      margin-bottom: 20px;
     }
 
     .grid-2 {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
-      margin-bottom: 16px;
+      gap: 16px;
+      margin-bottom: 20px;
     }
 
     .grid-1 {
       display: grid;
       grid-template-columns: 1fr;
-      gap: 12px;
-      margin-bottom: 16px;
+      gap: 16px;
+      margin-bottom: 20px;
     }
 
     /* ============================================
@@ -574,8 +590,11 @@
     }
 
     .shift-optimal {
-      background: rgba(16, 185, 129, 0.1);
-      color: var(--success);
+      /* the ordinary state is quiet — amber/red mark penalties, the one
+         accent rule from the reference */
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
     }
 
     .shift-warning {
@@ -647,7 +666,7 @@
       align-items: flex-start;
       gap: 10px;
       padding: 10px;
-      background: var(--dark-bg);
+      background: var(--card-bg);
       border: 1px solid var(--border);
       border-radius: 8px;
       margin-bottom: 8px;
@@ -743,7 +762,6 @@
 
     .btn-primary:hover {
       background: #D97706;
-      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
     }
 
     .btn-secondary {
@@ -1021,7 +1039,7 @@
       align-items: center;
       gap: 12px;
       padding: 12px;
-      background: var(--dark-bg);
+      background: var(--card-bg);
       border-radius: 8px;
       border: 1px solid var(--border);
       transition: all 0.2s;
@@ -1072,8 +1090,9 @@
     }
 
     .staff-status.on-shift {
-      background: rgba(16, 185, 129, 0.1);
-      color: var(--success);
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
     }
 
     .staff-status.off-shift {
@@ -3204,7 +3223,7 @@
                 <span style="display:inline-block; width:1px; height:20px; background:var(--border); margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterPDF()" title="Download PDF for printing">PDF</button>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterCSV()" title="Download CSV for Excel">CSV</button>
-                <button class="btn btn-primary btn-small" onclick="publishRoster()" id="btn-publish-roster" title="Publish this roster and notify staff (no integration required)">Publish Roster</button>
+                <button class="btn btn-secondary btn-small" onclick="publishRoster()" id="btn-publish-roster" title="Publish this roster and notify staff (no integration required)">Publish Roster</button>
                 <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" title="Also push roster to a connected rostering system (Tanda/Deputy/Humanforce)">Push to System</button>
                 <span style="display:inline-block; width:1px; height:20px; background:var(--border); margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportDailyRunsheet()" title="Print today's shift runsheet">Runsheet</button>
@@ -6792,10 +6811,12 @@ async function loadSnapshot() {
     chip.textContent = s.prime_cost_pct == null ? '' : ('Prime cost ' + s.prime_cost_pct + '% · ' + bandLabel);
     chip.style.color = bandColor;
     const cell = function(label, value, sub) {
-      return '<div style="background:var(--card-2,#F1F3F6); border:1px solid var(--border); border-radius:8px; padding:14px;">' +
-        '<div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;">' + label + '</div>' +
-        '<div style="font-size:22px; font-weight:800; margin-top:4px;">' + value + '</div>' +
-        (sub ? '<div style="font-size:12px; color:var(--text-muted); margin-top:2px;">' + sub + '</div>' : '') +
+      // Reference KPI pattern: white hairline card, small caps label above a
+      // large 800-weight numeral — the app's own .kpi-card system.
+      return '<div class="kpi-card" style="padding:14px 16px;">' +
+        '<div class="kpi-label">' + label + '</div>' +
+        '<div class="kpi-value" style="margin-top:2px;">' + value + '</div>' +
+        (sub ? '<div class="kpi-sub" style="margin:2px 0 0;">' + sub + '</div>' : '') +
         '</div>';
     };
     grid.innerHTML =
@@ -8587,6 +8608,23 @@ document.querySelectorAll('.tab').forEach(tab => {
 
 let charts = {};
 
+// Reference chart style: stippled dot-matrix fills instead of solid areas.
+// One tiny repeating canvas per colour; Chart.js accepts a CanvasPattern
+// anywhere a colour goes.
+const _dotFills = {};
+function dotFill(color, size, r) {
+  const key = color + '|' + (size || 0) + '|' + (r || 0);
+  if (_dotFills[key]) return _dotFills[key];
+  size = size || 7; r = r || 2.1;
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const x = c.getContext('2d');
+  x.fillStyle = color;
+  x.beginPath(); x.arc(size / 2, size / 2, r, 0, Math.PI * 2); x.fill();
+  _dotFills[key] = x.createPattern(c, 'repeat');
+  return _dotFills[key];
+}
+
 function createChart(canvasId, config) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
@@ -8632,7 +8670,7 @@ function initHourlyBreakdownChart(isDemo = false) {
         {
           label: 'Revenue',
           data: revenueData,
-          backgroundColor: 'rgba(245,158,11,0.7)',
+          backgroundColor: dotFill('#E2A45F'),
           borderColor: '#F59E0B',
           borderWidth: 1,
           borderRadius: 4,
@@ -8641,7 +8679,7 @@ function initHourlyBreakdownChart(isDemo = false) {
         {
           label: 'Forecast',
           data: forecastData,
-          backgroundColor: 'rgba(217,119,6,0.3)',
+          backgroundColor: dotFill('rgba(17,24,39,0.28)'),
           borderColor: '#D97706',
           borderWidth: 1,
           borderRadius: 4,
@@ -8686,7 +8724,7 @@ function initRevenueLabourChart() {
           label: 'Revenue ($)',
           data: revenueData,
           borderColor: colors.success,
-          backgroundColor: `${colors.success}15`,
+          backgroundColor: dotFill('rgba(22,163,74,0.35)'),
           borderWidth: 2,
           fill: true,
           tension: 0.4,
@@ -8696,7 +8734,7 @@ function initRevenueLabourChart() {
           label: 'Labour Cost ($)',
           data: labourData,
           borderColor: colors.primary,
-          backgroundColor: `${colors.primary}15`,
+          backgroundColor: dotFill('rgba(226,164,95,0.55)'),
           borderWidth: 2,
           fill: true,
           tension: 0.4,
@@ -8748,7 +8786,7 @@ function initLabourPctChart() {
           label: 'Labour %',
           data: data,
           borderColor: colors.primary,
-          backgroundColor: `${colors.primary}15`,
+          backgroundColor: dotFill('rgba(226,164,95,0.55)'),
           borderWidth: 2,
           fill: true,
           tension: 0.4,
@@ -8797,7 +8835,7 @@ function initLabourPctTrendChart() {
           label: 'Labour %',
           data: data,
           borderColor: colors.primary,
-          backgroundColor: `${colors.primary}15`,
+          backgroundColor: dotFill('rgba(226,164,95,0.55)'),
           borderWidth: 2,
           fill: true,
           tension: 0.4,
@@ -8855,12 +8893,12 @@ function initLabourRevenueChart() {
         {
           label: 'Revenue',
           data: revenue,
-          backgroundColor: colors.success,
+          backgroundColor: dotFill('rgba(22,163,74,0.75)'),
         },
         {
           label: 'Labour Cost',
           data: labour,
-          backgroundColor: colors.primary,
+          backgroundColor: dotFill('#E2A45F'),
         },
       ],
     },
@@ -9471,8 +9509,10 @@ function populateDemoReportCharts() {
       data: {
         labels: days,
         datasets: [
-          { label: 'Revenue', data: [3200, 3800, 4100, 3900, 5200, 6100, 4800], backgroundColor: 'rgba(245,158,11,0.7)', borderRadius: 4 },
-          { label: 'Labour Cost', data: [960, 1140, 1230, 1170, 1560, 1830, 1440], backgroundColor: 'rgba(17,24,39,0.45)', borderRadius: 4 },
+          { label: 'Revenue', data: [3200, 3800, 4100, 3900, 5200, 6100, 4800],
+            backgroundColor: dotFill('#E2A45F'), borderColor: '#D97706', borderWidth: 1, borderRadius: 4 },
+          { label: 'Labour Cost', data: [960, 1140, 1230, 1170, 1560, 1830, 1440],
+            backgroundColor: dotFill('rgba(17,24,39,0.55)'), borderColor: 'rgba(17,24,39,0.45)', borderWidth: 1, borderRadius: 4 },
         ],
       },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, pointStyle: 'line', boxWidth: 24 } } } },
@@ -9492,13 +9532,13 @@ function populateDemoReportCharts() {
           label: 'Labour %',
           data: [29.1, 31.4, 28.6, 30.2, 27.9, 32.8, 30.5],
           borderColor: '#F59E0B',
-          backgroundColor: 'rgba(245,158,11,0.1)',
+          backgroundColor: dotFill('rgba(226,164,95,0.3)', 7, 1.6),
           fill: true,
           tension: 0.3,
         }, {
           label: 'Target Max (32%)',
           data: [32, 32, 32, 32, 32, 32, 32],
-          borderColor: 'rgba(245,158,11,0.5)',
+          borderColor: 'rgba(217,119,6,0.9)',
           backgroundColor: 'transparent',
           borderDash: [5, 5],
           pointRadius: 0,
@@ -9593,7 +9633,21 @@ function updateDemoDashboardKPIs() {
 
   // Update revenue KPI to show forecast instead
   document.getElementById('kpi-revenue').textContent = venue.revenue_forecast_today.toLocaleString();
-  document.getElementById('kpi-revenue-detail').textContent = `vs $${venue.revenue_yesterday.toLocaleString()} yesterday`;
+  // Reference-style change pill — computed from the venue's own numbers,
+  // never decorative.
+  (function () {
+    const el = document.getElementById('kpi-revenue-detail');
+    const fc = venue.revenue_forecast_today, yd = venue.revenue_yesterday;
+    if (yd > 0) {
+      const pct = ((fc - yd) / yd) * 100;
+      const up = pct >= 0;
+      el.innerHTML = '<span class="delta-chip ' + (up ? 'up' : 'down') + '">' +
+        (up ? '&#9650;' : '&#9660;') + ' ' + Math.abs(pct).toFixed(0) + '%</span> ' +
+        '<span style="color:var(--text-muted);">vs $' + yd.toLocaleString() + ' yesterday</span>';
+    } else {
+      el.textContent = 'vs $' + yd.toLocaleString() + ' yesterday';
+    }
+  })();
 
   // Update labour cost to show current on-shift cost
   document.getElementById('kpi-labour-cost').textContent = metrics.labour_cost.toLocaleString();
@@ -11606,7 +11660,7 @@ function updateHourlySparkline(hourlyData) {
       datasets: [{
         label: 'Revenue',
         data: revenues,
-        backgroundColor: 'rgba(245, 158, 11, 0.6)',
+        backgroundColor: dotFill('#E2A45F'),
         borderColor: 'var(--brand-blue)',
         borderWidth: 1,
         borderRadius: 4,
