@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <link rel="icon" href="/static/logo-icon.svg" type="image/svg+xml">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#1e3a5f">
   <link rel="manifest" href="/static/manifest.json">
@@ -471,7 +472,7 @@
     .progress-bar {
       width: 100%;
       height: 5px;
-      background: #E5E8ED;
+      background: var(--dark-bg);
       border-radius: 3px;
       overflow: hidden;
       margin-top: 8px;
@@ -480,7 +481,7 @@
     .progress-fill {
       height: 100%;
       border-radius: 3px;
-      background: linear-gradient(90deg, var(--success), var(--warning));
+      background: var(--brand-blue);
       transition: width 0.3s;
     }
 
@@ -2830,7 +2831,7 @@
             </div>
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Covers forecast</div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-              <div style="flex: 1; height: 8px; background: #E5E8ED; border-radius: 4px;">
+              <div style="flex: 1; height: 8px; background: var(--dark-bg); border-radius: 4px;">
                 <div id="res-covers-bar" style="height: 100%; background: var(--brand-blue); border-radius: 4px; transition: width 0.3s;"></div>
               </div>
               <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);" id="res-covers-total">--</div>
@@ -2988,7 +2989,7 @@
             <div id="optimiser-progress" style="display: none;">
               <div style="display: flex; align-items: center; gap: 12px;">
                 <div style="flex: 1;">
-                  <div class="progress-bar" style="height: 8px; background: #E5E8ED;">
+                  <div class="progress-bar" style="height: 8px; background: var(--dark-bg);">
                     <div class="progress-fill" id="optimiser-progress-bar" style="width: 0%; background: var(--brand-blue); transition: width 0.3s;"></div>
                   </div>
                 </div>
@@ -3264,7 +3265,7 @@
                     <td><span class="shift-cell shift-optimal" draggable="true">5-11pm</span></td>
                     <td><span class="shift-cell shift-optimal ai-suggested" draggable="true">5-11pm<span class="ai-reason">High demand Fri</span></span></td>
                     <td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>
-                    <td><span class="shift-cell shift-danger" draggable="true">6-11pm<span class="ai-reason">Sun penalty 1.75x</span></span></td>
+                    <td><span class="shift-cell shift-warning" draggable="true">6-11pm<span class="ai-reason">Sun penalty 1.75x</span></span></td>
                   </tr>
                   <tr>
                     <td><strong>Sarah Chen</strong><br><span style="font-size:11px;color:var(--text-muted);">Kitchen (L3)</span></td>
@@ -3618,7 +3619,7 @@
                 <option value="approved">Approved</option>
               </select>
             </div>
-            <button class="btn btn-primary" onclick="loadTimesheets()">Load</button>
+            <button class="btn btn-secondary" onclick="loadTimesheets()">Load</button>
             <span id="ts-summary" style="color:var(--text-muted); font-size:13px; margin-left:auto;"></span>
           </div>
         </div>
@@ -3663,7 +3664,7 @@
         </div>
         <div class="card" style="margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <h3 style="font-size:15px;">Team availability this week</h3>
+            <div class="chart-title" style="margin:0 0 10px;">Team availability this week</div>
             <span style="color:var(--text-muted); font-size:12px;">Set by staff in /my · the roster honours it</span>
           </div>
           <div style="overflow-x:auto;" id="team-avail-wrap">
@@ -3672,7 +3673,7 @@
         </div>
         <div class="card" style="margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <h3 style="font-size:15px;">Shift cover requests</h3>
+            <div class="chart-title" style="margin:0 0 10px;">Shift cover requests</div>
             <span id="cv-summary" style="color:var(--text-muted); font-size:13px;"></span>
           </div>
           <div style="overflow-x:auto;">
@@ -3761,12 +3762,12 @@
                   <button class="btn btn-secondary btn-small act-cat" data-cat="ai" onclick="actSetFilter('category', 'ai')">AI</button>
                   <button class="btn btn-secondary btn-small act-cat" data-cat="job" onclick="actSetFilter('category', 'job')">Jobs</button>
                 </div>
-                <div style="display:flex; gap:4px;" id="act-since-filter">
+                <div style="display:flex; gap:4px;" id="act-since-filter" data-sep="1">
                   <button class="btn btn-secondary btn-small act-since" data-since="24h" onclick="actSetFilter('since', '24h')">24h</button>
                   <button class="btn btn-secondary btn-small act-since active" data-since="7d" onclick="actSetFilter('since', '7d')">7d</button>
                   <button class="btn btn-secondary btn-small act-since" data-since="30d" onclick="actSetFilter('since', '30d')">30d</button>
                 </div>
-                <button class="btn btn-secondary btn-small" onclick="loadActivity()" title="Refresh">Refresh</button>
+                <button onclick="loadActivity()" title="Refresh" style="background:transparent; border:none; cursor:pointer; color:var(--text-muted); font-size:12px; font-weight:600; padding:6px 10px;">Refresh</button>
               </div>
             </div>
             <div id="act-summary" style="margin-top:10px; font-size:12px; color:var(--text-muted);"></div>
@@ -3784,15 +3785,6 @@
           </div>
 
           <div id="act-list"></div>
-          <div class="card" id="act-platform-card" style="display:none; margin-top:16px; border-color:rgba(220,38,38,0.35);">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
-              <div>
-                <div style="font-weight:700; font-size:15px;">Platform security &amp; errors <span style="font-size:11px; font-weight:700; letter-spacing:.06em; padding:2px 7px; border-radius:8px; background:rgba(245,158,11,0.12); color:#B45309; margin-left:6px; vertical-align:2px;">OWNER</span></div>
-                <div style="color:var(--text-muted); font-size:13px;">Every venue, last 7 days: failed sign-ins, lockouts, denied access, and unhandled errors with their correlation ids.</div>
-              </div>
-            </div>
-            <div id="act-platform-list"></div>
-          </div>
         </div>
 
         <!-- TEAM FEED (manager view + moderation) -->
@@ -3890,7 +3882,7 @@
             <div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Below par</div>
               <div style="font-size:22px; font-weight:800;" id="iv-low">—</div></div>
             <div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Waste (30d)</div>
-              <div style="font-size:22px; font-weight:800; color:var(--danger);" id="iv-waste">—</div></div>
+              <div style="font-size:22px; font-weight:800;" id="iv-waste">—</div></div>
             <div style="margin-left:auto; display:flex; gap:10px;">
               <button class="btn btn-secondary" id="iv-st-btn" onclick="startStocktake()">Start stocktake</button>
               <button class="btn btn-secondary" onclick="openWasteEntry()">Log waste</button>
@@ -4568,6 +4560,7 @@
           <div class="grid-1">
             <div class="card">
               <div class="chart-title">General Settings</div>
+              <div style="max-width:520px;">
               <div class="input-group">
                 <label>Venue Name</label>
                 <input type="text" id="setting-venue-name" placeholder="e.g., The Brass Monkey">
@@ -4598,6 +4591,7 @@
                 <input type="number" id="setting-covers-per-staff" placeholder="e.g., 8" min="1" step="0.5">
               </div>
               <button class="btn btn-primary" id="btn-save-settings">Save Settings</button>
+              </div>
               <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border);">
                 <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">Need to reconfigure integrations?</div>
                 <button class="btn btn-secondary" onclick="showOnboardingWizard()">Run Setup Wizard</button>
@@ -4893,21 +4887,21 @@
             <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--dark-bg);">
               <div style="display:flex; align-items:center; gap:10px;">
                 <div style="width:36px; height:36px; border-radius:10px; background:var(--brand-blue); display:flex; align-items:center; justify-content:center;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#fff"/><circle cx="14" cy="10" r="1" fill="#fff"/></svg>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#111827"/><circle cx="14" cy="10" r="1" fill="#111827"/></svg>
                 </div>
                 <div>
                   <div style="font-weight:600; color:var(--text-primary); font-size:15px;">RosterIQ AI</div>
                   <div style="font-size:11px; color:var(--text-muted);">Your venue copilot</div>
                 </div>
               </div>
-              <button onclick="clearAIChat()" style="background:var(--card-bg); border:1px solid var(--border); cursor:pointer; color:var(--text-muted); font-size:12px; padding:6px 12px; border-radius:6px; transition:all 0.2s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'" title="New conversation">New Chat</button>
+              <button class="btn btn-secondary btn-small" onclick="clearAIChat()" title="New conversation">New Chat</button>
             </div>
 
             <!-- Chat Messages -->
             <div id="ai-chat-messages" style="flex:1; overflow-y:auto; padding:20px 24px; display:flex; flex-direction:column; gap:14px;">
               <div class="ai-welcome" style="text-align:center; padding:60px 40px; color:var(--text-muted);">
                 <div style="width:64px; height:64px; border-radius:16px; background:var(--brand-blue); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#fff"/><circle cx="14" cy="10" r="1" fill="#fff"/><path d="M9 14h6"/></svg>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#111827"/><circle cx="14" cy="10" r="1" fill="#111827"/><path d="M9 14h6"/></svg>
                 </div>
                 <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px; font-size:16px;">How can I help?</div>
                 <div style="font-size:13px; line-height:1.6; max-width:400px; margin:0 auto;">Ask me about staffing levels, labour costs, compliance, forecasting, or get me to generate an optimised roster.</div>
@@ -6413,14 +6407,14 @@ async function loadChecklistsBoard() {
     const lists = data.checklists || [];
     document.getElementById('btn-seed-checklists').style.display = lists.length ? 'none' : 'inline-block';
     if (!lists.length) {
-      board.innerHTML = '<div style="color:var(--text-muted); padding:12px;">No checklists yet — set up the standard Opening / Closing / Food Safety lists with one click.</div>';
+      board.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:36px 20px; color:var(--text-muted);">No checklists yet — set up the standard Opening / Closing / Food Safety lists with one click.</div>';
     } else {
       board.innerHTML = lists.map(function(c) {
         const pct = c.item_count ? Math.round((c.done_items / c.item_count) * 100) : 0;
         const statusChip = c.status === 'complete'
           ? '<span style="background:rgba(34,197,94,.15); color:var(--success); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">DONE</span>'
           : (c.status === 'in_progress'
-            ? '<span style="background:rgba(245,158,11,.15); color:var(--brand-blue); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">' + c.done_items + '/' + c.item_count + '</span>'
+            ? '<span style="background:rgba(245,158,11,.15); color:#B45309; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">' + c.done_items + '/' + c.item_count + '</span>'
             : '<span style="background:rgba(139,148,158,.15); color:var(--text-muted); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">NOT STARTED</span>');
         const flags = c.flags_count ? '<span style="color:var(--danger); font-size:12px; font-weight:700; margin-left:8px;">⚑ ' + c.flags_count + '</span>' : '';
         const btnLabel = c.status === 'complete' ? 'View' : (c.status === 'in_progress' ? 'Continue' : 'Start');
@@ -6622,7 +6616,7 @@ function renderTimesheets() {
       ? '<span style="background:rgba(34,197,94,.15); color:var(--success); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">APPROVED</span>'
       : (t.status === 'open'
         ? '<span style="background:rgba(34,197,94,.12); color:#15803D; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">ON SHIFT</span>'
-        : '<span style="background:rgba(245,158,11,.15); color:var(--brand-blue); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">TO APPROVE</span>');
+        : '<span style="background:rgba(245,158,11,.15); color:#B45309; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">TO APPROVE</span>');
     const actions = t.status === 'closed'
       ? '<button class="btn btn-primary btn-small" onclick="approveTimesheet(' + i + ')">Approve</button> ' +
         '<button class="btn btn-secondary btn-small" onclick="openEditTimesheet(' + i + ')">Edit</button>'
@@ -6657,7 +6651,7 @@ async function loadLeaveRequests() {
     lvRows = data.requests || [];
     const pending = lvRows.filter(function(r) { return r.status === 'pending'; }).length;
     document.getElementById('lv-summary').textContent =
-      lvRows.length + ' requests' + (pending ? ' · ' + pending + ' awaiting a decision' : '');
+      lvRows.length + (lvRows.length === 1 ? ' request' : ' requests') + (pending ? ' · ' + pending + ' awaiting a decision' : '');
     renderLeaveRequests();
   } catch (e) {
     showToast('Failed to load leave requests: ' + e.message, 'error');
@@ -6675,7 +6669,7 @@ function renderLeaveRequests() {
       ? '<span style="background:rgba(34,197,94,.15); color:var(--success); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">APPROVED</span>'
       : (r.status === 'declined'
         ? '<span style="background:rgba(239,68,68,.15); color:var(--danger); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">DECLINED</span>'
-        : '<span style="background:rgba(245,158,11,.15); color:var(--brand-blue); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">PENDING</span>');
+        : '<span style="background:rgba(245,158,11,.15); color:#B45309; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">PENDING</span>');
     const actions = r.status === 'pending'
       ? '<button class="btn btn-primary btn-small" onclick="decideLeave(' + i + ', true)">Approve</button> ' +
         '<button class="btn btn-secondary btn-small" onclick="decideLeave(' + i + ', false)">Decline</button>'
@@ -6823,7 +6817,7 @@ async function loadSnapshot() {
       cell('Net sales (ex GST)', formatCurrency(s.net_sales), formatCurrency(s.revenue_inc_gst) + ' inc') +
       cell('Labour (rostered)', formatCurrency(s.labour), pct(s.labour_pct) + ' of sales') +
       cell('Food cost', formatCurrency(s.cogs), pct(s.food_cost_pct) + ' of sales') +
-      cell('<span style="color:' + bandColor + '">Prime cost</span>', '<span style="color:' + bandColor + '">' + pct(s.prime_cost_pct) + '</span>', 'labour + food') +
+      cell('Prime cost', '<span style="color:' + bandColor + '">' + pct(s.prime_cost_pct) + '</span>', 'labour + food') +
       cell('Gross profit', formatCurrency(s.gross_profit), 'after labour & food');
   } catch (e) {
     grid.innerHTML = '<div style="color:var(--text-muted);">' + esc(e.message) + '</div>';
@@ -6868,8 +6862,8 @@ function renderMenuRows() {
   }
   tbody.innerHTML = msRecipes.map(function(r, i) {
     const fcChip = r.flagged
-      ? '<span style="background:rgba(239,68,68,.15); color:var(--danger); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">' + r.food_cost_pct + '%</span>'
-      : '<span style="background:rgba(34,197,94,.15); color:var(--success); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">' + r.food_cost_pct + '%</span>';
+      ? '<span style="background:rgba(220,38,38,.1); color:var(--danger); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">' + r.food_cost_pct + '%</span>'
+      : '<span style="font-weight:700; font-size:13px;">' + r.food_cost_pct + '%</span>';
     return '<tr style="border-top:1px solid var(--border);">' +
       '<td style="padding:10px 8px; font-weight:600;">' + esc(r.name) + '</td>' +
       '<td style="padding:10px 8px;">' + formatCurrency(r.cost_per_portion || 0) + '</td>' +
@@ -7420,10 +7414,10 @@ function renderOrders(orders) {
   }
   box.innerHTML = orders.map(function(o) {
     const chipStyle = {
-      draft: 'background:rgba(56,189,248,.15); color:#38BDF8;',
-      ordered: 'background:rgba(245,158,11,.15); color:var(--brand-blue);',
+      draft: 'background:rgba(245,158,11,.15); color:#B45309;',
+      ordered: 'background:rgba(245,158,11,.15); color:#B45309;',
       received: 'background:rgba(34,197,94,.15); color:var(--success);',
-      cancelled: 'background:rgba(148,163,184,.15); color:var(--text-muted);',
+      cancelled: 'background:rgba(41,37,36,.06); color:var(--text-muted);',
     }[o.status] || '';
     const lines = (o.items || []).map(function(it) {
       return '<div style="display:flex; justify-content:space-between; font-size:13px; padding:3px 0; color:var(--text-muted);">' +
@@ -8021,8 +8015,8 @@ function eventCopy(e) {
 function _healthStat(label, value, tone) {
   const colour = tone === 'bad' ? 'var(--danger)' : tone === 'warn' ? '#B45309' : 'var(--text-primary)';
   return '<div style="min-width:120px;">' +
-    '<div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;">' + esc(label) + '</div>' +
-    '<div style="font-size:19px; font-weight:700; color:' + colour + ';">' + esc(String(value)) + '</div>' +
+    '<div style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">' + esc(label) + '</div>' +
+    '<div style="font-size:26px; font-weight:800; line-height:1.1; font-variant-numeric:tabular-nums; color:' + colour + ';">' + esc(String(value)) + '</div>' +
   '</div>';
 }
 
@@ -8120,7 +8114,7 @@ async function loadActivity() {
     }
     const evs = d.events || [];
     if (!evs.length) {
-      list.innerHTML = '<div class="card" style="text-align:center; color:var(--text-muted); padding:28px;">Nothing recorded for this filter yet</div>';
+      list.innerHTML = '<div class="card" style="text-align:center; color:var(--text-muted); padding:28px;">Nothing recorded for this filter yet — approvals, roster publishes, pay changes and sign-ins are written here as they happen, and nothing can be edited or deleted</div>';
     } else {
       list.innerHTML = '<div class="card" style="padding:0;">' + evs.map(function(e) {
         const tone = e.category === 'error' ? 'var(--danger)' : (e.category === 'security' ? '#B45309' : 'var(--text-muted)');
@@ -8146,6 +8140,10 @@ async function loadPlatformSecurity() {
     box = document.createElement('div'); box.id = 'act-platform';
     document.getElementById('act-list').insertAdjacentElement('afterend', box);
   }
+  // Owner-only platform view: a manager session would be a guaranteed 403 —
+  // skip the probe rather than spraying refusals into the console and the
+  // security log this very tab displays.
+  if (_jwtRole() !== 'owner') { box.innerHTML = ''; return; }
   try {
     const d = await fetchAPI('/api/events?since=' + actFilter.since + '&limit=100&category=security');
     const errs = await fetchAPI('/api/events?since=' + actFilter.since + '&limit=50&category=error');
@@ -8189,7 +8187,7 @@ async function loadSopLibrary() {
     const noOneApplies = st.required === 0 && d.requires_ack !== false && d.active !== false;
     const pct = noOneApplies ? 0 : (st.required ? Math.round(100 * st.acknowledged_current_version / st.required) : 100);
     const barColor = noOneApplies ? 'var(--warning)' : (pct === 100 ? 'var(--success)' : 'var(--brand-blue)');
-    const bar = '<div style="height:6px; background:#E5E8ED; border-radius:3px; overflow:hidden; margin:8px 0 4px;"><div style="height:100%; width:' + pct + '%; background:' + barColor + ';"></div></div>';
+    const bar = '<div style="height:6px; background:var(--dark-bg); border-radius:3px; overflow:hidden; margin:8px 0 4px;"><div style="height:100%; width:' + pct + '%; background:' + barColor + ';"></div></div>';
     const outs = (st.outstanding_names || []);
     const caption = noOneApplies
       ? '<span style="color:var(--warning); font-weight:600;">applies to no current staff — check the role names</span>'
@@ -8198,7 +8196,7 @@ async function loadSopLibrary() {
     return '<div class="card" style="margin-bottom:12px;' + (d.active === false ? ' opacity:.6;' : '') + '">' +
       '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">' +
         '<div style="flex:1; min-width:0;">' +
-          '<div style="font-weight:700; font-size:15px;"><span style="font-size:10px; font-weight:700; letter-spacing:.06em; padding:2px 7px; border-radius:8px; background:rgba(2,132,199,0.10); color:#0284C7; margin-right:8px; vertical-align:2px;">' + (CAT[d.category] || 'DOC') + '</span>' + esc(d.title) +
+          '<div style="font-weight:700; font-size:15px;"><span style="font-size:10px; font-weight:700; letter-spacing:.06em; padding:2px 7px; border-radius:8px; background:rgba(17,24,39,0.05); color:var(--text-muted); margin-right:8px; vertical-align:2px;">' + (CAT[d.category] || 'DOC') + '</span>' + esc(d.title) +
             (d.active === false ? ' <span style="font-size:11px; color:var(--text-muted);">(retired)</span>' : '') + '</div>' +
           '<div style="font-size:12px; color:var(--text-muted); margin-top:4px;">v' + d.version + ' · applies to ' + (d.applies_to && d.applies_to.length ? esc(d.applies_to.join(', ')) : 'everyone') + (d.requires_ack === false ? ' · info only' : '') + '</div>' +
           (d.requires_ack === false || d.active === false ? '' :
@@ -8340,7 +8338,7 @@ async function loadTeamAvailability() {
       const m = map[status] || map.available;
       return '<td style="text-align:center; padding:7px 6px; color:' + m[0] + '; font-weight:700;" title="' + status + '">' + m[1] + '</td>';
     };
-    let html = '<table class="data-table" style="width:100%; border-collapse:collapse; font-size:13px;">' +
+    let html = '<table class="table" style="width:100%;">' +
       '<thead><tr style="color:var(--text-muted); font-size:11px; text-transform:uppercase;">' +
       '<th style="text-align:left; padding:7px 8px;">Staff</th>' +
       days.map(function(d){ return '<th style="padding:7px 6px;">' + d.slice(0,3) + '</th>'; }).join('') +
@@ -8373,7 +8371,7 @@ async function loadCoverRequests() {
     cvRows = data.covers || [];
     const claimed = cvRows.filter(function(c) { return c.status === 'claimed'; }).length;
     document.getElementById('cv-summary').textContent =
-      cvRows.length + ' requests' + (claimed ? ' · ' + claimed + ' ready to approve' : '');
+      cvRows.length + (cvRows.length === 1 ? ' request' : ' requests') + (claimed ? ' · ' + claimed + ' ready to approve' : '');
     renderCoverRequests();
   } catch (e) {
     showToast('Failed to load cover requests: ' + e.message, 'error');
@@ -8389,10 +8387,10 @@ function renderCoverRequests() {
   tbody.innerHTML = cvRows.map(function(c, i) {
     const chipStyle = {
       approved: 'background:rgba(34,197,94,.15); color:var(--success);',
-      claimed: 'background:rgba(245,158,11,.15); color:var(--brand-blue);',
-      open: 'background:rgba(56,189,248,.15); color:#38BDF8;',
-      cancelled: 'background:rgba(148,163,184,.15); color:var(--text-muted);',
-    }[c.status] || 'background:rgba(148,163,184,.15); color:var(--text-muted);';
+      claimed: 'background:rgba(245,158,11,.15); color:#B45309;',
+      open: 'background:rgba(245,158,11,.15); color:#B45309;',
+      cancelled: 'background:rgba(41,37,36,.06); color:var(--text-muted);',
+    }[c.status] || 'background:rgba(41,37,36,.06); color:var(--text-muted);';
     const chip = '<span style="' + chipStyle + ' padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">' +
       (c.status === 'claimed' ? 'READY TO APPROVE' : c.status.toUpperCase()) + '</span>';
     const actions = c.status === 'claimed'
@@ -8893,7 +8891,7 @@ function initLabourRevenueChart() {
         {
           label: 'Revenue',
           data: revenue,
-          backgroundColor: dotFill('rgba(22,163,74,0.75)'),
+          backgroundColor: dotFill('#E2A45F'),
         },
         {
           label: 'Labour Cost',
@@ -9512,7 +9510,7 @@ function populateDemoReportCharts() {
           { label: 'Revenue', data: [3200, 3800, 4100, 3900, 5200, 6100, 4800],
             backgroundColor: dotFill('#E2A45F'), borderColor: '#D97706', borderWidth: 1, borderRadius: 4 },
           { label: 'Labour Cost', data: [960, 1140, 1230, 1170, 1560, 1830, 1440],
-            backgroundColor: dotFill('rgba(17,24,39,0.55)'), borderColor: 'rgba(17,24,39,0.45)', borderWidth: 1, borderRadius: 4 },
+            backgroundColor: dotFill('rgba(120,103,79,0.55)'), borderColor: 'rgba(120,103,79,0.7)', borderWidth: 1, borderRadius: 4 },
         ],
       },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, pointStyle: 'line', boxWidth: 24 } } } },
@@ -11039,7 +11037,7 @@ async function loadUpcomingFunctions() {
       html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);">' +
         '<div><span style="font-weight:500;color:var(--text-primary);">' + name + '</span>' +
         '<span style="margin-left:8px;font-size:11px;color:var(--text-muted);text-transform:capitalize;">' + eventType + '</span></div>' +
-        '<div style="text-align:right;"><span style="color:var(--brand-blue);font-weight:600;">' + guests + ' guests</span>' +
+        '<div style="text-align:right;"><span style="color:#B45309;font-weight:600;">' + guests + ' guests</span>' +
         (dateStr ? '<span style="margin-left:8px;font-size:11px;color:var(--text-muted);">' + dateStr + '</span>' : '') +
         '</div></div>';
     });
@@ -12948,7 +12946,7 @@ function clearAIChat() {
   container.innerHTML = `
     <div class="ai-welcome" style="text-align:center; padding:60px 40px; color:var(--text-muted);">
       <div style="width:64px; height:64px; border-radius:16px; background:var(--brand-blue); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#fff"/><circle cx="14" cy="10" r="1" fill="#fff"/><path d="M9 14h6"/></svg>
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v4a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-4H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="10" cy="10" r="1" fill="#111827"/><circle cx="14" cy="10" r="1" fill="#111827"/><path d="M9 14h6"/></svg>
       </div>
       <div style="font-weight:600; color:var(--text-primary); margin-bottom:8px; font-size:16px;">How can I help?</div>
       <div style="font-size:13px; line-height:1.6; max-width:400px; margin:0 auto;">Ask me about staffing levels, labour costs, compliance, forecasting, or get me to generate an optimised roster.</div>
