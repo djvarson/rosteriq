@@ -2048,8 +2048,21 @@ async def ready():
         pass
     checks["scheduler"] = scheduler_available
 
-    # Determine status
-    is_ready = checks.get("database", False)  # Database is critical
+    # Pilot-critical config checks. In production a deploy that silently
+    # fell back to the in-memory store would LOSE A VENUE'S DATA on the
+    # next restart, and a missing JWT_SECRET rejects every login — both
+    # must fail the readiness gate so Railway never promotes such a build.
+    # Strict only when Railway's explicit ENVIRONMENT=production is set —
+    # local dev/test servers (unset) should not 503 their own /ready.
+    is_production = os.environ.get("ENVIRONMENT", "").lower() == "production"
+    checks["durable_store"] = type(_db).__name__ == "PostgresStore"
+    checks["jwt_secret"] = bool(os.environ.get("JWT_SECRET"))
+
+    # Determine status: DB is always critical; in production the durable
+    # store and auth secret are too.
+    is_ready = checks.get("database", False)
+    if is_production:
+        is_ready = is_ready and checks["durable_store"] and checks["jwt_secret"]
     status_code = 200 if is_ready else 503
 
     response = {
