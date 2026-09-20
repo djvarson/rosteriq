@@ -4972,357 +4972,86 @@
 
 <!-- ONBOARDING WIZARD -->
 <div class="onboarding-overlay" id="onboarding-wizard">
-  <!-- Progress Bar -->
   <div class="onboarding-progress" id="ob-progress">
-    <div class="onboarding-progress-step active" data-ob-step="1">
-      <div class="onboarding-progress-dot">1</div>
-      <span>Venue</span>
-    </div>
+    <div class="onboarding-progress-step active" data-ob-step="1"><div class="onboarding-progress-dot">1</div><span>Venue</span></div>
     <div class="onboarding-progress-line"></div>
-    <div class="onboarding-progress-step" data-ob-step="2">
-      <div class="onboarding-progress-dot">2</div>
-      <span>Rostering</span>
-    </div>
+    <div class="onboarding-progress-step" data-ob-step="2"><div class="onboarding-progress-dot">2</div><span>Team</span></div>
     <div class="onboarding-progress-line"></div>
-    <div class="onboarding-progress-step" data-ob-step="3">
-      <div class="onboarding-progress-dot">3</div>
-      <span>POS</span>
-    </div>
+    <div class="onboarding-progress-step" data-ob-step="3"><div class="onboarding-progress-dot">3</div><span>Kitchen</span></div>
     <div class="onboarding-progress-line"></div>
-    <div class="onboarding-progress-step" data-ob-step="4">
-      <div class="onboarding-progress-dot">4</div>
-      <span>Bookings</span>
-    </div>
-    <div class="onboarding-progress-line"></div>
-    <div class="onboarding-progress-step" data-ob-step="5">
-      <div class="onboarding-progress-dot">5</div>
-      <span>Accounting</span>
-    </div>
-    <div class="onboarding-progress-line"></div>
-    <div class="onboarding-progress-step" data-ob-step="6">
-      <div class="onboarding-progress-dot">6</div>
-      <span>Import</span>
-    </div>
-    <div class="onboarding-progress-line"></div>
-    <div class="onboarding-progress-step" data-ob-step="7">
-      <div class="onboarding-progress-dot">7</div>
-      <span>Settings</span>
-    </div>
-    <div class="onboarding-progress-line"></div>
-    <div class="onboarding-progress-step" data-ob-step="8">
-      <div class="onboarding-progress-dot">8</div>
-      <span>Roster</span>
-    </div>
+    <div class="onboarding-progress-step" data-ob-step="4"><div class="onboarding-progress-dot">4</div><span>First roster</span></div>
   </div>
 
-  <!-- Step Content -->
   <div class="onboarding-body">
 
-    <!-- Step 1: Venue Profile -->
+    <!-- Step 1: the venue -->
     <div class="onboarding-step active" data-ob-page="1">
-      <div class="onboarding-step-title">Venue Profile</div>
-      <div class="onboarding-step-subtitle">Tell us about your venue so we can configure compliance and forecasting rules.</div>
-      <div class="input-group">
-        <label>Venue Name</label>
-        <input type="text" id="ob-venue-name" placeholder="e.g., The Brass Monkey">
+      <div class="onboarding-step-title">Your venue</div>
+      <div class="onboarding-step-subtitle">Name and state set up award compliance — nothing gets plugged into your existing systems today.</div>
+      <div class="input-group"><label>Venue name</label>
+        <input type="text" id="ob-venue-name" maxlength="80" placeholder="e.g., The Brass Monkey"></div>
+      <div class="input-group"><label>Suburb / location</label>
+        <input type="text" id="ob-venue-location" maxlength="80" placeholder="e.g., Northbridge, WA"></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+        <div class="input-group" style="margin:0;"><label>State (award rules)</label>
+          <select id="ob-venue-state">
+            <option value="wa">WA</option><option value="nsw">NSW</option><option value="vic">VIC</option>
+            <option value="qld">QLD</option><option value="sa">SA</option><option value="tas">TAS</option>
+            <option value="nt">NT</option><option value="act">ACT</option>
+          </select></div>
+        <div class="input-group" style="margin:0;"><label>Venue type</label>
+          <select id="ob-venue-type">
+            <option value="pub">Pub</option><option value="cafe">Cafe</option><option value="restaurant">Restaurant</option>
+            <option value="bar">Bar</option><option value="club">Club</option><option value="hotel">Hotel</option>
+          </select></div>
+        <div class="input-group" style="margin:0;"><label>Max labour % of sales</label>
+          <input type="number" id="ob-max-labour" min="1" max="100" value="30"></div>
       </div>
-      <div class="input-group">
-        <label>Location</label>
-        <input type="text" id="ob-venue-location" placeholder="e.g., Northbridge, WA">
-      </div>
-      <div class="input-group">
-        <label>State (for award compliance)</label>
-        <select id="ob-venue-state">
-          <option value="">Select state...</option>
-          <option value="NSW">NSW</option>
-          <option value="VIC">VIC</option>
-          <option value="QLD">QLD</option>
-          <option value="WA">WA</option>
-          <option value="SA">SA</option>
-          <option value="TAS">TAS</option>
-          <option value="NT">NT</option>
-          <option value="ACT">ACT</option>
-        </select>
-      </div>
-      <div class="input-group">
-        <label>Venue Type</label>
-        <select id="ob-venue-type">
-          <option value="">Select type...</option>
-          <option value="bar">Bar</option>
-          <option value="restaurant">Restaurant</option>
-          <option value="cafe">Cafe</option>
-          <option value="hotel">Hotel</option>
-          <option value="club">Club</option>
-          <option value="pub">Pub</option>
-        </select>
-      </div>
+      <div class="ob-note">Everything here can be changed later in Settings.</div>
     </div>
 
-    <!-- Step 2: Connect Rostering Platform -->
+    <!-- Step 2: the team (CSV paste — no live connection needed) -->
     <div class="onboarding-step" data-ob-page="2">
-      <div class="onboarding-step-title">Connect Rostering Platform</div>
-      <div class="onboarding-step-subtitle">Connect your workforce management system to sync staff, shifts, and availability.</div>
-      <div class="onboarding-card-grid">
-        <div class="onboarding-card" id="ob-roster-tanda">
-          <div class="onboarding-card-name">Tanda</div>
-          <div class="onboarding-card-desc">Australia's leading workforce platform. Sync rosters, timesheets, and employee data.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'roster', 'tanda')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter API token" data-field="api_key">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'roster', 'tanda')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
-        <div class="onboarding-card" id="ob-roster-deputy">
-          <div class="onboarding-card-name">Deputy</div>
-          <div class="onboarding-card-desc">Schedule, timesheet, and task management for shift-based teams.</div>
-          <button class="btn btn-secondary btn-small" onclick="obConnectDeputyOAuth(this)" id="ob-deputy-connect-btn">Connect with Deputy</button>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
-        <div class="onboarding-card" id="ob-roster-humanforce">
-          <div class="onboarding-card-name">HumanForce</div>
-          <div class="onboarding-card-desc">Enterprise workforce management with award interpretation and payroll.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'roster', 'humanforce')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter API token" data-field="api_key">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'roster', 'humanforce')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
+      <div class="onboarding-step-title">Your team</div>
+      <div class="onboarding-step-subtitle">Export your staff list from Deputy, Tanda or a spreadsheet and paste it here. Columns are matched automatically (name, email, pay rate, role) — extra columns are ignored.</div>
+      <textarea id="ob-staff-csv" rows="8" placeholder="Name,Email,Pay Rate,Role&#10;Emma Thompson,emma@venue.com.au,31.50,floor&#10;Marcus Johnson,marcus@venue.com.au,33.00,bar" style="width:100%; font-family:ui-monospace,monospace; font-size:12px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); color:var(--text-primary);"></textarea>
+      <div style="display:flex; align-items:center; gap:12px; margin-top:10px;">
+        <button class="btn btn-primary btn-small" id="ob-staff-import-btn" onclick="obImportStaff()">Import staff</button>
+        <span id="ob-staff-result" style="font-size:13px; color:var(--text-muted);"></span>
       </div>
-      <span class="onboarding-skip" onclick="obNextStep()">Skip for now</span>
+      <div class="ob-note">Each person later links their phone with a join code from the Staff page — no passwords to hand out. You can skip this and import later.</div>
     </div>
 
-    <!-- Step 3: Connect POS System -->
+    <!-- Step 3: the kitchen (optional) -->
     <div class="onboarding-step" data-ob-page="3">
-      <div class="onboarding-step-title">Connect POS System</div>
-      <div class="onboarding-step-subtitle">Link your point-of-sale to track revenue, covers, and transaction data in real time.</div>
-      <div class="onboarding-card-grid">
-        <div class="onboarding-card" id="ob-pos-swiftpos">
-          <div class="onboarding-card-name">SwiftPOS</div>
-          <div class="onboarding-card-desc">Hospitality POS built for pubs, clubs, and bars across Australia.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'pos', 'swiftpos')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter Client ID" data-field="client_id">
-            <input type="text" placeholder="Enter Client Secret" data-field="client_secret">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'pos', 'swiftpos')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
-        <div class="onboarding-card" id="ob-pos-lightspeed">
-          <div class="onboarding-card-name">Lightspeed</div>
-          <div class="onboarding-card-desc">Cloud POS for restaurants and retail with powerful reporting.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'pos', 'lightspeed')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter Client ID" data-field="client_id">
-            <input type="text" placeholder="Enter Client Secret" data-field="client_secret">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'pos', 'lightspeed')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
-        <div class="onboarding-card" id="ob-pos-kounta">
-          <div class="onboarding-card-name">Kounta</div>
-          <div class="onboarding-card-desc">Simple cloud POS with real-time sales and product mix data.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'pos', 'kounta')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter API key" data-field="api_key">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'pos', 'kounta')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
+      <div class="onboarding-step-title">Your kitchen &amp; bar stock</div>
+      <div class="onboarding-step-subtitle">Paste your ingredient or supplier list to light up live menu costing and stocktakes. Columns matched automatically (name, unit, pack size, cost, supplier, section).</div>
+      <textarea id="ob-ing-csv" rows="8" placeholder="Name,Unit,Pack Size,Cost,Supplier,Section&#10;Chicken breast,kg,5,52,PFD,kitchen&#10;Lager kegs,l,49.5,260,CUB,bar" style="width:100%; font-family:ui-monospace,monospace; font-size:12px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); color:var(--text-primary);"></textarea>
+      <div style="display:flex; align-items:center; gap:12px; margin-top:10px;">
+        <button class="btn btn-primary btn-small" id="ob-ing-import-btn" onclick="obImportIngredients()">Import stock</button>
+        <span id="ob-ing-result" style="font-size:13px; color:var(--text-muted);"></span>
       </div>
-      <span class="onboarding-skip" onclick="obNextStep()">Skip for now</span>
-      <span class="onboarding-skip" onclick="obShowCsvUpload()" id="ob-csv-link">or Import CSV</span>
-      <div class="ob-file-upload" id="ob-csv-upload">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        <p>Drop a CSV file here or click to upload</p>
-        <input type="file" accept=".csv" style="display:none" id="ob-csv-file">
-      </div>
+      <div class="ob-note">Skippable — the roster works without it; costing joins in whenever you paste.</div>
     </div>
 
-    <!-- Step 4: Connect Booking System -->
+    <!-- Step 4: the first roster (real, never simulated) -->
     <div class="onboarding-step" data-ob-page="4">
-      <div class="onboarding-step-title">Connect Booking System</div>
-      <div class="onboarding-step-subtitle">Import reservation data to improve demand forecasting and staffing accuracy.</div>
-      <div class="onboarding-card-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
-        <div class="onboarding-card" id="ob-booking-nowbookit">
-          <div class="onboarding-card-name">NowBookIt</div>
-          <div class="onboarding-card-desc">AU/NZ restaurant reservation and table management platform.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'booking', 'nowbookit')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter API key" data-field="api_key">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'booking', 'nowbookit')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
-        <div class="onboarding-card" id="ob-booking-resdiary">
-          <div class="onboarding-card-name">ResDiary</div>
-          <div class="onboarding-card-desc">Online booking and guest management for hospitality.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'booking', 'resdiary')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter API key" data-field="api_key">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'booking', 'resdiary')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
-        <div class="onboarding-card" id="ob-booking-opentable">
-          <div class="onboarding-card-name">OpenTable</div>
-          <div class="onboarding-card-desc">Global reservation platform for restaurants worldwide.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'booking', 'opentable')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter API key" data-field="api_key">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'booking', 'opentable')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
-        <div class="onboarding-card" id="ob-booking-bookitlive">
-          <div class="onboarding-card-name">BookitLive</div>
-          <div class="onboarding-card-desc">Australian booking platform for venues and events.</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'booking', 'bookitlive')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter API key" data-field="api_key">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'booking', 'bookitlive')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
+      <div class="onboarding-step-title">Your first roster</div>
+      <div class="onboarding-step-subtitle" id="ob-roster-context">Generates a real roster for next week from your team and award rules.</div>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="ob-generate-btn" onclick="obGenerateFirstRoster()">Generate first roster</button>
+        <button class="btn btn-secondary" id="ob-publish-btn" onclick="obPublishFirstRoster()" style="display:none;">Publish it</button>
       </div>
-      <span class="onboarding-skip" onclick="obNextStep()">Skip for now</span>
-    </div>
-
-    <!-- Step 5: Connect Accounting -->
-    <div class="onboarding-step" data-ob-page="5">
-      <div class="onboarding-step-title">Connect Accounting</div>
-      <div class="onboarding-step-subtitle">Link your accounting platform for accurate labour cost tracking.</div>
-      <div class="onboarding-cards" style="max-width: 500px; margin: 0 auto;">
-        <div class="onboarding-card" id="ob-myob-card">
-          <div style="margin-bottom: 8px;">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6D28D9" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
-          </div>
-          <div class="onboarding-card-name">MYOB</div>
-          <div class="onboarding-card-desc">Sync employees, timesheets and payroll data with MYOB AccountRight/Business</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'accounting', 'myob')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="MYOB API Key" data-field="api_key">
-            <input type="text" placeholder="MYOB API Secret" data-field="api_secret">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'accounting', 'myob')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
-        <div class="onboarding-card" id="ob-xero-card">
-          <div style="margin-bottom: 8px;">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 8l8 8M16 8l-8 8"/></svg>
-          </div>
-          <div class="onboarding-card-name">Xero</div>
-          <div class="onboarding-card-desc">Sync revenue data and wage costs for accurate labour % tracking</div>
-          <button class="btn btn-secondary btn-small" onclick="obToggleConnect(this, 'accounting', 'xero')">Connect</button>
-          <div class="ob-api-input">
-            <input type="text" placeholder="Enter Xero Client ID" data-field="client_id">
-            <input type="text" placeholder="Enter Xero Client Secret" data-field="client_secret">
-            <button class="btn btn-primary btn-small" onclick="obSaveConnection(this, 'accounting', 'xero')">Save</button>
-          </div>
-          <div class="onboarding-card-status">Connected</div>
-        </div>
-      </div>
-      <span class="onboarding-skip" onclick="obNextStep()" style="margin-top: 16px;">Skip for now</span>
-    </div>
-
-    <!-- Step 6: Import Historical Data -->
-    <div class="onboarding-step" data-ob-page="6">
-      <div class="onboarding-step-title">Import Historical Data</div>
-      <div class="onboarding-step-subtitle">Pull historical data from your connected integrations to train the AI forecasting model.</div>
-      <div id="ob-import-connected" style="margin-bottom: 24px;"></div>
-      <div id="ob-import-options">
-        <div class="onboarding-import-option" onclick="obSelectImportRange(this, '3m')">
-          <input type="radio" name="ob-import-range" value="3m">
-          <div class="onboarding-import-label">Pull last 3 months</div>
-        </div>
-        <div class="onboarding-import-option" onclick="obSelectImportRange(this, '6m')">
-          <input type="radio" name="ob-import-range" value="6m">
-          <div class="onboarding-import-label">Pull last 6 months</div>
-        </div>
-        <div class="onboarding-import-option selected" onclick="obSelectImportRange(this, '12m')">
-          <input type="radio" name="ob-import-range" value="12m" checked>
-          <div class="onboarding-import-label">Pull last 12 months</div>
-        </div>
-        <div class="onboarding-import-option" onclick="obSelectImportRange(this, 'all')">
-          <input type="radio" name="ob-import-range" value="all">
-          <div class="onboarding-import-label">Pull all available data</div>
-        </div>
-      </div>
-      <div id="ob-import-none" class="ob-no-data-msg" style="display: none;">
-        Connect at least one data source to import history
-      </div>
-      <div class="ob-import-progress" id="ob-import-progress">
-        <div class="ob-import-bar-track">
-          <div class="ob-import-bar-fill" id="ob-import-bar"></div>
-        </div>
-        <div class="ob-import-status" id="ob-import-status">Preparing import...</div>
-      </div>
-    </div>
-
-    <!-- Step 7: Configure Settings -->
-    <div class="onboarding-step" data-ob-page="7">
-      <div class="onboarding-step-title">Configure Settings</div>
-      <div class="onboarding-step-subtitle">Set your default rostering parameters. These can be changed later in Settings.</div>
-      <div class="ob-settings-grid">
-        <div class="input-group">
-          <label>Min Staff Required</label>
-          <input type="number" id="ob-min-staff" placeholder="e.g., 2" min="1" value="2">
-        </div>
-        <div class="input-group">
-          <label>Covers per Staff Target</label>
-          <input type="number" id="ob-covers-per-staff" placeholder="e.g., 8" min="1" step="0.5" value="8">
-        </div>
-        <div class="input-group">
-          <label>Max Labour % Target</label>
-          <input type="number" id="ob-max-labour" placeholder="e.g., 30" min="1" max="100" value="30">
-        </div>
-        <div class="input-group">
-          <label>Default Shift Length</label>
-          <select id="ob-shift-length">
-            <option value="4">4 hours</option>
-            <option value="6">6 hours</option>
-            <option value="8" selected>8 hours</option>
-          </select>
-        </div>
-        <div class="input-group" style="grid-column: 1 / -1;">
-          <label>Break Policy</label>
-          <select id="ob-break-policy">
-            <option value="auto" selected>Auto (recommended)</option>
-            <option value="manual">Manual</option>
-          </select>
-        </div>
-      </div>
-      <div class="ob-note">These can be changed later in Settings</div>
-    </div>
-
-    <!-- Step 8: Generate First Roster -->
-    <div class="onboarding-step" data-ob-page="8">
-      <div class="onboarding-step-title">Generate Your First Roster</div>
-      <div class="onboarding-step-subtitle">Review your configuration and let the AI create an optimized roster.</div>
-      <div id="ob-summary"></div>
-      <button class="ob-generate-btn" id="ob-generate-btn" onclick="obGenerateRoster()">Generate AI Roster</button>
-      <div class="ob-loading" id="ob-generate-loading">
-        <div class="ob-spinner"></div>
-        <div style="color: var(--text-secondary); font-size: 14px;">Analysing demand patterns and building your roster...</div>
-      </div>
-      <div class="ob-success-msg" id="ob-generate-success">
-        <div class="ob-success-icon">
-          <svg viewBox="0 0 24 24" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
-        </div>
-        <div style="font-size: 20px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px;">Your first roster is ready!</div>
-        <div style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px;">Head to the dashboard to review and fine-tune your schedule.</div>
-        <button class="btn btn-primary" onclick="obFinish()" style="background: #F59E0B; color: #000; padding: 12px 32px; font-size: 15px;">Go to Dashboard</button>
-      </div>
+      <div id="ob-roster-result" style="margin-top:14px; font-size:13px; color:var(--text-secondary); white-space:pre-line;"></div>
+      <div class="ob-note">Connect Xero, your POS or Deputy later from the Connections page — nothing needs plugging in today.</div>
     </div>
 
   </div>
 
-  <!-- Footer Navigation -->
   <div class="onboarding-footer" id="ob-footer">
     <button class="btn btn-secondary" id="ob-btn-back" onclick="obPrevStep()" style="visibility: hidden;">Back</button>
-    <div style="font-size: 12px; color: var(--text-muted);" id="ob-step-counter">Step 1 of 8</div>
-    <button class="btn btn-primary" id="ob-btn-next" onclick="obNextStep()" style="background: #F59E0B; color: #000;">Next</button>
+    <div style="font-size: 12px; color: var(--text-muted);" id="ob-step-counter">Step 1 of 4</div>
+    <button class="btn btn-primary" id="ob-btn-next" onclick="obNextStep()">Next</button>
   </div>
 </div>
 
@@ -11089,31 +10818,6 @@ async function connectDeputy() {
   }
 }
 
-// OAuth connect for onboarding wizard
-async function obConnectDeputyOAuth(btn) {
-  try {
-    const obVenueName = obState.venue.name || '';
-    const obVenueSlug = obVenueName ? obVenueName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') : '';
-    const venueId = state.currentVenue || obVenueSlug || 'default';
-    btn.textContent = 'Redirecting to Deputy...';
-    btn.disabled = true;
-    const data = await fetchAPI('/api/deputy/install', {
-      method: 'POST',
-      body: JSON.stringify({ venue_id: venueId })
-    });
-    if (data.authorize_url) {
-      window.location.href = data.authorize_url;
-    } else {
-      throw new Error('No authorize URL returned');
-    }
-  } catch (err) {
-    console.error('Deputy OAuth error:', err);
-    showToastNotification('Connection Failed', err.message || 'Could not start Deputy connection. Check that DEPUTY_CLIENT_ID is configured.', 'error');
-    btn.textContent = 'Connect with Deputy';
-    btn.disabled = false;
-  }
-}
-
 // Check for deputy_connected param on page load (after OAuth redirect)
 function checkDeputyOAuthReturn() {
   var params = new URLSearchParams(window.location.search);
@@ -11967,21 +11671,19 @@ window.addEventListener('offline', () => {
 // ============================================
 // ONBOARDING WIZARD
 // ============================================
-const obState = {
-  currentStep: 1,
-  totalSteps: 8,
-  connections: {
-    roster: null,
-    pos: null,
-    booking: null,
-    accounting: null
-  },
-  importRange: '12m',
-  venue: {},
-  settings: {}
-};
+const obState = { currentStep: 1, totalSteps: 4, venueId: null, rosterId: null };
 
 function showOnboardingWizard() {
+  // Re-running for an existing venue updates it rather than making a twin.
+  obState.venueId = state.currentVenue || null;
+  if (obState.venueId && state.venues && state.venues.length) {
+    const v = state.venues.find(x => x.id === obState.venueId);
+    if (v) {
+      document.getElementById('ob-venue-name').value = v.name || '';
+      if (v.state) document.getElementById('ob-venue-state').value = String(v.state).toLowerCase();
+      if (v.max_labour_pct) document.getElementById('ob-max-labour').value = v.max_labour_pct;
+    }
+  }
   document.getElementById('onboarding-wizard').classList.add('active');
   document.body.style.overflow = 'hidden';
   obGoToStep(1);
@@ -11994,361 +11696,173 @@ function hideOnboardingWizard() {
 
 function obGoToStep(step) {
   obState.currentStep = step;
-
-  // Update step content
   document.querySelectorAll('.onboarding-step').forEach(s => s.classList.remove('active'));
   const target = document.querySelector(`[data-ob-page="${step}"]`);
   if (target) target.classList.add('active');
-
-  // Update progress bar
   document.querySelectorAll('.onboarding-progress-step').forEach(s => {
-    const sNum = parseInt(s.getAttribute('data-ob-step'));
+    const n = parseInt(s.getAttribute('data-ob-step'));
     s.classList.remove('active', 'completed');
-    if (sNum === step) s.classList.add('active');
-    else if (sNum < step) s.classList.add('completed');
+    if (n === step) s.classList.add('active');
+    else if (n < step) s.classList.add('completed');
   });
   document.querySelectorAll('.onboarding-progress-line').forEach((line, i) => {
     line.classList.toggle('completed', i < step - 1);
   });
-
-  // Update progress dot content for completed steps
-  document.querySelectorAll('.onboarding-progress-step.completed .onboarding-progress-dot').forEach(dot => {
-    dot.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
-  });
-  document.querySelectorAll('.onboarding-progress-step:not(.completed) .onboarding-progress-dot').forEach(dot => {
-    const stepEl = dot.closest('.onboarding-progress-step');
-    dot.textContent = stepEl.getAttribute('data-ob-step');
-  });
-
-  // Update footer
-  document.getElementById('ob-btn-back').style.visibility = step === 1 ? 'hidden' : 'visible';
+  document.getElementById('ob-btn-back').style.visibility = step > 1 ? 'visible' : 'hidden';
   document.getElementById('ob-step-counter').textContent = `Step ${step} of ${obState.totalSteps}`;
-
-  // Hide next button on step 8 (final step)
-  const nextBtn = document.getElementById('ob-btn-next');
-  nextBtn.style.display = step === 8 ? 'none' : '';
-
-  // Populate step 6 connected summary
-  if (step === 6) obBuildImportSummary();
-
-  // Populate step 8 summary
-  if (step === 8) obBuildFinalSummary();
-
-  // Scroll body to top
-  const body = document.querySelector('.onboarding-body');
-  if (body) body.scrollTop = 0;
+  document.getElementById('ob-btn-next').textContent = step === obState.totalSteps ? 'Finish' : 'Next';
+  if (step === 4) obRosterContext();
 }
 
-function obNextStep() {
-  // Collect data from current step before advancing
-  obCollectStepData(obState.currentStep);
-
-  if (obState.currentStep < obState.totalSteps) {
-    obGoToStep(obState.currentStep + 1);
+async function obNextStep() {
+  if (obState.currentStep === 1) {
+    const ok = await obSaveVenue();
+    if (!ok) return;                       // stay put; the toast said why
   }
+  if (obState.currentStep < obState.totalSteps) obGoToStep(obState.currentStep + 1);
+  else obFinish();
 }
 
 function obPrevStep() {
-  if (obState.currentStep > 1) {
-    obGoToStep(obState.currentStep - 1);
-  }
+  if (obState.currentStep > 1) obGoToStep(obState.currentStep - 1);
 }
 
-function obCollectStepData(step) {
-  if (step === 1) {
-    obState.venue = {
-      name: document.getElementById('ob-venue-name').value,
-      location: document.getElementById('ob-venue-location').value,
-      state: document.getElementById('ob-venue-state').value,
-      type: document.getElementById('ob-venue-type').value
-    };
-  } else if (step === 7) {
-    obState.settings = {
-      minStaff: document.getElementById('ob-min-staff').value,
-      coversPerStaff: document.getElementById('ob-covers-per-staff').value,
-      maxLabour: document.getElementById('ob-max-labour').value,
-      shiftLength: document.getElementById('ob-shift-length').value,
-      breakPolicy: document.getElementById('ob-break-policy').value
-    };
-  }
-}
-
-function obToggleConnect(btn, category, provider) {
-  const card = btn.closest('.onboarding-card');
-  const apiInput = card.querySelector('.ob-api-input');
-  if (apiInput.classList.contains('visible')) {
-    apiInput.classList.remove('visible');
-    btn.textContent = 'Connect';
-  } else {
-    apiInput.classList.add('visible');
-    btn.textContent = 'Cancel';
-    // Focus first input
-    const firstInput = apiInput.querySelector('input');
-    if (firstInput) setTimeout(() => firstInput.focus(), 100);
-  }
-}
-
-async function obSaveConnection(btn, category, provider) {
-  const card = btn.closest('.onboarding-card');
-  const inputs = card.querySelectorAll('.ob-api-input input');
-  const credentials = {};
-  let hasValues = false;
-
-  inputs.forEach(input => {
-    const field = input.getAttribute('data-field');
-    if (input.value.trim()) {
-      credentials[field] = input.value.trim();
-      hasValues = true;
-    }
-  });
-
-  if (!hasValues) {
-    showToastNotification('Missing Credentials', 'Please enter your API credentials', 'warning');
-    return;
-  }
-
-  // Determine API endpoint
-  let endpoint = '';
-  // During onboarding, derive venue ID from the wizard venue name
-  const obVenueName = obState.venue.name || '';
-  const obVenueSlug = obVenueName ? obVenueName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') : '';
-  const venueId = state.currentVenue || obVenueSlug || 'default';
-  const body = { venue_id: venueId, ...credentials };
-
-  if (category === 'roster') {
-    if (provider === 'tanda') endpoint = '/api/tanda/install';
-    else if (provider === 'deputy') {
-      // Deputy uses OAuth flow — handled by obConnectDeputyOAuth(), not this function
-      return;
-    }
-    else if (provider === 'humanforce') endpoint = '/api/humanforce/install';
-  } else if (category === 'pos') {
-    endpoint = `/api/pos/${provider}/install`;
-    body.provider = provider;
-  } else if (category === 'booking') {
-    endpoint = `/api/reservations/${provider}/install`;
-  } else if (category === 'accounting') {
-    if (provider === 'myob') endpoint = '/api/myob/install-token';
-    else if (provider === 'xero') endpoint = '/api/xero/install';
-  }
-
+async function obSaveVenue() {
+  const name = document.getElementById('ob-venue-name').value.trim();
+  if (!name) { showToast('Give the venue a name first', 'warning'); return false; }
+  const st = document.getElementById('ob-venue-state').value;
+  const venueId = obState.venueId ||
+    (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `venue-${Date.now()}`);
+  const payload = {
+    id: venueId,
+    name: name,
+    tanda_org_id: '',
+    state: st,
+    timezone: getTimezoneForState(st.toUpperCase()),
+    min_staff: {},
+    max_labour_pct: parseFloat(document.getElementById('ob-max-labour').value) || 30.0,
+    created_at: new Date().toISOString(),
+  };
   try {
-    btn.textContent = 'Connecting...';
-    btn.disabled = true;
-
-    if (!endpoint) throw new Error('Unknown integration provider');
-
-    const resp = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (state.authToken || state.token || '') },
-      body: JSON.stringify(body)
-    });
-    if (!resp.ok) {
-      const errData = await resp.json().catch(() => ({}));
-      throw new Error(errData.detail || 'Connection failed (' + resp.status + ')');
-    }
-
-    // Mark as connected
-    card.classList.add('connected');
-    card.querySelector('.ob-api-input').classList.remove('visible');
-    const connectBtn = card.querySelector('.btn.btn-secondary');
-    if (connectBtn) connectBtn.style.display = 'none';
-
-    obState.connections[category] = provider;
-
-    // Update main app state — no longer demo mode
-    state.isDemo = false;
-    if (category === 'roster') {
-      updateDeputyStatus && updateDeputyStatus(provider === 'deputy');
-    }
-
-    showToastNotification(provider.charAt(0).toUpperCase() + provider.slice(1) + ' Connected', 'Integration configured successfully', 'success');
+    await fetchAPI('/venues', { method: 'POST', body: JSON.stringify(payload) });
+    obState.venueId = venueId;
+    state.currentVenue = venueId;
+    localStorage.setItem('rosteriq_current_venue', venueId);
+    return true;
   } catch (err) {
-    console.error('Onboarding connect error:', err);
-    showToastNotification('Connection Failed', err.message || 'Could not connect. Check your credentials and try again.', 'error');
-    btn.textContent = 'Save';
+    showToast('Could not save the venue: ' + err.message, 'error');
+    return false;
+  }
+}
+
+async function obImportStaff() {
+  const content = document.getElementById('ob-staff-csv').value.trim();
+  const out = document.getElementById('ob-staff-result');
+  if (!content) { out.textContent = 'Paste your staff export first.'; return; }
+  const btn = document.getElementById('ob-staff-import-btn');
+  btn.disabled = true;
+  try {
+    const r = await fetchAPI('/api/setup/import-staff', {
+      method: 'POST', body: JSON.stringify({ venue_id: obState.venueId, content: content }),
+    });
+    const skipped = (r.skipped || []).length;
+    out.textContent = (r.created || []).length + ' imported' +
+      (skipped ? ' · ' + skipped + ' skipped (' + esc((r.skipped[0] || {}).reason || '') + (skipped > 1 ? ', …' : '') + ')' : ' ✓');
+  } catch (err) {
+    out.textContent = 'Import failed: ' + err.message;
+  } finally {
     btn.disabled = false;
   }
 }
 
-function obShowCsvUpload() {
-  const upload = document.getElementById('ob-csv-upload');
-  upload.classList.toggle('visible');
-  if (upload.classList.contains('visible')) {
-    upload.addEventListener('click', () => document.getElementById('ob-csv-file').click());
+async function obImportIngredients() {
+  const content = document.getElementById('ob-ing-csv').value.trim();
+  const out = document.getElementById('ob-ing-result');
+  if (!content) { out.textContent = 'Paste your stock list first.'; return; }
+  const btn = document.getElementById('ob-ing-import-btn');
+  btn.disabled = true;
+  try {
+    const r = await fetchAPI('/api/setup/import-ingredients', {
+      method: 'POST', body: JSON.stringify({ venue_id: obState.venueId, content: content }),
+    });
+    const skipped = (r.skipped || []).length;
+    out.textContent = (r.created || []).length + ' imported' + (skipped ? ' · ' + skipped + ' skipped' : ' ✓');
+  } catch (err) {
+    out.textContent = 'Import failed: ' + err.message;
+  } finally {
+    btn.disabled = false;
   }
 }
 
-function obSelectImportRange(el, range) {
-  obState.importRange = range;
-  document.querySelectorAll('.onboarding-import-option').forEach(o => {
-    o.classList.remove('selected');
-    o.querySelector('input[type="radio"]').checked = false;
-  });
-  el.classList.add('selected');
-  el.querySelector('input[type="radio"]').checked = true;
+async function obRosterContext() {
+  const el = document.getElementById('ob-roster-context');
+  try {
+    const d = await fetchAPI('/employees?venue_id=' + encodeURIComponent(obState.venueId) + '&limit=200');
+    const n = (d.items || []).length;
+    el.textContent = n
+      ? 'Generates a real roster for next week from your ' + n + ' staff and ' + 'award rules.'
+      : 'No staff imported yet — go back a step, or finish now and import from the Staff page later.';
+    document.getElementById('ob-generate-btn').disabled = !n;
+  } catch (e) { /* leave default copy */ }
 }
 
-function obBuildImportSummary() {
-  const container = document.getElementById('ob-import-connected');
-  const hasAny = Object.values(obState.connections).some(v => v !== null);
-
-  if (!hasAny) {
-    document.getElementById('ob-import-options').style.display = 'none';
-    document.getElementById('ob-import-none').style.display = 'block';
-    container.innerHTML = '';
-    return;
-  }
-
-  document.getElementById('ob-import-options').style.display = 'block';
-  document.getElementById('ob-import-none').style.display = 'none';
-
-  const labels = {
-    roster: 'Rostering',
-    pos: 'POS',
-    booking: 'Bookings',
-    accounting: 'Accounting'
-  };
-
-  let html = '<div style="margin-bottom: 16px; font-size: 13px; color: var(--text-secondary);">Connected sources that will be imported:</div>';
-  for (const [cat, provider] of Object.entries(obState.connections)) {
-    if (provider) {
-      html += `<div style="display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px;">
-        <span style="color: var(--success); font-weight: 600;">&#10003;</span>
-        <span style="color: var(--text-primary); font-weight: 500;">${labels[cat]}</span>
-        <span style="color: var(--text-muted);">${provider.charAt(0).toUpperCase() + provider.slice(1)}</span>
-      </div>`;
-    }
-  }
-  container.innerHTML = html;
+function obNextMonday() {
+  const d = new Date();
+  d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
+  return d.toISOString().slice(0, 10);
 }
 
-function obBuildFinalSummary() {
-  obCollectStepData(7);
-  const s = obState;
-  const container = document.getElementById('ob-summary');
-
-  const connLabel = (v) => v ? `<span class="ob-summary-value connected">${v.charAt(0).toUpperCase() + v.slice(1)}</span>` : '<span class="ob-summary-value skipped">Skipped</span>';
-
-  const rangeLabels = { '3m': 'Last 3 months', '6m': 'Last 6 months', '12m': 'Last 12 months', 'all': 'All available' };
-
-  container.innerHTML = `
-    <div class="ob-summary-row"><span class="ob-summary-label">Venue</span><span class="ob-summary-value">${s.venue.name || 'Not set'}</span></div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Location</span><span class="ob-summary-value">${s.venue.location || 'Not set'}</span></div>
-    <div class="ob-summary-row"><span class="ob-summary-label">State</span><span class="ob-summary-value">${s.venue.state || 'Not set'}</span></div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Type</span><span class="ob-summary-value">${s.venue.type ? s.venue.type.charAt(0).toUpperCase() + s.venue.type.slice(1) : 'Not set'}</span></div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Rostering Platform</span>${connLabel(s.connections.roster)}</div>
-    <div class="ob-summary-row"><span class="ob-summary-label">POS System</span>${connLabel(s.connections.pos)}</div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Booking System</span>${connLabel(s.connections.booking)}</div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Accounting</span>${connLabel(s.connections.accounting)}</div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Historical Import</span><span class="ob-summary-value">${rangeLabels[s.importRange] || 'Not set'}</span></div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Min Staff</span><span class="ob-summary-value">${s.settings.minStaff || '2'}</span></div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Covers/Staff</span><span class="ob-summary-value">${s.settings.coversPerStaff || '8'}</span></div>
-    <div class="ob-summary-row"><span class="ob-summary-label">Max Labour %</span><span class="ob-summary-value">${s.settings.maxLabour || '30'}%</span></div>
-    <div class="ob-summary-row" style="border: none;"><span class="ob-summary-label">Shift Length</span><span class="ob-summary-value">${s.settings.shiftLength || '8'}h</span></div>
-  `;
-
-  // Reset generate state
-  document.getElementById('ob-generate-btn').style.display = '';
-  document.getElementById('ob-generate-btn').disabled = false;
-  document.getElementById('ob-generate-loading').classList.remove('active');
-  document.getElementById('ob-generate-success').classList.remove('active');
-}
-
-function obGenerateRoster() {
+async function obGenerateFirstRoster() {
   const btn = document.getElementById('ob-generate-btn');
-  const loading = document.getElementById('ob-generate-loading');
-  const success = document.getElementById('ob-generate-success');
+  const out = document.getElementById('ob-roster-result');
+  btn.disabled = true;
+  out.textContent = 'Building the roster from your demand forecast and award rules…';
+  try {
+    const r = await fetchAPI('/rosters/generate', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: obState.venueId, week_start: obNextMonday() }),
+    });
+    obState.rosterId = r.id;
+    let msg = (r.shifts || []).length + ' shifts for the week of ' + obNextMonday() +
+      (r.total_cost ? ' · estimated labour $' + Math.round(parseFloat(r.total_cost)).toLocaleString() : '');
+    if ((r.visa_flags || []).length) msg += '\n⚠ ' + r.visa_flags[0].message;
+    if ((r.visa_expiry_alerts || []).length) msg += '\n⚠ Check work rights: ' + r.visa_expiry_alerts[0].name;
+    out.textContent = msg;
+    document.getElementById('ob-publish-btn').style.display = '';
+    btn.textContent = 'Regenerate';
+  } catch (err) {
+    out.textContent = 'Could not generate: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
 
-  btn.style.display = 'none';
-  loading.classList.add('active');
-
-  // Simulate roster generation
-  setTimeout(() => {
-    loading.classList.remove('active');
-    success.classList.add('active');
-
-    // Also run the import simulation if on step 6
-    localStorage.setItem('rosteriq_onboarded', 'true');
-  }, 3000);
+async function obPublishFirstRoster() {
+  const btn = document.getElementById('ob-publish-btn');
+  const out = document.getElementById('ob-roster-result');
+  btn.disabled = true;
+  try {
+    await fetchAPI('/api/v1/rosters/' + encodeURIComponent(obState.rosterId) + '/publish', {
+      method: 'POST', body: JSON.stringify({}),
+    });
+    out.textContent += '\nPublished — staff with linked phones see their shifts in /my.';
+    btn.textContent = 'Published ✓';
+  } catch (err) {
+    out.textContent += '\nPublish failed: ' + err.message;
+    btn.disabled = false;
+  }
 }
 
 async function obFinish() {
-  // Collect any remaining step data
-  obCollectStepData(obState.currentStep);
-
-  // Generate a venue ID from the name (slug) or fallback to timestamp
-  const venueName = obState.venue.name || 'My Venue';
-  const venueId = venueName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `venue-${Date.now()}`;
-
-  // Build venue payload matching VenueConfig model
-  const venuePayload = {
-    id: venueId,
-    name: venueName,
-    tanda_org_id: obState.connections.roster ? (obState.connections.roster.org_id || '') : '',
-    state: obState.venue.state || 'WA',
-    timezone: getTimezoneForState(obState.venue.state || 'WA'),
-    min_staff: {},
-    max_labour_pct: parseFloat(obState.settings.maxLabour) || 30.0,
-    pos_system: obState.connections.pos || null,
-    created_at: new Date().toISOString()
-  };
-
-  // Parse min staff per role if provided
-  if (obState.settings.minStaff) {
-    venuePayload.min_staff['default'] = parseInt(obState.settings.minStaff) || 3;
-  }
-
+  hideOnboardingWizard();
   try {
-    // Create the venue in the database
-    const result = await fetchAPI('/venues', {
-      method: 'POST',
-      body: JSON.stringify(venuePayload)
-    });
-
-    // Set the current venue so the dashboard loads real data
-    state.currentVenue = venueId;
-    state.venues = [venuePayload];
-    localStorage.setItem('rosteriq_current_venue', venueId);
-
-    // Update the venue selector
-    const select = document.getElementById('venue-select');
-    if (select) {
-      select.innerHTML = `<option value="${esc(venueId)}" selected>${esc(venueName)}</option>`;
-      select.value = venueId;
-    }
-
-    hideOnboardingWizard();
-
-    // Apply settings to the main dashboard
-    if (obState.venue.name) {
-      const vnInput = document.getElementById('setting-venue-name');
-      if (vnInput) vnInput.value = obState.venue.name;
-    }
-    if (obState.venue.location) {
-      const locInput = document.getElementById('setting-location');
-      if (locInput) locInput.value = obState.venue.location;
-    }
-    if (obState.settings.minStaff) {
-      const msInput = document.getElementById('setting-min-staff');
-      if (msInput) msInput.value = obState.settings.minStaff;
-    }
-    if (obState.settings.coversPerStaff) {
-      const cpsInput = document.getElementById('setting-covers-per-staff');
-      if (cpsInput) cpsInput.value = obState.settings.coversPerStaff;
-    }
-
-    showPage('dashboard');
-    loadVenueData();
-    showToastNotification('Setup Complete', `${esc(venueName)} is configured and ready to go!`, 'success');
-  } catch (err) {
-    console.error('Failed to create venue:', err);
-    // Still allow proceeding — store locally and retry next load
-    state.currentVenue = venueId;
-    hideOnboardingWizard();
-    showPage('dashboard');
-    showToastNotification('Setup Saved Locally', 'Venue created but sync failed — will retry on next load', 'warning');
-  }
+    await loadVenues();
+  } catch (e) { /* selector refresh is cosmetic */ }
+  const select = document.getElementById('venue-select');
+  if (select && obState.venueId) select.value = obState.venueId;
+  showPage('dashboard');
+  loadVenueData();
+  showToastNotification('Setup complete', 'Your venue is live — the Staff page has join codes for the team.', 'success');
 }
 
 function getTimezoneForState(stateCode) {
