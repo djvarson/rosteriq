@@ -112,6 +112,7 @@ EXEMPT_PATHS = {
     "/admin",
     "/staff",
     "/login",
+    "/reset-password",  # a locked-out user is unauthenticated by definition
     "/register",
     "/savings",
     "/timeclock",

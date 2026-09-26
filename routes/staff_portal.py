@@ -217,6 +217,126 @@ async def employee_join_code(employee_id: str, user: UserContext = Depends(get_c
     }
 
 
+def _account_management_guards(user, emp, db):
+    """Shared spine for the two login-management endpoints.
+
+    Returns the target ACCOUNT after enforcing, in order:
+    demo sandbox (neither demo identity may manage logins, and demo
+    accounts may never be managed); manager/owner caller; a venue on the
+    employee record (fail CLOSED — a venue-less record proves nothing);
+    a linked login for the email (case-insensitive); the target account
+    HOLDS this venue (an email typed onto an employee record is
+    attacker-controlled — without this check any manager could mint
+    takeovers for accounts platform-wide); target is not an owner.
+    """
+    if user.user_id in _DEMO_USER_IDS or (user.email or "").strip().lower() in _DEMO_EMAILS:
+        raise HTTPException(status_code=403, detail="The demo can't manage logins")
+    if user.role not in ("manager", "owner") and not getattr(user, "is_owner", False):
+        raise HTTPException(status_code=403, detail="Managers only")
+    vid = getattr(emp, "venue_id", None)
+    if not vid:
+        raise HTTPException(status_code=409,
+                            detail="This staff record has no venue — fix the record first")
+    email_raw = (getattr(emp, "email", None) or "").strip()
+    if not email_raw:
+        raise HTTPException(status_code=409,
+                            detail="This staff record has no email — add one, then use a join code first")
+    # Registration stores what pydantic's EmailStr yields: raw local part,
+    # lowercased domain. Staff records hold whatever the manager typed.
+    variants = [email_raw, email_raw.lower()]
+    if "@" in email_raw:
+        local, _, domain = email_raw.rpartition("@")
+        variants.insert(1, f"{local}@{domain.lower()}")
+    account = None
+    for candidate in dict.fromkeys(variants):
+        account = db.get_user_by_email(candidate)
+        if account:
+            break
+    if not account:
+        raise HTTPException(status_code=409,
+                            detail="No login exists for this email yet — hand them a join code instead")
+    if (account.get("email") or "").strip().lower() in _DEMO_EMAILS:
+        raise HTTPException(status_code=403, detail="Demo accounts can't be managed")
+    if vid not in (account.get("venue_ids") or []):
+        raise HTTPException(status_code=409,
+                            detail="Their login isn't linked to this venue yet — join code first")
+    if account.get("role") == "owner" or account.get("is_owner"):
+        raise HTTPException(status_code=403, detail="Owner accounts can't be changed here")
+    return account
+
+
+@router.post("/api/employees/{employee_id}/reset-link")
+async def employee_reset_link(employee_id: str,
+                              user: UserContext = Depends(get_current_user)) -> dict:
+    """A one-hour, single-use password-reset link a manager hands (or texts)
+    to a team member who is locked out. Mirrors the join-code philosophy:
+    no email delivery to depend on — the manager IS the delivery channel.
+    Manager/owner only, employee must be in the caller's venues, and the
+    employee must already have a linked login (otherwise: join code)."""
+    from rosteriq.middleware.tenant import load_employee_in_scope
+    from rosteriq.routes.auth import auth_service, public_origin
+    from rosteriq.services.events import security
+    db = get_db()
+    emp = load_employee_in_scope(db, employee_id)
+    account = _account_management_guards(user, emp, db)
+    email = account.get("email")
+    token = auth_service.create_password_reset_token(email)
+    if not token:
+        raise HTTPException(status_code=500, detail="Could not create a reset link — try again")
+    security("auth.reset_link_issued", outcome="ok",
+             venue_id=getattr(emp, "venue_id", None),
+             user_id=user.user_id, target=account.get("id"), email=email)
+    return {
+        "employee_id": emp.id,
+        "name": emp.name,
+        "email": email,
+        "reset_url": f"{public_origin()}/reset-password?token={token}",
+        "expires_in_minutes": 60,
+        "instructions": "Send them this link however you like — it works once and dies in an hour.",
+    }
+
+
+class AccessRoleBody(BaseModel):
+    role: str = Field(..., pattern="^(manager|staff)$")
+
+
+@router.post("/api/employees/{employee_id}/access-role")
+async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
+                                   user: UserContext = Depends(get_current_user)) -> dict:
+    """Give a linked team member manager access to THIS venue's dashboard
+    (or set them back to staff). The only role-granting path used to be
+    first-venue bootstrap — a venue's 2IC could never approve leave.
+    Guards: manager/owner only; the target must be a linked login holding
+    this venue; never an owner account; never your own account (no
+    self-lockouts); staff<->manager only."""
+    from rosteriq.middleware.tenant import load_employee_in_scope
+    from rosteriq.services.events import audit
+    db = get_db()
+    emp = load_employee_in_scope(db, employee_id)
+    account = _account_management_guards(user, emp, db)
+    email = account.get("email")
+    vid = getattr(emp, "venue_id", None)
+    if account.get("id") == user.user_id:
+        raise HTTPException(status_code=400, detail="You can't change your own access level")
+    # The role field is GLOBAL on an account. Only single-venue accounts may
+    # be flipped here — promoting a user who also holds other venues would
+    # grant them manager power at venues this caller doesn't run.
+    other_venues = [v for v in (account.get("venue_ids") or []) if v != vid]
+    if other_venues:
+        raise HTTPException(status_code=409,
+                            detail="Their login is linked to more than one venue — "
+                                   "access changes for multi-venue accounts need the platform owner")
+    old = account.get("role")
+    account["role"] = body.role
+    db.save_user(account)
+    audit("user.role_change", vid, "user", account["id"], email=email,
+          old_role=old, new_role=body.role, changed_by=user.user_id,
+          reason="venue_manager_set")
+    return {"employee_id": emp.id, "name": emp.name, "email": email,
+            "old_role": old, "role": body.role,
+            "message": f"{emp.name} is now {'a manager' if body.role == 'manager' else 'staff'} — takes effect on their next sign-in."}
+
+
 @router.get("/api/me/shifts")
 async def my_shifts(user: UserContext = Depends(get_current_user)) -> dict:
     """My upcoming shifts — the schedule-visibility fix."""

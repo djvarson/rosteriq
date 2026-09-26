@@ -5056,6 +5056,25 @@
 </div>
 
 <!-- MODALS -->
+<div class="modal" id="modal-access">
+  <div class="modal-content" style="max-width:460px;">
+    <div class="modal-header">Login &amp; access — <span id="al-who"></span></div>
+    <div class="modal-body">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        <button class="btn btn-secondary btn-small" onclick="staffResetLink()" title="One-hour, single-use link — you send it to them">Reset login link</button>
+        <button class="btn btn-secondary btn-small" onclick="staffSetRole('manager')" title="They can run this venue's dashboard">Make manager</button>
+        <button class="btn btn-secondary btn-small" onclick="staffSetRole('staff')" title="Back to the staff app only">Set to staff</button>
+      </div>
+      <textarea id="al-link" readonly rows="2" style="display:none; width:100%; font-family:ui-monospace,monospace; font-size:11px; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); color:var(--text-primary); margin-bottom:8px;"></textarea>
+      <div id="al-result" style="font-size:13px; color:var(--text-muted); min-height:20px;"></div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">They need a linked login first (Join code). Access changes take effect on their next sign-in. Every change lands in the audit log.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-access')">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal-report-problem">
   <div class="modal-content" style="max-width:460px;">
     <div class="modal-header">Report a problem</div>
@@ -9070,7 +9089,8 @@ function renderStaffTable() {
     var fat = h === 0 ? '<span style="color:var(--text-muted)">Not rostered</span>'
             : (h > 38 ? 'High' : h > 30 ? 'Medium' : 'Low') + ' (' + Math.round(h) + 'hrs/wk)';
     var actions = isManager
-      ? '<button class="btn btn-secondary btn-small" onclick="showJoinCode(\'' + esc(e.id) + '\')" title="Code the staff member enters in the app to link their login">Join code</button>'
+      ? '<button class="btn btn-secondary btn-small" onclick="showJoinCode(\'' + esc(e.id) + '\')" title="Code the staff member enters in the app to link their login">Join code</button> ' +
+        '<button class="btn btn-secondary btn-small" onclick="openAccessModal(this.getAttribute(\'data-emp\'))" data-emp="' + esc(e.id) + '" title="Reset their login or change their dashboard access">Access</button>'
       : '';
     var emailLine = e.email ? '<div style="font-size:11px;color:var(--text-muted)">' + esc(e.email) + '</div>' : '<div style="font-size:11px;color:var(--text-muted)">invite pending</div>';
     return '<tr>' +
@@ -9084,6 +9104,45 @@ function renderStaffTable() {
       '<td>' + actions + '</td>' +
       '</tr>';
   }).join('') || '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted);">No staff match.</td></tr>';
+}
+
+var _accessEmpId = null;
+function openAccessModal(employeeId) {
+  _accessEmpId = employeeId;
+  var emp = (state.employees || []).find(function (e) { return e.id === employeeId; });
+  document.getElementById('al-who').textContent = (emp && emp.name) || '';
+  document.getElementById('al-result').textContent = '';
+  document.getElementById('al-link').style.display = 'none';
+  document.getElementById('al-link').value = '';
+  openModal('modal-access');
+}
+
+async function staffResetLink() {
+  try {
+    var d = await fetchAPI('/api/employees/' + encodeURIComponent(_accessEmpId) + '/reset-link', { method: 'POST' });
+    var ta = document.getElementById('al-link');
+    ta.value = d.reset_url;
+    document.getElementById('al-result').textContent =
+      'One-hour, single-use link for ' + d.name + ' — text it to them however you like.';
+    ta.style.display = 'block';
+    ta.focus(); ta.select();
+    try { document.execCommand('copy'); showToast('Reset link copied', 'success'); } catch (e) {}
+  } catch (err) {
+    document.getElementById('al-result').textContent = err.message;
+    document.getElementById('al-link').style.display = 'none';
+  }
+}
+
+async function staffSetRole(role) {
+  try {
+    var d = await fetchAPI('/api/employees/' + encodeURIComponent(_accessEmpId) + '/access-role', {
+      method: 'POST', body: JSON.stringify({ role: role }),
+    });
+    document.getElementById('al-result').textContent = d.message;
+    showToast(d.message, 'success');
+  } catch (err) {
+    document.getElementById('al-result').textContent = err.message;
+  }
 }
 
 var _lastJoinCode = '';

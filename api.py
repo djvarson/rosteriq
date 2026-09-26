@@ -1907,6 +1907,17 @@ async def root():
     return RedirectResponse(url="/login")
 
 
+@app.get("/reset-password", tags=["auth"])
+async def reset_password_page():
+    """Set-a-new-password page — the target of every reset link."""
+    import pathlib
+    from fastapi.responses import FileResponse
+    f = pathlib.Path(__file__).parent / "static" / "reset-password.html"
+    if f.exists():
+        return FileResponse(f)
+    raise HTTPException(404, "Reset page unavailable")
+
+
 @app.get("/login", tags=["auth"])
 async def login_page():
     """Login page — entry point for all users."""

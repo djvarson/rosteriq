@@ -99,6 +99,14 @@ async def demo_session(
 _bg_sends: set = set()
 
 
+def public_origin() -> str:
+    """The origin users reach us on — for links we put in emails and hand
+    to managers. PUBLIC_ORIGIN env wins; the Railway prod domain is the
+    honest default (a reset link must never point at example.com)."""
+    return (os.environ.get("PUBLIC_ORIGIN")
+            or "https://rosteriq-production-6aaf.up.railway.app").rstrip("/")
+
+
 def _send_in_background(coro, what: str) -> None:
     task = asyncio.create_task(coro)
     _bg_sends.add(task)
@@ -537,7 +545,7 @@ async def forgot_password(
 
         if reset_token:
             # Build reset URL (client should construct this)
-            reset_url = f"https://app.example.com/reset-password?token={reset_token}"
+            reset_url = f"{public_origin()}/reset-password?token={reset_token}"
 
             # Send email asynchronously (don't block response)
             notification_service = get_notification_service()

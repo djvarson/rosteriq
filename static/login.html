@@ -724,12 +724,30 @@
             }
         });
 
-        // Handle "Forgot password?" link
-        document.querySelector('.forgot-link').addEventListener('click', (e) => {
+        // "Forgot password?" — a real flow: sends the reset request for the
+        // typed email, and points at the manager-issued reset link (the path
+        // that works even before email delivery is configured).
+        let forgotInFlight = false;
+        document.querySelector('.forgot-link').addEventListener('click', async (e) => {
             e.preventDefault();
-            // The styled in-page message, never a raw browser alert
+            if (forgotInFlight) return;   // every extra click mints another token
+            forgotInFlight = true;
+            setTimeout(() => { forgotInFlight = false; }, 8000);
+            const email = document.getElementById('email').value.trim();
+            if (!email) {
+                successMessage.textContent = 'Type your email above first, then tap "Forgot password?" again.';
+                successMessage.classList.add('show');
+                return;
+            }
+            try {
+                await fetch('/api/auth/forgot-password', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email }),
+                });
+            } catch (err) { /* the message below covers every case honestly */ }
             successMessage.textContent =
-                "No stress — email support@rosteriq.com.au and we'll reset it within the hour.";
+                'If that account exists, a reset is on its way. Fastest path: ask your manager — ' +
+                'they can hand you a one-hour reset link from the Staff page in seconds.';
             successMessage.classList.add('show');
         });
     </script>
