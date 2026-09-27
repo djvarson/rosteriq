@@ -233,6 +233,32 @@ def test_access_role_multi_venue_account_is_refused():
     assert r.status_code == 409, r.text
 
 
+def test_linked_staff_cannot_self_promote_via_throwaway_venue():
+    """First-venue bootstrap promotes staff->manager GLOBALLY, so it must
+    apply only to accounts with NO venues yet (genuine new-owner signup).
+    A join-code-linked employee who creates a free venue of their own must
+    NOT become a manager of their workplace by the back door."""
+    c, owner_h, vid, tag = _world()
+    email = f"ra_esc_{tag}@x.com"
+    cow_email = f"ra_cow_{tag}@x.com"
+    eid = _employee(c, owner_h, vid, tag, email=email)
+    cow_eid = _employee(c, owner_h, vid, tag, name="Coworker", email=cow_email)
+    _link_staff(c, owner_h, vid, cow_eid, cow_email)
+    staff_h = _link_staff(c, owner_h, vid, eid, email)
+
+    # the attack: linked staff opens a throwaway venue of their own
+    r = c.post("/venues", json={"id": f"esc-{tag}", "name": "T", "state": "wa",
+                                "max_labour_pct": 30, "tanda_org_id": "",
+                                "created_at": "2026-07-01T00:00:00"}, headers=staff_h)
+    assert r.status_code in (200, 201), r.text
+    assert get_db().get_user_by_email(email)["role"] == "staff"  # NOT promoted
+    # and manager power at the WORKPLACE stays shut
+    assert c.post(f"/api/employees/{cow_eid}/reset-link", headers=staff_h).status_code == 403
+    assert c.get(f"/api/employees/{cow_eid}/join-code", headers=staff_h).status_code == 403
+    assert c.post(f"/api/employees/{cow_eid}/access-role", json={"role": "manager"},
+                  headers=staff_h).status_code == 403
+
+
 def test_new_reset_link_revokes_the_old_one():
     """Only the LATEST reset link works: minting a second token kills the
     first, and a successful reset kills everything outstanding."""

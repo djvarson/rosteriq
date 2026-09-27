@@ -2332,10 +2332,17 @@ async def create_venue(venue: VenueConfig):
         if _user:
             _vids = list(_user.get("venue_ids") or [])
             _old_role = _user.get("role")
+            # Promotion is for FIRST-venue signups only. The role field is
+            # GLOBAL, so promoting a staff member who already holds a venue
+            # (a join-code-linked employee) would make them a manager of
+            # their WORKPLACE via a throwaway venue they created themselves.
+            # They still get membership of the new venue; managing it needs
+            # the platform owner — same rule as multi-venue account changes.
+            _had_venues = bool(_vids)
             if venue.id not in _vids:
                 _vids.append(venue.id)
             _user["venue_ids"] = _vids
-            if _user.get("role") == "staff":
+            if _user.get("role") == "staff" and not _had_venues:
                 _user["role"] = "manager"
             _raw.save_user(_user)
             # Audit the self-serve grant (venue access, and the staff->manager
