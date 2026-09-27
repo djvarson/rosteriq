@@ -227,7 +227,9 @@ def _account_management_guards(user, emp, db):
     a linked login for the email (case-insensitive); the target account
     HOLDS this venue (an email typed onto an employee record is
     attacker-controlled — without this check any manager could mint
-    takeovers for accounts platform-wide); target is not an owner.
+    takeovers for accounts platform-wide); the target holds ONLY this
+    venue (resets and role flips are account-global); target is not an
+    owner.
     """
     if user.user_id in _DEMO_USER_IDS or (user.email or "").strip().lower() in _DEMO_EMAILS:
         raise HTTPException(status_code=403, detail="The demo can't manage logins")
@@ -260,6 +262,15 @@ def _account_management_guards(user, emp, db):
     if vid not in (account.get("venue_ids") or []):
         raise HTTPException(status_code=409,
                             detail="Their login isn't linked to this venue yet — join code first")
+    # Both a role flip AND a password reset act on the whole ACCOUNT, not
+    # just this venue. A login linked to other venues too must not be
+    # controllable by one venue's manager — resetting its password would
+    # hand this caller a session that reaches venues they don't run.
+    other_venues = [v for v in (account.get("venue_ids") or []) if v != vid]
+    if other_venues:
+        raise HTTPException(status_code=409,
+                            detail="Their login is linked to more than one venue — "
+                                   "account changes for multi-venue logins need the platform owner")
     if account.get("role") == "owner" or account.get("is_owner"):
         raise HTTPException(status_code=403, detail="Owner accounts can't be changed here")
     return account
@@ -318,14 +329,6 @@ async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
     vid = getattr(emp, "venue_id", None)
     if account.get("id") == user.user_id:
         raise HTTPException(status_code=400, detail="You can't change your own access level")
-    # The role field is GLOBAL on an account. Only single-venue accounts may
-    # be flipped here — promoting a user who also holds other venues would
-    # grant them manager power at venues this caller doesn't run.
-    other_venues = [v for v in (account.get("venue_ids") or []) if v != vid]
-    if other_venues:
-        raise HTTPException(status_code=409,
-                            detail="Their login is linked to more than one venue — "
-                                   "access changes for multi-venue accounts need the platform owner")
     old = account.get("role")
     account["role"] = body.role
     db.save_user(account)

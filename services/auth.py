@@ -244,6 +244,11 @@ class AuthService:
         token = secrets.token_urlsafe(48)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
 
+        # A fresh link revokes any outstanding one — a previously handed-out
+        # (possibly screenshotted or mis-sent) link must not stay live once
+        # a newer one exists. Only the latest token works.
+        self.db.delete_password_reset_tokens_for_user(user["id"])
+
         # Store hash with 1-hour expiry
         expires_at = datetime.utcnow() + timedelta(hours=1)
         self.db.save_password_reset_token(token_hash, user["id"], expires_at)
@@ -289,8 +294,9 @@ class AuthService:
         user["password_hash"] = self.hash_password(new_password)
         self.db.save_user(user)
 
-        # Delete the used token
-        self.db.delete_password_reset_token(token_hash)
+        # A successful reset revokes every outstanding token for the user,
+        # not just the one consumed.
+        self.db.delete_password_reset_tokens_for_user(user_id)
 
         return True
 

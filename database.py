@@ -225,6 +225,10 @@ class BaseStore:
         """Delete a password reset token."""
         raise NotImplementedError
 
+    def delete_password_reset_tokens_for_user(self, user_id: str) -> None:
+        """Delete ALL password reset tokens for a user (revocation)."""
+        raise NotImplementedError
+
     def save_email_verification_token(self, token_hash: str, user_id: str, expires_at: datetime) -> None:
         """Save an email verification token."""
         raise NotImplementedError
@@ -1846,6 +1850,13 @@ class MemoryStore(BaseStore):
         """Delete a password reset token."""
         if token_hash in self._password_reset_tokens:
             del self._password_reset_tokens[token_hash]
+
+    def delete_password_reset_tokens_for_user(self, user_id: str) -> None:
+        """Delete ALL password reset tokens for a user (revocation)."""
+        self._password_reset_tokens = {
+            h: t for h, t in self._password_reset_tokens.items()
+            if t.get("user_id") != user_id
+        }
 
     def save_email_verification_token(self, token_hash: str, user_id: str, expires_at: datetime) -> None:
         """Save an email verification token."""
@@ -5466,6 +5477,15 @@ class PostgresStore(BaseStore):
             cur.execute(
                 "DELETE FROM password_reset_tokens WHERE token_hash = %s",
                 (token_hash,)
+            )
+
+    def delete_password_reset_tokens_for_user(self, user_id: str) -> None:
+        """Delete ALL password reset tokens for a user (revocation)."""
+        with self._cursor() as cur:
+            self._ensure_table(cur, "password_reset_tokens")
+            cur.execute(
+                "DELETE FROM password_reset_tokens WHERE user_id = %s",
+                (user_id,)
             )
 
     def save_email_verification_token(self, token_hash: str, user_id: str, expires_at: datetime) -> None:

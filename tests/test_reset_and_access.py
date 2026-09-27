@@ -212,9 +212,10 @@ def test_demo_session_cannot_manage_logins():
 
 
 def test_access_role_multi_venue_account_is_refused():
-    """role is a GLOBAL field — flipping it may only touch single-venue
-    accounts, or one venue's manager would mint power at venues they
-    don't run."""
+    """role AND password are GLOBAL on an account — neither endpoint may
+    touch a login that also holds other venues, or one venue's manager
+    could mint power (or a working session, via reset) at venues they
+    don't run. Re-verify round 2 proved reset-link was missing this."""
     c, owner_h, vid, tag = _world()
     email = f"ra_multi_{tag}@x.com"
     eid = _employee(c, owner_h, vid, tag, email=email)
@@ -226,6 +227,32 @@ def test_access_role_multi_venue_account_is_refused():
     assert r.status_code in (200, 201)
     r = c.post(f"/api/employees/{eid}/access-role", json={"role": "manager"}, headers=owner_h)
     assert r.status_code == 409, r.text
+    # the takeover vector: reset-link is strictly MORE powerful than a role
+    # flip, so the same multi-venue 409 must hold — no token may be minted
+    r = c.post(f"/api/employees/{eid}/reset-link", headers=owner_h)
+    assert r.status_code == 409, r.text
+
+
+def test_new_reset_link_revokes_the_old_one():
+    """Only the LATEST reset link works: minting a second token kills the
+    first, and a successful reset kills everything outstanding."""
+    c, owner_h, vid, tag = _world()
+    email = f"ra_rev_{tag}@x.com"
+    eid = _employee(c, owner_h, vid, tag, email=email)
+    _link_staff(c, owner_h, vid, eid, email)
+
+    t1 = c.post(f"/api/employees/{eid}/reset-link", headers=owner_h).json()["reset_url"].split("token=")[1]
+    t2 = c.post(f"/api/employees/{eid}/reset-link", headers=owner_h).json()["reset_url"].split("token=")[1]
+    # the older link is dead the moment a newer one exists
+    assert c.post("/api/auth/reset-password",
+                  json={"token": t1, "new_password": "Revoked!123"}).status_code == 400
+    # the newest works, exactly once
+    assert c.post("/api/auth/reset-password",
+                  json={"token": t2, "new_password": "Fresh!12345"}).status_code == 200
+    assert c.post("/api/auth/reset-password",
+                  json={"token": t2, "new_password": "Again!12345"}).status_code == 400
+    assert c.post("/api/auth/login",
+                  json={"email": email, "password": "Fresh!12345"}).status_code == 200
 
 
 def test_venueless_employee_record_fails_closed():
