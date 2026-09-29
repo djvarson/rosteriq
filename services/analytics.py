@@ -14,6 +14,7 @@ from typing import Optional, List, Dict, Any
 from collections import defaultdict
 import statistics
 
+from rosteriq.middleware.tenant import scoped_employee_map
 from rosteriq.models import (
     Roster, Shift, Employee, DemandForecast,
     EmploymentType, DayType, State,
@@ -153,7 +154,7 @@ class AnalyticsService:
             }
         """
         rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
-        employees = self.db.get_employees_dict()
+        employees = scoped_employee_map(self.db, venue_id)
         venue = self.db.get_venue(venue_id)
 
         if not venue:
@@ -414,7 +415,7 @@ class AnalyticsService:
         for venue_id in venue_ids:
             rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
             revenue_snapshots = self.db.get_revenue_snapshots(venue_id, start_date, end_date)
-            employees = self.db.get_employees_dict()
+            employees = scoped_employee_map(self.db, venue_id)
 
             if not rosters:
                 continue
@@ -598,7 +599,7 @@ class AnalyticsService:
 
         rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
         revenue_snapshots = self.db.get_revenue_snapshots(venue_id, start_date, end_date)
-        employees = self.db.get_employees_dict()
+        employees = scoped_employee_map(self.db, venue_id)
         venue = self.db.get_venue(venue_id)
 
         if not rosters or not venue:

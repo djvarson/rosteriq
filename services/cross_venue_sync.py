@@ -23,6 +23,7 @@ import logging
 from collections import defaultdict
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import scoped_venue_ids
 from rosteriq.models import (
     Employee, Shift, Roster, VenueConfig, ShiftStatus
 )
@@ -219,9 +220,12 @@ class CrossVenueSync:
     multiple venues to prevent double-booking and ensure compliance.
     """
 
-    def __init__(self):
-        """Initialize the cross-venue synchroniser."""
-        self.db = get_db()
+    @property
+    def db(self):
+        # Resolved per call: the route's scope gates read get_db(), so the
+        # data must come from the same store (a copy captured at import time
+        # goes stale when the store is rebuilt).
+        return get_db()
 
     def get_cross_venue_shifts(
         self, employee_id: str, start_date: str, end_date: str
@@ -253,7 +257,7 @@ class CrossVenueSync:
         all_shifts: List[Shift] = []
         total_hours = 0.0
 
-        for roster in self.db.list_rosters():
+        for roster in self._visible_rosters():
             if start <= roster.week_start <= end or start <= roster.week_end <= end:
                 for shift in roster.shifts:
                     if (
@@ -300,8 +304,8 @@ class CrossVenueSync:
         for i, shift_a in enumerate(schedule.all_shifts):
             for shift_b in schedule.all_shifts[i + 1 :]:
                 # Only flag if different venues
-                venue_a = self._get_shift_venue_id(shift_a)
-                venue_b = self._get_shift_venue_id(shift_b)
+                venue_a = self._get_shift_venue_id(shift_a, schedule)
+                venue_b = self._get_shift_venue_id(shift_b, schedule)
 
                 if venue_a == venue_b:
                     continue
@@ -376,15 +380,15 @@ class CrossVenueSync:
         emp_to_venues: Dict[str, Set[str]] = defaultdict(set)
         emp_to_name: Dict[str, str] = {}
 
-        for venue_id in venue_ids:
-            for roster in self.db.list_rosters():
-                if roster.venue_id == venue_id:
-                    for shift in roster.shifts:
-                        emp_to_venues[shift.employee_id].add(venue_id)
-                        if shift.employee_id not in emp_to_name:
-                            emp = self.db.get_employee(shift.employee_id)
-                            if emp:
-                                emp_to_name[shift.employee_id] = emp.name
+        wanted = set(venue_ids)
+        for roster in self._visible_rosters():
+            if roster.venue_id in wanted:
+                for shift in roster.shifts:
+                    emp_to_venues[shift.employee_id].add(roster.venue_id)
+                    if shift.employee_id not in emp_to_name:
+                        emp = self.db.get_employee(shift.employee_id)
+                        if emp:
+                            emp_to_name[shift.employee_id] = emp.name
 
         # Filter to only those in multiple venues
         shared_employees: List[SharedEmployee] = []
@@ -478,7 +482,7 @@ class CrossVenueSync:
             conflicts_found = []
             for existing_shift in schedule.all_shifts:
                 # Skip shifts in the same venue (roster engine handles those)
-                existing_venue = self._get_shift_venue_id(existing_shift)
+                existing_venue = self._get_shift_venue_id(existing_shift, schedule)
                 if existing_venue == venue_id:
                     continue
 
@@ -669,11 +673,20 @@ class CrossVenueSync:
     # Private Helper Methods
     # ========================================================================
 
-    def _get_shift_venue_id(self, shift: Shift) -> str:
-        """Find which venue a shift belongs to."""
-        for roster in self.db.list_rosters():
-            if any(s.id == shift.id for s in roster.shifts):
-                return roster.venue_id
+    def _visible_rosters(self) -> List[Roster]:
+        """Rosters of the venues the current caller may see (every roster for an
+        owner, or outside a request)."""
+        allowed = scoped_venue_ids()
+        rosters = self.db.list_rosters()
+        if allowed is None:
+            return list(rosters)
+        return [r for r in rosters if r.venue_id in allowed]
+
+    def _get_shift_venue_id(self, shift: Shift, schedule: CrossVenueSchedule) -> str:
+        """Find which venue a shift in ``schedule`` belongs to."""
+        for venue_id, shifts in schedule.shifts_by_venue.items():
+            if any(s is shift for s in shifts):
+                return venue_id
         return ""
 
     def _calculate_overlap_minutes(self, shift_a: Shift, shift_b: Shift) -> int:
@@ -764,7 +777,7 @@ class CrossVenueSync:
 
         total = 0.0
 
-        for roster in self.db.list_rosters():
+        for roster in self._visible_rosters():
             if roster.venue_id in venue_ids:
                 if week_start <= roster.week_start <= week_end:
                     for shift in roster.shifts:

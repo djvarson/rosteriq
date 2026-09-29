@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.events import audit, record_event
-from rosteriq.services.visa import preserve_recorded_work_rights
+from rosteriq.services.visa import preserve_recorded_work_rights, save_synced_employee
 from rosteriq.myob_adapter import (
     MYOBAdapter,
     MYOBOAuth,
@@ -227,7 +227,7 @@ async def install_token(body: MYOBInstallTokenRequest) -> dict:
                         for emp in employees:
                             try:
                                 emp.venue_id = body.venue_id
-                                db.save_employee(preserve_recorded_work_rights(db, emp))
+                                save_synced_employee(db, emp)
                             except Exception:
                                 pass
                         logger.info(
@@ -466,7 +466,7 @@ async def sync_employees(body: MYOBSyncEmployeesRequest) -> dict:
     for emp in employees:
         try:
             emp.venue_id = body.venue_id
-            db.save_employee(preserve_recorded_work_rights(db, emp))
+            save_synced_employee(db, emp)
             saved += 1
         except Exception as e:
             logger.warning(f"Failed to save MYOB employee {emp.name}: {e}")

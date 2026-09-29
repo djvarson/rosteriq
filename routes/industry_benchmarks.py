@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query, Path, Depends
 from pydantic import BaseModel
 
 from rosteriq.database import get_db, BaseStore
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.industry_benchmarks import (
     IndustryBenchmarkService, BenchmarkComparison, BenchmarkRecommendation,
     IndustryBenchmark,
@@ -152,6 +153,7 @@ async def get_venue_industry_benchmark(
     - start_date: ISO date, default 90 days ago
     - end_date: ISO date, default today
     """
+    enforce_venue_manager(venue_id)
     try:
         comparison: BenchmarkComparison = service.compare_venue(
             venue_id, venue_type, start_date, end_date
@@ -209,6 +211,7 @@ async def get_venue_percentile(
     - cost_per_cover: Cost per cover in AUD (lower is better)
     - covers_per_staff: Covers per staff hour (higher is better)
     """
+    enforce_venue_manager(venue_id)
     try:
         percentile = service.get_percentile(
             venue_id, venue_type, metric, start_date, end_date
@@ -263,6 +266,7 @@ async def get_venue_recommendations(
     - Staff utilisation gains
     - Covers per staff hour targets
     """
+    enforce_venue_manager(venue_id)
     try:
         recommendations: List[BenchmarkRecommendation] = service.get_recommendations(
             venue_id, venue_type, start_date, end_date
@@ -357,6 +361,8 @@ async def compare_multiple_venues(
     - Summary statistics across venues
     - Ranking by percentile performance
     """
+    for config in request.venue_configs:
+        enforce_venue_manager(config.get("venue_id"))
     try:
         comparisons = service.compare_venues(
             request.venue_configs, request.start_date, request.end_date

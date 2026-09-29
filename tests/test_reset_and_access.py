@@ -308,3 +308,124 @@ def test_uppercase_registered_email_still_links():
     if r.status_code == 200:
         r = c.post(f"/api/employees/{eid}/reset-link", headers=owner_h)
         assert r.status_code == 200, r.text
+
+
+def test_throwaway_venue_then_join_code_is_refused():
+    """The reverse ordering of the self-promotion attack: create a throwaway
+    venue FIRST (a genuine first-venue signup, so the account becomes a
+    manager), THEN redeem the workplace join code. Role is account-wide, so
+    the link must be refused or the new hire arrives as a workplace manager."""
+    c, owner_h, vid, tag = _world()
+    email = f"ra_rev_esc_{tag}@x.com"
+    eid = _employee(c, owner_h, vid, tag, email=email)
+    cow = _employee(c, owner_h, vid, tag, name="Coworker", email=f"ra_cw_{tag}@x.com")
+    _, h = _login(c, email)
+    r = c.post("/venues", json={"id": f"throwaway-{tag}", "name": "T", "state": "wa",
+                                "max_labour_pct": 30, "tanda_org_id": "",
+                                "created_at": "2026-07-01T00:00:00"}, headers=h)
+    assert r.status_code in (200, 201), r.text
+    code = c.get(f"/api/employees/{eid}/join-code", headers=owner_h).json()["join_code"]
+    r = c.post("/api/me/link", json={"code": code}, headers=h)
+    assert r.status_code == 409, r.text
+    assert vid not in (get_db().get_user_by_email(email).get("venue_ids") or [])
+    # and nothing at the workplace opened up
+    assert c.post(f"/api/employees/{cow}/reset-link", headers=h).status_code in (403, 404)
+
+
+def test_manager_can_still_link_to_own_venues_staff_record():
+    """Not over-blocking: a manager linking to a staff record at a venue they
+    already hold is fine (the owner who also works the floor)."""
+    c = TestClient(app)
+    tag = uuid.uuid4().hex[:6]
+    _login(c, f"ra_platform_{tag}@x.com")        # platform owner out of the way
+    mgr_email = f"ra_mgr_{tag}@x.com"
+    _, mgr_h = _login(c, mgr_email)
+    vid = f"ra-own-{tag}"
+    assert c.post("/venues", json={"id": vid, "name": vid, "state": "wa", "max_labour_pct": 30,
+                                   "tanda_org_id": "", "created_at": "2026-07-01T00:00:00"},
+                  headers=mgr_h).status_code in (200, 201)
+    assert get_db().get_user_by_email(mgr_email)["role"] == "manager"
+    eid = _employee(c, mgr_h, vid, tag, name="Owner On Floor", email=mgr_email)
+    code = c.get(f"/api/employees/{eid}/join-code", headers=mgr_h).json()["join_code"]
+    r = c.post("/api/me/link", json={"code": code}, headers=mgr_h)
+    assert r.status_code == 200, r.text
+
+
+def test_venueless_employee_records_cannot_be_created_or_read():
+    """Venue-less staff records belonged to no tenant, so they slipped every
+    venue-scoped read (any manager — including the demo — could read one by
+    id). Creation now requires a venue; existing ones are hidden from
+    non-owners."""
+    c, owner_h, vid, tag = _world()
+    r = c.post("/employees", json={
+        "id": f"nov2-{tag}", "name": "No Venue", "employment_type": "casual",
+        "award_level": "level_2", "state": "wa", "hourly_base_rate": "31.50",
+        "created_at": "2026-07-01T00:00:00", "updated_at": "2026-07-01T00:00:00",
+    }, headers=owner_h)
+    assert r.status_code == 422, r.text
+    # a legacy venue-less row is invisible to a non-owner manager
+    from rosteriq.models import Employee
+    get_db().save_employee(Employee(
+        id=f"legacy-{tag}", name="Legacy Row", employment_type="casual", award_level="level_2",
+        state="wa", hourly_base_rate="31.50", created_at="2026-07-01T00:00:00",
+        updated_at="2026-07-01T00:00:00"))
+    _, mgr_h = _login(c, f"ra_nv_mgr_{tag}@x.com")
+    c.post("/venues", json={"id": f"nv-{tag}", "name": "N", "state": "wa", "max_labour_pct": 30,
+                            "tanda_org_id": "", "created_at": "2026-07-01T00:00:00"}, headers=mgr_h)
+    r = c.get(f"/api/v1/venues/employees/legacy-{tag}/versatility", headers=mgr_h)
+    assert r.status_code == 404, r.text
+
+
+def test_hire_cannot_squat_a_colleagues_email_via_emailless_record():
+    """Signup email is unverified. A hire registers AS a colleague's email and
+    redeems their own email-less record's code: the link must not stamp an
+    email another record at the venue already carries."""
+    c, owner_h, vid, tag = _world()
+    alice = f"ra_alice_{tag}@x.com"
+    _employee(c, owner_h, vid, tag, name="Alice", email=alice)
+    p_rec = _employee(c, owner_h, vid, tag, name="Pat Hire", email=None)
+    _, p_h = _login(c, alice)                       # P registers with Alice's email
+    code = c.get(f"/api/employees/{p_rec}/join-code", headers=owner_h).json()["join_code"]
+    r = c.post("/api/me/link", json={"code": code}, headers=p_h)
+    assert r.status_code == 409, r.text
+    assert vid not in (get_db().get_user_by_email(alice).get("venue_ids") or [])
+
+
+def test_access_changes_refuse_when_two_records_share_an_email():
+    """Second layer: even if two records at a venue end up with the same email
+    (typed twice by hand), access changes and reset links refuse rather than
+    act on whichever login the email text happens to resolve to."""
+    c, owner_h, vid, tag = _world()
+    email = f"ra_dupe_{tag}@x.com"
+    first = _employee(c, owner_h, vid, tag, name="Real Person", email=email)
+    _link_staff(c, owner_h, vid, first, email)
+    second = _employee(c, owner_h, vid, tag, name="Duplicate Row", email=email)
+    for eid in (first, second):
+        assert c.post(f"/api/employees/{eid}/access-role", json={"role": "manager"},
+                      headers=owner_h).status_code == 409
+        assert c.post(f"/api/employees/{eid}/reset-link", headers=owner_h).status_code == 409
+    assert get_db().get_user_by_email(email)["role"] == "staff"
+
+
+def test_legacy_venueless_rows_are_neither_readable_nor_rehomeable():
+    """Rows with no venue (None or "") predate the create-time check. A
+    non-owner manager must not read them by id or overwrite (re-home) them."""
+    from rosteriq.models import Employee
+    c, owner_h, vid, tag = _world()
+    for rid, v in ((f"legacy-none-{tag}", None), (f"legacy-blank-{tag}", "")):
+        get_db().save_employee(Employee(
+            id=rid, venue_id=v, name="Legacy Row", employment_type="casual", award_level="level_2",
+            state="wa", hourly_base_rate="52.10", created_at="2026-07-01T00:00:00",
+            updated_at="2026-07-01T00:00:00"))
+    _, mgr_h = _login(c, f"ra_legacy_mgr_{tag}@x.com")
+    c.post("/venues", json={"id": f"lg-{tag}", "name": "L", "state": "wa", "max_labour_pct": 30,
+                            "tanda_org_id": "", "created_at": "2026-07-01T00:00:00"}, headers=mgr_h)
+    _, mgr_h = _login(c, f"ra_legacy_mgr_{tag}@x.com")
+    for rid in (f"legacy-none-{tag}", f"legacy-blank-{tag}"):
+        assert c.get(f"/employees/{rid}", headers=mgr_h).status_code == 404, rid
+        r = c.post("/employees", json={
+            "id": rid, "venue_id": f"lg-{tag}", "name": "Taken Over", "employment_type": "casual",
+            "award_level": "level_2", "state": "wa", "hourly_base_rate": "1.00",
+            "created_at": "2026-07-01T00:00:00", "updated_at": "2026-07-01T00:00:00"}, headers=mgr_h)
+        assert r.status_code == 404, (rid, r.status_code, r.text[:150])
+        assert get_db().get_employee(rid).name == "Legacy Row"

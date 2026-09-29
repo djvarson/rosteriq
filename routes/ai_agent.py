@@ -208,6 +208,9 @@ async def get_insights(
     These are fast rule-based checks (no LLM call) that surface
     staffing gaps, cost alerts, compliance issues, and demand signals.
     """
+    # Cards carry labour cost and average hourly rate -> manager-level.
+    from rosteriq.middleware.tenant import enforce_venue_manager
+    enforce_venue_manager(venue_id)
     _guard_demo_scope(venue_id)
 
     try:

@@ -290,14 +290,13 @@ async def preview_schedule(
     Returns 400 if week_start is invalid.
     Returns 404 if venue not found.
     """
+    # Access first: checking existence first answered "does this venue exist?"
+    # for venues the caller doesn't hold (404 vs 403).
+    enforce_venue_access(venue_id)
     try:
-        # Verify venue exists
         venue = db.get_venue(venue_id)
         if not venue:
             raise HTTPException(status_code=404, detail=f"Venue {venue_id} not found")
-
-        # Verify user has access (owners pass)
-        enforce_venue_access(venue_id)
 
         # Parse date
         try:
@@ -399,14 +398,13 @@ async def get_hiring_suggestions(
     Returns 400 if week_start is invalid.
     Returns 404 if venue not found.
     """
+    # Access first: checking existence first answered "does this venue exist?"
+    # for venues the caller doesn't hold (404 vs 403).
+    enforce_venue_access(venue_id)
     try:
-        # Verify venue exists
         venue = db.get_venue(venue_id)
         if not venue:
             raise HTTPException(status_code=404, detail=f"Venue {venue_id} not found")
-
-        # Verify user has access (owners pass)
-        enforce_venue_access(venue_id)
 
         # Parse date
         try:
@@ -416,7 +414,11 @@ async def get_hiring_suggestions(
 
         # Get recommendations
         scheduler = AutoScheduler(db)
-        recommendations = scheduler.suggest_hiring(venue_id, week_date)
+        try:
+            recommendations = scheduler.suggest_hiring(venue_id, week_date)
+        except ValueError as e:
+            # e.g. a venue with no staff yet — a client error, not a 500
+            raise HTTPException(status_code=400, detail=str(e))
 
         return HiringRecommendationsResponse(
             venue_id=venue_id,

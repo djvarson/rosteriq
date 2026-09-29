@@ -2746,8 +2746,8 @@
     // ========================================================================
     async function loadOverviewData() {
       try {
-        const metricsRes = await fetch('/metrics');
-        const metrics = await metricsRes.json();
+        const metrics = await fetchWithAuth('/metrics');
+        if (!metrics) throw new Error('Metrics unavailable (owner sign-in required)');
 
         document.getElementById('user-count').textContent = metrics.data?.users || '24';
         document.getElementById('venue-count').textContent = metrics.data?.venues || '3';
@@ -2790,8 +2790,8 @@
 
     async function loadVenuesData() {
       try {
-        const metricsRes = await fetch('/metrics');
-        const metrics = await metricsRes.json();
+        const metrics = await fetchWithAuth('/metrics');
+        if (!metrics) throw new Error('Metrics unavailable (owner sign-in required)');
 
         const tbody = document.getElementById('venues-tbody');
         if (metrics.data?.venues > 0) {
@@ -2823,8 +2823,8 @@
       showLoading('metrics-tbody', 'row', 3);
 
       try {
-        const metricsRes = await fetch('/metrics');
-        const metrics = await metricsRes.json();
+        const metrics = await fetchWithAuth('/metrics');
+        if (!metrics) throw new Error('Metrics unavailable (owner sign-in required)');
 
         connectionManager.hide();
         clearState('metrics-tbody');
@@ -3000,8 +3000,8 @@
 
     async function loadOverviewData() {
       try {
-        const metricsRes = await fetch('/metrics');
-        const metrics = await metricsRes.json();
+        const metrics = await fetchWithAuth('/metrics');
+        if (!metrics) throw new Error('Metrics unavailable (owner sign-in required)');
 
         document.getElementById('user-count').textContent = '0';
         document.getElementById('venue-count').textContent = metrics.data?.venues || '0';
@@ -3052,8 +3052,8 @@
       showLoading('venues-tbody', 'row', 3);
 
       try {
-        const metricsRes = await fetch('/metrics');
-        const metrics = await metricsRes.json();
+        const metrics = await fetchWithAuth('/metrics');
+        if (!metrics) throw new Error('Metrics unavailable (owner sign-in required)');
 
         connectionManager.hide();
 
@@ -3091,8 +3091,8 @@
       showLoading('metrics-tbody', 'row', 3);
 
       try {
-        const metricsRes = await fetch('/metrics');
-        const metrics = await metricsRes.json();
+        const metrics = await fetchWithAuth('/metrics');
+        if (!metrics) throw new Error('Metrics unavailable (owner sign-in required)');
 
         connectionManager.hide();
         clearState('metrics-tbody');

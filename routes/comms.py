@@ -122,7 +122,11 @@ async def publish_announcement(body: AnnouncementBody,
                    "check the section names or send to everyone")
 
     sms_result = None
-    if body.send_sms:
+    from rosteriq.services.demo import DEMO_VENUE_ID
+    if body.send_sms and body.venue_id == DEMO_VENUE_ID:
+        sms_result = {"attempted": False, "reason": "The demo venue never sends texts.",
+                      "sent": 0, "no_phone": 0, "failed": 0}
+    elif body.send_sms:
         sms = get_sms_service()
         if not sms.is_configured:
             sms_result = {

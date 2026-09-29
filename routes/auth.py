@@ -624,6 +624,11 @@ async def resend_verification(
 
     Generates a new verification token and sends it.
     """
+    # Email verification isn't built end to end (registration sends nothing and
+    # there is no verify page), so this would only mail a dead link on demand —
+    # including to the shared demo inbox. Off until the flow exists.
+    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                        detail="Email verification isn't switched on yet.")
     # Get user
     user = db.get_user_by_id(current_user.user_id)
 

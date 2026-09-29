@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Path, Body
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager, load_employee_in_scope
 from rosteriq.models import Employee
 from rosteriq.services.cross_venue_sync import (
     CrossVenueSync,
@@ -175,6 +176,8 @@ def get_employee_cross_venue_shifts(
 
     Returns shifts grouped by venue with total hours calculation.
     """
+    emp = load_employee_in_scope(get_db(), employee_id)
+    enforce_venue_manager(emp.venue_id)
     try:
         schedule = _sync_service.get_cross_venue_shifts(
             employee_id, start_date, end_date
@@ -203,6 +206,8 @@ def get_employee_conflicts(
 
     Returns a list of conflicts with overlap duration and severity.
     """
+    emp = load_employee_in_scope(get_db(), employee_id)
+    enforce_venue_manager(emp.venue_id)
     try:
         conflicts = _sync_service.detect_conflicts(
             employee_id, start_date, end_date
@@ -230,6 +235,8 @@ def get_employee_cross_venue_hours(
 
     Includes per-venue breakdown and compliance warnings if over limit.
     """
+    emp = load_employee_in_scope(get_db(), employee_id)
+    enforce_venue_manager(emp.venue_id)
     try:
         hours = _sync_service.get_cross_venue_hours(employee_id, week_start)
         return hours.to_dict()
@@ -255,6 +262,8 @@ def get_employee_availability_across_venues(
 
     Considers all existing shifts and required rest periods between venues.
     """
+    emp = load_employee_in_scope(get_db(), employee_id)
+    enforce_venue_manager(emp.venue_id)
     try:
         slots = _sync_service.get_availability_across_venues(employee_id, target_date)
         return [
@@ -294,8 +303,10 @@ def get_multi_venue_conflicts(
 
     Useful for compliance audits and multi-venue scheduling reviews.
     """
+    venue_list = [v.strip() for v in venue_ids.split(",") if v.strip()]
+    for v in venue_list:
+        enforce_venue_manager(v)
     try:
-        venue_list = [v.strip() for v in venue_ids.split(",")]
         conflicts = _sync_service.detect_all_conflicts(
             venue_list, start_date, end_date
         )
@@ -321,8 +332,10 @@ def get_multi_venue_shared_employees(
 
     Includes total weekly hours and recent conflict counts.
     """
+    venue_list = [v.strip() for v in venue_ids.split(",") if v.strip()]
+    for v in venue_list:
+        enforce_venue_manager(v)
     try:
-        venue_list = [v.strip() for v in venue_ids.split(",")]
         shared = _sync_service.get_shared_employees(venue_list)
         return [s.to_dict() for s in shared]
     except Exception as e:
@@ -351,6 +364,9 @@ def check_schedule_before_booking(
     Returns validation status with any conflicts, warnings, or errors.
     Useful for preventing invalid shifts before they're added to the roster.
     """
+    emp = load_employee_in_scope(get_db(), employee_id)
+    enforce_venue_manager(emp.venue_id)
+    enforce_venue_manager(proposed_shift.venue_id)
     try:
         result = _sync_service.check_before_scheduling(
             employee_id, proposed_shift.dict()

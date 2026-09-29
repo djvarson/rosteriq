@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
+from rosteriq.middleware.tenant import enforce_venue_manager, load_employee_in_scope
 from rosteriq.services.fatigue_predictor import FatiguePredictor
 from rosteriq.models import Shift
 
@@ -175,6 +176,8 @@ async def get_fatigue_risk(
     Returns:
         FatigueAssessmentResponse with detailed scores and recommendations
     """
+    employee = load_employee_in_scope(get_db(), employee_id)
+    enforce_venue_manager(employee.venue_id)
     predictor = _get_predictor()
     assessment = predictor.assess_fatigue(employee_id, lookback_weeks=lookback_weeks)
 
@@ -220,6 +223,7 @@ async def get_team_fatigue(
     Returns:
         TeamFatigueReportResponse with all employees and team metrics
     """
+    enforce_venue_manager(venue_id)
     predictor = _get_predictor()
     report = predictor.assess_team(venue_id)
 
@@ -278,15 +282,9 @@ async def get_clopenings(
     Returns:
         ClopeningListResponse with all clopening pairs
     """
-    db = get_db()
+    employee = load_employee_in_scope(get_db(), employee_id)
+    enforce_venue_manager(employee.venue_id)
     predictor = _get_predictor()
-
-    employee = db.get_employee(employee_id)
-    if not employee:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Employee {employee_id} not found"
-        )
 
     clopening_pairs = predictor.get_clopening_shifts(employee_id, weeks=weeks)
 
@@ -339,15 +337,9 @@ async def get_burnout_prediction(
     Returns:
         BurnoutPredictionResponse with estimated critical date
     """
-    db = get_db()
+    employee = load_employee_in_scope(get_db(), employee_id)
+    enforce_venue_manager(employee.venue_id)
     predictor = _get_predictor()
-
-    employee = db.get_employee(employee_id)
-    if not employee:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Employee {employee_id} not found"
-        )
 
     assessment = predictor.assess_fatigue(employee_id)
     if not assessment:
@@ -402,15 +394,9 @@ async def get_recovery_plan(
     Returns:
         RecoveryRosterResponse with recovery suggestions
     """
-    db = get_db()
+    employee = load_employee_in_scope(get_db(), employee_id)
+    enforce_venue_manager(employee.venue_id)
     predictor = _get_predictor()
-
-    employee = db.get_employee(employee_id)
-    if not employee:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Employee {employee_id} not found"
-        )
 
     suggestions = predictor.suggest_recovery_roster(employee_id)
 

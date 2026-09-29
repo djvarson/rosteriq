@@ -103,8 +103,24 @@ def preserve_recorded_work_rights(db, emp):
         prior = db.get_employee(emp.id)
     except Exception:
         prior = None
-    if prior is not None:
+    if prior is not None and getattr(prior, "venue_id", None) == getattr(emp, "venue_id", None):
         emp.visa_status = getattr(prior, "visa_status", None)
         emp.visa_expiry = getattr(prior, "visa_expiry", None)
         emp.visa_work_limit_fortnight = getattr(prior, "visa_work_limit_fortnight", None)
     return emp
+
+
+def save_synced_employee(db, emp) -> bool:
+    """Save an employee rebuilt by an integration sync. External ids are only
+    unique within one external account (Deputy ids are small integers), so a
+    synced id can collide with another venue's staff record. Never overwrite
+    a record that belongs to a different venue — skip it and return False."""
+    try:
+        prior = db.get_employee(emp.id)
+    except Exception:
+        prior = None
+    prior_vid = getattr(prior, "venue_id", None) if prior is not None else None
+    if prior is not None and prior_vid and prior_vid != getattr(emp, "venue_id", None):
+        return False
+    db.save_employee(preserve_recorded_work_rights(db, emp))
+    return True

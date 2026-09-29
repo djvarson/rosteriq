@@ -92,14 +92,35 @@ class TenantContext:
 
 
 # Exempt paths from tenant validation
+# Try Demo sessions may not write to these (see _deny_demo_side_effects).
+DEMO_DENIED_PREFIXES = (
+    "/api/notifications/", "/api/push/", "/api/sms/",
+    "/api/deputy/", "/deputy/", "/api/myob/", "/api/xero/", "/api/humanforce/",
+    "/tanda/", "/api/tanda/", "/api/keypay/", "/api/pos/", "/api/reservations/",
+    "/api/function-tracker/", "/api/connections/", "/api/feeds/config", "/api/plugins/",
+    "/api/marketplace/", "/api/billing/", "/employees/", "/venues/",
+)
+DEMO_DENIED_PATHS = frozenset({
+    "/employees", "/venues", "/api/setup/import-staff", "/api/staff/profile",
+})
+
+OAUTH_CALLBACK_PATHS = frozenset({
+    "/api/deputy/callback",
+    "/deputy/callback",
+    "/api/humanforce/callback",
+    "/api/myob/callback",
+    "/api/xero/callback",
+    "/tanda/callback",
+})
+
 EXEMPT_PATHS = {
     "/",
     "/health",
     "/api/health",
     "/ready",
     "/api/ready",
-    "/metrics",
-    "/api/metrics",
+    # /metrics is NOT exempt: it reports platform-wide tenant counts and is
+    # owner-only (api.py metrics() calls enforce_owner, which needs a context).
     "/docs",
     "/redoc",
     "/openapi.json",
@@ -108,7 +129,6 @@ EXEMPT_PATHS = {
     "/api/auth/refresh",
     "/api/auth/logout",
     "/api/status",
-    "/graphql",
     "/admin",
     "/staff",
     "/login",
@@ -197,6 +217,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 denied = self._enforce_path_venue_scope(request.url.path, user)
                 if denied is not None:
                     return denied
+                denied = self._deny_demo_side_effects(request, user)
+                if denied is not None:
+                    return denied
 
             response = await call_next(request)
             return response
@@ -216,6 +239,25 @@ class TenantMiddleware(BaseHTTPMiddleware):
             # Reset the ContextVar for this task so the context never leaks.
             if ctx_token is not None:
                 _tenant_context_var.reset(ctx_token)
+
+    @staticmethod
+    def _deny_demo_side_effects(request: Request, user) -> Optional[JSONResponse]:
+        """The public Try Demo identities are shared by every visitor. Writes
+        that reach outside the sandbox (email/SMS/push to caller-chosen
+        recipients, integrations and their credentials, staff-record imports
+        and edits) are refused as a class, so a new endpoint under one of these
+        prefixes is covered without remembering to guard it."""
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        from rosteriq.services.demo import is_demo_identity
+        if not is_demo_identity(getattr(user, "user_id", None), getattr(user, "email", None)):
+            return None
+        path = request.url.path
+        if path.startswith(DEMO_DENIED_PREFIXES) or path in DEMO_DENIED_PATHS or (
+                path.startswith("/api/v1/venues/") and path.endswith("/digest/send")):
+            return JSONResponse(status_code=403, content={
+                "detail": "The demo can't do that \u2014 sign up to try it with your own venue."})
+        return None
 
     @staticmethod
     def _enforce_path_venue_scope(path: str, user) -> Optional[JSONResponse]:
@@ -247,10 +289,11 @@ class TenantMiddleware(BaseHTTPMiddleware):
         if path in EXEMPT_PATHS:
             return True
         # OAuth callbacks are hit by the provider's browser redirect with no JWT —
-        # they identify the venue from the signed `state` param, not app auth. Any
-        # connector's /callback must be public or its OAuth connect flow 401s. This
-        # covers existing (deputy/xero/myob/humanforce/tanda) and future connectors.
-        if path.endswith("/callback"):
+        # they identify the venue from the signed `state` param, not app auth.
+        # Listed explicitly: a suffix match also exempted every route whose last
+        # path parameter was sent as the literal "callback". A new connector's
+        # callback must be added here or its connect flow 401s.
+        if path in OAUTH_CALLBACK_PATHS:
             return True
         return any(path.startswith(p) for p in EXEMPT_PREFIXES)
 
@@ -494,6 +537,10 @@ def _scoped(record, venue_id: Optional[str], not_found: str, resource_type: str)
     if record is None:
         raise HTTPException(status_code=404, detail=not_found)
     tenant = get_tenant_context_optional()
+    # A record with no venue proves nothing about who may see it — deny
+    # non-owners (fail closed, as load_shift_in_scope does).
+    if tenant is not None and not venue_id and not getattr(tenant, "is_owner", False):
+        raise HTTPException(status_code=404, detail=not_found)
     if tenant is not None and venue_id and not tenant.has_access_to(venue_id):
         audit_cross_tenant_attempt(venue_id, resource_type, "access")
         try:
@@ -509,6 +556,24 @@ def load_roster_in_scope(db, roster_id: str):
     """Roster by id, or 404 (missing OR belongs to another tenant)."""
     r = db.get_roster(roster_id)
     return _scoped(r, getattr(r, "venue_id", None), "Roster not found", "roster")
+
+
+def scoped_employee_map(db, venue_id: str) -> dict:
+    """id -> Employee for pricing a venue's shifts: that venue's staff plus
+    staff of any OTHER venue the caller also holds (an operator's shared
+    staff working across their own venues). Never another tenant's staff.
+    Platform owners (and callers with no request context) get the whole
+    store, as before — it is only ever used as an id lookup for this venue's
+    own shifts."""
+    tenant = get_tenant_context_optional()
+    if tenant is None or getattr(tenant, "is_owner", False):
+        return {e.id: e for e in (db.list_employees() or [])}
+    venue_ids = {venue_id} | set(getattr(tenant, "venue_ids", None) or [])
+    out = {}
+    for vid in venue_ids:
+        for e in db.get_employees(vid) or []:
+            out[e.id] = e
+    return out
 
 
 def load_employee_in_scope(db, employee_id: str):

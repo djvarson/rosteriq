@@ -191,12 +191,7 @@ class FatiguePredictor:
         Returns:
             TeamFatigueReport with all employees sorted by risk
         """
-        employees = self.db.list_employees()
-        # Filter to employees who have shifts at this venue
-        venue_employees = [
-            e for e in employees
-            if self._has_shifts_at_venue(e.id, venue_id)
-        ]
+        venue_employees = self.db.get_employees(venue_id)
 
         if not venue_employees:
             logger.warning(f"No employees found for venue {venue_id}")
@@ -694,13 +689,3 @@ class FatiguePredictor:
             recommendations.append("Team fatigue levels are healthy")
 
         return recommendations
-
-    def _has_shifts_at_venue(self, employee_id: str, venue_id: str) -> bool:
-        """Check if employee has any shifts at a venue."""
-        shifts = self.db.list_shifts()
-        for shift in shifts:
-            if shift.employee_id == employee_id:
-                roster = self.db.get_roster(shift.id.split("_")[0])
-                if roster and roster.venue_id == venue_id:
-                    return True
-        return False

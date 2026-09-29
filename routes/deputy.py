@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
-from rosteriq.services.visa import preserve_recorded_work_rights
+from rosteriq.services.visa import preserve_recorded_work_rights, save_synced_employee
 from rosteriq.deputy_adapter import (
     DeputyAdapter,
     DeputyOAuth,
@@ -346,7 +346,7 @@ async def install_token(body: InstallTokenRequest) -> dict:
             for emp in employees:
                 try:
                     emp.venue_id = body.venue_id
-                    db.save_employee(preserve_recorded_work_rights(db, emp))
+                    save_synced_employee(db, emp)
                 except Exception as e:
                     employee_errors += 1
                     logger.warning(
@@ -524,7 +524,7 @@ async def oauth_callback(
             for emp in employees:
                 try:
                     emp.venue_id = venue_id
-                    db.save_employee(preserve_recorded_work_rights(db, emp))
+                    save_synced_employee(db, emp)
                 except Exception as e:
                     logger.warning(f"Failed to save employee: {e}")
 
@@ -659,7 +659,7 @@ async def sync_employees(body: SyncEmployeesRequest) -> dict:
     for emp in employees:
         try:
             emp.venue_id = body.venue_id
-            db.save_employee(preserve_recorded_work_rights(db, emp))
+            save_synced_employee(db, emp)
             saved += 1
             if emp.id.removeprefix("deputy-") in rate_review_ids:
                 rate_review_names.append(emp.name)

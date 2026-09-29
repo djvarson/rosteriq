@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 
 from rosteriq.database import get_db, BaseStore
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.analytics import AnalyticsService
 
 
@@ -190,6 +191,7 @@ async def get_labour_trend(
     Returns:
         Trend points with labour %, costs, headcount, hours
     """
+    enforce_venue_manager(venue_id)
     try:
         service = AnalyticsService(db)
         trend_points = service.get_labour_trend(venue_id, period, days)
@@ -223,6 +225,7 @@ async def get_labour_breakdown(
     Returns:
         Costs and hours grouped by category
     """
+    enforce_venue_manager(venue_id)
     try:
         start_date = date.fromisoformat(start)
         end_date = date.fromisoformat(end)
@@ -239,6 +242,8 @@ async def get_labour_breakdown(
             end_date=end,
             **breakdown,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
     except Exception as e:
@@ -264,6 +269,7 @@ async def get_forecast_accuracy(
     Returns:
         MAPE, MAE, RMSE, bias, and per-day breakdown
     """
+    enforce_venue_manager(venue_id)
     try:
         end_date = date.today()
         start_date = end_date - timedelta(days=days)
@@ -300,6 +306,7 @@ async def get_accuracy_history(
     Returns:
         List of weekly accuracy scores
     """
+    enforce_venue_manager(venue_id)
     try:
         service = AnalyticsService(db)
         history = service.get_accuracy_history(venue_id, weeks)
@@ -332,9 +339,10 @@ async def benchmark_venues(
     Returns:
         Metrics for each venue, rankings, and outlier detection
     """
+    venues = [v.strip() for v in venue_ids.split(",")]
+    for vid in venues:
+        enforce_venue_manager(vid)
     try:
-        venues = [v.strip() for v in venue_ids.split(",")]
-
         start_date = None
         end_date = None
 
@@ -377,6 +385,7 @@ async def get_peak_analysis(
     Returns:
         Heatmap data, peak windows, dead zones
     """
+    enforce_venue_manager(venue_id)
     try:
         service = AnalyticsService(db)
         analysis = service.get_peak_analysis(venue_id, weeks)
@@ -412,6 +421,7 @@ async def get_optimisation_opportunities(
     Returns:
         List of insights with severity and estimated savings
     """
+    enforce_venue_manager(venue_id)
     try:
         service = AnalyticsService(db)
         insights = service.get_optimisation_opportunities(venue_id)
@@ -442,6 +452,7 @@ async def get_analytics_summary(
     Returns:
         Complete analytics snapshot
     """
+    enforce_venue_manager(venue_id)
     try:
         service = AnalyticsService(db)
 

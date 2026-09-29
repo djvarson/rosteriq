@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db, BaseStore
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.cost_trends import (
     CostTrendsService, CostTrendReport, VenueCostComparison,
     OvertimeAnalysis, CasualDependencyReport,
@@ -184,6 +185,7 @@ async def get_cost_trends(
 
     Includes trend analysis showing cost direction and % change.
     """
+    enforce_venue_manager(venue_id)
     try:
         # Parse dates
         start = date.fromisoformat(start_date)
@@ -212,6 +214,8 @@ async def get_cost_trends(
 
         return CostTrendResponseModel(**response_dict)
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
     except Exception as e:
@@ -247,9 +251,11 @@ async def compare_venues(
 
     Identifies best-performing venue and highest-cost venue.
     """
+    venue_list = [v.strip() for v in venue_ids.split(",")]
+    for vid in venue_list:
+        enforce_venue_manager(vid)
     try:
         # Parse inputs
-        venue_list = [v.strip() for v in venue_ids.split(",")]
         start = date.fromisoformat(start_date)
         end = date.fromisoformat(end_date)
 
@@ -277,6 +283,8 @@ async def compare_venues(
 
         return VenueComparisonResponseModel(**response_dict)
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
     except Exception as e:
@@ -309,6 +317,7 @@ async def get_cost_forecast(
     - Forecasted cost for each week ahead
     - Last updated timestamp
     """
+    enforce_venue_manager(venue_id)
     try:
         service = CostTrendsService(db)
         forecasts = service.get_cost_forecast(venue_id, weeks_ahead)
@@ -365,6 +374,7 @@ async def get_overtime_analysis(
     - Percentage of total hours that are overtime
     - Average overtime per affected employee
     """
+    enforce_venue_manager(venue_id)
     try:
         # Parse dates
         start = date.fromisoformat(start_date)
@@ -394,6 +404,8 @@ async def get_overtime_analysis(
             overtime_percentage=analysis.overtime_percentage,
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
     except Exception as e:
@@ -431,6 +443,7 @@ async def get_casual_dependency(
     >60% indicates over-reliance on casual labour.
     <20% may indicate insufficient flexibility.
     """
+    enforce_venue_manager(venue_id)
     try:
         # Parse dates
         start = date.fromisoformat(start_date)
@@ -461,6 +474,8 @@ async def get_casual_dependency(
             recommendation=report.recommendation,
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
     except Exception as e:

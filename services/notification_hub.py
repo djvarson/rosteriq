@@ -34,6 +34,7 @@ from typing import Optional, Dict, Any, List
 from time import time
 
 from rosteriq.database import get_db
+from rosteriq.services.demo import DEMO_VENUE_ID
 from rosteriq.services.notifications import get_notification_service
 from rosteriq.services.sms import get_sms_service
 from rosteriq.services.push_notifications import get_push_service
@@ -375,6 +376,11 @@ class NotificationHub:
             # Get preferences
             prefs = self._prefs_service.get_preferences(employee_id)
             channels_sent = {}
+            # The public demo is a shared sandbox anyone can drive: it must never
+            # email, text or push a real person. In-app delivery only.
+            if venue_id == DEMO_VENUE_ID:
+                prefs = dict(prefs)
+                prefs["channels"] = {k: False for k in ("email", "sms", "push")}
 
             # Send via email
             if prefs["channels"].get("email", False):

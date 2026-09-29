@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
+from rosteriq.middleware.tenant import enforce_venue_manager, load_employee_in_scope
 from rosteriq.services.skill_matrix import (
     SkillMatrixService,
     SkillMatrix,
@@ -290,6 +291,7 @@ async def get_skill_matrix(
     Shows all employees, all roles, and who can do what.
     Includes coverage statistics per role.
     """
+    enforce_venue_manager(venue_id)
     service = SkillMatrixService(db)
     try:
         matrix = service.build_skill_matrix(venue_id)
@@ -321,6 +323,7 @@ async def get_training_gaps(
     - Prioritized training actions
     - Cross-training recommendations
     """
+    enforce_venue_manager(venue_id)
     service = SkillMatrixService(db)
     try:
         report = service.identify_training_gaps(venue_id)
@@ -354,6 +357,7 @@ async def get_resilience_score(
     - 40-59: Fair - some gaps, some SPOF risks
     - 0-39: Poor - critical gaps or many SPOF risks
     """
+    enforce_venue_manager(venue_id)
     service = SkillMatrixService(db)
     try:
         matrix = service.build_skill_matrix(venue_id)
@@ -401,6 +405,8 @@ async def get_employee_versatility(
     - Critical roles where they're the sole trainer
     - Roles they can back up
     """
+    emp = load_employee_in_scope(db, employee_id)
+    enforce_venue_manager(emp.venue_id)
     service = SkillMatrixService(db)
     try:
         versatility = service.get_employee_versatility(employee_id)
@@ -438,6 +444,10 @@ async def simulate_absence(
     - Critical gaps that would be created
     - Overall resilience score without this person
     """
+    enforce_venue_manager(venue_id)
+    emp = load_employee_in_scope(db, employee_id)
+    if emp.venue_id != venue_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     service = SkillMatrixService(db)
     try:
         impact = service.simulate_absence(venue_id, employee_id)
@@ -474,6 +484,7 @@ async def get_hiring_profile(
     - Current skill distribution
     - Expected impact on resilience
     """
+    enforce_venue_manager(venue_id)
     service = SkillMatrixService(db)
     try:
         profile = service.suggest_hiring_profile(venue_id)

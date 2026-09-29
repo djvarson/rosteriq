@@ -34,7 +34,7 @@ from rosteriq.models import (
 )
 from rosteriq.middleware.api_version import APIVersionMiddleware
 from rosteriq.middleware.tenant import (
-    TenantMiddleware, enforce_venue_access, enforce_venue_manager,
+    TenantMiddleware, enforce_venue_access, enforce_venue_manager, enforce_owner, scoped_employee_map,
     get_tenant_context_optional,
 )
 from rosteriq.roster_optimiser import (
@@ -1267,18 +1267,10 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register AI Agent routes: {e}")
 
-# GraphQL API with Strawberry
-try:
-    from strawberry.fastapi import GraphQLRouter
-    from graphql_schema.schema import schema
-
-    graphql_app = GraphQLRouter(schema)
-    app.include_router(graphql_app, prefix="/graphql")
-    logger.info("GraphQL API registered at /graphql")
-except ImportError:
-    logger.warning("Strawberry GraphQL not installed; GraphQL API unavailable")
-except Exception as e:
-    logger.error(f"Failed to register GraphQL API: {e}")
+# graphql_schema/ is deliberately NOT mounted: its resolvers have no auth and
+# no venue scoping (queries return every tenant's staff; mutations rewrite any
+# tenant's shifts). Nothing in the product calls it. Do not mount it without
+# per-resolver enforce_venue_* checks.
 
 
 # ============================================================================
@@ -1558,8 +1550,6 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     modules: list[str]
-    venues_loaded: int
-    employees_loaded: int
 
 
 # ============================================================================
@@ -2008,8 +1998,6 @@ async def api_status():
             "decision_engine", "ensemble", "tanda_adapter", "pos_import",
             "roster_optimiser",
         ],
-        venues_loaded=len(_store["venues"]),
-        employees_loaded=len(_store["employees"]),
     )
 
 
@@ -2123,9 +2111,13 @@ async def manifest():
 @app.get("/metrics")
 async def metrics():
     """
-    Metrics endpoint for monitoring (no auth required).
+    Metrics endpoint for the admin panel — platform owner only.
     Reports: total requests, errors, response time, uptime, resource counts.
+    The resource counts are platform-wide (every tenant's venues, staff and
+    rosters), so this path is deliberately NOT in TenantMiddleware's exempt
+    list: anonymous callers get 401, venue managers 403.
     """
+    enforce_owner()
     venue_count = len(_store["venues"])
     employee_count = len(_store["employees"])
 
@@ -2316,8 +2308,18 @@ async def staff_portal():
 # Venue management
 # ============================================================================
 
+def _refuse_demo_write(message: str) -> None:
+    # The public demo is one shared sandbox: anything it creates is seen by the
+    # next visitor, and a venue it creates squats that id for a real signup.
+    from rosteriq.services.demo import is_demo_identity
+    t = get_tenant_context_optional()
+    if t is not None and is_demo_identity(getattr(t, "user_id", None), getattr(t, "email", None)):
+        raise HTTPException(403, message)
+
+
 @app.post("/venues")
 async def create_venue(venue: VenueConfig):
+    _refuse_demo_write("Sign up to create your own venue \u2014 the demo can't add venues.")
     # First-venue bootstrap: a signed-in user creating a BRAND-NEW venue id
     # becomes that venue's manager. Existing venues stay protected — touching
     # one you don't own is a 403, and you gain access only to the venue you
@@ -2497,11 +2499,20 @@ def _audit_employee_saved(employee: Employee, previous, via: str = None) -> None
         logger.warning(f"employee audit event not recorded: {e}")
 
 
+def _deny_venueless_to_non_owner(emp) -> None:
+    """A staff record with no venue belongs to no tenant; enforce_venue_*(None)
+    checks role only, so without this any manager could read or re-home it."""
+    t = get_tenant_context_optional()
+    if emp is not None and not getattr(emp, "venue_id", None) and t is not None and not t.is_owner:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+
 def _guard_employee_overwrite(previous) -> None:
     """An existing employee id may only be overwritten by someone who holds
     the venue it CURRENTLY belongs to. Denial is 404 so ids are no oracle."""
     if previous is None:
         return
+    _deny_venueless_to_non_owner(previous)
     try:
         enforce_venue_access(getattr(previous, "venue_id", None))
     except HTTPException as exc:
@@ -2512,6 +2523,11 @@ def _guard_employee_overwrite(previous) -> None:
 
 @app.post("/employees")
 async def create_employee(employee: Employee):
+    # enforce_venue_manager(None) checks role only — a venue-less record would
+    # belong to no tenant and slip every venue-scoped read.
+    if not getattr(employee, "venue_id", None):
+        raise HTTPException(422, "venue_id is required")
+    _refuse_demo_write("Sample staff can't be changed in the demo \u2014 sign up to manage your own team.")
     enforce_venue_manager(getattr(employee, "venue_id", None))
     previous = _store["employees"].get(employee.id)
     # Upsert-by-id: if this id already exists it must be OURS to overwrite.
@@ -2536,6 +2552,8 @@ async def create_employee(employee: Employee):
 @app.post("/employees/bulk")
 async def bulk_create_employees(employees: list[Employee]):
     for emp in employees:
+        if not getattr(emp, "venue_id", None):
+            raise HTTPException(422, "venue_id is required on every employee")
         enforce_venue_manager(getattr(emp, "venue_id", None))
         _guard_employee_overwrite(_store["employees"].get(emp.id))
     for emp in employees:
@@ -2633,6 +2651,7 @@ async def get_employee(employee_id: str):
     if employee_id not in _store["employees"]:
         raise HTTPException(404, f"Employee {employee_id} not found")
     emp = _store["employees"][employee_id]
+    _deny_venueless_to_non_owner(emp)
     enforce_venue_access(getattr(emp, "venue_id", None))
     _tenant = get_tenant_context_optional()
     if not (_tenant is None or _tenant.is_owner
@@ -3059,7 +3078,7 @@ async def analyse(roster_id: str):
     venue = _store["venues"].get(roster.venue_id)
     state = venue.state if venue else State.vic
 
-    result = analyse_roster(roster, _store["employees"], state)
+    result = analyse_roster(roster, scoped_employee_map(_db, roster.venue_id), state)
     return result
 
 
@@ -3084,7 +3103,7 @@ async def get_suggestions(
     ]
 
     suggestions = suggest_improvements(
-        roster, forecasts, _store["employees"], state, covers_per_staff
+        roster, forecasts, scoped_employee_map(_db, roster.venue_id), state, covers_per_staff
     )
     return {"roster_id": roster_id, "suggestions": suggestions, "count": len(suggestions)}
 
@@ -3132,7 +3151,7 @@ async def labour_pct(
     venue = _store["venues"].get(roster.venue_id)
     state = venue.state if venue else State.vic
 
-    total_cost = calculate_roster_cost(roster, _store["employees"], state)
+    total_cost = calculate_roster_cost(roster, scoped_employee_map(_db, roster.venue_id), state)
     pct = calculate_labour_percentage(total_cost, Decimal(str(revenue)))
     return {"roster_id": roster_id, "labour_cost": total_cost, "revenue": revenue, "percentage": pct}
 
@@ -3444,8 +3463,11 @@ async def tanda_sync(venue_id: str):
 
         # Sync employees
         employees = await tanda.get_employees()
+        from rosteriq.services.visa import save_synced_employee
         for emp in employees:
-            _store["employees"][emp.id] = emp
+            if not getattr(emp, "venue_id", None):
+                emp.venue_id = venue_id
+            save_synced_employee(_db, emp)
 
         # Sync upcoming shifts (next 2 weeks)
         today = date.today()
@@ -4323,6 +4345,9 @@ async def send_test_notification(req: NotificationTestRequest):
 
     Send a test email to verify SMTP configuration.
     """
+    # Platform owner only: it mails an arbitrary address from the platform's
+    # sender — any self-serve login could otherwise use it as a relay.
+    enforce_owner()
     service = get_notification_service()
 
     html = service._wrap_template(
@@ -4352,7 +4377,14 @@ async def send_test_notification(req: NotificationTestRequest):
 
 @app.post("/api/notifications/digest/{venue_id}")
 async def trigger_daily_digest(venue_id: str, manager_email: str = Query(...)):
-    enforce_venue_manager(venue_id)  # emails confidential venue data to an arbitrary address
+    enforce_venue_manager(venue_id)
+    # The digest carries confidential venue figures: a manager may only send
+    # it to their own login email; only the platform owner may pick another.
+    _t = get_tenant_context_optional()
+    if _t is not None and not _t.is_owner:
+        _me = (_db.get_user_by_id(_t.user_id) or {}).get("email", "")
+        if manager_email.strip().lower() != (_me or "").strip().lower():
+            raise HTTPException(403, "Digests can only be sent to your own email address")
     """
     POST /api/notifications/digest/{venue_id}?manager_email=manager@example.com
 

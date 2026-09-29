@@ -20,6 +20,7 @@ from collections import defaultdict
 from dataclasses import dataclass, asdict
 import statistics
 
+from rosteriq.middleware.tenant import scoped_employee_map
 from rosteriq.models import (
     Roster, Shift, Employee, EmploymentType, DayType, State,
 )
@@ -217,7 +218,7 @@ class CostTrendsService:
         """
         # Fetch rosters and employees
         rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
-        employees = self.db.get_employees_dict()
+        employees = scoped_employee_map(self.db, venue_id)
         venue = self.db.get_venue(venue_id)
 
         if not rosters or not venue:
@@ -412,7 +413,7 @@ class CostTrendsService:
 
         for venue_id in venue_ids:
             rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
-            employees = self.db.get_employees_dict()
+            employees = scoped_employee_map(self.db, venue_id)
 
             if not rosters:
                 continue
@@ -595,7 +596,7 @@ class CostTrendsService:
             OvertimeAnalysis with employee-level breakdown
         """
         rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
-        employees = self.db.get_employees_dict()
+        employees = scoped_employee_map(self.db, venue_id)
 
         if not rosters:
             return self._empty_overtime_analysis()
@@ -688,7 +689,7 @@ class CostTrendsService:
             CasualDependencyReport with trends and recommendations
         """
         rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
-        employees = self.db.get_employees_dict()
+        employees = scoped_employee_map(self.db, venue_id)
 
         if not rosters:
             return self._empty_casual_dependency_report()

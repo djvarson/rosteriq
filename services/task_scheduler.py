@@ -337,12 +337,14 @@ class AsyncTaskScheduler:
 
         for venue in venues:
             try:
-                # Get today's shifts from roster
+                # Today's shifts from THIS venue's rosters only
                 rosters = self._db.list_rosters()
                 today = datetime.now().date()
 
                 venue_shifts = []
                 for roster in rosters:
+                    if getattr(roster, "venue_id", None) != venue.id:
+                        continue
                     for shift in roster.shifts:
                         if shift.date == today:
                             venue_shifts.append(shift)

@@ -29,6 +29,13 @@ DEMO_STAFF_USER_ID = "demo-staff-user"
 DEMO_STAFF_EMAIL = "demo.staff@rosteriq.app"
 DEMO_STAFF_EMPLOYEE_ID = "demo-staff-001"
 
+
+def is_demo_identity(user_id=None, email=None) -> bool:
+    """True for either public Try Demo login (dashboard or staff phone)."""
+    if user_id in (DEMO_USER_ID, DEMO_STAFF_USER_ID):
+        return True
+    return (email or "").strip().lower() in (DEMO_USER_EMAIL, DEMO_STAFF_EMAIL)
+
 # (name, role/skill, hourly rate) — mirrors the dashboard's client-side demo set.
 _DEMO_STAFF = [
     ("Emma Thompson", "floor", "32.50"),

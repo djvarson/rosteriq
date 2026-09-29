@@ -173,16 +173,19 @@ class SkillMatrixService:
         """Initialize the service with optional database connection."""
         self.db = db or get_db()
 
+    def _venue_employees(self, venue_id: Optional[str]) -> List[Employee]:
+        # get_employees(None) is the whole platform, never a venue's staff.
+        if not venue_id:
+            return []
+        return self.db.get_employees(venue_id)
+
     def build_skill_matrix(self, venue_id: str) -> SkillMatrix:
         """
         Build a complete skill matrix for a venue.
 
         Returns SkillMatrix with employee-role coverage map and statistics.
         """
-        employees = self.db.list_employees()
-
-        # Filter to venue if needed (assumes all employees for now)
-        # In practice, would filter by venue_id
+        employees = self._venue_employees(venue_id)
 
         if not employees:
             return SkillMatrix(
@@ -255,7 +258,7 @@ class SkillMatrixService:
         Returns TrainingGapReport with priorities and action items.
         """
         matrix = self.build_skill_matrix(venue_id)
-        employees = self.db.list_employees()
+        employees = self._venue_employees(venue_id)
 
         # 1. Identify critical gaps (roles with < 2 trained staff)
         critical_gaps = []
@@ -334,7 +337,7 @@ class SkillMatrixService:
         if not emp:
             raise ValueError(f"Employee {employee_id} not found")
 
-        employees = self.db.list_employees()
+        employees = self._venue_employees(emp.venue_id) or [emp]
 
         # Find roles where this employee is the sole trainer
         critical_roles = []
@@ -387,14 +390,14 @@ class SkillMatrixService:
         Shows which roles lose coverage and by how much.
         """
         emp = self.db.get_employee(absent_employee_id)
-        if not emp:
+        if not emp or emp.venue_id != venue_id:
             raise ValueError(f"Employee {absent_employee_id} not found")
 
         # Build matrix for current state
         matrix_before = self.build_skill_matrix(venue_id)
 
         # Build hypothetical matrix without this employee
-        employees = self.db.list_employees()
+        employees = self._venue_employees(venue_id)
         matrix_after_data = {
             e.id: {role: role in e.skills for role in matrix_before.roles}
             for e in employees
@@ -424,7 +427,7 @@ class SkillMatrixService:
 
         # Recalculate resilience without this employee
         resilience_after = self._calculate_resilience_without_employee(
-            matrix_before, absent_employee_id
+            matrix_before, absent_employee_id, employees
         )
 
         return AbsenceImpact(
@@ -466,7 +469,7 @@ class SkillMatrixService:
             impact = 20.0  # Critical gap elimination
 
         # Secondary skills: most common among current staff
-        employees = self.db.list_employees()
+        employees = self._venue_employees(venue_id)
         skill_frequency = {}
         for emp in employees:
             for skill in emp.skills:
@@ -626,11 +629,13 @@ class SkillMatrixService:
         return self.calculate_resilience_score(fake_matrix)
 
     def _calculate_resilience_without_employee(
-        self, matrix: SkillMatrix, employee_id: str
+        self, matrix: SkillMatrix, employee_id: str, employees: List[Employee]
     ) -> float:
-        """Recalculate resilience score if an employee is removed."""
-        employees = self.db.list_employees()
+        """Recalculate resilience score if an employee is removed.
 
+        ``employees`` must be the same venue's staff that ``matrix`` was built
+        from (the matrix is indexed by their ids).
+        """
         # Rebuild coverage without this employee
         new_coverage = {}
         for role in matrix.roles:

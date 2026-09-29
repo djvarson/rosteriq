@@ -15,6 +15,9 @@ Rules
   their shifts and pay. Instead the user enters a JOIN CODE the manager hands
   them (staff page → "Join code"). The code proves the manager gave it to
   this person; entering it links the account and durably grants the venue.
+* Nothing here tells an unlinked login whether (or where) a staff record
+  carries its email — that would be a tenant-membership oracle for anyone
+  who registers with someone else's address.
 * Join codes are deterministic — HMAC(JWT_SECRET, employee_id) rendered as
   8 unambiguous base32 characters ("XXXX-XXXX") — so nothing new is stored
   and every worker/process agrees. Rotating JWT_SECRET rotates every code.
@@ -110,26 +113,6 @@ def find_linked_employee(db, user) -> Tuple[Optional[object], Optional[str]]:
     return None, None
 
 
-def find_pending_link(db, user) -> Tuple[Optional[object], Optional[str]]:
-    """
-    An employee record OUTSIDE the user's venues whose email matches — i.e.
-    someone a manager has set up who has not yet entered their join code.
-    Used only to show the "enter your join code" prompt; never to grant.
-    """
-    email = (getattr(user, "email", "") or "").strip().lower()
-    if not email or getattr(user, "is_owner", False):
-        return None, None
-    held = set(getattr(user, "venue_ids", None) or [])
-    for venue in db.list_venues() or []:
-        vid = getattr(venue, "id", None)
-        if not vid or vid in held:
-            continue
-        for emp in db.get_employees(vid) or []:
-            if _email_of(emp) == email:
-                return emp, vid
-    return None, None
-
-
 def _throttle(user_id: str) -> None:
     """Raise if this user has burned MAX_CODE_ATTEMPTS in the window."""
     from fastapi import HTTPException
@@ -198,8 +181,36 @@ def link_with_code(db, user, raw_code: str) -> Tuple[Optional[object], Optional[
                    "Ask your manager to put your login email on your staff profile.",
         )
 
+    # Dashboard role is account-wide. A login that already manages some venue
+    # (e.g. a throwaway it created itself) must not join another venue as
+    # staff, or it would arrive there as a manager.
+    rec_now = db.get_user_by_id(uid) or {}
+    if match_vid not in (rec_now.get("venue_ids") or []):
+        role_now = getattr(rec_now.get("role"), "value", rec_now.get("role"))
+        if role_now in ("manager", "owner") or rec_now.get("is_owner"):
+            security("link.manager_account_refused", venue_id=match_vid, user_id=uid,
+                     outcome="denied", employee_id=match.id)
+            raise HTTPException(
+                status_code=409,
+                detail="This login already manages a venue, so it can't also be linked as "
+                       "staff somewhere else. Sign up for your staff account with a different "
+                       "email, or ask your manager.",
+            )
+
     # A record with no email yet: the code IS the proof — stamp the login
-    # email on it so every later email lookup finds this employee.
+    # email on it so every later email lookup finds this employee. Never
+    # stamp one another record here already carries: signup email is
+    # unverified, so a hire could register as a colleague and then be the
+    # login every email lookup (access changes, reset links) resolves to.
+    if not emp_email and email:
+        if any(_email_of(e) == email and e.id != match.id for e in (db.get_employees(match_vid) or [])):
+            security("link.email_already_on_record", venue_id=match_vid, user_id=uid,
+                     outcome="denied", employee_id=match.id)
+            raise HTTPException(
+                status_code=409,
+                detail="Another staff record here already uses this login's email. "
+                       "Ask your manager to check the staff list.",
+            )
     if not emp_email and email:
         try:
             match.email = email

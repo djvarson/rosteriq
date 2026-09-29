@@ -203,7 +203,6 @@ class IndustryBenchmarkService:
 
         rosters = self.db.get_rosters_by_date_range(venue_id, start_date, end_date)
         revenue_snapshots = self.db.get_revenue_snapshots(venue_id, start_date, end_date)
-        employees = self.db.get_employees_dict()
 
         # Calculate actual metrics
         total_labour_cost = Decimal("0.00")

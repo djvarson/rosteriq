@@ -104,6 +104,7 @@ async def preview_digest(
     Returns:
         Digest summary with key metrics and insights
     """
+    enforce_venue_manager(venue_id)
     try:
         generator = WeeklyDigestGenerator()
         db = get_db()
@@ -212,6 +213,7 @@ async def get_digest_history(
     Returns:
         List of historical digests with key metrics
     """
+    enforce_venue_manager(venue_id)
     try:
         generator = WeeklyDigestGenerator()
         db = get_db()
@@ -272,6 +274,8 @@ async def get_portfolio_digest(
     """
     try:
         venue_list = [v.strip() for v in venue_ids.split(",")]
+        for vid in venue_list:
+            enforce_venue_manager(vid)
         if not venue_list or len(venue_list) < 2:
             raise HTTPException(
                 status_code=400,

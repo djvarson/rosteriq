@@ -130,27 +130,16 @@ def _linked_employee(db, user: UserContext):
 
 
 def _no_link_response(user: UserContext, db=None) -> dict:
-    """Not linked. If a manager has set this email up at a venue the user
-    doesn't hold yet, say so and invite the join code (link_pending)."""
-    pending = False
-    pending_venue = None
-    try:
-        from rosteriq.services.linking import find_pending_link
-        emp, vid = find_pending_link(db or get_db(), user)
-        if emp is not None:
-            pending = True
-            v = (db or get_db()).get_venue(vid)
-            pending_venue = getattr(v, "name", None) or vid
-    except Exception:
-        pending = False
-    if pending:
-        msg = (f"Your manager has set you up at {pending_venue}. Enter the join "
-               "code they gave you to link your account.")
-    else:
-        msg = ("No staff record matches your login email "
-               f"({user.email}). Ask your manager to add this email to your "
-               "profile in Staff and give you your join code.")
-    return {"linked": False, "link_pending": pending, "message": msg}
+    """Not linked. The response is the SAME whether or not some venue's staff
+    record carries this email: registration email is unverified, so any
+    difference (a venue name, a pending flag) would tell whoever registered
+    with a stranger's email which tenant employs that person. The join code
+    is the only way to link, so link_pending is always True."""
+    msg = ("No staff record matches your login email "
+           f"({user.email}) yet. Ask your manager to add this email to your "
+           "profile in Staff and give you your join code, then enter it to "
+           "link your account.")
+    return {"linked": False, "link_pending": True, "message": msg}
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +251,22 @@ def _account_management_guards(user, emp, db):
     if vid not in (account.get("venue_ids") or []):
         raise HTTPException(status_code=409,
                             detail="Their login isn't linked to this venue yet — join code first")
+    # The account was found by the email TEXT on the record. It must be the
+    # login actually linked to THIS record: exactly one staff record here
+    # carries that email (it's this one), and no other login shares the email
+    # in a different letter case.
+    acct_email = (account.get("email") or "").strip().lower()
+    same_email = [e for e in (db.get_employees(vid) or [])
+                  if (getattr(e, "email", "") or "").strip().lower() == acct_email]
+    if len(same_email) != 1 or same_email[0].id != getattr(emp, "id", None):
+        raise HTTPException(status_code=409,
+                            detail="More than one staff record here uses this email — "
+                                   "fix the staff list before changing their login")
+    twins = {u.get("id") for u in (db.get_user_by_email(v) for v in dict.fromkeys(variants)) if u}
+    if len(twins) > 1:
+        raise HTTPException(status_code=409,
+                            detail="More than one login uses this email in different letter case — "
+                                   "ask the platform owner to merge them")
     # Both a role flip AND a password reset act on the whole ACCOUNT, not
     # just this venue. A login linked to other venues too must not be
     # controllable by one venue's manager — resetting its password would
