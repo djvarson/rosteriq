@@ -2919,10 +2919,10 @@
               <button class="btn btn-primary" id="btn-generate-roster">
                 Generate AI Roster
               </button>
-              <button class="btn btn-secondary" id="btn-view-forecast">
+              <button class="btn btn-secondary" id="btn-view-forecast" onclick="showForecastCard()">
                 View Forecast
               </button>
-              <button class="btn btn-secondary" id="btn-export-report">
+              <button class="btn btn-secondary" id="btn-export-report" onclick="navigateTo('reports')">
                 Export Report
               </button>
             </div>
@@ -3225,7 +3225,7 @@
                 <button class="btn btn-secondary btn-small" onclick="exportRosterPDF()" title="Download PDF for printing">PDF</button>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterCSV()" title="Download CSV for Excel">CSV</button>
                 <button class="btn btn-secondary btn-small" onclick="publishRoster()" id="btn-publish-roster" title="Publish this roster and notify staff (no integration required)">Publish Roster</button>
-                <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" title="Also push roster to a connected rostering system (Tanda/Deputy/Humanforce)">Push to System</button>
+                <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" style="display:none" title="Also push roster to a connected rostering system (Tanda/Deputy/Humanforce)">Push to System</button>
                 <span style="display:inline-block; width:1px; height:20px; background:var(--border); margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportDailyRunsheet()" title="Print today's shift runsheet">Runsheet</button>
                 <button class="btn btn-secondary btn-small" onclick="sendRosterToStaff()" id="btn-send-roster" title="Email/SMS roster to all staff">Send to Staff</button>
@@ -3396,8 +3396,9 @@
           </div>
         </div>
 
-        <!-- Shift Notes -->
-        <div class="grid-1">
+        <!-- Shift Notes: demo only — there is no server-side store behind it,
+             so a real venue must not be told its notes reach other managers. -->
+        <div class="grid-1" id="shift-notes-card">
           <div class="card">
             <div class="chart-title">Shift Notes & History</div>
             <div class="input-group">
@@ -4438,14 +4439,11 @@
               <div class="input-group">
                 <label>Metric</label>
                 <select id="report-metric">
-                  <option value="labour">Labour Cost</option>
-                  <option value="revenue">Revenue</option>
-                  <option value="efficiency">Efficiency</option>
-                  <option value="compliance">Compliance</option>
+                  <option value="labour">Rostered labour</option>
                 </select>
               </div>
               <div style="display: flex; align-items: flex-end;">
-                <button class="btn btn-primary" style="width: 100%;" id="btn-generate-report">Generate Report</button>
+                <button class="btn btn-primary" style="width: 100%;" id="btn-generate-report" onclick="generateReport()">Generate Report</button>
               </div>
             </div>
           </div>
@@ -4473,7 +4471,7 @@
           <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
               <h3 style="font-size:15px; margin:0;">Performance summary</h3>
-              <button class="btn btn-secondary btn-small" id="btn-export-csv">Export CSV</button>
+              <button class="btn btn-secondary btn-small" id="btn-export-csv" onclick="exportReportCSV()">Export CSV</button>
             </div>
             <div class="table-container">
               <table class="table" id="report-table">
@@ -4551,7 +4549,6 @@
         <div class="tabs">
           <button class="tab active" data-tab="general">General</button>
           <button class="tab" data-tab="integrations">Integrations</button>
-          <button class="tab" data-tab="alerts">Alert Settings</button>
           <button class="tab" data-tab="team">Team & Permissions</button>
         </div>
 
@@ -4566,16 +4563,12 @@
                 <input type="text" id="setting-venue-name" placeholder="e.g., The Brass Monkey">
               </div>
               <div class="input-group">
-                <label>Location</label>
-                <input type="text" id="setting-location" placeholder="e.g., Northbridge, WA">
-              </div>
-              <div class="input-group">
                 <label>State (for Fair Work rules)</label>
                 <select id="setting-state">
                   <option value="vic">Victoria</option>
                   <option value="nsw">New South Wales</option>
                   <option value="qld">Queensland</option>
-                  <option value="wa" selected>Western Australia</option>
+                  <option value="wa">Western Australia</option>
                   <option value="sa">South Australia</option>
                   <option value="tas">Tasmania</option>
                   <option value="act">Australian Capital Territory</option>
@@ -4583,17 +4576,13 @@
                 </select>
               </div>
               <div class="input-group">
-                <label>Min Staff Required</label>
-                <input type="number" id="setting-min-staff" placeholder="e.g., 2" min="1">
+                <label>Target labour % of sales</label>
+                <input type="number" id="setting-max-labour" placeholder="e.g., 30" min="1" max="100" step="0.5">
               </div>
-              <div class="input-group">
-                <label>Covers per Staff</label>
-                <input type="number" id="setting-covers-per-staff" placeholder="e.g., 8" min="1" step="0.5">
-              </div>
-              <button class="btn btn-primary" id="btn-save-settings">Save Settings</button>
+              <button class="btn btn-primary" id="btn-save-settings" onclick="saveVenueSettings()">Save Settings</button>
               </div>
               <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border);">
-                <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">Need to reconfigure integrations?</div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">Want to import more staff or rebuild your first roster?</div>
                 <button class="btn btn-secondary" onclick="showOnboardingWizard()">Run Setup Wizard</button>
               </div>
             </div>
@@ -4603,6 +4592,18 @@
         <!-- Integrations Tab -->
         <div class="tab-panel" id="tab-integrations">
           <div class="grid-1">
+            <div class="card">
+              <div class="chart-title">Integrations</div>
+              <p style="font-size:14px;color:var(--text-secondary);margin:4px 0 16px;max-width:560px;">
+                Xero, your POS and your old rostering system connect from the Connections page, and only when you choose to.
+                Nothing needs plugging in to run RosterIQ; staff and rosters come across by CSV.
+              </p>
+              <a class="btn btn-primary" href="/connections">Open Connections</a>
+            </div>
+          </div>
+          <!-- Superseded by /connections; kept hidden because load-time status
+               checks still look these elements up by id. -->
+          <div class="grid-1" style="display:none;">
             <div class="card">
               <div class="chart-title">Integrations</div>
               <div style="border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
@@ -4845,26 +4846,25 @@
           <div class="grid-1">
             <div class="card">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div class="chart-title" style="margin: 0;">Team Members</div>
-                <button class="btn btn-primary btn-small">+ Invite User</button>
+                <div class="chart-title" style="margin: 0;">Team &amp; Permissions</div>
+                <button class="btn btn-primary btn-small" onclick="navigateTo('staff')">Go to Staff</button>
+              </div>
+              <div style="font-size:14px;color:var(--text-secondary);max-width:600px;line-height:1.55;margin-bottom:16px;">
+                Everyone who works here is added on the <strong>Staff</strong> page. Hand each person their
+                <strong>Join code</strong> so they can link their own login &mdash; no passwords to hand out.
+                To give someone dashboard access (your 2IC, a head chef), open <strong>Access</strong> on their row
+                and choose <em>Make manager</em>. Every change is written to the audit log.
               </div>
               <div class="table-container">
                 <table class="table">
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Email</th>
-                      <th>Role</th>
-                      <th>Actions</th>
+                      <th>Signed in as</th>
+                      <th>Access</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    <tr>
-                      <td>You</td>
-                      <td>dale@thebrassmonkey.com.au</td>
-                      <td><span class="alert-badge badge-info">Owner</span></td>
-                      <td>—</td>
-                    </tr>
+                  <tbody id="team-self-body">
+                    <tr><td colspan="2" style="color:var(--text-muted);">&mdash;</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -4990,19 +4990,12 @@
       <div class="onboarding-step-subtitle">Name and state set up award compliance — nothing gets plugged into your existing systems today.</div>
       <div class="input-group"><label>Venue name</label>
         <input type="text" id="ob-venue-name" maxlength="80" placeholder="e.g., The Brass Monkey"></div>
-      <div class="input-group"><label>Suburb / location</label>
-        <input type="text" id="ob-venue-location" maxlength="80" placeholder="e.g., Northbridge, WA"></div>
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
         <div class="input-group" style="margin:0;"><label>State (award rules)</label>
           <select id="ob-venue-state">
             <option value="wa">WA</option><option value="nsw">NSW</option><option value="vic">VIC</option>
             <option value="qld">QLD</option><option value="sa">SA</option><option value="tas">TAS</option>
             <option value="nt">NT</option><option value="act">ACT</option>
-          </select></div>
-        <div class="input-group" style="margin:0;"><label>Venue type</label>
-          <select id="ob-venue-type">
-            <option value="pub">Pub</option><option value="cafe">Cafe</option><option value="restaurant">Restaurant</option>
-            <option value="bar">Bar</option><option value="club">Club</option><option value="hotel">Hotel</option>
           </select></div>
         <div class="input-group" style="margin:0;"><label>Max labour % of sales</label>
           <input type="number" id="ob-max-labour" min="1" max="100" value="30"></div>
@@ -6080,6 +6073,23 @@ function showPage(pageId) {
 
   if (pageId === 'staff') {
     renderStaffTable();
+  }
+
+  if (pageId === 'settings') {
+    loadVenueSettings();
+  }
+
+  if (pageId === 'reports' && !state.isDemo) {
+    renderRealReport();
+  }
+
+  if (pageId === 'ai-agent') {
+    loadAIInsights();
+  }
+
+  if (pageId === 'on-shift') {
+    var notesCard = document.getElementById('shift-notes-card');
+    if (notesCard) notesCard.style.display = state.isDemo ? '' : 'none';
   }
 
   if (pageId === 'compliance') {
@@ -8889,14 +8899,10 @@ function loadDemoVenueData() {
   // Pre-fill Settings fields with demo data
   var vnEl = document.getElementById('setting-venue-name');
   if (vnEl) vnEl.value = 'The Brass Monkey';
-  var locEl = document.getElementById('setting-location');
-  if (locEl) locEl.value = 'Northbridge, WA';
   var stEl = document.getElementById('setting-state');
   if (stEl) stEl.value = 'wa';
-  var msEl = document.getElementById('setting-min-staff');
-  if (msEl) msEl.value = '2';
-  var cpsEl = document.getElementById('setting-covers-per-staff');
-  if (cpsEl) cpsEl.value = '8';
+  var mlEl = document.getElementById('setting-max-labour');
+  if (mlEl) mlEl.value = '30';
 
   // Pre-fill Report date fields
   // Relative dates: a demo whose report ends three months before the header
@@ -9071,6 +9077,42 @@ function renderRealCompliance() {
     : muted(4, 'No shifts rostered this week.'));
 }
 
+var _demoStaffWired = false;
+function _wireDemoStaffTable() {
+  var body = document.getElementById('staff-body');
+  if (!body || _demoStaffWired) return;
+  _demoStaffWired = true;
+  body.querySelectorAll('button').forEach(function(b) {
+    if (b.textContent.trim() === 'Edit') b.addEventListener('click', function() {
+      showToast('Sample staff can’t be edited — sign up to manage your own team.', 'info');
+    });
+  });
+  var apply = function() {
+    var q = (document.getElementById('staff-search').value || '').trim().toLowerCase();
+    var role = (document.getElementById('staff-role-filter').value || '').toLowerCase();
+    var sort = document.getElementById('staff-sort').value;
+    var rows = Array.from(body.querySelectorAll('tr'));
+    rows.forEach(function(tr) {
+      var c = tr.children;
+      var name = (c[0] && c[0].textContent || '').toLowerCase();
+      var r = (c[1] && c[1].textContent || '').toLowerCase();
+      tr.style.display = (!q || name.indexOf(q) >= 0) && (!role || r.indexOf(role) >= 0) ? '' : 'none';
+    });
+    var key = function(tr) {
+      var c = tr.children;
+      if (sort === 'rate') return -parseFloat((c[3] && c[3].textContent || '').replace(/[^0-9.]/g, '') || 0);
+      if (sort === 'award') return (c[2] && c[2].textContent || '');
+      return (c[0] && c[0].textContent || '');
+    };
+    rows.sort(function(a, b) { var x = key(a), y = key(b); return x < y ? -1 : x > y ? 1 : 0; })
+      .forEach(function(tr) { body.appendChild(tr); });
+  };
+  ['staff-search', 'staff-role-filter', 'staff-sort'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) { el.addEventListener('input', apply); el.addEventListener('change', apply); }
+  });
+}
+
 function _weekHoursByEmployee() {
   var out = {};
   var now = new Date();
@@ -9094,7 +9136,8 @@ function _weekHoursByEmployee() {
 function renderStaffTable() {
   // Demo mode keeps the hand-authored rows (award levels, certs, rates) —
   // re-rendering from the thin demoData wiped them into a page of em-dashes.
-  if (state.isDemo) return;
+  // The search/filter/sort controls still work over those rows.
+  if (state.isDemo) { _wireDemoStaffTable(); return; }
   var body = document.getElementById('staff-body');
   if (!body) return;
   if (!_staffTableWired) {
@@ -9231,8 +9274,9 @@ async function showJoinCode(employeeId) {
 function copyJoinCode() {
   if (!_lastJoinCode) return;
   var done = function() { showToastNotification('Copied', _lastJoinCode + ' copied to clipboard', 'success'); };
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(_lastJoinCode).then(done, function() { done(); });
-  else done();
+  var failed = function() { showToastNotification('Copy it by hand', 'Your browser blocked the clipboard — the code is ' + _lastJoinCode, 'warning'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(_lastJoinCode).then(done, failed);
+  else failed();
 }
 
 function populateRealRoster(employees, shifts) {
@@ -10134,7 +10178,7 @@ document.getElementById('btn-save-note').addEventListener('click', async () => {
   noteEl.style.cssText = 'padding: 12px; background: var(--dark-bg); border-radius: 6px; margin-bottom: 8px; font-size: 12px;';
   noteEl.innerHTML = `
     <div style="color: var(--text-primary); margin-bottom: 4px;"><strong>You</strong> • just now</div>
-    <div style="color: var(--text-muted);">${note}</div>
+    <div style="color: var(--text-muted);">${esc(note)}</div>
   `;
   historyEl.insertBefore(noteEl, historyEl.firstChild);
   document.getElementById('shift-notes').value = '';
@@ -11805,6 +11849,7 @@ window.addEventListener('offline', () => {
 const obState = { currentStep: 1, totalSteps: 4, venueId: null, rosterId: null };
 
 function showOnboardingWizard() {
+  if (state.isDemo) { showToast('The setup wizard builds your own venue \u2014 sign up to run it.', 'info'); return; }
   // Re-running for an existing venue updates it rather than making a twin.
   obState.venueId = state.currentVenue || null;
   if (obState.venueId && state.venues && state.venues.length) {
@@ -11988,6 +12033,179 @@ async function obPublishFirstRoster() {
     btn.textContent = 'Published ✓';
   } catch (err) {
     out.textContent += '\nPublish failed: ' + err.message;
+    btn.disabled = false;
+  }
+}
+
+function showForecastCard() {
+  navigateTo('dashboard');
+  var label = Array.from(document.querySelectorAll('#page-dashboard .kpi-label'))
+    .find(function(el) { return /forecast/i.test(el.textContent); });
+  var card = label && (label.closest('.kpi-card') || label.parentElement);
+  if (card) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.style.transition = 'box-shadow .3s';
+    card.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.45)';
+    setTimeout(function() { card.style.boxShadow = ''; }, 1600);
+  }
+}
+
+// Real venues: the Reports table shipped hand-written sample days ("1 May
+// 2026 · $4,850"). Build it from this venue's own rosters instead: rostered
+// hours, staff and labour cost per day. Revenue needs sales data, so the
+// report doesn't pretend to have it.
+function _reportRange() {
+  var sEl = document.getElementById('report-start-date'), eEl = document.getElementById('report-end-date');
+  if (!sEl.value || !eEl.value) {
+    var start = getWeekMonday(-1), end = new Date(getWeekMonday(1)); end.setDate(end.getDate() + 6);
+    sEl.value = localIso(start); eEl.value = localIso(end);
+  }
+  return { s: sEl.value, e: eEl.value };
+}
+
+function _realReportRows() {
+  var r = _reportRange(), byDay = {};
+  (state.rosters || []).forEach(function(roster) {
+    (roster.shifts || []).forEach(function(sh) {
+      var d = String(sh.date || '').slice(0, 10);
+      if (!d || d < r.s || d > r.e) return;
+      var x = byDay[d] = byDay[d] || { hours: 0, cost: 0, costKnown: true, staff: {} };
+      var st = String(sh.start_time || '').split(':'), en = String(sh.end_time || '').split(':');
+      var hrs = ((+en[0]) * 60 + (+en[1]) - (+st[0]) * 60 - (+st[1])) / 60;
+      if (hrs < 0) hrs += 24;
+      x.hours += Math.max(0, hrs - (sh.break_minutes || 0) / 60);
+      if (sh.cost == null) x.costKnown = false; else x.cost += Number(sh.cost) || 0;
+      x.staff[sh.employee_id] = true;
+    });
+  });
+  return Object.keys(byDay).sort().map(function(d) {
+    var x = byDay[d];
+    return { date: d, hours: Math.round(x.hours * 10) / 10, staff: Object.keys(x.staff).length,
+             cost: x.costKnown ? Math.round(x.cost) : null };
+  });
+}
+
+function renderRealReport() {
+  if (state.isDemo) return;
+  var rows = _realReportRows();
+  var table = document.getElementById('report-table');
+  if (table && table.tHead) {
+    table.tHead.innerHTML = '<tr><th>Date</th><th>Rostered hours</th><th>Staff</th><th>Labour cost</th></tr>';
+  }
+  var body = document.getElementById('report-body');
+  var fmtDate = function(d) {
+    var p = d.split('-').map(Number);
+    return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+  };
+  body.innerHTML = rows.length
+    ? rows.map(function(x) {
+        return '<tr><td>' + esc(fmtDate(x.date)) + '</td><td>' + x.hours + 'h</td><td>' + x.staff +
+          '</td><td>' + (x.cost == null ? '—' : '$' + x.cost.toLocaleString()) + '</td></tr>';
+      }).join('')
+    : '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted);">No rostered shifts in this date range.</td></tr>';
+
+  // Chart: rostered labour cost by day. The labour-% chart needs sales data.
+  var lr = document.getElementById('labour-revenue-chart');
+  var lrTitle = lr && lr.closest('.chart-container') && lr.closest('.chart-container').querySelector('.chart-title');
+  if (lrTitle) lrTitle.textContent = 'Rostered labour cost by day';
+  var lp = document.getElementById('labour-pct-chart');
+  var lpBox = lp && lp.closest('.chart-container');
+  if (lpBox) {
+    var lpTitle = lpBox.querySelector('.chart-title');
+    if (lpTitle) lpTitle.textContent = 'Labour % of sales';
+    var wrap = lpBox.querySelector('.chart-wrap');
+    if (wrap) wrap.innerHTML = '<div style="padding:32px 8px;color:var(--text-muted);font-size:14px;">Shows once sales come in — import dish sales on Menu &amp; Sales, or connect your POS on Connections.</div>';
+  }
+  if (lr && typeof Chart !== 'undefined') {
+    createChart('labour-revenue-chart', {
+      type: 'bar',
+      data: {
+        labels: rows.map(function(x) { return fmtDate(x.date); }),
+        datasets: [{ label: 'Labour cost', data: rows.map(function(x) { return x.cost || 0; }),
+                     backgroundColor: dotFill('rgba(226,164,95,0.55)'), borderColor: colors.primary, borderWidth: 1 }],
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                 scales: { y: { ticks: { callback: function(v) { return '$' + v; } } } } },
+    });
+  }
+}
+
+function generateReport() {
+  if (state.isDemo) {
+    try { populateDemoReportCharts(); } catch (e) {}
+    showToast('Demo report refreshed — sign up to report on your own rosters.', 'info');
+    return;
+  }
+  renderRealReport();
+  showToast('Report updated', 'success');
+}
+
+function exportReportCSV() {
+  var table = document.getElementById('report-table');
+  if (!table) return;
+  var lines = Array.from(table.querySelectorAll('tr')).map(function(tr) {
+    return Array.from(tr.children).map(function(td) {
+      return '"' + td.textContent.trim().replace(/\s+/g, ' ').replace(/"/g, '""') + '"';
+    }).join(',');
+  }).filter(function(l) { return l.split(',').length > 1; });
+  if (lines.length < 2) { showToast('Nothing to export for this range', 'warning'); return; }
+  var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  var a = document.createElement('a');
+  var r = _reportRange();
+  a.href = URL.createObjectURL(blob);
+  a.download = 'rosteriq-report-' + r.s + '-to-' + r.e + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+}
+
+function _jwtClaims() {
+  try {
+    var t = state.authToken || localStorage.getItem('jwt_token') || '';
+    return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) || {};
+  } catch (e) { return {}; }
+}
+
+async function loadVenueSettings() {
+  var claims = _jwtClaims();
+  var role = claims.role || '';
+  var roleLabel = role === 'owner' ? 'Owner' : role === 'manager' ? 'Manager' : role === 'staff' ? 'Staff' : '—';
+  var who = state.isDemo ? 'Demo session' : (claims.email || '—');
+  var teamBody = document.getElementById('team-self-body');
+  if (teamBody) teamBody.innerHTML = '<tr><td>' + esc(who) + '</td><td><span class="alert-badge badge-info">' +
+    esc(state.isDemo ? 'Demo' : roleLabel) + '</span></td></tr>';
+  if (state.isDemo || !state.currentVenue) return;
+  try {
+    var v = await fetchAPI('/venues/' + encodeURIComponent(state.currentVenue));
+    document.getElementById('setting-venue-name').value = v.name || '';
+    document.getElementById('setting-state').value = String(v.state || '').toLowerCase();
+    document.getElementById('setting-max-labour').value = (v.max_labour_pct != null) ? v.max_labour_pct : '';
+  } catch (e) {
+    showToast('Could not load venue settings: ' + e.message, 'error');
+  }
+}
+
+async function saveVenueSettings() {
+  if (state.isDemo) { showToast('This is the demo venue — sign up to save your own settings.', 'info'); return; }
+  if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
+  var name = document.getElementById('setting-venue-name').value.trim();
+  var st = document.getElementById('setting-state').value;
+  var pct = parseFloat(document.getElementById('setting-max-labour').value);
+  if (!name) { showToast('The venue needs a name', 'warning'); return; }
+  if (!(pct > 0 && pct <= 100)) { showToast('Target labour % should be between 1 and 100', 'warning'); return; }
+  var btn = document.getElementById('btn-save-settings');
+  btn.disabled = true;
+  try {
+    var v = await fetchAPI('/venues/' + encodeURIComponent(state.currentVenue));
+    v.name = name;
+    v.state = st;
+    v.timezone = getTimezoneForState(st.toUpperCase());
+    v.max_labour_pct = pct;
+    await fetchAPI('/venues', { method: 'POST', body: JSON.stringify(v) });
+    showToast('Settings saved', 'success');
+    try { await loadVenues(); } catch (e) { /* selector label refresh is cosmetic */ }
+  } catch (e) {
+    showToast('Could not save settings: ' + e.message, 'error');
+  } finally {
     btn.disabled = false;
   }
 }
@@ -12771,7 +12989,20 @@ function addAIChatMessage(role, content, extras) {
 
     // Add action buttons if any
     if (extras?.actions?.length) {
+      // The server can't carry these out yet (it answers 501), so offering a
+      // button that can only fail is worse than pointing to the manual path.
+      const manual = {
+        send_message: 'To send this, use Comms & Procedures — the AI can’t send messages yet.',
+        adjust_shift: 'To make this change, edit the shift on the Roster page — the AI can’t edit shifts yet.',
+      };
       for (const action of extras.actions) {
+        if (manual[action.action_type]) {
+          const note = document.createElement('div');
+          note.style.cssText = 'margin-top:8px;font-size:12px;color:var(--text-muted);';
+          note.textContent = manual[action.action_type];
+          div.appendChild(note);
+          continue;
+        }
         const btn = document.createElement('button');
         btn.className = 'ai-action-btn';
         btn.textContent = action.message?.replace(/^Ready to /, '').replace(/\. Click.*$/, '') || 'Execute';
@@ -12896,11 +13127,53 @@ async function executeAIAction(action) {
 }
 
 // AI Insight Cards
+function _aiInsightCard(insight) {
+  const card = document.createElement('div');
+  card.className = 'ai-insight-card';
+  card.setAttribute('data-severity', insight.severity || 'info');
+  const title = document.createElement('div');
+  title.className = 'ai-insight-title';
+  title.textContent = insight.title || '';
+  const desc = document.createElement('div');
+  desc.className = 'ai-insight-desc';
+  desc.textContent = insight.description || '';
+  card.appendChild(title);
+  card.appendChild(desc);
+  const a = insight.action;
+  if (a && a.label) {
+    const run = {
+      ask_ai: () => { showPage('ai-agent'); setTimeout(() => aiQuickQuestion(a.prompt || ''), 300); },
+      generate_roster: () => { navigateTo('roster'); openModal('modal-generate-roster'); },
+      open_integrations: () => { window.location.href = '/connections'; },
+    }[a.type];
+    if (run) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ai-insight-action';
+      const btn = document.createElement('button');
+      btn.className = 'ai-action-btn';
+      btn.textContent = a.label;
+      btn.addEventListener('click', run);
+      wrap.appendChild(btn);
+      card.appendChild(wrap);
+    }
+  }
+  return card;
+}
+
 async function loadAIInsights() {
-  if (state.isDemo) return;
+  const pageCards = document.getElementById('ai-page-insights-cards');
+  if (state.isDemo) {
+    if (pageCards) pageCards.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Today’s insights are on the Dashboard in the demo.</div>';
+    return;
+  }
   try {
     const venueId = _getVenueId();
     const data = await fetchAPI('/api/ai/insights?venue_id=' + encodeURIComponent(venueId));
+    if (pageCards) {
+      pageCards.innerHTML = '';
+      (data.insights || []).forEach(i => pageCards.appendChild(_aiInsightCard(i)));
+      if (!(data.insights || []).length) pageCards.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Nothing needs your attention right now.</div>';
+    }
     if (!data.insights?.length) {
       document.getElementById('ai-insights-container').style.display = 'none';
       return;
@@ -12921,27 +13194,7 @@ async function loadAIInsights() {
     }
 
     for (const insight of data.insights) {
-      const card = document.createElement('div');
-      card.className = 'ai-insight-card';
-      card.setAttribute('data-severity', insight.severity || 'info');
-
-      let actionHtml = '';
-      if (insight.action) {
-        if (insight.action.type === 'ask_ai') {
-          actionHtml = `<div class="ai-insight-action"><button class="ai-action-btn" onclick="showPage('ai-agent'); setTimeout(() => aiQuickQuestion('${insight.action.prompt.replace(/'/g, "\\'")}'), 300);">${insight.action.label}</button></div>`;
-        } else if (insight.action.type === 'generate_roster') {
-          actionHtml = `<div class="ai-insight-action"><button class="ai-action-btn" onclick="navigateTo('roster')">${insight.action.label}</button></div>`;
-        } else if (insight.action.type === 'open_integrations') {
-          actionHtml = `<div class="ai-insight-action"><button class="ai-action-btn" onclick="navigateTo('settings')">${insight.action.label}</button></div>`;
-        }
-      }
-
-      card.innerHTML = `
-        <div class="ai-insight-title">${insight.title}</div>
-        <div class="ai-insight-desc">${insight.description}</div>
-        ${actionHtml}
-      `;
-      container.appendChild(card);
+      container.appendChild(_aiInsightCard(insight));
     }
   } catch (err) {
     console.log('AI insights unavailable:', err.message);

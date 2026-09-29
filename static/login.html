@@ -550,11 +550,7 @@
                         >
                     </div>
 
-                    <div class="form-footer">
-                        <label class="remember-me">
-                            <input type="checkbox" id="rememberMe" name="rememberMe">
-                            <span>Remember me</span>
-                        </label>
+                    <div class="form-footer" style="justify-content:flex-end;">
                         <a href="#" class="forgot-link">Forgot password?</a>
                     </div>
 
@@ -730,15 +726,15 @@
         let forgotInFlight = false;
         document.querySelector('.forgot-link').addEventListener('click', async (e) => {
             e.preventDefault();
-            if (forgotInFlight) return;   // every extra click mints another token
-            forgotInFlight = true;
-            setTimeout(() => { forgotInFlight = false; }, 8000);
             const email = document.getElementById('email').value.trim();
             if (!email) {
                 successMessage.textContent = 'Type your email above first, then tap "Forgot password?" again.';
                 successMessage.classList.add('show');
                 return;
             }
+            if (forgotInFlight) return;   // every extra send mints another token
+            forgotInFlight = true;
+            setTimeout(() => { forgotInFlight = false; }, 8000);
             try {
                 await fetch('/api/auth/forgot-password', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },

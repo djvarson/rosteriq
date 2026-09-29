@@ -456,15 +456,15 @@
                     </div>
                     <div class="step">
                         <div class="step-number">2</div>
-                        <div class="step-text">Connect your rostering & POS systems</div>
+                        <div class="step-text">Paste in your staff list &mdash; a CSV from Deputy, Tanda or a spreadsheet</div>
                     </div>
                     <div class="step">
                         <div class="step-number">3</div>
-                        <div class="step-text">Import your staff and set labour targets</div>
+                        <div class="step-text">Add your menu and stock levels (optional)</div>
                     </div>
                     <div class="step">
                         <div class="step-number">4</div>
-                        <div class="step-text">Generate your first AI-optimised roster</div>
+                        <div class="step-text">Generate your first roster &mdash; nothing needs plugging in</div>
                     </div>
                 </div>
             </div>
@@ -699,8 +699,10 @@
                         window.location.href = '/static/dashboard.html';
                     }, 800);
                 } else {
-                    const msg = data.detail?.message || data.detail || data.message || 'Registration failed. Please try again.';
-                    showError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+                    let msg = data.error?.message || data.detail?.message || data.detail || data.message;
+                    if (Array.isArray(msg)) msg = 'Check your details \u2014 ' + (msg[0] && msg[0].loc && msg[0].loc.includes('email') ? 'that email address doesn\u2019t look right.' : 'something is missing or invalid.');
+                    if (/already exists/i.test(String(msg || ''))) msg = 'There\u2019s already an account with that email \u2014 sign in instead, or use \u201cForgot password?\u201d on the sign-in page.';
+                    showError(typeof msg === 'string' && msg ? msg : 'Registration failed. Please try again.');
                     registerBtn.disabled = false;
                     registerBtn.textContent = originalText;
                 }
