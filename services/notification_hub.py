@@ -71,9 +71,19 @@ class NotificationHub:
     - Quiet hours (queue SMS during 10pm-7am, send in morning)
     """
 
+    @property
+    def _db(self):
+        # Read the live store on every call rather than pinning the one that
+        # existed when this singleton was built; an injected store wins.
+        return self._db_override if self._db_override is not None else get_db()
+
+    @_db.setter
+    def _db(self, value):
+        self._db_override = value
+
     def __init__(self):
         """Initialize notification hub with services."""
-        self._db = get_db()
+        self._db_override = None
         self._email_service = get_notification_service()
         self._sms_service = get_sms_service()
         self._push_service = None  # Lazy loaded
@@ -288,11 +298,19 @@ class NotificationHub:
             Summary of dispatch (sent counts, failed, skipped)
         """
         try:
-            # Get target employees
+            # Targets are ALWAYS bounded by this venue's roster of staff. The
+            # store's list_employees() is platform-wide, and caller-supplied
+            # ids are unverified — either path could otherwise reach another
+            # venue's staff.
+            venue_staff_ids = [e.id for e in (self._db.get_employees(venue_id) or [])]
             if target_employee_ids is None:
-                # Get all employees at venue
-                employees = self._db.list_employees()
-                target_employee_ids = [e.id for e in employees]
+                outside_venue = 0
+                target_employee_ids = venue_staff_ids
+            else:
+                allowed = set(venue_staff_ids)
+                requested = list(dict.fromkeys(target_employee_ids))
+                target_employee_ids = [i for i in requested if i in allowed]
+                outside_venue = len(requested) - len(target_employee_ids)
 
             summary = {
                 "event_type": event_type.value,
@@ -300,7 +318,8 @@ class NotificationHub:
                 "total_targets": len(target_employee_ids),
                 "sent": {"email": 0, "sms": 0, "push": 0, "ws": 0},
                 "failed": {"email": 0, "sms": 0, "push": 0, "ws": 0},
-                "skipped": {"duplicate": 0, "rate_limit": 0, "preference": 0, "quiet_hours": 0},
+                "skipped": {"duplicate": 0, "rate_limit": 0, "preference": 0,
+                            "quiet_hours": 0, "outside_venue": outside_venue},
             }
 
             # Dispatch to each employee
@@ -517,7 +536,7 @@ class NotificationHub:
         """
         try:
             # Get all employees with manager role at venue
-            employees = self._db.list_employees()
+            employees = self._db.get_employees(venue_id) or []
             manager_ids = [
                 e.id for e in employees
                 if hasattr(e, "role") and e.role in ("manager", "admin")

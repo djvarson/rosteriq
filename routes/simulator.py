@@ -34,6 +34,7 @@ from rosteriq.services.cost_simulator import (
     ScenarioChange,
 )
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 
 
 # ============================================================================
@@ -274,9 +275,15 @@ def _get_simulator(roster_id: str, db=None) -> Tuple[Roster, CostSimulator, Stat
     roster = db.get_roster(roster_id)
     if not roster:
         raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    # Simulations price the venue's labour from its pay rates: manager of the
+    # roster's venue only. A foreign roster reads as not-found (no id oracle).
+    try:
+        enforce_venue_manager(roster.venue_id)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
 
-    # Get all employees from the database
-    employees_list = db.list_employees() or []
+    # Only this venue's staff — list_employees() is platform-wide
+    employees_list = db.get_employees(roster.venue_id) or []
     employees = {emp.id: emp for emp in employees_list}
 
     # Infer state from venue config
@@ -326,6 +333,8 @@ async def simulate_roster(
         return SimulationResultJSON.from_result(result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Simulation error: {str(e)}")
 
@@ -366,6 +375,8 @@ async def compare_scenarios(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Comparison error: {str(e)}")
 
@@ -418,6 +429,8 @@ async def find_savings(
                 message=f"Could not find changes to achieve {request.target_savings_pct}% savings "
                         f"within {request.max_iterations} iterations",
             )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Optimization error: {str(e)}")
 
@@ -455,5 +468,7 @@ async def leave_impact(
         return SimulationResultJSON.from_result(result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Leave impact error: {str(e)}")

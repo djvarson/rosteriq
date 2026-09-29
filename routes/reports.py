@@ -23,6 +23,7 @@ from rosteriq.services.report_export import (
     export_compliance_csv,
 )
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import enforce_venue_manager
 
 
 # ============================================================================
@@ -128,6 +129,8 @@ async def get_compliance_report(
     Returns:
         JSON compliance report with sections, violations, and scoring
     """
+    # Reports carry staff names and pay-derived figures: manager of THIS venue only.
+    enforce_venue_manager(venue_id)
     try:
         # Fetch venue config
         venue = db.get_venue(venue_id)
@@ -141,7 +144,7 @@ async def get_compliance_report(
         all_rosters = db.list_rosters()
 
         # Filter to employees in this venue and shifts in rosters for this venue
-        employees = [e for e in all_employees if e.id.startswith(venue_id) or True]
+        employees = [e for e in all_employees if getattr(e, "venue_id", None) == venue_id]
         shifts = []
         for roster in all_rosters:
             if roster.venue_id == venue_id:
@@ -182,6 +185,8 @@ async def get_compliance_pdf(
     Returns:
         PDF file for download
     """
+    # Reports carry staff names and pay-derived figures: manager of THIS venue only.
+    enforce_venue_manager(venue_id)
     try:
         # Fetch venue config
         venue = db.get_venue(venue_id)
@@ -195,7 +200,7 @@ async def get_compliance_pdf(
         all_rosters = db.list_rosters()
 
         # Filter to employees in this venue and shifts in rosters for this venue
-        employees = [e for e in all_employees if e.id.startswith(venue_id) or True]
+        employees = [e for e in all_employees if getattr(e, "venue_id", None) == venue_id]
         shifts = []
         for roster in all_rosters:
             if roster.venue_id == venue_id:
@@ -249,6 +254,8 @@ async def get_compliance_csv(
     Returns:
         CSV file for download
     """
+    # Reports carry staff names and pay-derived figures: manager of THIS venue only.
+    enforce_venue_manager(venue_id)
     try:
         # Fetch venue config
         venue = db.get_venue(venue_id)
@@ -262,7 +269,7 @@ async def get_compliance_csv(
         all_rosters = db.list_rosters()
 
         # Filter to employees in this venue and shifts in rosters for this venue
-        employees = [e for e in all_employees if e.id.startswith(venue_id) or True]
+        employees = [e for e in all_employees if getattr(e, "venue_id", None) == venue_id]
         shifts = []
         for roster in all_rosters:
             if roster.venue_id == venue_id:
@@ -311,6 +318,8 @@ async def get_hours_report(
     Returns:
         JSON report focused on hours compliance
     """
+    # Reports carry staff names and pay-derived figures: manager of THIS venue only.
+    enforce_venue_manager(venue_id)
     try:
         # Parse week_start or use today
         if week_start:
@@ -332,7 +341,7 @@ async def get_hours_report(
         all_rosters = db.list_rosters()
 
         # Filter to employees in this venue and shifts in rosters for this venue
-        employees = [e for e in all_employees if e.id.startswith(venue_id) or True]
+        employees = [e for e in all_employees if getattr(e, "venue_id", None) == venue_id]
         shifts = []
         for roster in all_rosters:
             if roster.venue_id == venue_id:
@@ -397,6 +406,8 @@ async def get_penalties_report(
     Returns:
         JSON report focused on penalty rates
     """
+    # Reports carry staff names and pay-derived figures: manager of THIS venue only.
+    enforce_venue_manager(venue_id)
     try:
         # Fetch venue config
         venue = db.get_venue(venue_id)
@@ -410,7 +421,7 @@ async def get_penalties_report(
         all_rosters = db.list_rosters()
 
         # Filter to employees in this venue and shifts in rosters for this venue
-        employees = [e for e in all_employees if e.id.startswith(venue_id) or True]
+        employees = [e for e in all_employees if getattr(e, "venue_id", None) == venue_id]
         shifts = []
         for roster in all_rosters:
             if roster.venue_id == venue_id:
@@ -471,6 +482,8 @@ async def get_certifications_report(
     Returns:
         JSON report on certification compliance
     """
+    # Reports carry staff names and pay-derived figures: manager of THIS venue only.
+    enforce_venue_manager(venue_id)
     try:
         # Fetch venue config
         venue = db.get_venue(venue_id)
@@ -484,7 +497,7 @@ async def get_certifications_report(
         all_rosters = db.list_rosters()
 
         # Filter to employees in this venue and shifts in rosters for this venue
-        employees = [e for e in all_employees if e.id.startswith(venue_id) or True]
+        employees = [e for e in all_employees if getattr(e, "venue_id", None) == venue_id]
         shifts = []
         for roster in all_rosters:
             if roster.venue_id == venue_id:

@@ -589,15 +589,22 @@ def test_dispatch_with_specific_employees():
 
     async def run_test():
         hub = NotificationHub()
+        hub._db = MagicMock()
+        hub._db.get_employees = MagicMock(
+            return_value=[MagicMock(id=i) for i in ("emp1", "emp2", "emp3")])
+        hub._db.get_employee = MagicMock(return_value=None)
 
         summary = await hub.dispatch(
             event_type=NotificationEventType.ROSTER_PUBLISHED,
             venue_id="venue1",
             payload={},
-            target_employee_ids=["emp1", "emp2", "emp3"],
+            target_employee_ids=["emp1", "emp2", "emp3", "other-venue-emp"],
         )
 
+        # Only this venue's staff are targeted; a foreign id is dropped.
         assert summary["total_targets"] == 3
+        assert summary["skipped"]["outside_venue"] == 1
+        hub._db.get_employees.assert_called_with("venue1")
 
     asyncio.run(run_test())
     print("PASS")
