@@ -6053,6 +6053,9 @@ function navigateTo(pageId) {
 }
 
 function showPage(pageId) {
+  // Nav items without a page (Time Clock, Connections, Sign Out) navigate
+  // elsewhere; hiding every page for them left a blank dashboard behind.
+  if (!pageId || !document.getElementById(`page-${pageId}`)) return;
   document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
   document.getElementById(`page-${pageId}`).style.display = 'block';
 
@@ -6072,6 +6075,7 @@ function showPage(pageId) {
   if (pageId === 'roster') {
     rosterSectionPills();
     rosterSetSection(rosterSection);
+    if (!state.isDemo) refreshRealRoster();
   }
 
   if (pageId === 'staff') {
@@ -6080,6 +6084,7 @@ function showPage(pageId) {
 
   if (pageId === 'compliance') {
     loadChecklistsBoard();
+    if (!state.isDemo) renderRealCompliance();
   }
 
   if (pageId === 'timesheets') {
@@ -9005,6 +9010,67 @@ function _fmtAward(a) {
   var m = String(a).match(/(\d+)/);
   return m ? 'Level ' + m[1] : String(a);
 }
+// Real venues: the Compliance tabs ship hand-authored sample staff for the
+// demo (Sarah Chen's "high fatigue", a "✓ Compliant" award rate). Replace
+// them with what this venue's own roster can honestly show, and say plainly
+// which checks aren't live yet — never a fabricated compliance verdict.
+function renderRealCompliance() {
+  if (state.isDemo) return;
+  var names = {};
+  (state.employees || []).forEach(function(e) { names[e.id] = e.name; });
+  var muted = function(cols, msg) {
+    return '<tr><td colspan="' + cols + '" style="text-align:center;padding:24px;color:var(--text-muted);">' + msg + '</td></tr>';
+  };
+  var set = function(id, html) { var el = document.getElementById(id); if (el) el.innerHTML = html; };
+
+  set('break-compliance-body', muted(6, 'Break checks against actual clock-ins aren’t live yet.'));
+  set('cert-body', muted(6, 'Certification expiry tracking isn’t live yet.'));
+  set('award-body', muted(6, 'Automatic award-rate checks aren’t shown here yet. During the pilot, pay runs parallel to your existing payroll.'));
+  document.querySelectorAll('#tab-break-compliance button, #tab-certifications button').forEach(function(b) { b.style.display = 'none'; });
+
+  // This week's rostered shifts, by employee and local date
+  var monday = getWeekMonday(0);
+  var days = [];
+  for (var i = 0; i < 7; i++) { var d = new Date(monday); d.setDate(monday.getDate() + i); days.push(localIso(d)); }
+  var worked = {};
+  (state.rosters || []).forEach(function(r) {
+    (r.shifts || []).forEach(function(sh) {
+      var ds = String(sh.date || sh.shift_date || '').slice(0, 10);
+      if (days.indexOf(ds) < 0) return;
+      (worked[sh.employee_id] = worked[sh.employee_id] || {})[ds] = true;
+    });
+  });
+
+  var hours = _weekHoursByEmployee();
+  var over = Object.keys(hours).filter(function(id) { return hours[id] > 38; })
+    .sort(function(a, b) { return hours[b] - hours[a]; });
+  set('fatigue-alerts', over.length
+    ? over.map(function(id) {
+        return '<div class="alert-item" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">' +
+          '<div><strong>' + esc(names[id] || id) + '</strong><div style="font-size:12px;color:var(--text-muted);">' +
+          Math.round(hours[id] * 10) / 10 + ' hours rostered this week — over the 38-hour ordinary week</div></div>' +
+          '<span class="alert-badge badge-warning">Check</span></div>';
+      }).join('')
+    : '<div style="padding:16px 0;color:var(--text-muted);">No one is rostered over 38 hours this week.</div>');
+
+  var todayIso = localIso(new Date());
+  var rows = Object.keys(worked).map(function(id) {
+    var run = 0, best = 0;
+    days.forEach(function(ds) { run = worked[id][ds] ? run + 1 : 0; best = Math.max(best, run); });
+    var off = days.filter(function(ds) { return ds >= todayIso && !worked[id][ds]; })[0];
+    var offLabel = off ? new Date(off + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long' }) : 'Not this week';
+    return { name: names[id] || id, best: best, off: offLabel };
+  }).sort(function(a, b) { return b.best - a.best || String(a.name).localeCompare(String(b.name)); });
+  set('consecutive-body', rows.length
+    ? rows.map(function(r) {
+        return '<tr><td>' + esc(r.name) + '</td><td>' + r.best + ' day' + (r.best === 1 ? '' : 's') + ' in a row</td><td>' +
+          esc(r.off) + '</td><td>' + (r.best >= 6
+            ? '<span class="alert-badge badge-warning">Check</span>'
+            : '<span class="alert-badge badge-success">OK</span>') + '</td></tr>';
+      }).join('')
+    : muted(4, 'No shifts rostered this week.'));
+}
+
 function _weekHoursByEmployee() {
   var out = {};
   var now = new Date();
@@ -9089,8 +9155,10 @@ function renderStaffTable() {
     var fat = h === 0 ? '<span style="color:var(--text-muted)">Not rostered</span>'
             : (h > 38 ? 'High' : h > 30 ? 'Medium' : 'Low') + ' (' + Math.round(h) + 'hrs/wk)';
     var actions = isManager
-      ? '<button class="btn btn-secondary btn-small" onclick="showJoinCode(\'' + esc(e.id) + '\')" title="Code the staff member enters in the app to link their login">Join code</button> ' +
-        '<button class="btn btn-secondary btn-small" onclick="openAccessModal(this.getAttribute(\'data-emp\'))" data-emp="' + esc(e.id) + '" title="Reset their login or change their dashboard access">Access</button>'
+      ? '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+        '<button class="btn btn-secondary btn-small" style="white-space:nowrap" onclick="showJoinCode(\'' + esc(e.id) + '\')" title="Code the staff member enters in the app to link their login">Join code</button>' +
+        '<button class="btn btn-secondary btn-small" style="white-space:nowrap" onclick="openAccessModal(this.getAttribute(\'data-emp\'))" data-emp="' + esc(e.id) + '" title="Reset their login or change their dashboard access">Access</button>' +
+        '</div>'
       : '';
     var emailLine = e.email ? '<div style="font-size:11px;color:var(--text-muted)">' + esc(e.email) + '</div>' : '<div style="font-size:11px;color:var(--text-muted)">invite pending</div>';
     return '<tr>' +
@@ -9134,6 +9202,8 @@ async function staffResetLink() {
 }
 
 async function staffSetRole(role) {
+  var ta = document.getElementById('al-link');
+  ta.style.display = 'none'; ta.value = '';
   try {
     var d = await fetchAPI('/api/employees/' + encodeURIComponent(_accessEmpId) + '/access-role', {
       method: 'POST', body: JSON.stringify({ role: role }),
@@ -9835,6 +9905,7 @@ document.getElementById('btn-modal-generate').addEventListener('click', async ()
         : a.name + "'s visa expires " + a.expiry + ' — re-check VEVO.', 'warning');
     }
     loadVenueData();
+    showRosterWeekOf(date);
     if (result && result.id) checkRosterCoverage(result.id, coversPerStaff);
   } catch (error) {
     showError('#page-dashboard', 'Failed to generate roster: ' + error.message);
@@ -9932,6 +10003,7 @@ async function runRosterImport() {
     res.textContent = msg;
     showToast(msg, r.shifts_imported ? 'success' : 'warning');
     if (r.shifts_imported && typeof loadVenueData === 'function') loadVenueData();
+    if (r.shifts_imported) refreshRealRoster();
   } catch (e) {
     res.textContent = '';
     showToast('Import failed: ' + e.message, 'error');
@@ -11807,6 +11879,7 @@ async function obSaveVenue() {
     obState.venueId = venueId;
     state.currentVenue = venueId;
     localStorage.setItem('rosteriq_current_venue', venueId);
+    await refreshSessionRole();
     return true;
   } catch (err) {
     showToast('Could not save the venue: ' + err.message, 'error');
@@ -11889,6 +11962,7 @@ async function obGenerateFirstRoster() {
     out.textContent = msg;
     document.getElementById('ob-publish-btn').style.display = '';
     btn.textContent = 'Regenerate';
+    showRosterWeekOf(obNextMonday());
   } catch (err) {
     out.textContent = 'Could not generate: ' + err.message;
   } finally {
@@ -11901,15 +11975,46 @@ async function obPublishFirstRoster() {
   const out = document.getElementById('ob-roster-result');
   btn.disabled = true;
   try {
-    await fetchAPI('/api/v1/rosters/' + encodeURIComponent(obState.rosterId) + '/publish', {
-      method: 'POST', body: JSON.stringify({}),
+    const result = await fetchAPI('/api/v1/rosters/' + encodeURIComponent(obState.rosterId) + '/publish', {
+      method: 'POST', body: JSON.stringify({ skip_approval: true }),
     });
+    if (!(result && result.success)) {
+      out.textContent += '\nNot published yet: ' + ((result && result.message) || 'the roster has conflicts to fix first') +
+        ' — open the Roster page to review it.';
+      btn.disabled = false;
+      return;
+    }
     out.textContent += '\nPublished — staff with linked phones see their shifts in /my.';
     btn.textContent = 'Published ✓';
   } catch (err) {
     out.textContent += '\nPublish failed: ' + err.message;
     btn.disabled = false;
   }
+}
+
+// Creating a first venue promotes the account to manager in the database,
+// but the access token in hand was minted as staff — and the dashboard reads
+// the role from it, so Join code / Access stayed hidden until re-login.
+// Trade the refresh token for a pair minted with the current role.
+async function refreshSessionRole() {
+  if (state.isDemo) return;
+  let rt = '';
+  try { rt = localStorage.getItem('jwt_refresh_token') || ''; } catch (e) { return; }
+  if (!rt) return;
+  try {
+    const r = await fetch(`${state.baseUrl}/api/auth/refresh`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: rt }),
+    });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j || !j.access_token) return;
+    state.authToken = j.access_token;
+    try {
+      localStorage.setItem('jwt_token', j.access_token);
+      if (j.refresh_token) localStorage.setItem('jwt_refresh_token', j.refresh_token);
+    } catch (e) { /* the in-memory token still works for this session */ }
+  } catch (e) { /* keep the current session; a re-login also fixes it */ }
 }
 
 async function obFinish() {
@@ -12407,40 +12512,82 @@ async function loadRosterForWeek() {
   const venueId = state.currentVenue;
   if (!venueId) return;
 
+  const tbody = document.getElementById('roster-body');
+  const costEl = document.getElementById('roster-total-cost');
   try {
-    const resp = await fetchAPI('/rosters?venue_id=' + venueId + '&week_start=' + dateStr);
-    const roster = (resp && resp.items) || [];
-    if (roster.length > 0) {
-      renderRosterTable(roster[0]);
+    const resp = await fetchAPI('/rosters?venue_id=' + encodeURIComponent(venueId) + '&week_start=' + dateStr);
+    const rosters = ((resp && resp.items) || (Array.isArray(resp) ? resp : []))
+      .slice().sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    if (rosters.length > 0) {
+      renderRosterTable(rosters[0]);
     } else {
-      // No roster for this week — show empty state
-      const tbody = document.getElementById('roster-body');
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">No roster generated for this week. Click Generate Roster to create one.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">No roster for this week yet. Generate one, or import your old roster from the toolbar above.</td></tr>';
+      if (costEl) costEl.textContent = '0';
+      const dailyEl = document.getElementById('roster-daily-cost');
+      if (dailyEl) dailyEl.textContent = '0';
+      const varEl = document.getElementById('roster-variance');
+      if (varEl) varEl.textContent = '—';
     }
   } catch (err) {
-    // Fallback: keep current display, just update week label
-    console.log('Could not load roster for week:', dateStr);
+    // Never leave placeholder sample rows on screen for a real venue
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">Couldn’t load this week’s roster — try again in a moment.</td></tr>';
+    console.log('Could not load roster for week:', dateStr, err);
   }
+}
+
+// Real venues: draw the displayed week's roster from the server. The markup
+// ships hand-authored sample rows for the demo; without this a real venue saw
+// (and exported) those sample staff until it clicked Prev/Next.
+function refreshRealRoster() {
+  if (state.isDemo || !state.currentVenue) return;
+  updateRosterWeekDisplay();
+  loadRosterForWeek();
+}
+
+function showRosterWeekOf(dateStr) {
+  if (state.isDemo || !dateStr) return;
+  const p = String(dateStr).split('-').map(Number);
+  const target = new Date(p[0], p[1] - 1, p[2]);
+  const weeks = Math.round((target - getWeekMonday(0)) / (7 * 86400000));
+  rosterWeekOffset = Math.max(-4, Math.min(4, weeks));
+  refreshRealRoster();
 }
 
 function renderRosterTable(roster) {
   if (!roster || !roster.shifts) return;
   const tbody = document.getElementById('roster-body');
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const names = {};
+  (state.employees || []).forEach(e => { names[e.id] = e.name; });
+  const hhmm = t => String(t || '').slice(0, 5);
 
   // Group shifts by employee
   const staffMap = {};
   roster.shifts.forEach(shift => {
     const key = shift.employee_id || shift.employee_name;
     if (!staffMap[key]) {
-      staffMap[key] = { name: shift.employee_name || key, role: shift.role || '', shifts: {} };
+      staffMap[key] = { name: shift.employee_name || names[shift.employee_id] || key, role: shift.role || '', shifts: {} };
     }
-    const day = new Date(shift.date).getDay();
+    // Parse YYYY-MM-DD as a LOCAL date — new Date('2026-09-28') is UTC midnight
+    const p = String(shift.date || '').slice(0, 10).split('-').map(Number);
+    const day = new Date(p[0], p[1] - 1, p[2]).getDay();
     const dayKey = days[day === 0 ? 6 : day - 1];
-    staffMap[key].shifts[dayKey] = shift.start_time + '-' + shift.end_time;
+    staffMap[key].shifts[dayKey] = hhmm(shift.start_time) + '-' + hhmm(shift.end_time);
   });
 
-  const staffList = Object.values(staffMap);
+  const cost = Number(roster.total_cost);
+  const costEl = document.getElementById('roster-total-cost');
+  if (costEl) costEl.textContent = isFinite(cost) ? Math.round(cost).toLocaleString() : '0';
+  const openDays = new Set();
+  Object.values(staffMap).forEach(s => Object.keys(s.shifts).forEach(d => openDays.add(d)));
+  const dailyEl = document.getElementById('roster-daily-cost');
+  if (dailyEl) dailyEl.textContent = (isFinite(cost) && openDays.size)
+    ? Math.round(cost / openDays.size).toLocaleString() : '0';
+  // No budget to compare against yet — show a dash rather than an invented 0%
+  const varEl = document.getElementById('roster-variance');
+  if (varEl) varEl.textContent = '—';
+
+  const staffList = Object.values(staffMap).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   if (!staffList.length) {
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">No shifts in this roster.</td></tr>';
     return;
@@ -12449,11 +12596,11 @@ function renderRosterTable(roster) {
   tbody.innerHTML = staffList.map(staff => {
     const cells = days.map(d => {
       if (staff.shifts[d]) {
-        return '<td><span class="shift-cell shift-optimal" draggable="true">' + staff.shifts[d] + '</span></td>';
+        return '<td><span class="shift-cell shift-optimal">' + esc(staff.shifts[d]) + '</span></td>';
       }
       return '<td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>';
     }).join('');
-    return '<tr><td><strong>' + (typeof esc === 'function' ? esc(staff.name) : staff.name) + '</strong><br><span style="font-size:11px;color:var(--text-muted);">' + (typeof esc === 'function' ? esc(staff.role) : staff.role) + '</span></td>' + cells + '</tr>';
+    return '<tr><td><strong>' + esc(staff.name) + '</strong><br><span style="font-size:11px;color:var(--text-muted);">' + esc(staff.role) + '</span></td>' + cells + '</tr>';
   }).join('');
 }
 

@@ -9,7 +9,9 @@ Steps (venue_created is implicit — you can't call this without a venue):
     menu         -- at least one recipe (seed or built)
     stock        -- par levels set on at least one ingredient
     roster       -- a roster generated for the venue
-    connect      -- Deputy connected (OPTIONAL — for migrating existing data)
+    import       -- past rosters pasted in via the CSV importer (OPTIONAL —
+                    migration is CSV-first; a live connection is never an
+                    onboarding step, only a post-sale choice)
 
 Route:
     GET /api/setup?venue_id=
@@ -42,6 +44,8 @@ async def setup_status(venue_id: str = Query(...)) -> dict:
         connected = bool(deputy and deputy.get("status") not in (None, "uninstalled"))
     except Exception:
         connected = False
+    history_done = connected or any(
+        str(getattr(r, "id", "") or "").startswith("imported-") for r in rosters)
 
     steps = [
         {
@@ -73,11 +77,11 @@ async def setup_status(venue_id: str = Query(...)) -> dict:
             "cta": "Roster", "optional": False,
         },
         {
-            "key": "connect", "label": "Connect Deputy (optional)",
-            "done": connected,
-            "detail": "Deputy connected" if connected
-                      else "On Connections, paste a Deputy access token to import your existing staff and shifts. Skip if starting fresh.",
-            "cta": "Connections", "optional": True,
+            "key": "import", "label": "Bring your old rosters across (optional)",
+            "done": history_done,
+            "detail": "Past rosters imported" if history_done
+                      else "On the Roster page, Import roster — paste a CSV export from Deputy, Tanda or a spreadsheet. No logins or live connections needed. Skip if starting fresh.",
+            "cta": "Roster", "optional": True,
         },
     ]
 

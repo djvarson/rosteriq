@@ -68,7 +68,7 @@ def test_wizard_advances_as_steps_complete():
     s3 = c.get(f"/api/setup?venue_id={vid}", headers=h).json()
     assert _step(s3, "stock")["done"] is True and s3["next_step"]["key"] == "roster"
 
-    # Save a roster -> roster done -> COMPLETE (connect is optional)
+    # Save a roster -> roster done -> COMPLETE (import is optional)
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
     db = get_db()
@@ -83,8 +83,20 @@ def test_wizard_advances_as_steps_complete():
     s4 = c.get(f"/api/setup?venue_id={vid}", headers=h).json()
     assert _step(s4, "roster")["done"] is True
     assert s4["complete"] is True and s4["percent"] == 100 and s4["next_step"] is None
-    # The optional Deputy step is still not done, but doesn't block completion
-    assert _step(s4, "connect")["optional"] is True and _step(s4, "connect")["done"] is False
+    # The optional history-import step is still not done, but doesn't block
+    # completion — and onboarding never asks for a live-system credential
+    imp = _step(s4, "import")
+    assert imp["optional"] is True and imp["done"] is False
+    assert "token" not in imp["detail"].lower() and imp["cta"] == "Roster"
+
+    # A CSV-imported roster (the importer's id prefix) marks it done
+    db.save_roster(Roster(
+        id=f"imported-{vid}-{week_start.isoformat()}", venue_id=vid, week_start=week_start,
+        week_end=week_start + timedelta(days=6), shifts=[], total_cost=None,
+        created_at=datetime(2026, 7, 1),
+    ))
+    s5 = c.get(f"/api/setup?venue_id={vid}", headers=h).json()
+    assert _step(s5, "import")["done"] is True
 
 
 def test_wizard_is_venue_scoped():
