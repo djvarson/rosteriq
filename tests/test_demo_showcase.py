@@ -30,13 +30,16 @@ def test_showcase_seeds_every_pillar_idempotently():
     ls = ls if isinstance(ls, date) else date.fromisoformat(str(ls)[:10])
     assert ls >= today
 
-    # Cover: open, and points at a shift that genuinely exists TODAY
+    # Cover: open, on a shift that genuinely exists, and claimable by Emma (the
+    # staff-phone demo) without double-booking her
     covers = [c for c in db.list_shift_covers(DEMO_VENUE_ID) if c["status"] == "open"]
-    assert covers
-    roster = max([r for r in db.list_rosters() if r.venue_id == DEMO_VENUE_ID],
-                 key=lambda r: r.week_start)
-    shift_ids = {s.id for s in roster.shifts}
-    assert all(c["shift_id"] in shift_ids for c in covers)
+    assert len(covers) == 1
+    rosters = [r for r in db.list_rosters() if r.venue_id == DEMO_VENUE_ID]
+    shifts = {s.id: s for r in rosters for s in r.shifts}
+    covered = shifts[covers[0]["shift_id"]]
+    assert covered.employee_id != "demo-staff-001"
+    assert not any(s.employee_id == "demo-staff-001" and s.date == covered.date for s in shifts.values())
+    roster = next(r for r in rosters if r.week_start <= today <= r.week_end)
 
     # Menu seeded server-side (no manual /api/menu/seed needed)
     assert len(db.list_ingredients(DEMO_VENUE_ID)) >= 3

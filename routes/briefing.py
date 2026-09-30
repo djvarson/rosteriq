@@ -104,12 +104,15 @@ async def daily_briefing(venue_id: str = Query(...),
     # --- Approvals waiting ------------------------------------------------
     pending_leave = len([r for r in (db.list_leave_requests(venue_id) or [])
                          if r.get("status") == "pending"])
-    open_covers = len([c for c in (db.list_shift_covers(venue_id) or [])
-                      if c.get("status") in ("open", "claimed")])
+    covers = db.list_shift_covers(venue_id) or []
+    claimed_covers = len([c for c in covers if c.get("status") == "claimed"])
+    open_covers = len([c for c in covers if c.get("status") == "open"])
     if pending_leave:
         attention.append(f"{pending_leave} leave request(s) awaiting your decision.")
+    if claimed_covers:
+        attention.append(f"{claimed_covers} shift cover claim(s) need your approval.")
     if open_covers:
-        attention.append(f"{open_covers} shift(s) up for cover need approval.")
+        attention.append(f"{open_covers} shift(s) up for cover \u2014 nobody has claimed yet.")
 
     # --- Work rights: visas expired or expiring (from the venue's own VEVO
     # records) — an expired one leads the whole list ------------------------

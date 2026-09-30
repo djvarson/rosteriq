@@ -158,9 +158,12 @@
     .nolink { text-align: center; padding: 40px 20px; }
     .nolink h2 { font-size: 18px; margin-bottom: 10px; }
     .nolink p { color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .demo-strip { background: var(--blue); color: var(--text); font-size: 12px; font-weight: 600;
+                  text-align: center; padding: 6px 16px; }
   </style>
 </head>
 <body>
+  <div class="demo-strip" id="demo-strip" style="display:none;">Demo &mdash; you're Emma, a staff member at The Brass Monkey</div>
   <header>
     <div class="who">
       <div class="hi" id="hi">My RosterIQ</div>
@@ -330,8 +333,17 @@
   <div class="toast" id="toast"></div>
 
 <script>
-const token = localStorage.getItem('jwt_token') || localStorage.getItem('auth_token');
-if (!token) window.location.href = '/login';
+// /my?demo=staff is the Try Demo staff phone (Emma), opened from the demo
+// dashboard. Its session lives in THIS tab's sessionStorage, so the manager
+// demo in the other tab keeps its own.
+const demoStaff = new URLSearchParams(window.location.search).get('demo') === 'staff';
+let token = demoStaff ? sessionStorage.getItem('demo_staff_token')
+                      : (localStorage.getItem('jwt_token') || localStorage.getItem('auth_token'));
+if (!token && !demoStaff) window.location.href = '/login';
+// One re-mint per expiry: set once this page has already retried, and the
+// first 401 of a burst (Home fires several calls at once) owns the reload.
+let demoRetried = demoStaff && !!sessionStorage.getItem('demo_staff_retried');
+let reauthing = false;
 
 async function api(path, opts) {
   opts = opts || {};
@@ -340,7 +352,20 @@ async function api(path, opts) {
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthenticated'); }
+  if (res.status === 401) {
+    if (demoStaff && !demoRetried) {
+      // The demo session expired: mint a fresh one rather than bounce to login.
+      if (!reauthing) {
+        reauthing = true;
+        sessionStorage.removeItem('demo_staff_token');
+        sessionStorage.setItem('demo_staff_retried', '1');
+        window.location.reload();
+      }
+    } else if (!reauthing) {
+      window.location.href = '/login';
+    }
+    throw new Error('unauthenticated');
+  }
   const data = await res.json().catch(function () { return {}; });
   if (!res.ok) {
     const e = new Error(apiErrorMessage(data, res.status)); e.status = res.status; throw e;
@@ -402,6 +427,11 @@ function toast(msg, kind) {
 }
 
 function logout() {
+  if (demoStaff) {
+    sessionStorage.removeItem('demo_staff_token');
+    window.location.href = '/login';
+    return;
+  }
   localStorage.removeItem('jwt_token');
   localStorage.removeItem('auth_token');
   localStorage.removeItem('jwt_refresh_token');
@@ -967,8 +997,27 @@ async function sendReport() {
 }
 
 async function boot() {
+  if (demoStaff) {
+    document.getElementById('demo-strip').style.display = 'block';
+    if (!token) {
+      try {
+        const r = await fetch('/api/auth/demo?as=staff', { method: 'POST' });
+        const j = await r.json();
+        if (j.access_token) {
+          token = j.access_token;
+          sessionStorage.setItem('demo_staff_token', token);
+        }
+      } catch (e) { /* reported below */ }
+      if (!token) {
+        document.getElementById('loading').textContent = 'The demo staff phone is busy — try again in a minute.';
+        return;
+      }
+    }
+  }
   try {
     const prof = await api('/api/me/profile');
+    sessionStorage.removeItem('demo_staff_retried');
+    demoRetried = false;
     document.getElementById('loading').style.display = 'none';
     if (!prof.linked) {
       document.getElementById('nolink-msg').textContent = prof.message;

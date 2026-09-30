@@ -13,6 +13,7 @@ from datetime import datetime
 from datetime import date, time, timedelta
 from decimal import Decimal
 
+from rosteriq.award_rules import get_minimum_break_minutes
 from rosteriq.models import (
     VenueConfig, Employee, EmploymentType, AwardLevel, State,
     Roster, Shift, ShiftStatus, DemandForecast,
@@ -50,30 +51,42 @@ _DEMO_STAFF = [
 # lowercase-day convention). Deliberately varied so "who can cover Saturday
 # night?" has a real answer in the demo — with no availability the AI's
 # find_available_staff comes back empty on the exact beat the runbook demos.
-_ALL_WEEK = {d: [{"start": "09:00", "end": "23:00"}]
-             for d in ("monday", "tuesday", "wednesday", "thursday",
-                       "friday", "saturday", "sunday")}
-_WEEKENDS_AND_NIGHTS = {
-    "thursday": [{"start": "16:00", "end": "23:59"}],
-    "friday": [{"start": "16:00", "end": "23:59"}],
-    "saturday": [{"start": "11:00", "end": "23:59"}],
-    "sunday": [{"start": "11:00", "end": "22:00"}],
-}
-_WEEKDAYS_ONLY = {d: [{"start": "08:00", "end": "18:00"}]
-                  for d in ("monday", "tuesday", "wednesday", "thursday", "friday")}
+_DAYS_OF_WEEK = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _every_day(start: str, end: str) -> dict:
+    return {d: [{"start": start, "end": end}] for d in _DAYS_OF_WEEK}
+
+
+# Everyone works every day, but at different TIMES, so each seeded shift sits
+# inside its person's availability (publishable as seeded) and "who can cover
+# Saturday night?" still has a real answer: the night and all-day people, not
+# the day-only ones.
 _DEMO_AVAILABILITY = {
-    "demo-staff-001": _ALL_WEEK,               # Emma — the showcase staffer
-    "demo-staff-002": _WEEKENDS_AND_NIGHTS,    # James — the Saturday-night answer
-    "demo-staff-003": _WEEKDAYS_ONLY,          # Sarah — weekday kitchen
-    "demo-staff-004": _ALL_WEEK,
-    "demo-staff-005": _WEEKENDS_AND_NIGHTS,    # Lisa — second bar cover
-    "demo-staff-006": _WEEKDAYS_ONLY,
+    "demo-staff-001": _every_day("09:00", "23:00"),   # Emma — the showcase staffer, any time
+    "demo-staff-002": _every_day("15:00", "23:59"),   # James — nights (the Saturday-night answer)
+    "demo-staff-003": _every_day("08:00", "18:00"),   # Sarah — day kitchen
+    "demo-staff-004": _every_day("09:00", "23:00"),
+    "demo-staff-005": _every_day("10:00", "20:00"),   # Lisa — day bar
+    "demo-staff-006": _every_day("08:00", "23:30"),   # David — evening kitchen
 }
+
+
+def _demo_available(emp_id: str, day, start, end) -> bool:
+    """Does the staffer's seeded availability cover this shift window?"""
+    from rosteriq.services.availability_rules import is_available
+    return is_available(_DEMO_AVAILABILITY.get(emp_id, {}), day, start, end)
+
+
 _DEMO_PHONES = {f"demo-staff-{i:03d}": f"04{i:02d} 555 0{i:02d}{i}" for i in range(1, 7)}
 
 
-def seed_demo_environment(db) -> None:
+def seed_demo_environment(db, reassert_showcase: bool = True) -> None:
     """Idempotently seed the demo user, venue, and staff.
+
+    reassert_showcase=False is the new-day refresh for a demo someone is still
+    using: it adds the day's roster, forecast and sales but leaves the showcase
+    feed posts and procedures as the visitor left them.
 
     Each entity is ensured independently (rather than skip-all-if-the-user-
     exists) so a previously partial seed self-heals on the next call. Never
@@ -169,34 +182,47 @@ def seed_demo_environment(db) -> None:
         except Exception:
             pass
 
-    # Seed staff only if the demo venue has none yet (self-heals a prior
-    # partial seed without duplicating).
+    # Seed each canonical staff member that's missing (a demo reset may keep
+    # one it couldn't safely delete). Never write over an id that belongs to
+    # another venue — an upsert would overwrite that venue's employee.
     try:
         already = db.get_employees(DEMO_VENUE_ID)
     except Exception:
         already = []
-    if not already:
-        employees = [
-            Employee(
-                id=f"demo-staff-{i:03d}",
-                venue_id=DEMO_VENUE_ID,
-                name=name,
-                employment_type=EmploymentType.casual,
-                award_level=AwardLevel.level_2,
-                state=State.wa,
-                hourly_base_rate=Decimal(rate),
-                skills=[role],
-                # Emma carries the staff-demo login email so /my links to her.
-                email=DEMO_STAFF_EMAIL if f"demo-staff-{i:03d}" == DEMO_STAFF_EMPLOYEE_ID else None,
-                availability=_DEMO_AVAILABILITY.get(f"demo-staff-{i:03d}", {}),
-                phone=_DEMO_PHONES.get(f"demo-staff-{i:03d}"),
-                created_at=now,
-                updated_at=now,
-            )
-            for i, (name, role, rate) in enumerate(_DEMO_STAFF, start=1)
-        ]
-        db.save_employees(employees)
-    else:
+    employees = [
+        Employee(
+            id=f"demo-staff-{i:03d}",
+            venue_id=DEMO_VENUE_ID,
+            name=name,
+            employment_type=EmploymentType.casual,
+            award_level=AwardLevel.level_2,
+            state=State.wa,
+            hourly_base_rate=Decimal(rate),
+            skills=[role],
+            # Emma carries the staff-demo login email so /my links to her.
+            email=DEMO_STAFF_EMAIL if f"demo-staff-{i:03d}" == DEMO_STAFF_EMPLOYEE_ID else None,
+            availability=_DEMO_AVAILABILITY.get(f"demo-staff-{i:03d}", {}),
+            phone=_DEMO_PHONES.get(f"demo-staff-{i:03d}"),
+            created_at=now,
+            updated_at=now,
+        )
+        for i, (name, role, rate) in enumerate(_DEMO_STAFF, start=1)
+    ]
+    have = {e.id for e in already}
+    missing = []
+    for emp in employees:
+        if emp.id in have:
+            continue
+        try:
+            holder = db.get_employee(emp.id)
+        except Exception:
+            holder = None
+        if holder is not None and getattr(holder, "venue_id", None) != DEMO_VENUE_ID:
+            continue
+        missing.append(emp)
+    if missing:
+        db.save_employees(missing)
+    if already:
         # Self-heal: a demo-staff-001 seeded before the staff-side identity
         # existed has no email, so the staff demo would land on linked:false.
         try:
@@ -254,7 +280,7 @@ def seed_demo_environment(db) -> None:
         week_start = today - timedelta(days=today.weekday())
         week_end = week_start + timedelta(days=6)
         wk = week_start.isoformat()
-        # (staff index, role, start, end) — break is 30 min.
+        # (staff index, role, start, end); breaks come from the award rules.
         _SHIFTS = [
             (1, "floor", time(11, 0), time(19, 0)),
             (2, "bar", time(15, 0), time(23, 0)),
@@ -268,27 +294,42 @@ def seed_demo_environment(db) -> None:
         # topped those days up — prime cost read ~29%, a too-good-to-be-true
         # venue). Days are grouped into their own Mon-Sun rosters so the
         # roster validator stays honest.
-        want_days = [today - timedelta(days=o) for o in (0, 1, 2)]
+        want = [(today - timedelta(days=o), _SHIFTS) for o in (0, 1, 2)]
+        # Plus ONE shift tomorrow — James on the bar — which carries the open
+        # cover request: Emma (the staff-phone demo) can claim it without
+        # being double-booked against her own shift today.
+        want.append((today + timedelta(days=1), [s for s in _SHIFTS if s[0] == 2]))
         by_week: dict = {}
-        for d in want_days:
+        for d, plan in want:
             ws = d - timedelta(days=d.weekday())
-            by_week.setdefault(ws, []).append(d)
+            by_week.setdefault(ws, []).append((d, plan))
         for ws, days in by_week.items():
             rid = f"demo-roster-{ws.isoformat()}"
             existing = db.get_roster(rid)
-            have_days = {s.date for s in existing.shifts} if existing else set()
+            if existing is not None and getattr(existing, "venue_id", None) != DEMO_VENUE_ID:
+                continue                      # never re-save another venue's roster
+            have_ids = {s.id for s in existing.shifts} if existing else set()
+            booked = {(s.employee_id, s.date) for s in existing.shifts} if existing else set()
             new_shifts = []
-            for d in days:
-                if d in have_days:
-                    continue
-                for i, role, st, en in _SHIFTS:
-                    paid_hours = (en.hour - st.hour) - 0.5
+            for d, plan in days:
+                for i, role, st, en in plan:
+                    emp_id = f"demo-staff-{i:03d}"
+                    sid = f"demo-shift-{d.isoformat()}-{i:03d}"
+                    if sid in have_ids or (emp_id, d) in booked:
+                        continue
+                    # Publishable as seeded: only inside each person's
+                    # availability, with the award's minimum break.
+                    if not _demo_available(emp_id, d, st, en):
+                        continue
+                    hours = (en.hour + en.minute / 60) - (st.hour + st.minute / 60)
+                    brk = get_minimum_break_minutes(hours)
+                    rate = float(_DEMO_STAFF[i - 1][2])
                     new_shifts.append(Shift(
-                        id=f"demo-shift-{d.isoformat()}-{i:03d}",
-                        employee_id=f"demo-staff-{i:03d}",
+                        id=sid,
+                        employee_id=emp_id,
                         date=d, start_time=st, end_time=en,
-                        break_minutes=30, status=ShiftStatus.scheduled, role=role,
-                        cost=Decimal(str(round(paid_hours * 32.5, 2))),
+                        break_minutes=brk, status=ShiftStatus.scheduled, role=role,
+                        cost=Decimal(str(round((hours - brk / 60) * rate, 2))),
                     ))
             if new_shifts:
                 all_shifts = (list(existing.shifts) if existing else []) + new_shifts
@@ -304,10 +345,10 @@ def seed_demo_environment(db) -> None:
     except Exception:
         pass
 
-    _seed_demo_showcase(db, now)
+    _seed_demo_showcase(db, now, reassert_showcase)
 
 
-def _seed_demo_showcase(db, now) -> None:
+def _seed_demo_showcase(db, now, reassert_showcase: bool = True) -> None:
     """Dress the newer Venue OS pillars so no demo page opens on an empty
     state: announcements with read receipts, a pending leave request, an open
     shift-cover, stock/par levels, and recent dish sales. Every block is
@@ -344,88 +385,89 @@ def _seed_demo_showcase(db, now) -> None:
     except Exception:
         pass
 
-    # Team feed (two-way: a staff swap ask with a manager reply, plus a pinned
-    # manager post with a couple of thumbs-up). Re-asserted on EVERY Try Demo:
-    # the two showcase posts are upserted by fixed id with their canonical
-    # content, so a prospect who removed or edited one gets it back next
-    # session, while posts prospects created themselves are left untouched.
-    # (Guarding on "feed empty" let one removed post blank the showcase for
-    # good — the pillar was never empty again, so it never re-seeded.)
-    try:
-        db.save_feed_post({
-            "id": "demo-feed-002", "venue_id": DEMO_VENUE_ID,
-            "author_user_id": DEMO_USER_ID, "author_name": "Management",
-            "author_role": "manager",
-            "body": "New pass-through window opens Friday — kitchen walkthrough "
-                    "3pm Thursday",
-            "pinned": True, "removed": False,
-            "reactions": {"\U0001F44D": ["demo-staff-003", "demo-staff-006"]},
-            "comments": [],
-            "created_at": now - timedelta(hours=5), "updated_at": now,
-        })
-        db.save_feed_post({
-            "id": "demo-feed-001", "venue_id": DEMO_VENUE_ID,
-            "author_user_id": "demo-staff-002", "author_name": "James Wilson",
-            "author_role": "staff",
-            "body": "Anyone able to swap my Sat close? Family thing",
-            "pinned": False, "removed": False,
-            "reactions": {},
-            "comments": [{
-                "id": "demo-feed-001-c1", "author_user_id": DEMO_USER_ID,
-                "author_name": "Management", "author_role": "manager",
-                "body": "Post it as a shift cover in /my and I'll approve "
-                        "whoever grabs it — Lisa's usually keen for Saturdays.",
-                "created_at": now - timedelta(hours=1),
-            }],
-            "created_at": now - timedelta(hours=2), "updated_at": now,
-        })
-    except Exception:
-        pass
+    if reassert_showcase:
+        # Team feed (two-way: a staff swap ask with a manager reply, plus a pinned
+        # manager post with a couple of thumbs-up). Re-asserted on every full seed:
+        # the two showcase posts are upserted by fixed id with their canonical
+        # content, so a prospect who removed or edited one gets it back next
+        # session, while posts prospects created themselves are left untouched.
+        # (Guarding on "feed empty" let one removed post blank the showcase for
+        # good — the pillar was never empty again, so it never re-seeded.)
+        try:
+            db.save_feed_post({
+                "id": "demo-feed-002", "venue_id": DEMO_VENUE_ID,
+                "author_user_id": DEMO_USER_ID, "author_name": "Management",
+                "author_role": "manager",
+                "body": "New pass-through window opens Friday — kitchen walkthrough "
+                        "3pm Thursday",
+                "pinned": True, "removed": False,
+                "reactions": {"\U0001F44D": ["demo-staff-003", "demo-staff-006"]},
+                "comments": [],
+                "created_at": now - timedelta(hours=5), "updated_at": now,
+            })
+            db.save_feed_post({
+                "id": "demo-feed-001", "venue_id": DEMO_VENUE_ID,
+                "author_user_id": "demo-staff-002", "author_name": "James Wilson",
+                "author_role": "staff",
+                "body": "Anyone able to swap my Sat close? Family thing",
+                "pinned": False, "removed": False,
+                "reactions": {},
+                "comments": [{
+                    "id": "demo-feed-001-c1", "author_user_id": DEMO_USER_ID,
+                    "author_name": "Management", "author_role": "manager",
+                    "body": "Post it as a shift cover in /my and I'll approve "
+                            "whoever grabs it — Lisa's usually keen for Saturdays.",
+                    "created_at": now - timedelta(hours=1),
+                }],
+                "created_at": now - timedelta(hours=2), "updated_at": now,
+            })
+        except Exception:
+            pass
 
-    # SOP / JSP library: the four starter procedures, with 3 of 6 staff having
-    # read Food safety so the manager view shows real outstanding names.
-    # Re-asserted every Try Demo: seed_starter_sops is idempotent (deterministic
-    # ids, skips titles that exist), so a starter a prospect deleted comes back
-    # while a renamed/edited one is left alone; the acks are first-write-wins
-    # in the store, so re-saving them is a no-op when they already exist.
-    try:
-        from rosteriq.routes.sops import seed_starter_sops, _starter_doc_id, STARTER_SOPS
-        seed_starter_sops(db, DEMO_VENUE_ID, author_name="Management", now=now)
-        food_title = next((s["title"] for s in STARTER_SOPS
-                           if str(s.get("title", "")).lower().startswith("food safety")),
-                          "Food safety & allergen declaration")
-        food = db.get_sop_document(_starter_doc_id(DEMO_VENUE_ID, food_title))
-        if not food:
-            # A demo library seeded before starter ids became deterministic
-            # holds Food safety under a random id (seed_starter_sops skips it
-            # by title) — fall back to the title so its acks still re-assert.
-            food = next((d for d in (db.list_sop_documents(DEMO_VENUE_ID) or [])
-                         if str(d.get("title", "")).lower().startswith("food safety")), None)
-        if food:
-            version = int(food.get("version") or 1)
-            have = {
-                a.get("employee_id")
-                for a in (db.list_sop_acks(DEMO_VENUE_ID, food["id"]) or [])
-                if int(a.get("doc_version") or 0) == version
-            }
-            for i, (name, _role, _rate) in enumerate(_DEMO_STAFF[:3], start=1):
-                emp_id = f"demo-staff-{i:03d}"
-                if emp_id in have:
-                    continue  # first-write-wins anyway; skip the round-trip
-                # Fixed ids for the canonical v1 acks; a later version gets its
-                # own ids so PG's PK on id can't collide with the v1 rows.
-                ack_id = f"demo-sop-ack-{i:03d}" if version == 1 else f"demo-sop-ack-{i:03d}-v{version}"
-                try:
-                    db.save_sop_ack({
-                        "id": ack_id, "venue_id": DEMO_VENUE_ID,
-                        "doc_id": food["id"], "doc_version": version,
-                        "employee_id": emp_id, "employee_name": name,
-                        "acknowledged_at": now - timedelta(hours=3 + i),
-                    })
-                except Exception:
-                    continue  # one ack failing must not drop the others
-    except Exception:
-        pass
+        # SOP / JSP library: the four starter procedures, with 3 of 6 staff having
+        # read Food safety so the manager view shows real outstanding names.
+        # Re-asserted every Try Demo: seed_starter_sops is idempotent (deterministic
+        # ids, skips titles that exist), so a starter a prospect deleted comes back
+        # while a renamed/edited one is left alone; the acks are first-write-wins
+        # in the store, so re-saving them is a no-op when they already exist.
+        try:
+            from rosteriq.routes.sops import seed_starter_sops, _starter_doc_id, STARTER_SOPS
+            seed_starter_sops(db, DEMO_VENUE_ID, author_name="Management", now=now)
+            food_title = next((s["title"] for s in STARTER_SOPS
+                               if str(s.get("title", "")).lower().startswith("food safety")),
+                              "Food safety & allergen declaration")
+            food = db.get_sop_document(_starter_doc_id(DEMO_VENUE_ID, food_title))
+            if not food:
+                # A demo library seeded before starter ids became deterministic
+                # holds Food safety under a random id (seed_starter_sops skips it
+                # by title) — fall back to the title so its acks still re-assert.
+                food = next((d for d in (db.list_sop_documents(DEMO_VENUE_ID) or [])
+                             if str(d.get("title", "")).lower().startswith("food safety")), None)
+            if food:
+                version = int(food.get("version") or 1)
+                have = {
+                    a.get("employee_id")
+                    for a in (db.list_sop_acks(DEMO_VENUE_ID, food["id"]) or [])
+                    if int(a.get("doc_version") or 0) == version
+                }
+                for i, (name, _role, _rate) in enumerate(_DEMO_STAFF[:3], start=1):
+                    emp_id = f"demo-staff-{i:03d}"
+                    if emp_id in have:
+                        continue  # first-write-wins anyway; skip the round-trip
+                    # Fixed ids for the canonical v1 acks; a later version gets its
+                    # own ids so PG's PK on id can't collide with the v1 rows.
+                    ack_id = f"demo-sop-ack-{i:03d}" if version == 1 else f"demo-sop-ack-{i:03d}-v{version}"
+                    try:
+                        db.save_sop_ack({
+                            "id": ack_id, "venue_id": DEMO_VENUE_ID,
+                            "doc_id": food["id"], "doc_version": version,
+                            "employee_id": emp_id, "employee_name": name,
+                            "acknowledged_at": now - timedelta(hours=3 + i),
+                        })
+                    except Exception:
+                        continue  # one ack failing must not drop the others
+        except Exception:
+            pass
 
     # One pending leave request (Leave page approve-it-live beat). Refresh the
     # SAME record when its dates fall into the past, so the demo never shows a
@@ -448,21 +490,35 @@ def _seed_demo_showcase(db, now) -> None:
     except Exception:
         pass
 
-    # One open shift-cover for TODAY's bar shift (Cover board beat). Keyed to
-    # today's shift so it never orphans onto a shift that no longer exists.
+    # One open shift-cover (Cover board beat) on TOMORROW's bar shift, which
+    # the roster seed puts on James alone — so Emma, the staff-phone identity,
+    # can claim it without clashing with her own shift today. Keyed to a shift
+    # that exists, and never written over a cover someone already acted on.
     try:
-        today_bar_shift = f"demo-shift-{today.isoformat()}-002"
+        tomorrow = today + timedelta(days=1)
+        week = tomorrow - timedelta(days=tomorrow.weekday())
+        roster = db.get_roster(f"demo-roster-{week.isoformat()}")
+        pick = next((sh for sh in (roster.shifts if roster and roster.venue_id == DEMO_VENUE_ID else [])
+                     if sh.id == f"demo-shift-{tomorrow.isoformat()}-002"), None)
         covers = db.list_shift_covers(DEMO_VENUE_ID) or []
-        if not any(c.get("shift_id") == today_bar_shift and c.get("status") == "open"
-                   for c in covers):
+        if pick is not None and not any(c.get("shift_id") == pick.id for c in covers):
             db.save_shift_cover({
-                "id": f"demo-cover-{today.isoformat()}", "venue_id": DEMO_VENUE_ID,
-                "shift_id": today_bar_shift,
-                "shift_date": today, "shift_start": "15:00", "shift_end": "23:00",
-                "role": "bar", "requested_by": "demo-staff-002",
-                "reason": "Uni exam tomorrow morning",
+                "id": f"demo-cover-{tomorrow.isoformat()}", "venue_id": DEMO_VENUE_ID,
+                "shift_id": pick.id,
+                "shift_date": tomorrow, "shift_start": pick.start_time.strftime("%H:%M"),
+                "shift_end": pick.end_time.strftime("%H:%M"),
+                "role": pick.role, "requested_by": pick.employee_id,
+                "reason": "Family thing \u2014 can anyone grab it?",
                 "claimed_by": None, "status": "open", "created_at": now,
             })
+    except Exception:
+        pass
+
+    # Standard daily checklists (Compliance > Daily Checklists beat). A demo
+    # reset clears the venue's templates, so the seed puts the defaults back.
+    try:
+        from rosteriq.routes.checklists import seed_default_checklist_templates
+        seed_default_checklist_templates(db, DEMO_VENUE_ID)
     except Exception:
         pass
 

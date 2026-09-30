@@ -167,6 +167,12 @@ def link_with_code(db, user, raw_code: str) -> Tuple[Optional[object], Optional[
         security("link.code_rejected", venue_id=None, user_id=uid, outcome="denied")
         raise HTTPException(status_code=400, detail="That join code isn't valid. Check it with your manager.")
 
+    # Demo-venue join codes are for show: redeeming one would stamp a real
+    # login's email onto a record every Try Demo visitor can see.
+    from rosteriq.services.demo import DEMO_VENUE_ID
+    if match_vid == DEMO_VENUE_ID:
+        raise HTTPException(status_code=400, detail="That's a demo join code — ask your manager for your own.")
+
     email = (getattr(user, "email", "") or "").strip().lower()
     emp_email = _email_of(match)
     if emp_email and email and emp_email != email:

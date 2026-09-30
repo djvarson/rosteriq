@@ -102,6 +102,18 @@ if pytest:
         except Exception:
             pass
 
+    def _clear_demo_counters():
+        """Per-process Try Demo state keyed by client address: every TestClient
+        is "testclient", so without this the per-visitor mint cap trips across
+        tests and activity stamps are skipped in a fresh store."""
+        try:
+            from rosteriq.routes import auth as _auth_routes
+            _auth_routes._DEMO_MINTS.clear()
+            from rosteriq.services import demo_reset as _demo_reset
+            _demo_reset._activity_written.clear()
+        except Exception:
+            pass
+
     @pytest.fixture(autouse=True)
     def reset_global_db():
         """Reset the global database singleton before each test, re-bind the
@@ -109,6 +121,7 @@ if pytest:
         reset_db()
         _rebind_stores()
         _clear_response_caches()
+        _clear_demo_counters()
         yield
         reset_db()
         _rebind_stores()

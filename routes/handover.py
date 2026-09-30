@@ -20,7 +20,8 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Path, Query, Body
 from pydantic import BaseModel, Field
 
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, load_shift_in_scope
+from rosteriq.database import get_db
 from rosteriq.services.handover_notes import (
     get_handover_service,
     HandoverNote,
@@ -379,6 +380,13 @@ async def create_handover_note(
     # Membership scope: staff may write a handover for their OWN venue, never
     # inject one into another tenant's shift. Before the try (broad except).
     enforce_venue_access(request.venue_id)
+    # ...and the shift must be one of THAT venue's shifts (404 otherwise, so a
+    # member of venue A can't attach a note to venue B's shift by id).
+    load_shift_in_scope(get_db(), shift_id)
+    _db = get_db()
+    shift_venue = _db.venue_id_for_shift(shift_id) if hasattr(_db, "venue_id_for_shift") else None
+    if shift_venue and shift_venue != request.venue_id:
+        raise HTTPException(status_code=404, detail="Shift not found")
     try:
         service = get_handover_service()
 
@@ -425,10 +433,19 @@ async def get_handover_note(
     try:
         service = get_handover_service()
         note = service.get_note_by_shift(shift_id)
-
-        if not note:
-            return None
-
+    except Exception as e:
+        logger.error(f"Error retrieving handover note: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve handover note")
+    if not note:
+        return None
+    # Notes carry their venue; an id alone must not reveal another tenant's.
+    try:
+        enforce_venue_access(getattr(note, "venue_id", None))
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Handover note not found")
+    if not getattr(note, "venue_id", None):
+        raise HTTPException(status_code=404, detail="Handover note not found")
+    try:
         return _to_response(note)
     except Exception as e:
         logger.error(f"Error retrieving handover note: {e}")
@@ -510,6 +527,7 @@ async def get_incoming_handovers(
     Raises:
         HTTPException: If error retrieving handovers
     """
+    enforce_venue_access(venue_id)
     try:
         service = get_handover_service()
         notes = service.get_incoming_handovers(employee_id, venue_id, limit=limit)
@@ -517,6 +535,40 @@ async def get_incoming_handovers(
     except Exception as e:
         logger.error(f"Error retrieving incoming handovers: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve incoming handovers")
+
+
+# Registered before /handovers/{date}, which would otherwise match "unacknowledged" as a date.
+@router.get(
+    "/venues/{venue_id}/handovers/unacknowledged",
+    response_model=List[HandoverNoteResponse],
+    summary="Get unacknowledged handovers",
+    description="Get all unacknowledged handover notes for a venue.",
+)
+async def get_unacknowledged_handovers(
+    venue_id: str = Path(..., description="ID of the venue"),
+) -> List[HandoverNoteResponse]:
+    """Get all unacknowledged handover notes for a venue.
+
+    Returns outstanding handovers from the past 3 days and next 7 days that haven't
+    been acknowledged by incoming staff.
+
+    Args:
+        venue_id: ID of the venue
+
+    Returns:
+        List of HandoverNoteResponse objects
+
+    Raises:
+        HTTPException: If error retrieving handovers
+    """
+    enforce_venue_access(venue_id)
+    try:
+        service = get_handover_service()
+        notes = service.get_unacknowledged(venue_id)
+        return [_to_response(note) for note in notes]
+    except Exception as e:
+        logger.error(f"Error retrieving unacknowledged handovers: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve unacknowledged handovers")
 
 
 @router.get(
@@ -541,6 +593,7 @@ async def get_venue_handovers_for_date(
     Raises:
         HTTPException: If invalid date format or error retrieving handovers
     """
+    enforce_venue_access(venue_id)
     try:
         # Validate date format
         datetime.strptime(date, "%Y-%m-%d")
@@ -554,35 +607,3 @@ async def get_venue_handovers_for_date(
     except Exception as e:
         logger.error(f"Error retrieving venue handovers: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve venue handovers")
-
-
-@router.get(
-    "/venues/{venue_id}/handovers/unacknowledged",
-    response_model=List[HandoverNoteResponse],
-    summary="Get unacknowledged handovers",
-    description="Get all unacknowledged handover notes for a venue.",
-)
-async def get_unacknowledged_handovers(
-    venue_id: str = Path(..., description="ID of the venue"),
-) -> List[HandoverNoteResponse]:
-    """Get all unacknowledged handover notes for a venue.
-
-    Returns outstanding handovers from the past 3 days and next 7 days that haven't
-    been acknowledged by incoming staff.
-
-    Args:
-        venue_id: ID of the venue
-
-    Returns:
-        List of HandoverNoteResponse objects
-
-    Raises:
-        HTTPException: If error retrieving handovers
-    """
-    try:
-        service = get_handover_service()
-        notes = service.get_unacknowledged(venue_id)
-        return [_to_response(note) for note in notes]
-    except Exception as e:
-        logger.error(f"Error retrieving unacknowledged handovers: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve unacknowledged handovers")

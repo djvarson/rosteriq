@@ -166,13 +166,21 @@ def record_event(
     if _throttled(category, action):
         return
     caller = _caller()
+    # Caller detail keys must not overwrite the fields that decide how a row is
+    # filtered, retained and shown: a recipe's category="main" used to replace
+    # category="audit". Keep the caller's value renamed. (role/ip MAY come from
+    # the caller — at registration there is no request context to supply them.)
+    extra = dict(_scrub(details or {}))
+    for reserved in ("category", "outcome", "correlation_id"):
+        if reserved in extra:
+            extra[f"detail_{reserved}"] = extra.pop(reserved)
     payload = {
         "category": category,
         "outcome": outcome,
         "correlation_id": caller.get("correlation_id"),
         "ip": caller.get("ip"),
         "role": caller.get("role"),
-        **(_scrub(details or {})),
+        **extra,
     }
     # Hard cap so a runaway payload can't bloat the table
     encoded = json.dumps(payload, default=str)

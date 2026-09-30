@@ -99,10 +99,17 @@ DEMO_DENIED_PREFIXES = (
     "/tanda/", "/api/tanda/", "/api/keypay/", "/api/pos/", "/api/reservations/",
     "/api/function-tracker/", "/api/connections/", "/api/feeds/config", "/api/plugins/",
     "/api/marketplace/", "/api/billing/", "/employees/", "/venues/",
+    "/api/onboarding/", "/api/webhooks/", "/api/payroll/export/", "/api/experiments/",
 )
 DEMO_DENIED_PATHS = frozenset({
     "/employees", "/venues", "/api/setup/import-staff", "/api/staff/profile",
+    "/api/me/link",
 })
+# ...and /api/v1/ paths containing any of these: digest sends, onboarding
+# checklists/templates/reminders (reminders message staff) and labour alert
+# thresholds (the last two live in per-worker memory a demo reset can't clear
+# on the other worker).
+DEMO_DENIED_V1_PARTS = ("/digest/send", "/onboarding", "/labour-thresholds")
 
 OAUTH_CALLBACK_PATHS = frozenset({
     "/api/deputy/callback",
@@ -220,6 +227,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 denied = self._deny_demo_side_effects(request, user)
                 if denied is not None:
                     return denied
+                await self._note_demo_activity(request, user)
 
             response = await call_next(request)
             return response
@@ -241,6 +249,27 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 _tenant_context_var.reset(ctx_token)
 
     @staticmethod
+    async def _note_demo_activity(request: Request, user) -> None:
+        """Tell the Try Demo reset this client is still using the demo, so a
+        newcomer's Try Demo doesn't wipe it mid-pitch (services/demo_reset.py)."""
+        try:
+            from rosteriq.services.demo import is_demo_identity
+            if not is_demo_identity(getattr(user, "user_id", None), getattr(user, "email", None)):
+                return
+            from rosteriq.services.demo_reset import activity_due, client_address, note_demo_activity
+            address = client_address(request)
+            if not activity_due(address):
+                return
+            db = get_db()
+            if db.__class__.__name__ == "PostgresStore":
+                import asyncio
+                await asyncio.to_thread(note_demo_activity, db, address)
+            else:
+                note_demo_activity(db, address)
+        except Exception:
+            pass
+
+    @staticmethod
     def _deny_demo_side_effects(request: Request, user) -> Optional[JSONResponse]:
         """The public Try Demo identities are shared by every visitor. Writes
         that reach outside the sandbox (email/SMS/push to caller-chosen
@@ -254,7 +283,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
             return None
         path = request.url.path
         if path.startswith(DEMO_DENIED_PREFIXES) or path in DEMO_DENIED_PATHS or (
-                path.startswith("/api/v1/venues/") and path.endswith("/digest/send")):
+                path.startswith("/api/v1/") and any(p in path for p in DEMO_DENIED_V1_PARTS)):
             return JSONResponse(status_code=403, content={
                 "detail": "The demo can't do that \u2014 sign up to try it with your own venue."})
         return None

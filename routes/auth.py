@@ -39,6 +39,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+_DEMO_MINTS: dict = {}
+_DEMO_MINTS_PER_MINUTE = 10
+
+
+def _demo_mint_allowed(visitor: str) -> bool:
+    """Per-visitor cap on Try Demo mints (per worker). The login throttle only
+    counts FAILED attempts, and every mint runs the demo seed."""
+    import time as _t
+    now = _t.monotonic()
+    recent = [ts for ts in _DEMO_MINTS.get(visitor, []) if now - ts < 60]
+    if len(recent) >= _DEMO_MINTS_PER_MINUTE:
+        _DEMO_MINTS[visitor] = recent
+        return False
+    recent.append(now)
+    _DEMO_MINTS[visitor] = recent
+    if len(_DEMO_MINTS) > 5000:          # bound memory: forget idle visitors
+        for k in [k for k, v in _DEMO_MINTS.items() if not v or now - v[-1] > 60]:
+            _DEMO_MINTS.pop(k, None)
+    return True
+
+
 @router.post("/demo")
 async def demo_session(
     request: Request,
@@ -56,7 +77,19 @@ async def demo_session(
     (/my) links and can be showcased; anything else is the default (venue-side)
     demo user. Both are role "staff" and locked to the demo venue.
     """
+    from rosteriq.services.demo_reset import client_address
     client_ip = request.client.host if request.client else "unknown"
+    # Behind Railway's proxy request.client is the proxy; client_address is the
+    # hop the edge itself saw. It keys both the demo mint throttle and the
+    # reset's same-visitor rule.
+    visitor = client_address(request)
+    if not _demo_mint_allowed(visitor):
+        security("rate.limited", outcome="throttled", path="/api/auth/demo", client_ip=visitor)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many demo sessions from this address. Try again shortly.",
+        )
+
     # Reuse the login throttle: too many recent attempts from this IP -> back off.
     if not auth_service.check_login_rate_limit(client_ip):
         # The api.py request middleware skips /api/auth/* for rate.limited, so
@@ -68,10 +101,26 @@ async def demo_session(
             detail="Too many demo sessions from this address. Try again shortly.",
         )
 
+    # The demo venue is shared by every visitor: wipe what earlier visitors
+    # added (throttled; never under a client still using it), then re-seed —
+    # both under one lock. Postgres work runs off the event loop.
     try:
-        seed_demo_environment(db)
+        from rosteriq.services.demo_reset import reset_and_seed
+        if db.__class__.__name__ == "PostgresStore":
+            import asyncio
+            outcome = await asyncio.to_thread(reset_and_seed, db, visitor)
+        else:
+            outcome = reset_and_seed(db, visitor)
+        if outcome.get("status") == "reset":
+            try:
+                from rosteriq.middleware.cache import get_cache_manager
+                cm = get_cache_manager()
+                for name in ("venue_configs", "employee_lists", "forecast_data", "roster_data"):
+                    await cm.invalidate_all(name)
+            except Exception:
+                pass
     except Exception as e:  # never 500 the public demo path
-        logger.warning("Demo seed issue (continuing): %s", e)
+        logger.warning("Demo reset/seed issue (continuing): %s", e)
 
     if (as_ or "").strip().lower() == "staff":
         demo_user_id, demo_email = DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL
@@ -400,6 +449,11 @@ async def update_current_user(
     """
     Update current user's profile (name only).
     """
+    from rosteriq.services.demo import is_demo_identity
+    if is_demo_identity(current_user.user_id, getattr(current_user, "email", None)):
+        # One login shared by every Try Demo visitor: a rename or a long-lived
+        # API key would persist into everyone else's session.
+        raise HTTPException(status_code=403, detail="The demo account can't be changed \u2014 sign up for your own.")
     user = db.get_user_by_id(current_user.user_id)
     if not user:
         raise HTTPException(
@@ -433,6 +487,11 @@ async def generate_api_key(
     Generate a new API key for the current user.
     The plaintext key is shown only once.
     """
+    from rosteriq.services.demo import is_demo_identity
+    if is_demo_identity(current_user.user_id, getattr(current_user, "email", None)):
+        # One login shared by every Try Demo visitor: a rename or a long-lived
+        # API key would persist into everyone else's session.
+        raise HTTPException(status_code=403, detail="The demo account can't be changed \u2014 sign up for your own.")
     api_key = auth_service.generate_api_key(current_user.user_id)
     user = db.get_user_by_id(current_user.user_id)
 

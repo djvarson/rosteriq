@@ -10,6 +10,7 @@ Usage:
     should_send = prefs_svc.should_notify(user_id, "sms", "shift_reminder")
 """
 
+import copy
 import logging
 from datetime import time, datetime
 from typing import Optional, Dict, Any
@@ -69,7 +70,7 @@ class NotificationPreferences:
             # Merge with defaults to fill in missing keys
             return self._merge_with_defaults(stored)
 
-        return self.DEFAULT_PREFS.copy()
+        return copy.deepcopy(self.DEFAULT_PREFS)
 
     def update_preferences(
         self,
@@ -86,8 +87,13 @@ class NotificationPreferences:
         Returns:
             Merged preferences (with defaults for missing keys)
         """
-        # Merge with defaults to ensure all keys present
-        merged = self._merge_with_defaults(prefs)
+        # A partial update (just quiet hours, say) keeps the user's other saved
+        # choices; merging onto the defaults would silently reset them.
+        current = self.get_preferences(user_id)
+        for section in ("channels", "notification_types", "quiet_hours"):
+            if isinstance(prefs.get(section), dict):
+                current[section].update(prefs[section])
+        merged = self._merge_with_defaults(current)
 
         # Save to database
         self._db.save_notification_preferences(user_id, merged)
@@ -193,7 +199,9 @@ class NotificationPreferences:
 
     def _merge_with_defaults(self, prefs: Dict[str, Any]) -> Dict[str, Any]:
         """Merge user preferences with defaults."""
-        merged = self.DEFAULT_PREFS.copy()
+        # deepcopy: a shallow copy shares the nested dicts, so .update() below
+        # rewrote the class-level defaults for every user without saved prefs.
+        merged = copy.deepcopy(self.DEFAULT_PREFS)
 
         if "channels" in prefs:
             merged["channels"].update(prefs["channels"])

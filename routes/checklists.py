@@ -170,20 +170,17 @@ async def upsert_template(body: TemplateRequest) -> dict:
     return {"status": "saved", "template_id": tpl_id}
 
 
-@router.post("/templates/seed")
-async def seed_default_templates(body: SeedRequest) -> dict:
-    """One click: give the venue the standard AU hospo checklists (idempotent —
-    skips any template name that already exists)."""
-    enforce_venue_manager(body.venue_id)
-    db = get_db()
-    existing_names = {t.get("name") for t in (db.list_checklist_templates(body.venue_id) or [])}
+def seed_default_checklist_templates(db, venue_id: str) -> dict:
+    """The standard AU hospo checklists for a venue (idempotent — skips any
+    template name that already exists). Shared by the route and the demo seed."""
+    existing_names = {t.get("name") for t in (db.list_checklist_templates(venue_id) or [])}
     created = []
     for d in _DEFAULT_TEMPLATES:
         if d["name"] in existing_names:
             continue
         tpl = {
             "id": f"ckt-{uuid.uuid4().hex[:10]}",
-            "venue_id": body.venue_id,
+            "venue_id": venue_id,
             "name": d["name"],
             "schedule": d["schedule"],
             "items": [TemplateItem(**i).model_dump() for i in d["items"]],
@@ -194,6 +191,13 @@ async def seed_default_templates(body: SeedRequest) -> dict:
         created.append(d["name"])
     return {"status": "seeded", "created": created,
             "skipped": sorted(existing_names & {d["name"] for d in _DEFAULT_TEMPLATES})}
+
+
+@router.post("/templates/seed")
+async def seed_default_templates(body: SeedRequest) -> dict:
+    """One click: give the venue the standard AU hospo checklists."""
+    enforce_venue_manager(body.venue_id)
+    return seed_default_checklist_templates(get_db(), body.venue_id)
 
 
 # ---------------------------------------------------------------------------

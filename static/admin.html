@@ -1961,9 +1961,14 @@
                     </span>
                   </div>
                 </div>
-                <button class="btn btn-primary" onclick="createBackupNow()" style="width: 100%; margin-top: 16px;">
-                  💾 Create Backup Now
+                <button class="btn btn-primary" id="btn-backup-now" onclick="createBackupNow()" style="width: 100%; margin-top: 16px;">
+                  💾 Create &amp; download backup
                 </button>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 10px; line-height: 1.5;">
+                  Saves a full copy to this computer &mdash; keep it somewhere private (it holds staff and pay details).
+                  The server's own copy is wiped on every deploy; Railway's daily database backups
+                  (PILOT_OPS.md &sect;2) are the real safety net.
+                </div>
               </div>
             </div>
           </div>
@@ -2650,13 +2655,15 @@
     async function loadBackupStatus() {
       try {
         const response = await fetchWithAuth(`${API_BASE}/admin/backups?limit=1`);
-        if (!response || !response.backups || response.backups.length === 0) {
-          document.getElementById('backup-time').textContent = 'Never';
-          document.getElementById('backup-size').textContent = '--';
+        // The API returns a plain list (older builds wrapped it in {backups})
+        const list = Array.isArray(response) ? response : (response && response.backups) || [];
+        if (list.length === 0) {
+          document.getElementById('backup-time').textContent = 'None on this server';
+          document.getElementById('backup-size').textContent = 'Server copies are wiped on every deploy';
           return;
         }
 
-        const backup = response.backups[0];
+        const backup = list[0];
         const backupDate = new Date(backup.timestamp);
         document.getElementById('backup-time').textContent = backupDate.toLocaleString();
         document.getElementById('backup-size').textContent = `${(backup.size_bytes / 1024 / 1024).toFixed(2)} MB`;
@@ -2674,17 +2681,39 @@
     }
 
     async function createBackupNow() {
-      if (!confirm('Create a new backup now?')) return;
-
+      if (!confirm('Create a backup and download it to this computer?')) return;
+      const btn = document.getElementById('btn-backup-now');
+      const auth = { 'Authorization': `Bearer ${getAuthToken()}` };
+      if (btn) btn.disabled = true;
       try {
-        const response = await fetchWithAuth(`${API_BASE}/admin/backup`, { method: 'POST' });
-        if (response) {
-          alert('Backup created successfully');
-          loadBackupStatus();
+        const res = await fetch(`${API_BASE}/admin/backup`, {
+          method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backup_type: 'full' }),
+        });
+        const meta = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const why = meta.detail || (meta.error || {}).message || res.statusText;
+          alert(`Backup failed (${res.status}): ${why}`);
+          return;
         }
+        const dl = await fetch(`${API_BASE}/admin/backups/${encodeURIComponent(meta.id)}/download`, { headers: auth });
+        if (!dl.ok) {
+          alert(`Backup ${meta.id} was created on the server but could not be downloaded (${dl.status}). ` +
+                'Try again \u2014 the server copy is lost on the next deploy.');
+          return;
+        }
+        const blob = await dl.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `rosteriq-${meta.id}.json.gz`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        loadBackupStatus();
       } catch (e) {
         console.error('Error creating backup:', e);
-        alert('Failed to create backup');
+        alert('Backup failed: ' + e.message);
+      } finally {
+        if (btn) btn.disabled = false;
       }
     }
 

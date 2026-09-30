@@ -185,3 +185,35 @@ def test_synced_employee_never_overwrites_another_venues_record():
     assert save_synced_employee(db, again) is True
     assert db.get_employee("deputy-1").name == "Victim Renamed"
     assert db.get_employee("deputy-1").visa_status == "student"
+
+
+def test_demo_cannot_register_webhooks_onboard_venues_or_store_tokens():
+    c = TestClient(app)
+    h = _demo(c)
+    for method, path, body in [
+        ("POST", "/api/webhooks/subscribe", {"url": "https://attacker.example/hook", "events": ["roster.published"]}),
+        ("POST", "/api/onboarding/start", {"venue_name": "Squat"}),
+        ("POST", "/api/payroll/export/xero", {"venue_id": DEMO_VENUE_ID}),
+        ("POST", "/api/me/link", {"code": "ABCD-EFGH"}),
+    ]:
+        r = c.request(method, path, json=body, headers=h)
+        assert r.status_code == 403, (path, r.status_code, r.text[:160])
+
+
+def test_demo_account_itself_cannot_be_changed():
+    c = TestClient(app)
+    h = _demo(c)
+    assert c.put("/api/auth/me", json={"name": "Renamed By Visitor"}, headers=h).status_code == 403
+    assert c.post("/api/auth/api-key/generate", headers=h).status_code == 403
+
+
+def test_real_user_cannot_redeem_a_demo_join_code():
+    c = TestClient(app)
+    h = _demo(c)
+    code = c.get("/api/employees/demo-staff-002/join-code", headers=h).json()["join_code"]
+    c.post("/api/auth/register", json={"email": "real_person@x.com", "password": "Passw0rd!234", "name": "R"})
+    rh = {"Authorization": "Bearer " + c.post("/api/auth/login", json={"email": "real_person@x.com", "password": "Passw0rd!234"}).json()["access_token"]}
+    r = c.post("/api/me/link", json={"code": code}, headers=rh)
+    assert r.status_code == 400, r.text
+    from rosteriq.database import get_db
+    assert DEMO_VENUE_ID not in (get_db().get_user_by_email("real_person@x.com").get("venue_ids") or [])

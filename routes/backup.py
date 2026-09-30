@@ -222,6 +222,27 @@ async def restore_backup(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/admin/backups/{backup_id}/download")
+async def download_backup(
+    backup_id: str,
+    current_user=Depends(require_owner),
+):
+    """Stream a backup file to the platform owner.
+
+    Backups are written to the container's own disk, which Railway wipes on
+    every deploy and restart — a copy only survives if it is downloaded.
+    """
+    import re
+    from fastapi.responses import FileResponse
+    if not re.fullmatch(r"backup_\d{8}_\d{6}_\d{6}", backup_id or ""):
+        raise HTTPException(status_code=404, detail="Backup not found")
+    metadata = get_backup_service()._find_backup_file(backup_id)
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    return FileResponse(metadata.path, media_type="application/gzip",
+                        filename=f"rosteriq-{backup_id}.json.gz")
+
+
 @router.delete("/admin/backups/{backup_id}")
 async def delete_backup(
     backup_id: str,

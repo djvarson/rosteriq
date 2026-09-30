@@ -1566,12 +1566,18 @@ async def log_routes():
 @app.on_event("startup")
 async def seed_demo_on_boot():
     """Keep the public demo venue dressed (staff, roster, announcements,
-    leave, cover, stock, sales) from the moment a deploy lands — the seeder
-    is idempotent and best-effort, so this can never block boot."""
+    leave, cover, stock, sales) from the moment a deploy lands. Seeds under
+    the demo lock (both workers boot together); on Postgres it runs in the
+    background so waiting for the other worker never delays boot."""
     try:
-        from rosteriq.services.demo import seed_demo_environment
-        seed_demo_environment(get_db())
-        logger.info("Demo environment ensured at startup")
+        from rosteriq.services.demo_reset import seed_on_boot
+        db = get_db()
+        if db.__class__.__name__ == "PostgresStore":
+            import asyncio
+            asyncio.get_running_loop().create_task(asyncio.to_thread(seed_on_boot, db))
+        else:
+            seed_on_boot(db)
+        logger.info("Demo environment check started at startup")
     except Exception as e:
         logger.warning(f"Demo seed at startup skipped: {e}")
 
@@ -2279,34 +2285,34 @@ async def get_http_stats():
 
 @app.get("/staff", tags=["staff"])
 async def staff_portal():
-    """
-    Staff self-service portal — single-page app for shift and availability management.
-
-    Features:
-    - View upcoming shifts with timeline visualization
-    - Set availability preferences by day and time block
-    - Request shift swaps with other staff members
-    - View pay estimates with penalty rate breakdowns
-    - Manage profile information
-
-    Returns static HTML that loads data via authenticated API endpoints.
-    """
-    try:
-        import pathlib
-        staff_file = pathlib.Path(__file__).parent / "static" / "staff.html"
-        if staff_file.exists():
-            from fastapi.responses import FileResponse
-            return FileResponse(staff_file, media_type="text/html")
-        else:
-            return {"error": "Staff portal not found"}, 404
-    except Exception as e:
-        logger.error(f"Error serving staff portal: {e}")
-        return {"error": str(e)}, 500
+    """The legacy staff portal (static/staff.html) is superseded by the
+    staff app at /my; old links and bookmarks land there instead."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/my")
 
 
 # ============================================================================
 # Venue management
 # ============================================================================
+
+def _response_cacheable() -> bool:
+    # Try Demo sessions aren't cached: a demo reset on one worker would leave
+    # another worker serving its cached (possibly mid-reset, empty) lists.
+    from rosteriq.services.demo import is_demo_identity
+    t = get_tenant_context_optional()
+    return not (t is not None and is_demo_identity(getattr(t, "user_id", None), None))
+
+
+def _refuse_reserved_id(obj_id, venue_id, existing=None) -> None:
+    # "demo-" ids belong to the Try Demo seed, which re-creates them after
+    # every demo reset — so a venue can't create one, or take the seed's. A
+    # record the venue already holds under such an id stays editable.
+    from rosteriq.services.demo import DEMO_VENUE_ID
+    if existing is not None and getattr(existing, "venue_id", None) == venue_id:
+        return
+    if str(obj_id or "").lower().startswith("demo-") and venue_id != DEMO_VENUE_ID:
+        raise HTTPException(422, "Ids starting with 'demo-' are reserved \u2014 choose another id")
+
 
 def _refuse_demo_write(message: str) -> None:
     # The public demo is one shared sandbox: anything it creates is seen by the
@@ -2404,7 +2410,7 @@ async def list_venues(
     _scope = "owner" if (_tenant is None or _tenant.is_owner) else ",".join(sorted(_tenant.venue_ids))
 
     # Use cache if available
-    if get_cache_manager and request:
+    if get_cache_manager and request and _response_cacheable():
         try:
             cache_key = f"venues_scope={_scope}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
@@ -2428,7 +2434,7 @@ async def list_venues(
     }
 
     # Store in cache if available
-    if get_cache_manager and request:
+    if get_cache_manager and request and _response_cacheable():
         try:
             cache_key = f"venues_scope={_scope}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
@@ -2527,6 +2533,7 @@ async def create_employee(employee: Employee):
     # belong to no tenant and slip every venue-scoped read.
     if not getattr(employee, "venue_id", None):
         raise HTTPException(422, "venue_id is required")
+    _refuse_reserved_id(employee.id, employee.venue_id, _store["employees"].get(employee.id))
     _refuse_demo_write("Sample staff can't be changed in the demo \u2014 sign up to manage your own team.")
     enforce_venue_manager(getattr(employee, "venue_id", None))
     previous = _store["employees"].get(employee.id)
@@ -2554,6 +2561,7 @@ async def bulk_create_employees(employees: list[Employee]):
     for emp in employees:
         if not getattr(emp, "venue_id", None):
             raise HTTPException(422, "venue_id is required on every employee")
+        _refuse_reserved_id(emp.id, emp.venue_id, _store["employees"].get(emp.id))
         enforce_venue_manager(getattr(emp, "venue_id", None))
         _guard_employee_overwrite(_store["employees"].get(emp.id))
     for emp in employees:
@@ -2594,7 +2602,7 @@ async def list_employees(
     _scope += "_mgr" if _is_mgr else "_staff"
 
     # Use cache if available
-    if get_cache_manager and request:
+    if get_cache_manager and request and _response_cacheable():
         try:
             cache_key = f"employees_scope={_scope}_venue={venue_id}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
@@ -2627,7 +2635,7 @@ async def list_employees(
     }
 
     # Store in cache if available
-    if get_cache_manager and request:
+    if get_cache_manager and request and _response_cacheable():
         try:
             cache_key = f"employees_scope={_scope}_venue={venue_id}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
@@ -2670,6 +2678,7 @@ async def add_forecasts(forecasts: list[DemandForecast]):
     # checked for ALL rows before ANY row is written.
     for f in forecasts:
         enforce_venue_manager(getattr(f, "venue_id", None))
+        _refuse_reserved_id(getattr(f, "id", None), getattr(f, "venue_id", None))
     _store["forecasts"].extend(forecasts)
 
     # Invalidate forecast cache
@@ -2700,7 +2709,7 @@ async def get_forecasts(
     _scope = "owner" if (_tenant is None or _tenant.is_owner) else ",".join(sorted(_tenant.venue_ids))
 
     # Use cache if available
-    if get_cache_manager and request:
+    if get_cache_manager and request and _response_cacheable():
         try:
             cache_key = f"forecasts_scope={_scope}_venue={venue_id}_start={start_date}_end={end_date}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
@@ -2731,7 +2740,7 @@ async def get_forecasts(
     }
 
     # Store in cache if available
-    if get_cache_manager and request:
+    if get_cache_manager and request and _response_cacheable():
         try:
             cache_key = f"forecasts_scope={_scope}_venue={venue_id}_start={start_date}_end={end_date}_limit={limit}_offset={offset}"
             cache_manager = get_cache_manager()
@@ -2774,7 +2783,8 @@ async def get_required_staff(
 
 async def _ensure_week_forecasts(venue, week_start):
     """
-    Return the week's demand forecasts, generating cold-start ones if none exist.
+    Return the week's demand forecasts, generating cold-start ones for any day
+    that has none.
 
     The roster engine REQUIRES DemandForecasts. A brand-new venue has no sales
     history, so without this /rosters/generate would 400 ("No forecasts") and the
@@ -2785,14 +2795,18 @@ async def _ensure_week_forecasts(venue, week_start):
     week_end = week_start + timedelta(days=6)
     # Query only THIS venue's week (not a full scan of every venue's forecasts —
     # which on Postgres materialised the whole table into memory each call).
-    existing = get_db().get_forecasts(venue.id, week_start, week_end)
-    if existing:
+    existing = list(get_db().get_forecasts(venue.id, week_start, week_end) or [])
+    # A week with only SOME days forecast (the demo seeds just today; a POS
+    # import may cover a few days) used to roster only those days.
+    have_days = {f.date for f in existing}
+    if len(have_days) >= 7:
         return existing
     try:
         generated = EnsembleForecaster(venue).predict_week(week_start)
     except Exception as e:
         logger.warning(f"Cold-start forecast generation failed for {venue.id}: {e}")
         generated = []
+    generated = [f for f in generated if f.date not in have_days]
     if generated:
         _store["forecasts"].extend(generated)
         # Keep the forecast list cache fresh (mirrors POST /forecasts).
@@ -2805,7 +2819,7 @@ async def _ensure_week_forecasts(venue, week_start):
             "Cold-start: generated %d forecasts for venue %s (week of %s)",
             len(generated), venue.id, week_start,
         )
-    return generated
+    return existing + generated
 
 
 def _approved_leave_map(venue_id: str) -> dict:

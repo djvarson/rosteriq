@@ -3220,7 +3220,7 @@
                 <button class="btn btn-secondary btn-small" id="btn-prev-week">← Previous</button>
                 <button class="btn btn-secondary btn-small" id="btn-next-week">Next →</button>
                 <button class="btn btn-secondary btn-small" onclick="openRosterImport()" title="Paste a roster export from Deputy, Tanda, or a spreadsheet">Import roster</button>
-                <button class="btn btn-primary btn-small" id="btn-roster-generate" onclick="openModal('modal-generate-roster')">Generate Roster</button>
+                <button class="btn btn-primary btn-small" id="btn-roster-generate" onclick="openGenerateRoster()">Generate Roster</button>
                 <span style="display:inline-block; width:1px; height:20px; background:var(--border); margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterPDF()" title="Download PDF for printing">PDF</button>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterCSV()" title="Download CSV for Excel">CSV</button>
@@ -5126,7 +5126,7 @@
       </div>
       <div class="input-group">
         <label>Covers per Staff Member</label>
-        <input type="number" id="modal-covers-per-staff" placeholder="e.g., 8" step="0.5">
+        <input type="number" id="modal-covers-per-staff" placeholder="15 (default)" step="0.5">
       </div>
     </div>
     <div class="modal-footer">
@@ -5649,6 +5649,7 @@ let state = {
   venues: [],
   employees: [],
   rosters: [],
+  currentRosterId: null,   // the roster on screen in the Roster grid
   forecasts: [],
   signals: [],
   ws: null,
@@ -5673,7 +5674,7 @@ if (state.isDemo) {
   var demoBanner = document.createElement('div');
   demoBanner.id = 'demo-banner';
   demoBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:#F59E0B;color:#111827;text-align:center;padding:6px 16px;font-size:13px;font-weight:600;letter-spacing:0.5px;';
-  demoBanner.innerHTML = 'DEMO MODE — Sample data only. <a href="/static/login.html" style="color:#000;text-decoration:underline;margin-left:8px;">Sign in</a> or <a href="/static/register.html" style="color:#000;text-decoration:underline;">Create an account</a> to connect your real systems.';
+  demoBanner.innerHTML = 'DEMO MODE — Sample data only. <a href="/my?demo=staff" target="_blank" rel="noopener" style="color:#000;text-decoration:underline;margin-left:8px;">Open the staff phone (Emma) ↗</a> · <a href="/static/login.html" style="color:#000;text-decoration:underline;">Sign in</a> or <a href="/static/register.html" style="color:#000;text-decoration:underline;">Create an account</a> to connect your real systems.';
   document.body.prepend(demoBanner);
   // Shift everything down so banner doesn't cover logo/content
   var sidebar = document.querySelector('.sidebar');
@@ -9178,10 +9179,19 @@ function renderStaffTable() {
     var rate = e.hourly_base_rate != null ? '$' + Number(e.hourly_base_rate).toFixed(2) : '—';
     var certs = (e.certifications || e.certs || []);
     var certTxt = certs.length ? certs.map(function(c) { return esc(c.name || c.type || c); }).join(', ') : '<span style="color:var(--text-muted)">—</span>';
-    var avDays = Object.keys(e.availability || {}).length;
-    var av = avDays === 0 ? '<span class="alert-badge badge-secondary">Not set</span>'
-           : avDays >= 5 ? '<span class="alert-badge badge-success">Available</span>'
-           : '<span class="alert-badge badge-warning">Limited</span>';
+    // Same rule as the roster: an unlisted day is available, [] is a day off,
+    // time ranges are a part day.
+    var avMap = e.availability || {}, offDays = 0, partDays = 0;
+    Object.keys(avMap).forEach(function(d) {
+      var v = avMap[d];
+      if (v === true || v == null) return;
+      if (v === false || (Array.isArray(v) && v.length === 0)) offDays++; else partDays++;
+    });
+    var avBits = [];
+    if (offDays) avBits.push('Off ' + offDays + (offDays === 1 ? ' day' : ' days'));
+    if (partDays) avBits.push(partDays + ' part ' + (partDays === 1 ? 'day' : 'days'));
+    var av = avBits.length ? '<span class="alert-badge badge-warning">' + avBits.join(' · ') + '</span>'
+           : '<span class="alert-badge badge-success">Available</span>';
     // Work-rights chip: expired = red, expiring within 28 days = amber,
     // capped visa = neutral note. Citizens/PRs and unrecorded stay quiet.
     var visaChip = '';
@@ -9896,6 +9906,7 @@ function populateDemoStaffList() {
 // ============================================
 document.getElementById('venue-select').addEventListener('change', (e) => {
   state.currentVenue = e.target.value;
+  state.currentRosterId = null;   // the old venue's roster is no longer on screen
   if (state.currentVenue) {
     // Close old WS connection if any and connect to new venue
     if (state.ws) {
@@ -9909,15 +9920,25 @@ document.getElementById('venue-select').addEventListener('change', (e) => {
   }
 });
 
-document.getElementById('btn-generate-roster').addEventListener('click', () => {
-  const today = new Date();
-  document.getElementById('modal-roster-date').valueAsDate = today;
+// Every "Generate roster" button opens the modal through here, defaulting the
+// week to next Monday as a LOCAL date (valueAsDate is UTC: in Perth before 8am
+// it showed yesterday). Rosters are built a week ahead.
+function openGenerateRoster() {
+  const input = document.getElementById('modal-roster-date');
+  if (input && !input.value) {
+    const d = new Date();
+    d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
+    input.value = localIso(d);
+  }
   openModal('modal-generate-roster');
-});
+}
+document.getElementById('btn-generate-roster').addEventListener('click', openGenerateRoster);
 
 document.getElementById('btn-modal-generate').addEventListener('click', async () => {
   const date = document.getElementById('modal-roster-date').value;
-  const coversPerStaff = parseFloat(document.getElementById('modal-covers-per-staff').value) || 8;
+  // Blank = the server's default (15): the ratio the coverage check,
+  // onboarding and the AI all use.
+  const coversPerStaff = parseFloat(document.getElementById('modal-covers-per-staff').value) || 15;
 
   if (!date || !state.currentVenue) {
     alert('Please select a date');
@@ -9948,8 +9969,9 @@ document.getElementById('btn-modal-generate').addEventListener('click', async ()
         ? a.name + "'s visa has EXPIRED — confirm work rights before publishing."
         : a.name + "'s visa expires " + a.expiry + ' — re-check VEVO.', 'warning');
     }
-    loadVenueData();
-    showRosterWeekOf(date);
+    if (result && result.id) state.currentRosterId = result.id;
+    await loadVenueData();
+    showRosterWeekOf(date, result);
     if (result && result.id) checkRosterCoverage(result.id, coversPerStaff);
   } catch (error) {
     showError('#page-dashboard', 'Failed to generate roster: ' + error.message);
@@ -10308,13 +10330,11 @@ document.getElementById('btn-optimiser-discard').addEventListener('click', () =>
 // CONFLICT DETECTION FUNCTIONS
 // ============================================================================
 async function scanConflicts() {
-  if (!state.rosters || state.rosters.length === 0) {
+  const rosterId = displayedRosterId();
+  if (!rosterId) {
     showError('#page-dashboard', 'No roster available for conflict detection');
     return;
   }
-
-  const rosterId = state.rosters[0]?.id;
-  if (!rosterId) return;
 
   try {
     document.getElementById('btn-conflict-scan').disabled = true;
@@ -10395,9 +10415,7 @@ function getSeverityIcon(severity) {
 document.getElementById('btn-conflict-scan').addEventListener('click', scanConflicts);
 
 document.getElementById('btn-conflict-autofix').addEventListener('click', async () => {
-  if (!state.rosters || state.rosters.length === 0) return;
-
-  const rosterId = state.rosters[0]?.id;
+  const rosterId = displayedRosterId();
   if (!rosterId) return;
 
   try {
@@ -10724,8 +10742,16 @@ function displayNotificationLog(auditData) {
       }
     } catch (e) { /* offline demo still renders the static showcase */ }
   }
-  loadVenues();
+  try { await loadVenues(); } catch (e) { /* loadVenues reports its own failures */ }
+  openPageFromUrl();
 })();
+
+// Deep link: /static/dashboard.html?page=staff opens that page (e.g. from
+// the Connections sidebar). Unknown values are ignored by showPage.
+function openPageFromUrl() {
+  var page = new URLSearchParams(window.location.search).get('page');
+  if (page && /^[a-z-]{2,30}$/.test(page)) showPage(page);
+}
 // Check if returning from Deputy OAuth redirect
 checkDeputyOAuthReturn();
 // Charts are initialized inside loadVenueData() or loadDemoVenueData()
@@ -12424,7 +12450,7 @@ async function publishRoster() {
   const btn = document.getElementById('btn-publish-roster');
   const venueId = state.currentVenue;
   if (!venueId) { showToast('No venue selected', 'error'); return; }
-  const rosterId = (state.rosters && state.rosters.length > 0) ? state.rosters[0].id : null;
+  const rosterId = displayedRosterId();
   if (!rosterId) { showToast('Generate a roster first, then publish.', 'warning', 4000); return; }
 
   if (btn) { btn.disabled = true; btn.textContent = 'Publishing...'; }
@@ -12503,9 +12529,7 @@ async function pushToRosteringSystem() {
     }
 
     // Get the current roster ID (from state or generate one)
-    const rosterId = (state.rosters && state.rosters.length > 0)
-      ? state.rosters[0].id
-      : 'current';
+    const rosterId = displayedRosterId() || 'current';
 
     let result;
     if (connectedSystem.method === 'publish') {
@@ -12736,6 +12760,7 @@ async function loadRosterForWeek() {
     const resp = await fetchAPI('/rosters?venue_id=' + encodeURIComponent(venueId) + '&week_start=' + dateStr);
     const rosters = ((resp && resp.items) || (Array.isArray(resp) ? resp : []))
       .slice().sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    state.currentRosterId = rosters.length > 0 ? rosters[0].id : null;
     if (rosters.length > 0) {
       renderRosterTable(rosters[0]);
     } else {
@@ -12762,13 +12787,28 @@ function refreshRealRoster() {
   loadRosterForWeek();
 }
 
-function showRosterWeekOf(dateStr) {
-  if (state.isDemo || !dateStr) return;
+function showRosterWeekOf(dateStr, roster) {
+  if (!dateStr) return;
   const p = String(dateStr).split('-').map(Number);
   const target = new Date(p[0], p[1] - 1, p[2]);
   const weeks = Math.round((target - getWeekMonday(0)) / (7 * 86400000));
+  if (state.isDemo) {
+    // The demo grid opens on hand-authored sample rows; once a visitor
+    // generates, show THEIR roster — it's the one Publish will publish.
+    if (!roster || !roster.shifts) return;
+    rosterWeekOffset = Math.max(-4, Math.min(4, weeks));
+    updateRosterWeekDisplay();
+    renderRosterTable(roster);
+    return;
+  }
   rosterWeekOffset = Math.max(-4, Math.min(4, weeks));
   refreshRealRoster();
+}
+
+// The roster Publish / conflict scan act on: the one on screen, else the newest.
+function displayedRosterId() {
+  if (state.currentRosterId) return state.currentRosterId;
+  return (state.rosters && state.rosters.length > 0) ? state.rosters[0].id : null;
 }
 
 function renderRosterTable(roster) {
@@ -13143,7 +13183,7 @@ function _aiInsightCard(insight) {
   if (a && a.label) {
     const run = {
       ask_ai: () => { showPage('ai-agent'); setTimeout(() => aiQuickQuestion(a.prompt || ''), 300); },
-      generate_roster: () => { navigateTo('roster'); openModal('modal-generate-roster'); },
+      generate_roster: () => { navigateTo('roster'); openGenerateRoster(); },
       open_integrations: () => { window.location.href = '/connections'; },
     }[a.type];
     if (run) {

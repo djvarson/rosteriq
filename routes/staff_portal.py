@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
+from rosteriq.services.availability_rules import day_windows
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.demo import (
@@ -473,12 +474,13 @@ async def my_availability(user: UserContext = Depends(get_current_user)) -> dict
     avail = getattr(emp, "availability", {}) or {}
     days = []
     for d in _WEEKDAYS:
-        if d not in avail:
+        windows = day_windows(avail, d)
+        if windows is None:
             days.append({"day": d, "status": "available", "ranges": []})
-        elif not avail[d]:
+        elif not windows:
             days.append({"day": d, "status": "unavailable", "ranges": []})
         else:
-            days.append({"day": d, "status": "partial", "ranges": avail[d]})
+            days.append({"day": d, "status": "partial", "ranges": windows})
     return {"linked": True, "days": days}
 
 
@@ -506,13 +508,14 @@ async def set_my_availability(body: AvailabilityBody,
                                     detail=f"{d}: 'partial' needs at least one time range")
             clean = []
             for r in spec.ranges:
-                start = r.start.strip()
-                end = r.end.strip()
+                s_min, e_min = _parse_hhmm(r.start.strip()), _parse_hhmm(r.end.strip())
                 # Minute-precise: 17:30–17:45 is valid; 17:00–17:00 is not.
-                if _parse_hhmm(start) >= _parse_hhmm(end):
+                if s_min >= e_min:
                     raise HTTPException(status_code=422,
-                                        detail=f"{d}: range start {start} must be before end {end}")
-                clean.append({"start": start, "end": end})
+                                        detail=f"{d}: range start {r.start.strip()} must be before end {r.end.strip()}")
+                # Stored as HH:MM, whatever was typed ("9" -> "09:00").
+                clean.append({"start": f"{s_min // 60:02d}:{s_min % 60:02d}",
+                              "end": f"{e_min // 60:02d}:{e_min % 60:02d}"})
             avail[d] = clean
 
     emp.availability = avail
@@ -613,6 +616,42 @@ async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
             "claimed_by_me": claimed_by_me}
 
 
+def _span_minutes(start, end) -> tuple:
+    def m(t):
+        if isinstance(t, str):
+            hh, mm = t.strip()[:5].split(":")
+            return int(hh) * 60 + int(mm)
+        return t.hour * 60 + t.minute
+    s, e = m(start), m(end)
+    return s, (e if e > s else e + 24 * 60)      # an overnight shift runs past midnight
+
+
+def _clashing_shift(db, venue_id: str, employee_id: str, cover: dict):
+    """The employee's own shift at this venue that overlaps the cover's shift,
+    if any — taking the cover would double-book them."""
+    day = cover.get("shift_date")
+    if not isinstance(day, date):
+        day = date.fromisoformat(str(day)[:10])
+    s, e = _span_minutes(cover.get("shift_start") or "00:00", cover.get("shift_end") or "23:59")
+    for roster in db.list_rosters() or []:
+        if getattr(roster, "venue_id", None) != venue_id:
+            continue
+        for sh in roster.shifts or []:
+            if sh.id == cover.get("shift_id") or sh.employee_id != employee_id or sh.date != day:
+                continue
+            if str(getattr(sh.status, "value", sh.status)) in ("cancelled", "no_show"):
+                continue
+            a, b = _span_minutes(sh.start_time, sh.end_time)
+            if a < e and s < b:
+                return sh
+    return None
+
+
+def _clash_detail(sh, whose: str) -> str:
+    return (f"{whose} already rostered {sh.start_time.strftime('%H:%M')}\u2013"
+            f"{sh.end_time.strftime('%H:%M')} that day, which overlaps this shift")
+
+
 @router.post("/api/me/cover/{cover_id}/claim")
 async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_user)) -> dict:
     """Claim a co-worker's open shift — goes to the manager for approval."""
@@ -627,6 +666,9 @@ async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_use
         raise HTTPException(status_code=409, detail="You can't claim your own shift")
     if cover.get("status") != "open":
         raise HTTPException(status_code=409, detail=f"This shift is already {cover.get('status')}")
+    clash = _clashing_shift(db, vid, emp.id, cover)
+    if clash is not None:
+        raise HTTPException(status_code=409, detail=_clash_detail(clash, "You're"))
     cover["claimed_by"] = emp.id
     cover["status"] = "claimed"
     db.save_shift_cover(cover)
@@ -689,9 +731,10 @@ async def team_availability(venue_id: str = Query(...)) -> dict:
         days = {}
         constrained = []
         for d in _WEEKDAYS:
-            if d not in avail:
+            windows = day_windows(avail, d)
+            if windows is None:
                 days[d] = "available"
-            elif not avail[d]:
+            elif not windows:
                 days[d] = "unavailable"
                 constrained.append(d[:3])
             else:
@@ -750,6 +793,10 @@ async def decide_cover(cover_id: str, body: CoverDecision,
 
     claimant_id = cover.get("claimed_by")
     if body.approve:
+        clash = _clashing_shift(db, body.venue_id, claimant_id, cover)
+        if clash is not None:
+            raise HTTPException(status_code=409, detail=_clash_detail(
+                clash, _emp_name(db, body.venue_id, claimant_id) + " is") + " \u2014 decline this request instead.")
         # The roster is the source of truth — a cover is only approved if the
         # shift genuinely moves. Fail loud if the roster changed underneath us.
         if not _reassign_shift(db, body.venue_id, cover["shift_id"], cover["claimed_by"]):
