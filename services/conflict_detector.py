@@ -32,6 +32,7 @@ from rosteriq.award_rules import (
     MAX_SHIFT_LENGTH_HOURS, MINIMUM_HOURS_BETWEEN_SHIFTS, MAX_CONSECUTIVE_DAYS,
     get_day_type, DayType,
 )
+from rosteriq.services.availability_rules import is_available
 
 logger = logging.getLogger(__name__)
 
@@ -163,13 +164,15 @@ class ConflictDetector:
 
     def _check_availability_violation(self, shift: Shift, employee: Employee) -> None:
         """Check if shift falls outside employee's stated availability."""
-        if not employee.availability:
+        # The shared rule (services/availability_rules.py): unavailable that
+        # day = CRITICAL; available that day but outside every window = WARNING.
+        availability = employee.availability
+        if is_available(availability, shift.date, shift.start_time, shift.end_time):
             return
 
         day_name = shift.date.strftime("%A").lower()
-        available_ranges = employee.availability.get(day_name, [])
 
-        if not available_ranges:
+        if not is_available(availability, shift.date):
             self.conflicts.append(RosterConflict(
                 conflict_type=ConflictType.AVAILABILITY_VIOLATION,
                 severity=ConflictSeverity.CRITICAL,
@@ -184,29 +187,19 @@ class ConflictDetector:
             ))
             return
 
-        shift_in_available_range = False
-        for avail_range in available_ranges:
-            start_time = self._parse_time(avail_range.get("start"))
-            end_time = self._parse_time(avail_range.get("end"))
-
-            if start_time and end_time:
-                if start_time <= shift.start_time and shift.end_time <= end_time:
-                    shift_in_available_range = True
-                    break
-
-        if not shift_in_available_range:
-            self.conflicts.append(RosterConflict(
-                conflict_type=ConflictType.AVAILABILITY_VIOLATION,
-                severity=ConflictSeverity.WARNING,
-                message=(
-                    f"Employee {employee.id} shift {shift.start_time}-{shift.end_time} "
-                    f"falls outside availability on {day_name}"
-                ),
-                employee_ids=[employee.id],
-                shift_ids=[shift.id],
-                date=shift.date,
-                suggestion=f"Adjust shift times to match availability or confirm with employee"
-            ))
+        # Available that day, but no window holds the whole shift.
+        self.conflicts.append(RosterConflict(
+            conflict_type=ConflictType.AVAILABILITY_VIOLATION,
+            severity=ConflictSeverity.WARNING,
+            message=(
+                f"Employee {employee.id} shift {shift.start_time}-{shift.end_time} "
+                f"falls outside availability on {day_name}"
+            ),
+            employee_ids=[employee.id],
+            shift_ids=[shift.id],
+            date=shift.date,
+            suggestion=f"Adjust shift times to match availability or confirm with employee"
+        ))
 
     # Generic roles that any hospitality employee can fill — not a specific skill.
     _GENERIC_ROLES = {"general", "any", "staff", "floor_general"}

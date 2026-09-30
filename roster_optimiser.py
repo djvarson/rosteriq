@@ -38,6 +38,7 @@ from rosteriq.award_rules import (
     MAX_SHIFT_LENGTH_HOURS,
 )
 from rosteriq.cost_calculator import calculate_shift_cost_breakdown, calculate_roster_cost
+from rosteriq.services.availability_rules import is_available
 
 
 # ============================================================================
@@ -192,19 +193,6 @@ def _employee_cost_score(
     return (type_cost * multiplier) + overtime_penalty + (fairness * 0.3)
 
 
-def _hhmm_to_minutes(value, default_minutes: int) -> int:
-    """'HH:MM' (or 'HH') -> minutes since midnight; default on garbage
-    (fail-open, matching the prior 'can't parse = assume available')."""
-    try:
-        s = str(value)
-        if ":" in s:
-            h, m = s.split(":")[:2]
-            return int(h) * 60 + int(m)
-        return int(s) * 60
-    except (ValueError, TypeError):
-        return default_minutes
-
-
 def _is_employee_available(
     employee: Employee,
     target_date: date,
@@ -259,24 +247,10 @@ def _is_employee_available(
         if rest_hours < 10:
             return False, f"Only {rest_hours}h rest (need 10h minimum)"
 
-    # Check availability schedule (if provided). Compare in MINUTES so a
-    # window like 17:30–21:30 is honoured to the minute — the old hour-only
-    # truncation rostered staff outside the window they set.
-    if employee.availability:
-        day_name = target_date.strftime("%A").lower()
-        if day_name in employee.availability:
-            ranges = employee.availability[day_name]
-            shift_start_min = start_hour * 60
-            shift_end_min = end_hour * 60
-            available = False
-            for r in ranges:
-                avail_start = _hhmm_to_minutes(r.get("start"), 0)
-                avail_end = _hhmm_to_minutes(r.get("end"), 24 * 60)
-                if avail_start <= shift_start_min and avail_end >= shift_end_min:
-                    available = True
-                    break
-            if not available:
-                return False, "Not available at this time"
+    # Availability, by the one shared rule (to the minute; "23:59" = close).
+    if not is_available(employee.availability, target_date,
+                        f"{start_hour:02d}:00", f"{end_hour:02d}:00"):
+        return False, "Not available at this time"
 
     return True, ""
 
@@ -494,8 +468,11 @@ def generate_daily_roster(
                 if not _employee_can_fill_role(emp, role):
                     continue
 
+                # Check the shift they'd actually work (stretched to minimum
+                # engagement / clamped to max length), not the demand period.
+                template = _best_shift_template(start_h, end_h, emp.employment_type)
                 available, reason = _is_employee_available(
-                    emp, target_date, start_h, end_h,
+                    emp, target_date, template[0], template[1],
                     existing_shifts + day_shifts,
                     weekly_hours[emp.id],
                 )
@@ -503,20 +480,17 @@ def generate_daily_roster(
                     continue
 
                 score = _employee_cost_score(emp, target_date, state, weekly_hours[emp.id])
-                candidates.append((score, emp))
+                candidates.append((score, emp, template))
 
             # Sort by score (lowest = cheapest)
             candidates.sort(key=lambda x: x[0])
 
             # Assign up to role_count employees to this role.
             assigned_for_role = 0
-            for _, emp in candidates:
+            for _, emp, (shift_start, shift_end, break_mins) in candidates:
                 if assigned_for_role >= role_count:
                     break
 
-                shift_start, shift_end, break_mins = _best_shift_template(
-                    start_h, end_h, emp.employment_type
-                )
                 shift = _create_shift(
                     emp, target_date, shift_start, shift_end, break_mins, role=role
                 )

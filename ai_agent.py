@@ -16,7 +16,7 @@ import json
 import asyncio
 import logging
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional, AsyncGenerator
 from enum import Enum
 
@@ -24,8 +24,68 @@ import httpx
 
 from rosteriq.database import get_db
 from rosteriq.models import Employee, Shift, State
+from rosteriq.services.availability_rules import is_available
 
 logger = logging.getLogger(__name__)
+
+# Staff whose record hasn't been touched in longer than this are flagged as
+# having stale availability (the staff app bumps updated_at on every save).
+AVAILABILITY_STALE_DAYS = 14
+
+
+def _availability_age_days(emp) -> Optional[int]:
+    """Whole days since the employee record (and so their availability) was
+    last saved, from Employee.updated_at. None if there's no usable stamp.
+    Aware stamps (Postgres timestamptz) and naive ones (datetime.utcnow() from
+    the staff app) are both compared in UTC."""
+    ts = getattr(emp, "updated_at", None)
+    if ts is None or ts == "":
+        return None
+    if isinstance(ts, str):
+        try:
+            ts = datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    elif isinstance(ts, date) and not isinstance(ts, datetime):
+        ts = datetime(ts.year, ts.month, ts.day)
+    if not isinstance(ts, datetime):
+        return None
+    if ts.tzinfo is not None:
+        ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return (now - ts).days
+
+def _tool_time(value) -> Optional[str]:
+    """A model-supplied time as 'HH:MM': '' when absent, None when it can't be
+    read (so the tool can ask again rather than guess). Takes '17:30', '5pm',
+    '5:30 PM', '1730'."""
+    text = str(value or "").strip().lower().replace(" ", "").replace(".", "")
+    if not text:
+        return ""
+    m = re.match(r"^(\d{1,2}):?(\d{2})?(am|pm)?$", text)
+    if not m:
+        return None
+    hh, mm, ap = int(m.group(1)), int(m.group(2) or 0), m.group(3)
+    if ap == "pm" and hh < 12:
+        hh += 12
+    elif ap == "am" and hh == 12:
+        hh = 0
+    if not (0 <= hh <= 23 and 0 <= mm <= 59) or (ap and not 1 <= int(m.group(1)) <= 12):
+        return None
+    return f"{hh:02d}:{mm:02d}"
+
+
+def _default_shift_end(start_time: str) -> str:
+    """The venue's close isn't recorded, so a shift asked about with no end
+    is taken as 4 hours from its start (capped at end of day)."""
+    try:
+        text = str(start_time).strip()[:5]
+        hh, mm = text.split(":")[:2] if ":" in text else (text, "0")
+        m = min(int(hh) * 60 + int(mm) + 240, 24 * 60 - 1)
+        return f"{m // 60:02d}:{m % 60:02d}"
+    except (TypeError, ValueError):
+        return "23:59"
+
 
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
 
@@ -312,8 +372,8 @@ GEMINI_TOOLS = [
                 "type": "OBJECT",
                 "properties": {
                     "date": {"type": "STRING", "description": "Date to check availability for (YYYY-MM-DD). Defaults to today."},
-                    "start_time": {"type": "STRING", "description": "Shift start time (HH:MM). Defaults to now."},
-                    "end_time": {"type": "STRING", "description": "Shift end time (HH:MM). Defaults to close."},
+                    "start_time": {"type": "STRING", "description": "Shift start time (HH:MM, 24-hour). If omitted, staff available at any point on the date are listed."},
+                    "end_time": {"type": "STRING", "description": "Shift end time (HH:MM). If omitted, a 4-hour shift from start_time is assumed."},
                     "role": {"type": "STRING", "description": "Role needed (e.g. 'bar', 'kitchen', 'floor', 'runner'). Optional — returns all if not specified."},
                     "include_unavailable": {"type": "BOOLEAN", "description": "Include staff marked as unavailable. Default true (per venue owner request)."},
                 },
@@ -819,9 +879,11 @@ class AgentContext:
     async def _tool_find_available_staff(self, params: dict) -> dict:
         """SOS staff finder — returns all staff with availability status and contact details."""
         target_date_str = params.get("date", self.today.isoformat())
-        start_time = params.get("start_time", "")
-        end_time = params.get("end_time", "")
-        role_filter = params.get("role", "").lower()
+        start_time = _tool_time(params.get("start_time"))
+        end_time = _tool_time(params.get("end_time"))
+        if start_time is None or end_time is None:
+            return {"error": "Times must be HH:MM in 24-hour time, e.g. 17:30."}
+        role_filter = (params.get("role") or "").strip().lower()
         include_unavailable = params.get("include_unavailable", True)
 
         try:
@@ -848,54 +910,50 @@ class AgentContext:
         for emp in employees:
             eid = str(getattr(emp, "id", None) or getattr(emp, "external_id", ""))
             name = getattr(emp, "name", "Unknown")
-            role = getattr(emp, "role", "")
+            # Employees carry skills, not a single role — same derivation as
+            # _tool_get_employees: an explicit role if any, else the primary skill.
+            skills = [str(s) for s in (getattr(emp, "skills", None) or []) if s]
+            role = getattr(emp, "role", None) or next(iter(skills), None)
             phone = getattr(emp, "phone", None)
             email = getattr(emp, "email", None)
             emp_type = str(getattr(emp, "employment_type", "casual"))
 
-            # Apply role filter if specified
-            if role_filter and role_filter not in (role or "").lower():
+            # Apply role filter if specified — against the role and every skill
+            if role_filter and not any(
+                role_filter in r.lower() for r in ([str(role)] if role else []) + skills
+            ):
                 continue
 
             entry = {
                 "id": eid,
                 "name": name,
                 "role": role,
+                "skills": skills,
                 "employment_type": emp_type,
                 "phone": phone,
                 "email": email,
                 "already_rostered": eid in rostered_ids,
             }
 
-            # Check availability data freshness
-            avail_updated = getattr(emp, "availability_updated_at", None)
-            if avail_updated:
-                try:
-                    updated_dt = datetime.fromisoformat(str(avail_updated)[:19])
-                    days_old = (datetime.now() - updated_dt).days
-                    entry["availability_days_old"] = days_old
-                    if days_old > 14:
-                        entry["stale_availability"] = True
-                        stale_availability.append(name)
-                except (ValueError, TypeError):
-                    entry["availability_days_old"] = None
-            else:
-                entry["availability_days_old"] = None
+            # Check availability data freshness (updated_at is bumped when
+            # staff save their availability in the staff app)
+            days_old = _availability_age_days(emp)
+            entry["availability_days_old"] = days_old
+            if days_old is not None and days_old > AVAILABILITY_STALE_DAYS:
+                entry["stale_availability"] = True
+                stale_availability.append(name)
 
-            # Check if employee has availability preferences
+            # Availability per the shared rule (services/availability_rules):
+            # {} / unlisted day = available, [] = unavailable that day,
+            # ranges = available only if the requested shift fits inside one.
             avail = getattr(emp, "availability", None)
-            is_available = True  # Default to available if no data
-
-            if isinstance(avail, dict):
-                day_name = target_date.strftime("%A").lower()
-                day_avail = avail.get(day_name, avail.get(day_name[:3], None))
-                if day_avail is not None:
-                    if isinstance(day_avail, bool):
-                        is_available = day_avail
-                    elif isinstance(day_avail, str):
-                        is_available = day_avail.lower() not in ("off", "unavailable", "no", "false")
-                    elif isinstance(day_avail, dict):
-                        is_available = day_avail.get("available", True)
+            if not isinstance(avail, dict):
+                avail = None  # no data -> no constraints
+            if start_time:
+                available_now = is_available(avail, target_date, start_time,
+                                             end_time or _default_shift_end(start_time))
+            else:
+                available_now = is_available(avail, target_date)
 
             # Skip already rostered staff
             if eid in rostered_ids:
@@ -903,7 +961,7 @@ class AgentContext:
                 unavailable.append(entry)
                 continue
 
-            if is_available:
+            if available_now:
                 entry["status"] = "available"
                 available.append(entry)
             else:
@@ -928,7 +986,7 @@ class AgentContext:
         if stale_availability:
             result["stale_availability_warning"] = f"{len(stale_availability)} staff haven't updated availability in >2 weeks: {', '.join(stale_availability[:5])}"
         if start_time:
-            result["requested_shift"] = f"{start_time} - {end_time or 'close'}"
+            result["requested_shift"] = f"{start_time} - {end_time or _default_shift_end(start_time)}"
 
         return result
 
@@ -1830,19 +1888,14 @@ async def generate_insights(venue_id: str, max_insights: int = 5) -> list[dict]:
         if employees:
             stale_staff = []
             for emp in employees:
-                avail_updated = getattr(emp, "availability_updated_at", None)
-                if avail_updated:
-                    try:
-                        updated_dt = datetime.fromisoformat(str(avail_updated)[:19])
-                        if (datetime.now() - updated_dt).days > 14:
-                            stale_staff.append(getattr(emp, "name", "Unknown"))
-                    except (ValueError, TypeError):
-                        pass
-                else:
-                    # No availability data at all
-                    name = getattr(emp, "name", "Unknown")
-                    if getattr(emp, "active", True):
-                        stale_staff.append(name)
+                if not getattr(emp, "active", True):
+                    continue
+                # updated_at is bumped when staff save their availability; only
+                # a stamp older than the threshold counts as stale (a missing
+                # stamp is not evidence of staleness).
+                days_old = _availability_age_days(emp)
+                if days_old is not None and days_old > AVAILABILITY_STALE_DAYS:
+                    stale_staff.append(getattr(emp, "name", "Unknown"))
 
             if len(stale_staff) >= 3:
                 insights.append({

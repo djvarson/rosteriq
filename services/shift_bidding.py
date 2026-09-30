@@ -16,6 +16,7 @@ from enum import Enum
 from rosteriq.database import BaseStore
 from rosteriq.models import Shift, ShiftStatus, Employee
 from rosteriq.award_rules import get_day_type, get_penalty_multiplier
+from rosteriq.services.availability_rules import is_available
 from rosteriq.services.notifications import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -416,11 +417,14 @@ class ShiftBiddingService:
         """
         score = 0.5  # Base score
 
-        # Check availability preferences if stored
-        if hasattr(employee, "availability") and employee.availability:
-            day_name = open_shift.date.strftime("%A").lower()
-            if day_name in employee.availability:
-                score += 0.25
+        # Availability bonus, by the shared rule (services/availability_rules.py).
+        if is_available(
+            getattr(employee, "availability", None),
+            open_shift.date,
+            open_shift.start_time,
+            open_shift.end_time,
+        ):
+            score += 0.25
 
         # Role match bonus
         if hasattr(employee, "role") and hasattr(open_shift, "role_required"):

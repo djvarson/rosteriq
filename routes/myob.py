@@ -466,8 +466,8 @@ async def sync_employees(body: MYOBSyncEmployeesRequest) -> dict:
     for emp in employees:
         try:
             emp.venue_id = body.venue_id
-            save_synced_employee(db, emp)
-            saved += 1
+            if save_synced_employee(db, emp):
+                saved += 1
         except Exception as e:
             logger.warning(f"Failed to save MYOB employee {emp.name}: {e}")
 

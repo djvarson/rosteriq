@@ -543,6 +543,10 @@ class MYOBAdapter:
         if hourly_rate == 0:
             hourly_rate = Decimal("28.26")  # Hospitality Award L3 casual
 
+        # MYOB holds no availability: {} is "no constraints" under the shared
+        # rule (services/availability_rules.py); staff set their own in /my,
+        # and a re-sync keeps it (services/visa.save_synced_employee).
+        now = datetime.utcnow()
         return Employee(
             id=f"myob_{uid}",
             tanda_id=uid,
@@ -554,16 +558,10 @@ class MYOBAdapter:
             phone=phone or None,
             email=email or None,
             skills=[],
-            availability={
-                "monday": {"start": "06:00", "end": "23:00"},
-                "tuesday": {"start": "06:00", "end": "23:00"},
-                "wednesday": {"start": "06:00", "end": "23:00"},
-                "thursday": {"start": "06:00", "end": "23:00"},
-                "friday": {"start": "06:00", "end": "23:00"},
-                "saturday": {"start": "06:00", "end": "23:00"},
-                "sunday": {"start": "06:00", "end": "23:00"},
-            },
+            availability={},
             max_hours_per_week=38.0 if employment_type == EmploymentType.full_time else 25.0,
+            created_at=now,
+            updated_at=now,
         )
 
     # ================================================================

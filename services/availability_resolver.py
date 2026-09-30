@@ -27,6 +27,7 @@ from rosteriq.models import (
 )
 from rosteriq.services.preference_learner import PreferenceLearner
 from rosteriq.services.employee_costing import EmployeeCostingService
+from rosteriq.services.availability_rules import day_windows, is_available
 from rosteriq.award_rules import (
     get_penalty_multiplier, get_minimum_engagement_hours,
     MAX_SHIFT_LENGTH_HOURS, MINIMUM_HOURS_BETWEEN_SHIFTS, MAX_CONSECUTIVE_DAYS,
@@ -323,11 +324,10 @@ class AvailabilityResolver:
         """
         logger.info(f"Suggesting time adjustments for shift {shift.id}, employee {employee.id}")
 
-        if not employee.availability:
-            return []
-
-        day_name = shift.date.strftime("%A").lower()
-        available_ranges = employee.availability.get(day_name, [])
+        # The shared rule decides what the day means: None = no constraint that
+        # day (they can work the shift as-is, nothing to adjust); [] = listed as
+        # unavailable (no window to adjust into); otherwise their windows.
+        available_ranges = day_windows(getattr(employee, "availability", None), shift.date)
 
         if not available_ranges:
             return []
@@ -335,6 +335,8 @@ class AvailabilityResolver:
         adjustments: List[TimeAdjustment] = []
 
         for avail_range in available_ranges:
+            if not isinstance(avail_range, dict):
+                continue
             avail_start = self._parse_time(avail_range.get("start"))
             avail_end = self._parse_time(avail_range.get("end"))
 
@@ -641,18 +643,28 @@ class AvailabilityResolver:
             if employee.id in scheduled_ids:
                 continue  # Already scheduled
 
-            # Check availability for each hour
+            # Check availability for each hour (shared rule: {} or an unlisted
+            # day = available all day; [] = unavailable; ranges = those windows)
             available_ranges: List[Tuple[int, int]] = []
-            day_name = target_date.strftime("%A").lower()
-            avail_ranges = employee.availability.get(day_name, [])
+            employee_availability = getattr(employee, "availability", None)
+            if not is_available(employee_availability, target_date):
+                continue  # listed as unavailable that day
+
+            avail_ranges = day_windows(employee_availability, target_date)
+            if avail_ranges is None:
+                available_ranges.append((0, 24))  # no constraint that day
+                avail_ranges = []
 
             for avail_range in avail_ranges:
+                if not isinstance(avail_range, dict):
+                    continue
                 start = self._parse_time(avail_range.get("start"))
                 end = self._parse_time(avail_range.get("end"))
 
                 if start and end:
                     start_hour = start.hour
-                    end_hour = end.hour
+                    # "23:59" means end of day in the shared rule
+                    end_hour = 24 if (end.hour, end.minute) == (23, 59) else end.hour
                     available_ranges.append((start_hour, end_hour))
 
             if available_ranges:
@@ -680,17 +692,12 @@ class AvailabilityResolver:
         if not self._is_available(employee, shift):
             return 0.0
 
-        # Perfect fit if exact availability match
-        if employee.availability:
-            day_name = shift.date.strftime("%A").lower()
-            ranges = employee.availability.get(day_name, [])
-            for r in ranges:
-                start = self._parse_time(r.get("start"))
-                end = self._parse_time(r.get("end"))
-                if start and end and start <= shift.start_time and shift.end_time <= end:
-                    return 100.0
+        # Perfect fit if exact availability match: they declared window(s) for
+        # this day and (per is_available above) the shift sits inside one.
+        if day_windows(getattr(employee, "availability", None), shift.date):
+            return 100.0
 
-        return 80.0  # Good fit if available but not perfect match
+        return 80.0  # Good fit if available but not perfect match (no constraint that day)
 
     def _score_cost(self, cost_impact: Decimal) -> float:
         """
@@ -746,24 +753,16 @@ class AvailabilityResolver:
     # ========================================================================
 
     def _is_available(self, employee: Employee, shift: Shift) -> bool:
-        """Check if employee is available for the shift."""
-        if not employee.availability:
-            return True  # No constraints
+        """Check if employee is available for the shift.
 
-        day_name = shift.date.strftime("%A").lower()
-        available_ranges = employee.availability.get(day_name, [])
-
-        if not available_ranges:
-            return False  # Not available on this day
-
-        for avail_range in available_ranges:
-            start = self._parse_time(avail_range.get("start"))
-            end = self._parse_time(avail_range.get("end"))
-
-            if start and end and start <= shift.start_time and shift.end_time <= end:
-                return True
-
-        return False
+        One meaning of employee.availability (services/availability_rules.py):
+        {} / an unlisted day = available; a day listed with [] = unavailable;
+        ranges = the shift must fit inside one, to the minute.
+        """
+        return is_available(
+            getattr(employee, "availability", None),
+            shift.date, shift.start_time, shift.end_time,
+        )
 
     def _check_assignment_constraints(
         self,

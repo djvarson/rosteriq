@@ -209,9 +209,9 @@ class TestRankForCallIn:
     def test_available_employee_ranked_higher(self):
         available = make_employee(
             id="emp-a",
-            availability={"tuesday": [{"start": "8", "end": "18"}]},
+            availability={"tuesday": [{"start": "08:00", "end": "18:00"}]},
         )
-        no_avail = make_employee(id="emp-b", availability={})
+        no_avail = make_employee(id="emp-b", availability={"tuesday": []})   # marked off
 
         recs = rank_for_call_in(
             [no_avail, available], [],

@@ -28,12 +28,6 @@ router = APIRouter(prefix="/api/staff", tags=["staff"])
 # Request/Response Models
 # ============================================================================
 
-class AvailabilityUpdateRequest(BaseModel):
-    """Request to update availability preferences."""
-    availability: Dict[str, Dict[str, bool]]
-    preferred_hours_per_week: float
-
-
 class ProfileUpdateRequest(BaseModel):
     """Request to update profile information."""
     name: Optional[str] = None
@@ -306,40 +300,14 @@ async def get_availability(
 
 
 @router.put("/availability")
-async def update_availability(
-    request: AvailabilityUpdateRequest,
-    current_user: UserContext = Depends(get_current_user),
-    db = Depends(get_db),
-):
-    """
-    Update staff member's availability preferences and max hours.
-    """
-    if current_user.role not in ["staff", "manager"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only staff can update their availability",
-        )
-
-    emp = _my_employee(db, current_user)
-
-    if not emp:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Employee record not found",
-        )
-
-    # Update availability
-    emp.availability = request.availability
-    emp.max_hours_per_week = request.preferred_hours_per_week
-    emp.updated_at = datetime.utcnow()
-
-    db.save_employee(emp)
-
-    return {
-        "message": "Availability updated",
-        "employee_id": emp.id,
-        "availability": emp.availability,
-    }
+async def update_availability(current_user: UserContext = Depends(get_current_user)):
+    """Retired. It stored a per-day {flag: bool} shape that every availability
+    reader treats as 'available all day', and let staff set their own max
+    hours. Availability is set in the staff app (POST /api/me/availability)."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Set availability in the staff app (/my) — POST /api/me/availability.",
+    )
 
 
 @router.get("/profile")

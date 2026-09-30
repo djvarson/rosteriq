@@ -27,6 +27,7 @@ import math
 
 from rosteriq.database import get_db
 from rosteriq.models import Employee, Shift, Roster, ShiftStatus, EmploymentType
+from rosteriq.services.availability_rules import is_available
 
 logger = logging.getLogger(__name__)
 
@@ -801,25 +802,12 @@ class NoShowPredictor:
         shift_start: time,
         shift_end: time,
     ) -> bool:
-        """Check if employee is available for the shift time."""
-        if not employee.availability:
-            return True  # Assume available if no constraints
+        """Check if employee is available for the shift time.
 
-        day_name = shift_date.strftime("%A").lower()
-        if day_name not in employee.availability:
-            return False
-
-        # Check if shift falls within availability windows
-        availability_windows = employee.availability[day_name]
-        shift_minutes_start = shift_start.hour * 60 + shift_start.minute
-        shift_minutes_end = shift_end.hour * 60 + shift_end.minute
-
-        for window in availability_windows:
-            window_start = int(window.get("start", "00:00").replace(":", "")) // 100 * 60
-            window_end = int(window.get("end", "23:59").replace(":", "")) // 100 * 60
-
-            if (window_start <= shift_minutes_start and
-                shift_minutes_end <= window_end):
-                return True
-
-        return False
+        One meaning of employee.availability (services/availability_rules.py):
+        {} / an unlisted day = available; a day listed with [] = unavailable;
+        ranges = the shift must fit inside one, to the minute.
+        """
+        return is_available(
+            getattr(employee, "availability", None), shift_date, shift_start, shift_end
+        )

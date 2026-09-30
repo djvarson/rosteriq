@@ -38,6 +38,7 @@ from rosteriq.award_rules import (
     get_day_type,
     calculate_shift_cost,
 )
+from rosteriq.services.availability_rules import is_available
 
 
 def get_weekly_hours(employee_id: str, shifts: list[Shift]) -> float:
@@ -173,19 +174,12 @@ def _call_in_priority_score(
     """
     score = 0.0
 
-    # Availability check
-    day_name = target_date.strftime("%A").lower()
-    if day_name in employee.availability:
-        ranges = employee.availability[day_name]
-        for r in ranges:
-            start_h = int(r.get("start", "0").split(":")[0])
-            end_h = int(r.get("end", "23").split(":")[0])
-            if start_h <= target_hour <= end_h:
-                score += 0.30
-                break
-    # If no availability data, give partial score (unknown availability)
-    if not employee.availability:
-        score += 0.15
+    # Available for the whole target hour, by the shared rule
+    # (services/availability_rules.py).
+    hour_start = time(target_hour % 24, 0)
+    hour_end = time((target_hour + 1) % 24, 0)   # 23 -> 00:00 = end of day
+    if is_available(employee.availability, target_date, hour_start, hour_end):
+        score += 0.30
 
     # Employment type + hours headroom
     hours_remaining = max(0.0, employee.max_hours_per_week - weekly_hours)

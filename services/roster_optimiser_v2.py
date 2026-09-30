@@ -47,6 +47,7 @@ from rosteriq.award_rules import (
     get_minimum_engagement_hours, MAX_SHIFT_LENGTH_HOURS,
 )
 from rosteriq.cost_calculator import calculate_shift_cost_breakdown
+from rosteriq.services.availability_rules import is_available
 
 logger = logging.getLogger(__name__)
 
@@ -182,46 +183,22 @@ def is_employee_available(
     """
     Check if employee is available for a shift window.
 
+    By the shared rule (services/availability_rules.py): the whole shift must
+    fit inside one of that day's windows, if any are listed.
+
     Args:
         employee: The employee
-        shift_date: The date (as day-of-week name for availability lookup)
+        shift_date: The date (its weekday selects the availability entry)
         start_hour: Start hour (0-23)
-        end_hour: End hour (0-23)
+        end_hour: End hour (0-24)
 
     Returns:
         True if available for the entire window
     """
-    day_name = shift_date.strftime("%A").lower()
-
-    if day_name not in employee.availability:
-        return False
-
-    windows = employee.availability[day_name]
-    if not windows:
-        return False
-
-    shift_start_minutes = start_hour * 60
-    shift_end_minutes = end_hour * 60
-
-    for window in windows:
-        # Parse window {start: "09:00", end: "17:00"}
-        try:
-            w_start_str = window.get("start", "")
-            w_end_str = window.get("end", "")
-
-            w_start_h, w_start_m = map(int, w_start_str.split(":"))
-            w_end_h, w_end_m = map(int, w_end_str.split(":"))
-
-            w_start_minutes = w_start_h * 60 + w_start_m
-            w_end_minutes = w_end_h * 60 + w_end_m
-
-            # Check if shift fits within window
-            if w_start_minutes <= shift_start_minutes and shift_end_minutes <= w_end_minutes:
-                return True
-        except (ValueError, KeyError):
-            continue
-
-    return False
+    return is_available(
+        employee.availability, shift_date,
+        f"{int(start_hour):02d}:00", f"{int(end_hour):02d}:00",
+    )
 
 
 # ============================================================================

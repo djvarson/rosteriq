@@ -122,5 +122,14 @@ def save_synced_employee(db, emp) -> bool:
     prior_vid = getattr(prior, "venue_id", None) if prior is not None else None
     if prior is not None and prior_vid and prior_vid != getattr(emp, "venue_id", None):
         return False
+    if prior is not None:
+        # Fields RosterIQ owns (availability staff set in /my, skills and the
+        # email a manager added for linking) survive a re-sync from a system
+        # that doesn't carry them.
+        for field in ("availability", "skills", "email", "phone"):
+            if not getattr(emp, field, None) and getattr(prior, field, None):
+                setattr(emp, field, getattr(prior, field))
+        if getattr(prior, "created_at", None):
+            emp.created_at = prior.created_at
     db.save_employee(preserve_recorded_work_rights(db, emp))
     return True

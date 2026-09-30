@@ -21,6 +21,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, Any, Callable
 
+from rosteriq.services.availability_rules import is_available
+
 logger = logging.getLogger(__name__)
 
 
@@ -479,12 +481,9 @@ class SurgeDetector:
                 if emp.id in active_employee_ids:
                     continue
 
-                # Check availability
-                day_name = now.strftime("%A").lower()
-                emp_availability = emp.availability.get(day_name, [])
-                is_available = self._check_availability(emp_availability, now.hour)
-
-                if not is_available:
+                # Check availability (the shared rule: {} / an unlisted day =
+                # available, [] = unavailable, ranges = only inside one)
+                if not self._available_now(emp.availability, now):
                     continue
 
                 # Create OnCallEmployee
@@ -562,26 +561,14 @@ class SurgeDetector:
             logger.error(f"Failed to get average hourly cost: {e}")
             return Decimal("25.00")
 
-    def _check_availability(
-        self, availability: list[dict[str, str]], current_hour: int
-    ) -> bool:
-        """Check if employee is available during current hour."""
-        if not availability:
-            return False
+    def _available_now(self, availability: Optional[dict], now: datetime) -> bool:
+        """Is the employee available at `now` (to the minute)?
 
-        for slot in availability:
-            try:
-                start_str = slot.get("start", "")
-                end_str = slot.get("end", "")
-                start_hour = int(start_str.split(":")[0])
-                end_hour = int(end_str.split(":")[0])
-
-                if start_hour <= current_hour < end_hour:
-                    return True
-            except (ValueError, IndexError, AttributeError):
-                continue
-
-        return False
+        By the shared rule (services/availability_rules.py).
+        """
+        start = now.replace(second=0, microsecond=0)
+        end = start + timedelta(minutes=1)
+        return is_available(availability, now.date(), start.time(), end.time())
 
     def _estimate_extra_cost(self, available_oncall: list[OnCallEmployee]) -> Decimal:
         """Estimate total extra cost for calling in staff."""

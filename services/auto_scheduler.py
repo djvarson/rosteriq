@@ -37,6 +37,7 @@ from rosteriq.award_rules import (
 from rosteriq.cost_calculator import calculate_shift_cost_breakdown
 from rosteriq.services.conflict_detector import ConflictDetector, RosterConflict
 from rosteriq.services.availability_resolver import AvailabilityResolver
+from rosteriq.services.availability_rules import is_available
 from rosteriq.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -436,12 +437,13 @@ class AutoScheduler:
         if hours_so_far[employee.id] + (end_hour - start_hour) > employee.max_hours_per_week:
             return False
 
-        # Check availability (simplified - check if day is in availability)
-        day_name = shift_date.strftime("%A").lower()
-        if employee.availability and day_name in employee.availability:
-            day_avail = employee.availability[day_name]
-            if not day_avail:  # Not available this day
-                return False
+        # Availability, by the shared rule (services/availability_rules.py).
+        # end_hour may be 24 (a window ending at midnight): "24:00" is end of day.
+        if not is_available(
+            employee.availability, shift_date,
+            f"{int(start_hour):02d}:00", f"{int(end_hour):02d}:00",
+        ):
+            return False
 
         return True
 
