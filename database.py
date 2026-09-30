@@ -3702,6 +3702,35 @@ class PostgresStore(BaseStore):
                     cur.execute(alter)
             except Exception as e:  # noqa: BLE001
                 logger.warning("Core-schema column ensure failed: %s", e)
+        self._retire_legacy_blob_tables()
+
+    # (table, the column the code reads) for tables an early migration 003
+    # created in a normalised shape no code uses.
+    _LEGACY_SHAPED_TABLES = (("notification_preferences", "preferences"),
+                             ("push_subscriptions", "subscription_data"))
+
+    def _retire_legacy_blob_tables(self) -> None:
+        """CREATE TABLE IF NOT EXISTS can't fix a table that already exists in
+        the wrong shape, so every read and write on it fails. Rename such a
+        table aside (kept, never dropped) and create the one the code uses.
+        Never raises."""
+        for table, column in self._LEGACY_SHAPED_TABLES:
+            try:
+                with self._cursor() as cur:
+                    cur.execute("""
+                        SELECT EXISTS (SELECT 1 FROM information_schema.tables
+                                       WHERE table_schema = current_schema() AND table_name = %s) AS has_table,
+                               EXISTS (SELECT 1 FROM information_schema.columns
+                                       WHERE table_schema = current_schema() AND table_name = %s
+                                         AND column_name = %s) AS has_column
+                    """, (table, table, column))
+                    row = cur.fetchone()
+                    if row["has_table"] and not row["has_column"]:
+                        cur.execute(f"ALTER TABLE {table} RENAME TO {table}_legacy003")
+                        logger.warning("Renamed legacy-shaped %s to %s_legacy003", table, table)
+                    self._ensure_table(cur, table)
+            except Exception as e:  # noqa: BLE001 — two workers may race the rename
+                logger.warning("Legacy table check for %s failed: %s", table, e)
 
     # --- Venues ---
 
