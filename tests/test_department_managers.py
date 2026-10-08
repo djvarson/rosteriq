@@ -134,6 +134,25 @@ def test_dept_manager_blocked_from_broadcast_and_publish():
     # gate is after the scoped load. 403 is the meaningful assertion here.)
 
 
+def test_dept_manager_announces_own_section_only():
+    """A department manager may address their OWN section(s), but not another
+    section and not a venue-wide (no-audience) broadcast."""
+    c = TestClient(app)
+    mgr, vid, _ = _full_manager_with_venue()
+    kmgr, _ = _dept_manager(c, vid, ["kitchen"])
+    # Own section: passes the gate (may 422 for "no recipients yet" — not an auth block)
+    assert nc.post("/api/announcements", json={
+        "venue_id": vid, "title": "K", "body": "kitchen team",
+        "audience": ["kitchen"]}, headers=kmgr).status_code not in (401, 403)
+    # Another section: 403
+    assert c.post("/api/announcements", json={
+        "venue_id": vid, "title": "B", "body": "bar team",
+        "audience": ["bar"]}, headers=kmgr).status_code == 403
+    # Venue-wide (no audience): 403 — that's a full-manager broadcast
+    assert c.post("/api/announcements", json={
+        "venue_id": vid, "title": "All", "body": "everyone"}, headers=kmgr).status_code == 403
+
+
 def test_invoice_cannot_rewrite_other_section():
     """A kitchen department manager cannot book/recost a BAR ingredient via an
     invoice line (the gap the adversarial review found)."""

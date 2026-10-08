@@ -29,7 +29,26 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
+from rosteriq.middleware.tenant import (
+    enforce_venue_access, enforce_venue_manager, enforce_section_manager,
+)
+
+
+def _gate_announcement(venue_id: str, audience) -> None:
+    """Authorise publishing/pinning an announcement by its audience.
+
+    An EMPTY audience = the whole venue -> FULL manager/owner only. A specific
+    audience = every section it targets must be one the caller manages, so a
+    DEPARTMENT manager can address their own section(s) (and, with SMS, only
+    their own people) but never the whole venue or another section. Reuses the
+    department-manager primitives — no new auth logic.
+    """
+    secs = [str(s).strip().lower() for s in (audience or []) if str(s).strip()]
+    if not secs:
+        enforce_venue_manager(venue_id)
+    else:
+        for s in secs:
+            enforce_section_manager(venue_id, s)
 from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
 from rosteriq.services.events import audit
 from rosteriq.services.sms import get_sms_service
@@ -110,10 +129,9 @@ def _require_manager(user: UserContext) -> None:
 @router.post("/api/announcements")
 async def publish_announcement(body: AnnouncementBody,
                                user: UserContext = Depends(get_current_user)) -> dict:
-    # Venue-wide broadcast (and SMS cost): full manager/owner only. A section-
-    # restricted department manager is refused (announcements aren't section-
-    # scoped yet — that's a v2 nicety).
-    enforce_venue_manager(body.venue_id)
+    # Full manager for a venue-wide broadcast; a department manager may address
+    # their own section(s) (audience ⊆ their grant). See _gate_announcement.
+    _gate_announcement(body.venue_id, body.audience)
     db = get_db()
     staff = db.get_employees(body.venue_id) or []
     targeted = [e for e in staff if _audience_match(body.audience, e)]
@@ -251,14 +269,15 @@ async def venue_announcements(venue_id: str = Query(...),
 @router.post("/api/announcements/{ann_id}/pin")
 async def pin_announcement(ann_id: str, body: PinBody,
                            user: UserContext = Depends(get_current_user)) -> dict:
-    # Venue-wide broadcast (and SMS cost): full manager/owner only. A section-
-    # restricted department manager is refused (announcements aren't section-
-    # scoped yet — that's a v2 nicety).
-    enforce_venue_manager(body.venue_id)
+    # Membership first (no existence oracle), then authorise by the announcement's
+    # OWN audience: a department manager may pin their section's announcement, not
+    # a venue-wide one or another section's.
+    enforce_venue_access(body.venue_id)
     db = get_db()
     ann = db.get_announcement(ann_id)
     if not ann or ann.get("venue_id") != body.venue_id:
         raise HTTPException(status_code=404, detail="Announcement not found")
+    _gate_announcement(body.venue_id, ann.get("audience"))
     ann["pinned"] = body.pinned
     db.save_announcement(ann)
     audit("announcement.pin", body.venue_id, "announcement", ann_id,
