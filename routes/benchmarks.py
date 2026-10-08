@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 
 from rosteriq.database import get_db, BaseStore
+from rosteriq.middleware.tenant import enforce_venue_access, scoped_venue_ids
 from rosteriq.services.venue_benchmarks import (
     VenueBenchmarkService, BenchmarkReport, VenueBenchmark,
     ImprovementSuggestion, IndustryComparison,
@@ -139,6 +140,10 @@ async def compare_venues(
     - start_date: ISO date, default 90 days ago
     - end_date: ISO date, default today
     """
+    # Cross-tenant guard: every compared venue must be one the caller holds
+    # (owner passes). Benchmarks expose each venue's confidential financials.
+    for _vid in venue_ids:
+        enforce_venue_access(_vid)
     try:
         # Parse dates
         start = date.fromisoformat(start_date) if start_date else None
@@ -224,11 +229,14 @@ async def get_rankings(
     - roster_efficiency_score: Higher is better
     - compliance_score: Higher is better
     """
+    # Scope the ranking to the caller's venues (owner = all / as requested);
+    # a non-owner can never see another tenant's venue in the leaderboard.
+    scoped = scoped_venue_ids(venue_ids)
     try:
         start = date.fromisoformat(start_date) if start_date else None
         end = date.fromisoformat(end_date) if end_date else None
 
-        rankings = service.rank_venues(metric, venue_ids, start, end)
+        rankings = service.rank_venues(metric, scoped, start, end)
 
         return RankingResponse(
             metric=metric,
@@ -263,6 +271,7 @@ async def get_industry_comparison(
     - Percentile position (0-100)
     - Status: exceeds, on_track, below, critical
     """
+    enforce_venue_access(venue_id)  # caller must hold this venue (owner passes)
     try:
         start = date.fromisoformat(start_date) if start_date else None
         end = date.fromisoformat(end_date) if end_date else None
@@ -310,6 +319,8 @@ async def get_insights(
 
     Compares metrics and identifies patterns across venues.
     """
+    for _vid in venue_ids:
+        enforce_venue_access(_vid)  # every analysed venue must be the caller's
     try:
         start = date.fromisoformat(start_date) if start_date else None
         end = date.fromisoformat(end_date) if end_date else None
@@ -348,6 +359,7 @@ async def get_efficiency_score(
 
     Includes breakdown and recommendations.
     """
+    enforce_venue_access(venue_id)  # caller must hold this venue (owner passes)
     try:
         start = date.fromisoformat(start_date) if start_date else None
         end = date.fromisoformat(end_date) if end_date else None

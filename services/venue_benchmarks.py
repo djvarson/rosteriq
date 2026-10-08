@@ -7,11 +7,14 @@ rankings, industry benchmarks, efficiency scoring, and actionable insights.
 All monetary values in AUD (Decimal). Dates in ISO 8601 format.
 """
 
+import logging
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Dict, Any, Tuple
 from collections import defaultdict
 import statistics
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel
 

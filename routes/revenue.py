@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_manager
+from rosteriq.middleware.tenant import enforce_venue_manager, enforce_venue_access
 from rosteriq.services.revenue_forecast import (
     RevenueForecaster, RevenueEstimate, BudgetCheckResult
 )
@@ -259,6 +259,7 @@ async def check_budget(request: BudgetCheckRequest) -> BudgetCheckResponse:
     Returns:
         BudgetCheckResult with budget status and recommendations
     """
+    enforce_venue_access(request.venue_id)  # cross-tenant guard: members only
     db = get_db()
     roster = db.get_roster(request.roster_id)
 

@@ -131,6 +131,7 @@ async def signals(
     db: BaseStore = Depends(get_db),
 ):
     """Demand signals derived from the venue's stored direct bookings."""
+    enforce_venue_access(venue_id)  # cross-tenant guard: members only (also ingests)
     try:
         start_d = date.fromisoformat(start)
         end_d = date.fromisoformat(end)

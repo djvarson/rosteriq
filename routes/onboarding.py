@@ -15,7 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-from rosteriq.middleware.tenant import enforce_venue_manager
+from rosteriq.middleware.tenant import enforce_venue_manager, enforce_venue_access
 from rosteriq.services.onboarding import OnboardingService, OnboardingStep
 from rosteriq.models import TandaCredentials
 
@@ -136,6 +136,7 @@ async def get_status(venue_id: str):
 
     Response: OnboardingStatusResponse with current step, progress, errors
     """
+    enforce_venue_access(venue_id)  # cross-tenant guard: members only
     try:
         service = get_onboarding_service()
         status = service.get_status(venue_id)
@@ -261,6 +262,7 @@ async def get_summary(venue_id: str):
 
     Response: OnboardingSummaryResponse with import statistics
     """
+    enforce_venue_access(venue_id)  # cross-tenant guard: members only
     try:
         service = get_onboarding_service()
         summary = service.get_summary(venue_id)

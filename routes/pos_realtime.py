@@ -21,7 +21,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from rosteriq.middleware.tenant import enforce_venue_manager
+from rosteriq.middleware.tenant import enforce_venue_manager, enforce_venue_access
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,7 @@ def create_pos_realtime_router(pos_feed_instance):
 
     @router.get("/revenue/{venue_id}")
     async def get_live_revenue(venue_id: str):
+        enforce_venue_access(venue_id)  # cross-tenant guard: members only (live revenue)
         """
         Get current live revenue for a venue.
 
@@ -187,6 +188,7 @@ def create_pos_realtime_router(pos_feed_instance):
         venue_id: str,
         date_str: Optional[str] = Query(None, alias="date"),
     ):
+        enforce_venue_access(venue_id)  # cross-tenant guard: members only
         """
         Get hourly revenue breakdown.
 
@@ -243,6 +245,7 @@ def create_pos_realtime_router(pos_feed_instance):
 
     @router.get("/variance/{venue_id}")
     async def get_variance(venue_id: str):
+        enforce_venue_access(venue_id)  # cross-tenant guard: members only
         """
         Get variance between actual and forecast revenue.
 
