@@ -289,12 +289,14 @@ def test_eligible_cross_venue_404_same_venue_only_own_staff(world):
 
 
 def test_owner_passes_tenant_scope_on_by_id_routes(world):
-    # Owner is not blocked by scope: it reaches the manager-role gate (403 with
-    # the role message), never the 404 a cross-venue caller gets.
+    # Owner bypasses BOTH venue scope and the manager gate (owners are platform
+    # super-managers): it reaches the shift and gets 200, never the 404 a
+    # cross-venue caller gets. (The bidding routes previously used a bare
+    # `role == manager` check that wrongly 403'd owners; the 2026-10 department-
+    # manager pass replaced it with enforce_venue_manager, which owners pass.)
     c = world["c"]
     r = c.get(f"/api/bidding/shifts/{world['shift_b']}", headers=world["owner"])
-    assert r.status_code == 403, r.text
-    assert "manager" in (_err(r) or "").lower()
+    assert r.status_code == 200, r.text
 
 
 def test_staff_cannot_bid_on_other_venue_shift(world):

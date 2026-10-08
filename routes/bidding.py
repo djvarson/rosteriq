@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.models import UserRole
 from rosteriq.services.shift_bidding import (
     ShiftBiddingService, OpenShift, Bid, OpenShiftStatus, BidStatus
@@ -187,11 +187,9 @@ async def post_open_shift(
     # Tenant scope: manager/staff limited to their venue_ids (owner passes).
     enforce_venue_access(venue_id)
 
-    if user.role != UserRole.manager:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only managers can post shifts",
-        )
+    # Venue-wide bidding admin: full manager/owner only (owners now pass too, and
+    # section-restricted department managers are refused).
+    enforce_venue_manager(venue_id)
 
     try:
         shift = bidding_service.post_open_shift(
@@ -272,12 +270,8 @@ async def get_open_shift_with_bids(
     # 404 for missing OR cross-venue (ids are not an oracle).
     shift = _load_shift_in_scope(bidding_service, shift_id)
 
-    # Only managers can see all bids
-    if user.role != UserRole.manager:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only managers can view bids",
-        )
+    # Only full managers/owners see all bids (section-restricted managers can't).
+    enforce_venue_manager(shift.venue_id)
 
     bids = bidding_service.list_bids(shift_id)
 
@@ -371,13 +365,10 @@ async def auto_assign_shift(
     Only managers can auto-assign, and only within a venue they can access.
     """
     # 404 for missing OR cross-venue (ids are not an oracle).
-    _load_shift_in_scope(bidding_service, shift_id)
+    _shift = _load_shift_in_scope(bidding_service, shift_id)
 
-    if user.role != UserRole.manager:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only managers can auto-assign shifts",
-        )
+    # Venue-wide bidding admin: full manager/owner only.
+    enforce_venue_manager(_shift.venue_id)
 
     try:
         winning_bid = bidding_service.auto_assign(shift_id)
@@ -412,13 +403,10 @@ async def award_shift(
     Only managers can award, and only within a venue they can access.
     """
     # 404 for missing OR cross-venue (ids are not an oracle).
-    _load_shift_in_scope(bidding_service, shift_id)
+    _shift = _load_shift_in_scope(bidding_service, shift_id)
 
-    if user.role != UserRole.manager:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only managers can award shifts",
-        )
+    # Venue-wide bidding admin: full manager/owner only.
+    enforce_venue_manager(_shift.venue_id)
 
     try:
         shift = bidding_service.award_shift(shift_id, bid_id, user.user_id)
@@ -455,13 +443,10 @@ async def cancel_open_shift(
     they can access.
     """
     # 404 for missing OR cross-venue (ids are not an oracle).
-    _load_shift_in_scope(bidding_service, shift_id)
+    _shift = _load_shift_in_scope(bidding_service, shift_id)
 
-    if user.role != UserRole.manager:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only managers can cancel shifts",
-        )
+    # Venue-wide bidding admin: full manager/owner only.
+    enforce_venue_manager(_shift.venue_id)
 
     try:
         bidding_service.cancel_open_shift(shift_id, user.user_id)
@@ -514,13 +499,10 @@ async def get_eligible_employees(
     Only managers can view this, and only within a venue they can access.
     """
     # 404 for missing OR cross-venue (ids are not an oracle).
-    _load_shift_in_scope(bidding_service, shift_id)
+    _shift = _load_shift_in_scope(bidding_service, shift_id)
 
-    if user.role != UserRole.manager:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only managers can view eligible employees",
-        )
+    # Venue-wide bidding admin: full manager/owner only.
+    enforce_venue_manager(_shift.venue_id)
 
     employees = bidding_service.get_eligible_employees(shift_id)
     return [

@@ -35,7 +35,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager, get_tenant_context_optional
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager, enforce_section_manager, enforce_venue_manager_any, get_tenant_context_optional
 from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
@@ -161,11 +161,16 @@ async def stock_list(venue_id: str = Query(...)) -> dict:
 @router.post("/levels")
 async def set_levels(body: LevelsBody) -> dict:
     """Set stock on hand and/or par level for one ingredient."""
-    enforce_venue_manager(body.venue_id)
-    if body.stock_qty is None and body.par_level is None:
-        raise HTTPException(status_code=422, detail="Provide stock_qty and/or par_level")
+    # Coarse gate first (membership + any manager) so staff/non-members are
+    # refused before the ingredient lookup; then the fine per-section check.
+    enforce_venue_manager_any(body.venue_id)
     db = get_db()
     ing = _ingredient_or_404(db, body.venue_id, body.ingredient_id)
+    # Scoped to the ingredient's section — a department manager sets levels for
+    # their own section's stock only (a full manager, any section).
+    enforce_section_manager(body.venue_id, ing.get("section") or "kitchen")
+    if body.stock_qty is None and body.par_level is None:
+        raise HTTPException(status_code=422, detail="Provide stock_qty and/or par_level")
     if body.stock_qty is not None:
         ing["stock_qty"] = float(body.stock_qty)
     if body.par_level is not None:
@@ -266,11 +271,15 @@ async def complete_stocktake(body: StocktakeCompleteBody) -> dict:
     """Close the stocktake: value the variance and correct stock levels.
     Uncounted items are flagged and keep their expected level — we never
     invent a count that nobody took."""
-    enforce_venue_manager(body.venue_id)
+    enforce_venue_manager_any(body.venue_id)  # staff/non-members out before lookup
     db = get_db()
     st = db.get_stocktake(body.stocktake_id)
     if not st or st.get("venue_id") != body.venue_id:
         raise HTTPException(status_code=404, detail="Stocktake not found")
+    # Completing corrects this section's stock. A department manager may finish
+    # their own section; a whole-venue stocktake (section None) is full-manager
+    # only (None matches no department grant).
+    enforce_section_manager(body.venue_id, st.get("section"))
     if st.get("status") != "open":
         raise HTTPException(status_code=409, detail="Stocktake is already completed")
 
@@ -337,7 +346,9 @@ async def stocktake_history(venue_id: str = Query(...)) -> dict:
 async def draft_orders(body: OrderDraftBody) -> dict:
     """Draft one order per supplier for everything below par, quantities
     rounded UP to whole purchase packs with real pack costs."""
-    enforce_venue_manager(body.venue_id)
+    # body.section = the department being ordered for (None = across all
+    # sections, full-manager only). A department manager orders their section.
+    enforce_section_manager(body.venue_id, body.section)
     db = get_db()
     # Ingredients already on an open (draft/ordered) order are covered — never
     # draft the same shortfall twice, or a double-click double-orders it.
@@ -387,6 +398,9 @@ async def draft_orders(body: OrderDraftBody) -> dict:
             "id": f"so-{uuid.uuid4().hex[:10]}",
             "venue_id": body.venue_id,
             "supplier": supplier,
+            # The section this order belongs to (None = drafted across all
+            # sections). Lets a department manager own their section's orders.
+            "section": section,
             "status": "draft",
             "items": items,
             "total_cost": round(sum(i["line_cost"] for i in items), 2),
@@ -406,11 +420,14 @@ async def draft_orders(body: OrderDraftBody) -> dict:
 async def set_order_status(order_id: str, body: OrderStatusBody) -> dict:
     """draft -> ordered -> received (receiving books the stock in);
     draft/ordered -> cancelled. Anything else is refused."""
-    enforce_venue_manager(body.venue_id)  # commits supplier spend / books stock
+    enforce_venue_manager_any(body.venue_id)  # staff/non-members out before lookup
     db = get_db()
     order = db.get_supplier_order(order_id)
     if not order or order.get("venue_id") != body.venue_id:
         raise HTTPException(status_code=404, detail="Order not found")
+    # Commits supplier spend / books stock for this order's section — scoped so a
+    # department manager manages only their own section's orders.
+    enforce_section_manager(body.venue_id, order.get("section"))
     current = order.get("status")
     allowed = {
         ("draft", "ordered"), ("draft", "cancelled"),
@@ -459,8 +476,17 @@ async def enter_invoice(body: InvoiceBody) -> dict:
       the invoice's quantities are the truth, the order's are ignored).
     - Same invoice number from the same supplier twice is refused.
     """
-    enforce_venue_manager(body.venue_id)
+    enforce_venue_manager_any(body.venue_id)  # staff/non-members out before lookup
     db = get_db()
+    # Scope to the linked order's section when this delivery fulfils one, so a
+    # department manager can receive their section's deliveries. A standalone
+    # invoice (no order) spans sections -> full-manager only.
+    _inv_section = None
+    if body.order_id:
+        _ord = db.get_supplier_order(body.order_id)
+        if _ord and _ord.get("venue_id") == body.venue_id:
+            _inv_section = _ord.get("section")
+    enforce_section_manager(body.venue_id, _inv_section)
 
     # A delivery landing mid-stocktake corrupts the count — same guard as receive
     for st in db.list_stocktakes(body.venue_id) or []:
@@ -482,6 +508,14 @@ async def enter_invoice(body: InvoiceBody) -> dict:
     if unknown:
         raise HTTPException(status_code=422,
                             detail=f"Unknown ingredient(s): {', '.join(unknown)}")
+
+    # Every booked line must be in a section the caller manages — a department
+    # manager cannot rewrite another section's stock/cost via invoice lines, even
+    # on an invoice linked to one of their own orders. Checked for ALL lines
+    # BEFORE any mutation so a bad line can't leave a half-applied invoice.
+    for line in body.lines:
+        enforce_section_manager(
+            body.venue_id, ingredients[line.ingredient_id].get("section") or "kitchen")
 
     order = None
     if body.order_id:

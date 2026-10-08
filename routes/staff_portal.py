@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
 from rosteriq.services.availability_rules import day_windows
+from typing import Optional, List
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.demo import (
@@ -315,6 +316,10 @@ async def employee_reset_link(employee_id: str,
 
 class AccessRoleBody(BaseModel):
     role: str = Field(..., pattern="^(manager|staff)$")
+    # Optional DEPARTMENT scope for a manager: the sections they may manage
+    # (kitchen/bar/cellar/floor…). Empty/omitted = full venue manager. Ignored
+    # when role == "staff".
+    sections: Optional[List[str]] = None
 
 
 @router.post("/api/employees/{employee_id}/access-role")
@@ -333,17 +338,44 @@ async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
     account = _account_management_guards(user, emp, db)
     email = account.get("email")
     vid = getattr(emp, "venue_id", None)
+    # Appointing managers / setting a department scope is a VENUE-WIDE user-
+    # management action — a department manager (section-restricted) must not be
+    # able to do it. enforce_venue_manager rejects section-restricted callers.
+    enforce_venue_manager(vid)
     if account.get("id") == user.user_id:
         raise HTTPException(status_code=400, detail="You can't change your own access level")
+    # Normalise any requested department scope (free-string sections, like the
+    # min_staff keys — strip/lowercase, drop blanks, dedupe preserving order).
+    sections: List[str] = []
+    seen = set()
+    for s in (body.sections or []):
+        n = str(s or "").strip().lower()
+        if n and n not in seen:
+            seen.add(n)
+            sections.append(n)
     old = account.get("role")
+    old_grants = dict(account.get("section_grants") or {})
     account["role"] = body.role
+    grants = dict(old_grants)
+    if body.role == "manager" and sections:
+        grants[vid] = sections          # department manager, scoped to these sections
+    else:
+        grants.pop(vid, None)           # full venue manager, or back to staff: clear scope
+    account["section_grants"] = grants
     db.save_user(account)
     audit("user.role_change", vid, "user", account["id"], email=email,
           old_role=old, new_role=body.role, changed_by=user.user_id,
-          reason="venue_manager_set")
+          sections=sections or None, reason="venue_manager_set")
+    if body.role == "manager" and sections:
+        msg = (f"{emp.name} is now a department manager for "
+               f"{', '.join(sections)} — takes effect on their next sign-in.")
+    elif body.role == "manager":
+        msg = f"{emp.name} is now a manager — takes effect on their next sign-in."
+    else:
+        msg = f"{emp.name} is now staff — takes effect on their next sign-in."
     return {"employee_id": emp.id, "name": emp.name, "email": email,
             "old_role": old, "role": body.role,
-            "message": f"{emp.name} is now {'a manager' if body.role == 'manager' else 'staff'} — takes effect on their next sign-in."}
+            "sections": sections, "message": msg}
 
 
 @router.get("/api/me/shifts")

@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Path, Depends, Body
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import load_roster_in_scope, enforce_venue_access
+from rosteriq.middleware.tenant import load_roster_in_scope, enforce_venue_access, enforce_venue_manager
 from rosteriq.models import User, UserRole
 from rosteriq.services.roster_changelog import (
     RosterChangelogService,
@@ -221,7 +221,9 @@ async def get_version(
         # Verify roster exists
         roster = load_roster_in_scope(db, roster_id)
 
-        require_role(current_user, [UserRole.owner, UserRole.manager])
+        # Venue-wide roster management: full manager/owner only (a section-
+        # restricted department manager would otherwise pass the bare role check).
+        enforce_venue_manager(getattr(roster, "venue_id", None))
 
         # Get version info
         current_version = _changelog_service.get_version(roster_id)
@@ -277,7 +279,9 @@ async def get_diff(
         # Verify roster exists
         roster = load_roster_in_scope(db, roster_id)
 
-        require_role(current_user, [UserRole.owner, UserRole.manager])
+        # Venue-wide roster management: full manager/owner only (a section-
+        # restricted department manager would otherwise pass the bare role check).
+        enforce_venue_manager(getattr(roster, "venue_id", None))
 
         # Get diff
         diff = _changelog_service.diff_versions(roster_id, from_version, to_version)
@@ -331,7 +335,9 @@ async def revert_to_version(
         # Verify roster exists
         roster = load_roster_in_scope(db, roster_id)
 
-        require_role(current_user, [UserRole.owner, UserRole.manager])
+        # Venue-wide roster management: full manager/owner only (a section-
+        # restricted department manager would otherwise pass the bare role check).
+        enforce_venue_manager(getattr(roster, "venue_id", None))
 
         # Get current version
         current_version = _changelog_service.get_version(roster_id)
@@ -465,7 +471,9 @@ async def export_changelog(
         # Verify roster exists
         roster = load_roster_in_scope(db, roster_id)
 
-        require_role(current_user, [UserRole.owner, UserRole.manager])
+        # Venue-wide roster management: full manager/owner only (a section-
+        # restricted department manager would otherwise pass the bare role check).
+        enforce_venue_manager(getattr(roster, "venue_id", None))
 
         if format == "text":
             content = _changelog_service.export_changelog(roster_id)
@@ -513,7 +521,9 @@ async def get_changelog_stats(
         # Verify roster exists
         roster = load_roster_in_scope(db, roster_id)
 
-        require_role(current_user, [UserRole.owner, UserRole.manager])
+        # Venue-wide roster management: full manager/owner only (a section-
+        # restricted department manager would otherwise pass the bare role check).
+        enforce_venue_manager(getattr(roster, "venue_id", None))
 
         # Get stats
         stats = _changelog_service.get_roster_stats(roster_id)

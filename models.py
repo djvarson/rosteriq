@@ -597,6 +597,9 @@ class User(BaseModel):
     name: str
     role: str  # "owner", "manager", "staff"
     venue_ids: List[str] = []
+    # Department-manager scope: venue_id -> [section names] this user is confined
+    # to managing. Absent/empty for a venue = full venue manager (the default).
+    section_grants: Dict[str, List[str]] = {}
     api_key_hash: str = ""
     is_active: bool = True
     created_at: datetime

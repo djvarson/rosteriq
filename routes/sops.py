@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
 from rosteriq.services.events import audit
 
@@ -104,13 +104,10 @@ def _clean_roles(roles) -> list:
 
 
 def _require_manager(user: UserContext, venue_id: str) -> None:
-    enforce_venue_access(venue_id)
-    if user.role not in _MANAGER_ROLES:
-        raise HTTPException(
-            status_code=403,
-            detail="Only managers can publish or edit procedures. Read and "
-                   "acknowledge yours in the SOPs tab of /my instead.",
-        )
+    # SOPs are venue-wide documents -> FULL manager/owner only. enforce_venue_manager
+    # also refuses a section-restricted department manager (they'd otherwise pass a
+    # bare role check), closing that escalation for every caller of this helper.
+    enforce_venue_manager(venue_id)
 
 
 def _require_manager_for_doc(user: UserContext, doc: dict) -> None:

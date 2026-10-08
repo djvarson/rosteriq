@@ -60,7 +60,7 @@ class TenantContext:
     """Holds the current request's tenant (venue) context."""
 
     def __init__(self, user_id: str, venue_ids: List[str], is_owner: bool = False,
-                 role: Optional[str] = None):
+                 role: Optional[str] = None, section_grants: Optional[dict] = None):
         """
         Initialize tenant context.
 
@@ -70,16 +70,37 @@ class TenantContext:
             is_owner: Whether the user is a system owner (unrestricted access)
             role: The user's role ("owner"/"manager"/"staff"). Carried so
                 role-gated helpers (enforce_venue_manager) don't need a DB hit.
+            section_grants: venue_id -> [section names] a DEPARTMENT manager is
+                confined to. Absent/empty for a venue = full venue manager.
+                Carried so section-gated helpers need no DB hit.
         """
         self.user_id = user_id
         self.venue_ids = venue_ids
         self.is_owner = is_owner
         self.role = role
+        self.section_grants = section_grants or {}
 
     def is_manager_or_owner(self) -> bool:
         """True if the user may perform manager-level actions (role manager or
         owner, or the platform-owner flag)."""
         return self.is_owner or self.role in ("manager", "owner")
+
+    def managed_sections(self, venue_id: str) -> Optional[List[str]]:
+        """The sections this user is confined to for ``venue_id`` as a department
+        manager, or None if they are a FULL manager of it (owner, or a manager
+        with no section restriction). Returns [] only if explicitly granted no
+        sections (an effectively powerless grant)."""
+        if self.is_owner:
+            return None
+        grants = self.section_grants or {}
+        if venue_id not in grants:
+            return None
+        return list(grants.get(venue_id) or [])
+
+    def is_section_restricted(self, venue_id: str) -> bool:
+        """True if the user is a DEPARTMENT manager of this venue (scoped to a
+        subset of sections), i.e. NOT a full venue manager."""
+        return self.managed_sections(venue_id) is not None
 
     def has_access_to(self, venue_id: str) -> bool:
         """Check if user has access to a specific venue."""
@@ -216,6 +237,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
                         venue_ids=user.venue_ids,
                         is_owner=user.is_owner,
                         role=getattr(user, "role", None),
+                        section_grants=getattr(user, "section_grants", None),
                     )
                 )
 
@@ -391,21 +413,100 @@ def enforce_venue_access(venue_id: Optional[str]) -> None:
 
 def enforce_venue_manager(venue_id: Optional[str]) -> None:
     """
-    Like ``enforce_venue_access`` but ALSO requires the caller to be a manager or
-    owner of the venue — venue membership alone is not enough. Use for every
-    manager-level mutation: venue/org config, integration credentials, data
-    imports, payroll, roster publishing, templates, webhooks, broadcast
-    messaging, billing, backups.
+    Like ``enforce_venue_access`` but ALSO requires the caller to be a FULL
+    manager or owner of the venue — venue membership alone is not enough, and a
+    DEPARTMENT manager (one scoped to a subset of sections) is NOT enough either.
+    Use for every VENUE-WIDE manager action: venue/org config, integration
+    credentials, data imports, payroll, roster publishing, templates, webhooks,
+    broadcast messaging, billing, backups, user/role management. For actions that
+    belong to one section (a kitchen stocktake, a bar roster edit) use
+    ``enforce_section_manager`` instead, which a department manager can pass.
 
     Order matters: membership is checked first (a non-member gets the same
     "no access to this venue" 403 as ``enforce_venue_access``, not a role hint
-    that would confirm the venue exists), then role. Owners (platform admins)
-    pass both. Raises HTTP 403 on denial.
+    that would confirm the venue exists), then role, then full-manager (not
+    section-restricted). Owners (platform admins) pass all. Raises HTTP 403.
 
     Fail-open on a missing tenant context is deliberate and matches
     ``enforce_venue_access``: there is no context only outside an authenticated
     HTTP request (a direct unit call, background task, or scheduler), never on a
     real venue-scoped route — TenantMiddleware always sets it first.
+    """
+    enforce_venue_access(venue_id)
+    tenant = get_tenant_context_optional()
+    if tenant is None:
+        return
+    if tenant.is_owner:
+        return
+    if tenant.is_manager_or_owner() and not tenant.is_section_restricted(venue_id):
+        return
+    if tenant.is_section_restricted(venue_id):
+        audit_cross_tenant_attempt(venue_id, "venue_scoped", "section_manager_denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=("This is a venue-wide action; a department manager is scoped "
+                    "to specific sections and cannot perform it."),
+        )
+    audit_cross_tenant_attempt(venue_id, "venue_scoped", "role_denied")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This action requires one of these roles: manager, owner",
+    )
+
+
+def enforce_section_manager(venue_id: Optional[str], section: Optional[str]) -> None:
+    """
+    Require the caller to manage ``section`` within ``venue_id``. Use for actions
+    that belong to one department (a kitchen/bar stocktake, a section's roster
+    shifts, a section-targeted announcement).
+
+    Passes for: a platform owner; a FULL venue manager (any section); a DEPARTMENT
+    manager whose grant for this venue includes ``section``. Fails (403) for:
+    staff; a manager of another venue; a department manager asked for a section
+    outside their grant. Section comparison is case/space-insensitive, matching
+    the min_staff-key / inventory-section normalisation used elsewhere.
+
+    Membership is enforced first (same 403 as ``enforce_venue_access`` for a
+    non-member). A missing tenant context is a no-op, matching the other helpers
+    (background/direct calls run outside an HTTP request).
+    """
+    enforce_venue_access(venue_id)
+    tenant = get_tenant_context_optional()
+    if tenant is None:
+        return
+    if tenant.is_owner:
+        return
+    if not tenant.is_manager_or_owner():
+        audit_cross_tenant_attempt(venue_id, "section_scoped", "role_denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires one of these roles: manager, owner",
+        )
+    allowed = tenant.managed_sections(venue_id)
+    if allowed is None:
+        # Full venue manager — may act on any section.
+        return
+    norm = lambda s: str(s or "").strip().lower()
+    if section is not None and norm(section) in {norm(s) for s in allowed}:
+        return
+    audit_cross_tenant_attempt(venue_id, "section_scoped", "section_denied")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(f"You manage the {', '.join(allowed) or '(no)'} section(s) of this "
+                f"venue, not '{section}'."),
+    )
+
+
+def enforce_venue_manager_any(venue_id: Optional[str]) -> None:
+    """
+    Coarse gate: membership AND manager/owner of the venue — FULL or DEPARTMENT.
+    Use BEFORE loading a section-bearing resource so staff and non-members are
+    refused before any existence check (no "does resource X exist" oracle), then
+    pair it with ``enforce_section_manager(venue_id, resource.section)`` AFTER the
+    load for the fine per-section decision. A department manager passes this
+    coarse check (they ARE a manager here) and is narrowed by the section check.
+
+    Missing tenant context is a no-op, matching the other helpers.
     """
     enforce_venue_access(venue_id)
     tenant = get_tenant_context_optional()

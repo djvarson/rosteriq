@@ -23,12 +23,16 @@ class UserContext:
         name: str,
         role: str,
         venue_ids: List[str],
+        section_grants: Optional[dict] = None,
     ):
         self.user_id = user_id
         self.email = email
         self.name = name
         self.role = role
         self.venue_ids = venue_ids
+        # venue_id -> [section names] this user manages (department-manager
+        # scope). Empty/absent for a venue = full venue manager.
+        self.section_grants = section_grants or {}
 
     @property
     def is_owner(self) -> bool:
@@ -177,6 +181,7 @@ async def get_current_user(
         name=user["name"],
         role=user["role"],
         venue_ids=venue_ids,
+        section_grants=user.get("section_grants") or {},
     )
 
 
@@ -229,6 +234,7 @@ async def get_api_key_user(
         name=user["name"],
         role=user["role"],
         venue_ids=venue_ids,
+        section_grants=user.get("section_grants") or {},
     )
 
 

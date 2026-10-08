@@ -282,15 +282,11 @@ async def recall_roster(
 
     logger.info(f"Recalling roster {roster_id} by user {user.user_id}: {body.reason}")
 
-    # Verify user is manager or owner
-    if user.role not in ("owner", "manager"):
-        raise HTTPException(
-            status_code=403,
-            detail="Only managers and owners can recall rosters",
-        )
-
     # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
     roster = _load_roster_scoped(roster_id)
+    # Venue-wide publication action: full manager/owner only — a section-restricted
+    # department manager must not recall the whole venue's roster.
+    enforce_venue_manager(getattr(roster, "venue_id", None))
 
     # Recall
     success = publisher.recall_roster(roster_id=roster_id, reason=body.reason)
@@ -340,15 +336,10 @@ async def archive_roster(
     """
     logger.info(f"Archiving roster {roster_id} by user {user.user_id}")
 
-    # Verify user is manager or owner
-    if user.role not in ("owner", "manager"):
-        raise HTTPException(
-            status_code=403,
-            detail="Only managers and owners can archive rosters",
-        )
-
     # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
     roster = _load_roster_scoped(roster_id)
+    # Venue-wide publication action: full manager/owner only.
+    enforce_venue_manager(getattr(roster, "venue_id", None))
 
     # Archive
     success = publisher.archive_roster(roster_id=roster_id)
@@ -585,15 +576,10 @@ async def auto_publish_roster(
     """
     logger.info(f"Auto-publishing roster {roster_id} by user {user.user_id}")
 
-    # Verify user is manager or owner
-    if user.role not in ("owner", "manager"):
-        raise HTTPException(
-            status_code=403,
-            detail="Only managers and owners can auto-publish",
-        )
-
     # Verify roster exists AND belongs to one of the caller's venues (404 otherwise)
     roster = _load_roster_scoped(roster_id)
+    # Venue-wide publication action: full manager/owner only.
+    enforce_venue_manager(getattr(roster, "venue_id", None))
 
     # Auto-publish
     result = await publisher.auto_publish_if_no_conflicts(roster_id=roster_id)

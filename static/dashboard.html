@@ -5055,8 +5055,13 @@
     <div class="modal-body">
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
         <button class="btn btn-secondary btn-small" onclick="staffResetLink()" title="One-hour, single-use link — you send it to them">Reset login link</button>
-        <button class="btn btn-secondary btn-small" onclick="staffSetRole('manager')" title="They can run this venue's dashboard">Make manager</button>
+        <button class="btn btn-secondary btn-small" onclick="staffSetRole('manager')" title="Full manager: runs the whole venue dashboard">Make manager</button>
         <button class="btn btn-secondary btn-small" onclick="staffSetRole('staff')" title="Back to the staff app only">Set to staff</button>
+      </div>
+      <div id="al-dept" style="margin:4px 0 12px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg);">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">Or make them a <b>department manager</b> — they run only the ticked departments' roster, stock &amp; ordering, never venue-wide settings, billing or integrations:</div>
+        <div id="al-sections" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px; font-size:13px;"></div>
+        <button class="btn btn-secondary btn-small" onclick="staffSetDeptManager()" title="Manager of only the ticked departments">Make department manager</button>
       </div>
       <textarea id="al-link" readonly rows="2" style="display:none; width:100%; font-family:ui-monospace,monospace; font-size:11px; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); color:var(--text-primary); margin-bottom:8px;"></textarea>
       <div id="al-result" style="font-size:13px; color:var(--text-muted); min-height:20px;"></div>
@@ -9235,7 +9240,37 @@ function openAccessModal(employeeId) {
   document.getElementById('al-result').textContent = '';
   document.getElementById('al-link').style.display = 'none';
   document.getElementById('al-link').value = '';
+  // Populate the department checkboxes from this venue's sections.
+  try {
+    var host = document.getElementById('al-sections');
+    if (host) {
+      host.innerHTML = venueSections().map(function (s) {
+        return '<label style="display:inline-flex; align-items:center; gap:4px; cursor:pointer;">' +
+          '<input type="checkbox" class="al-section-cb" value="' + esc(s) + '"> ' + esc(s) + '</label>';
+      }).join('');
+    }
+  } catch (e) { /* non-fatal */ }
   openModal('modal-access');
+}
+
+async function staffSetDeptManager() {
+  var picked = Array.prototype.slice.call(document.querySelectorAll('.al-section-cb'))
+    .filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
+  if (!picked.length) {
+    document.getElementById('al-result').textContent = 'Tick at least one department first.';
+    return;
+  }
+  var ta = document.getElementById('al-link');
+  ta.style.display = 'none'; ta.value = '';
+  try {
+    var d = await fetchAPI('/api/employees/' + encodeURIComponent(_accessEmpId) + '/access-role', {
+      method: 'POST', body: JSON.stringify({ role: 'manager', sections: picked }),
+    });
+    document.getElementById('al-result').textContent = d.message;
+    showToast(d.message, 'success');
+  } catch (err) {
+    document.getElementById('al-result').textContent = err.message;
+  }
 }
 
 async function staffResetLink() {

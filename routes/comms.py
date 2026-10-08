@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
 from rosteriq.services.events import audit
 from rosteriq.services.sms import get_sms_service
@@ -110,8 +110,10 @@ def _require_manager(user: UserContext) -> None:
 @router.post("/api/announcements")
 async def publish_announcement(body: AnnouncementBody,
                                user: UserContext = Depends(get_current_user)) -> dict:
-    enforce_venue_access(body.venue_id)
-    _require_manager(user)
+    # Venue-wide broadcast (and SMS cost): full manager/owner only. A section-
+    # restricted department manager is refused (announcements aren't section-
+    # scoped yet — that's a v2 nicety).
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     staff = db.get_employees(body.venue_id) or []
     targeted = [e for e in staff if _audience_match(body.audience, e)]
@@ -249,8 +251,10 @@ async def venue_announcements(venue_id: str = Query(...),
 @router.post("/api/announcements/{ann_id}/pin")
 async def pin_announcement(ann_id: str, body: PinBody,
                            user: UserContext = Depends(get_current_user)) -> dict:
-    enforce_venue_access(body.venue_id)
-    _require_manager(user)
+    # Venue-wide broadcast (and SMS cost): full manager/owner only. A section-
+    # restricted department manager is refused (announcements aren't section-
+    # scoped yet — that's a v2 nicety).
+    enforce_venue_manager(body.venue_id)
     db = get_db()
     ann = db.get_announcement(ann_id)
     if not ann or ann.get("venue_id") != body.venue_id:

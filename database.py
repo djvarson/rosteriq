@@ -3316,6 +3316,7 @@ class PostgresStore(BaseStore):
                 id TEXT PRIMARY KEY,
                 venue_id TEXT NOT NULL,
                 supplier TEXT,
+                section TEXT,
                 status TEXT NOT NULL DEFAULT 'draft',
                 items JSONB NOT NULL DEFAULT '[]',
                 total_cost NUMERIC DEFAULT 0,
@@ -3545,6 +3546,7 @@ class PostgresStore(BaseStore):
                 api_key_hash TEXT,
                 is_active BOOLEAN DEFAULT true,
                 venue_ids JSONB DEFAULT '[]',
+                section_grants JSONB DEFAULT '{}',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 last_login TIMESTAMP WITH TIME ZONE
             )"""),
@@ -3666,6 +3668,13 @@ class PostgresStore(BaseStore):
         # without it, staff users get [] and can't reach their own venue.
         for alter in (
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS venue_ids JSONB DEFAULT '[]'",
+            # section_grants: venue_id -> [section names] a department manager is
+            # confined to. Absent/empty for a venue = full venue manager (the
+            # default), so this is backward-compatible with every existing user.
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS section_grants JSONB DEFAULT '{}'",
+            # supplier_orders.section: which department an order belongs to, so a
+            # department manager can own their section's ordering/receiving.
+            "ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS section TEXT",
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS approved_by TEXT",
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE",
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS adjustment_note TEXT",
@@ -4388,15 +4397,16 @@ class PostgresStore(BaseStore):
         with self._cursor() as cur:
             self._ensure_table(cur, "supplier_orders")
             cur.execute("""
-                INSERT INTO supplier_orders (id, venue_id, supplier, status, items,
+                INSERT INTO supplier_orders (id, venue_id, supplier, section, status, items,
                     total_cost, created_at, ordered_at, received_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
-                    status=EXCLUDED.status, items=EXCLUDED.items,
+                    status=EXCLUDED.status, items=EXCLUDED.items, section=EXCLUDED.section,
                     total_cost=EXCLUDED.total_cost, ordered_at=EXCLUDED.ordered_at,
                     received_at=EXCLUDED.received_at, updated_at=now()
             """, (
                 order["id"], order["venue_id"], order.get("supplier"),
+                order.get("section"),
                 order.get("status", "draft"), _json(order.get("items", [])),
                 float(order.get("total_cost", 0) or 0),
                 order.get("created_at", datetime.utcnow()),
@@ -5129,24 +5139,27 @@ class PostgresStore(BaseStore):
         """Save or update a user."""
         with self._cursor() as cur:
             cur.execute("""
-                INSERT INTO users (id, email, password_hash, name, role, api_key_hash, is_active, created_at, last_login, venue_ids)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO users (id, email, password_hash, name, role, api_key_hash, is_active, created_at, last_login, venue_ids, section_grants)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     email=EXCLUDED.email, password_hash=EXCLUDED.password_hash,
                     name=EXCLUDED.name, role=EXCLUDED.role,
                     api_key_hash=EXCLUDED.api_key_hash, is_active=EXCLUDED.is_active,
-                    last_login=EXCLUDED.last_login, venue_ids=EXCLUDED.venue_ids
+                    last_login=EXCLUDED.last_login, venue_ids=EXCLUDED.venue_ids,
+                    section_grants=EXCLUDED.section_grants
             """, (
                 user.get("id"), user.get("email"), user.get("password_hash"),
                 user.get("name"), user.get("role"), user.get("api_key_hash", ""),
                 user.get("is_active", True), user.get("created_at"), user.get("last_login"),
                 _json(user.get("venue_ids", []) or []),
+                _json(user.get("section_grants", {}) or {}),
             ))
 
     @staticmethod
     def _normalize_user(row):
-        """Row -> dict with venue_ids guaranteed to be a list (JSONB returns a
-        list already, but be defensive about NULL / legacy string values)."""
+        """Row -> dict with venue_ids (list) and section_grants (dict) guaranteed
+        well-shaped (JSONB returns them already, but be defensive about NULL /
+        legacy string values)."""
         if row is None:
             return None
         u = dict(row)
@@ -5158,6 +5171,14 @@ class PostgresStore(BaseStore):
                 u["venue_ids"] = json.loads(v)
             except Exception:
                 u["venue_ids"] = []
+        g = u.get("section_grants")
+        if g is None:
+            u["section_grants"] = {}
+        elif isinstance(g, str):
+            try:
+                u["section_grants"] = json.loads(g)
+            except Exception:
+                u["section_grants"] = {}
         return u
 
     def get_user_by_email(self, email):

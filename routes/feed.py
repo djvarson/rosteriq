@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
 from rosteriq.services.events import audit
 
@@ -288,9 +288,9 @@ async def pin_post(post_id: str, body: PinBody,
                    user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
     post, actor = _load_post(db, user, post_id)
-    if not (actor.is_manager or _is_manager_user(user)):
-        raise HTTPException(status_code=403,
-                            detail="Only managers can pin or unpin feed posts")
+    # Pinning is venue-wide feed moderation: full manager/owner only (a section-
+    # restricted department manager would otherwise pass the bare is_manager check).
+    enforce_venue_manager(post.get("venue_id"))
     post["pinned"] = bool(body.pinned)
     post["updated_at"] = datetime.utcnow()
     db.save_feed_post(post)
@@ -307,9 +307,10 @@ async def remove_post(post_id: str,
     db = get_db()
     post, actor = _load_post(db, user, post_id)
     is_author = str(post.get("author_user_id") or "") == str(user.user_id)
-    if not (is_author or actor.is_manager or _is_manager_user(user)):
-        raise HTTPException(status_code=403,
-                            detail="Only the author or a manager can remove this post")
+    if not is_author:
+        # Non-authors must be a full venue manager/owner (not a section-restricted
+        # department manager) to remove someone else's post.
+        enforce_venue_manager(post.get("venue_id"))
     post["removed"] = True
     post["updated_at"] = datetime.utcnow()
     db.save_feed_post(post)

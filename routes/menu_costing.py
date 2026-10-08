@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager, enforce_section_manager, enforce_venue_manager_any
 from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
@@ -187,12 +187,21 @@ async def list_ingredients(venue_id: str = Query(...)) -> dict:
 
 @router.post("/ingredients")
 async def upsert_ingredient(body: IngredientRequest) -> dict:
-    enforce_venue_manager(body.venue_id)
+    # Coarse gate first so staff/non-members are refused before any lookup.
+    enforce_venue_manager_any(body.venue_id)
     db = get_db()
     if body.id:
         existing = db.get_ingredient(body.id)
         if not existing or existing.get("venue_id") != body.venue_id:
             raise HTTPException(status_code=404, detail="Ingredient not found")
+        # You must manage the section the ingredient is CURRENTLY in to touch it.
+        enforce_section_manager(body.venue_id, existing.get("section") or "kitchen")
+        # Moving it into a different section requires managing the target too.
+        if body.section and body.section.strip().lower() != (existing.get("section") or "kitchen"):
+            enforce_section_manager(body.venue_id, body.section)
+    else:
+        # New ingredient: scoped to the section it is being created in.
+        enforce_section_manager(body.venue_id, body.section or "kitchen")
     ing_id = body.id or f"ing-{uuid.uuid4().hex[:10]}"
     cost_per_unit = body.purchase_cost / body.purchase_size
     # A price/pack edit must not wipe the inventory levels set on this
