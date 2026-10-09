@@ -89,6 +89,7 @@ def test_my_shifts_shows_only_mine():
         ],
         total_cost=None, created_at=datetime(2026, 7, 1),
     ))
+    db.update_roster_state("sp-roster", "published", "test", "test")   # staff see published rosters only
 
     staff_h = _register_login(c, staff_email)
     _scope_staff(c, staff_email, vid)
@@ -160,6 +161,7 @@ def _roster_with_shift(vid, emp_id, shift_id):
                       break_minutes=30, status=ShiftStatus.scheduled, role="bar")],
         total_cost=None, created_at=datetime(2026, 7, 1),
     ))
+    db.update_roster_state(f"{vid}-roster", "published", "test", "test")   # staff see published rosters only
     return shift_day
 
 

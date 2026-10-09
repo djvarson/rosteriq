@@ -16,6 +16,7 @@ from rosteriq.middleware.auth import get_current_user
 
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
+from rosteriq.services.current_roster import current_roster
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.menu_costing import GST_RATE, _cost_recipe
 from rosteriq.roster_optimiser import compute_coverage_gaps
@@ -57,31 +58,23 @@ async def daily_briefing(venue_id: str = Query(...),
         attention.append("Couldn't calculate labour/prime cost — check the dashboard.")
 
     # --- Today: roster + coverage ----------------------------------------
-    today_rosters = []
+    # The week's ONE live roster (published, else the newest) — never the sum
+    # of every roster saved for the week.
+    active = None
     try:
-        today_rosters = [r for r in (db.get_rosters_by_date_range(venue_id, today, today) or [])]
-    except Exception:
-        pass
-    on_today = 0
-    labour_today = 0.0
-    seen = set()
-    for r in today_rosters:
-        for sh in r.shifts:
-            if sh.date == today and sh.id not in seen:
-                seen.add(sh.id)
-                on_today += 1
-                labour_today += float(sh.cost or 0)
+        active = current_roster(db, venue_id, today)
+    except Exception as e:
+        logger.warning(f"Briefing roster lookup failed for {venue_id}: {e}")
+    on_today = len([sh for sh in (active.shifts if active else []) if sh.date == today])
+    try:
+        labour_today = float((_labour_by_day(db, venue_id, today, today) or {}).get(today.isoformat(), 0.0))
+    except Exception as e:
+        logger.warning(f"Briefing today-labour calc failed for {venue_id}: {e}")
+        labour_today = 0.0
 
     coverage = None
     try:
-        # The roster that COVERS today (week_start <= today <= week_end), not
-        # merely the one with the latest week_start — otherwise a
-        # next-week roster hides today's shortfall.
-        candidates = [r for r in (db.list_rosters() or [])
-                      if getattr(r, "venue_id", None) == venue_id
-                      and r.week_start <= today <= r.week_end]
-        if candidates:
-            active = max(candidates, key=lambda r: r.week_start)
+        if active is not None:
             fcs = db.get_forecasts(venue_id, active.week_start, active.week_end) or []
             if fcs:
                 venue = db.get_venue(venue_id)

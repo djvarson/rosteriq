@@ -55,6 +55,7 @@ def test_full_clock_lifecycle_with_variance():
                       break_minutes=30, status=ShiftStatus.scheduled, role="bar")],
         total_cost=None, created_at=datetime(2026, 7, 1),
     ))
+    db.update_roster_state("clk-roster", "published", "test", "test")   # the kiosk shows the published roster
 
     # Board shows the employee, rostered, state off
     board = c.get(f"/api/clock/board?venue_id={vid}", headers=h).json()

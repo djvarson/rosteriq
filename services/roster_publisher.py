@@ -8,7 +8,8 @@ and staff notifications.
 State machine:
     DRAFT → PENDING_REVIEW → APPROVED → PUBLISHING → PUBLISHED → ARCHIVED
 
-    Also: REJECTED (from PENDING_REVIEW), FAILED (from PUBLISHING)
+    Also: REJECTED (from PENDING_REVIEW), FAILED (from PUBLISHING),
+    SUPERSEDED (a newer roster for the same week replaced it)
 
 Usage:
     from rosteriq.services.roster_publisher import publisher
@@ -68,6 +69,8 @@ class RosterPublishState(str, Enum):
     ARCHIVED = "archived"
     REJECTED = "rejected"
     FAILED = "failed"
+    # A newer roster for the same venue-week replaced it (services/current_roster)
+    SUPERSEDED = "superseded"
 
 
 @dataclass
@@ -196,6 +199,10 @@ class RosterPublisher:
                 return result
 
             current_state_str = self.db.get_roster_state(roster_id)
+            if current_state_str == RosterPublishState.PUBLISHED.value:
+                result.state = current_state_str
+                result.message = "Roster is already published - staff can already see it"
+                return result
             # FAILED and a stale PUBLISHING are retryable — a transient Tanda outage
             # or a mid-publish crash must not permanently block re-publishing.
             if current_state_str not in (
@@ -452,6 +459,12 @@ class RosterPublisher:
 
             venue = self.db.get_venue(roster.venue_id)
 
+            if self.db.get_roster_state(roster_id) == RosterPublishState.SUPERSEDED.value:
+                result.state = RosterPublishState.SUPERSEDED.value
+                result.message = ("A newer roster for this week replaced this one "
+                                  "- review that one instead")
+                return result
+
             if approved:
                 logger.info(f"Roster {roster_id} approved by {reviewer_id}")
                 self.transition_state(
@@ -601,6 +614,8 @@ class RosterPublisher:
                 reason=reason,
                 actor_id=actor_id,
             )
+            if new_state == RosterPublishState.PUBLISHED.value:
+                self._supersede_rest_of_week(roster_id, actor_id)
 
             logger.info(
                 f"Roster {roster_id} transitioned to {new_state} by {actor_id}: {reason}"
@@ -613,6 +628,25 @@ class RosterPublisher:
                 exc_info=True,
             )
             return False
+
+    def _supersede_rest_of_week(self, roster_id: str, actor_id: str) -> None:
+        """One live roster per venue-week: the newly published roster replaces
+        the week's other generated rosters."""
+        try:
+            from rosteriq.services.current_roster import supersede_week_drafts
+            roster = self.db.get_roster(roster_id)
+            if roster is None:
+                return
+            supersede_week_drafts(
+                self.db, roster.venue_id, roster.week_start, roster_id,
+                reason=f"Replaced by published roster {roster_id}",
+                actor_id=actor_id, include_published=True,
+            )
+        except Exception as e:
+            logger.error(
+                f"Could not supersede the rest of roster {roster_id}'s week: {e}",
+                exc_info=True,
+            )
 
     def recall_roster(self, roster_id: str, reason: str) -> bool:
         """

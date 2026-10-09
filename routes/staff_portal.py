@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
 from rosteriq.services.availability_rules import day_windows
+from rosteriq.services.current_roster import live_rosters, live_shifts
 from typing import Optional, List
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
@@ -389,7 +390,7 @@ async def my_shifts(user: UserContext = Depends(get_current_user)) -> dict:
     horizon = today + timedelta(days=14)
     mine = []
     try:
-        for s in db.get_shifts(vid, today, horizon) or []:
+        for s in live_shifts(db, vid, today, horizon, staff=True):
             if str(getattr(s, "employee_id", "")) != str(emp.id):
                 continue
             mine.append({
@@ -565,7 +566,7 @@ def _find_my_shift(db, venue_id: str, employee_id: str, shift_id: str):
     """The named future shift, only if it belongs to this employee."""
     today = venue_today(venue_id, db)
     try:
-        shifts = db.get_shifts(venue_id, today, today + timedelta(days=60)) or []
+        shifts = live_shifts(db, venue_id, today, today + timedelta(days=60), staff=True)
     except Exception:
         shifts = []
     for s in shifts:
@@ -642,7 +643,7 @@ async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
             mine.append(p)
         elif c.get("claimed_by") == emp.id and c.get("status") in ("claimed", "approved"):
             claimed_by_me.append(p)
-        elif c.get("status") == "open":
+        elif c.get("status") == "open" and _live_shift(db, vid, c) is not None:
             up_for_grabs.append(p)
     return {"linked": True, "up_for_grabs": up_for_grabs, "mine": mine,
             "claimed_by_me": claimed_by_me}
@@ -665,7 +666,7 @@ def _clashing_shift(db, venue_id: str, employee_id: str, cover: dict):
     if not isinstance(day, date):
         day = date.fromisoformat(str(day)[:10])
     s, e = _span_minutes(cover.get("shift_start") or "00:00", cover.get("shift_end") or "23:59")
-    for roster in db.list_rosters() or []:
+    for roster in live_rosters(db, venue_id, day, day, staff=True):
         if getattr(roster, "venue_id", None) != venue_id:
             continue
         for sh in roster.shifts or []:
@@ -676,6 +677,21 @@ def _clashing_shift(db, venue_id: str, employee_id: str, cover: dict):
             a, b = _span_minutes(sh.start_time, sh.end_time)
             if a < e and s < b:
                 return sh
+    return None
+
+
+def _live_shift(db, venue_id: str, cover: dict):
+    """The cover's shift, if it is still on the roster staff see for that
+    day (a republish replaces the week's shifts)."""
+    try:
+        day = cover.get("shift_date")
+        if not isinstance(day, date):
+            day = date.fromisoformat(str(day)[:10])
+    except ValueError:
+        return None
+    for sh in live_shifts(db, venue_id, day, day, staff=True):
+        if sh.id == cover.get("shift_id"):
+            return sh
     return None
 
 
@@ -698,6 +714,8 @@ async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_use
         raise HTTPException(status_code=409, detail="You can't claim your own shift")
     if cover.get("status") != "open":
         raise HTTPException(status_code=409, detail=f"This shift is already {cover.get('status')}")
+    if _live_shift(db, vid, cover) is None:
+        raise HTTPException(status_code=409, detail="That shift is no longer on the roster \u2014 it may have been republished")
     clash = _clashing_shift(db, vid, emp.id, cover)
     if clash is not None:
         raise HTTPException(status_code=409, detail=_clash_detail(clash, "You're"))
@@ -831,7 +849,8 @@ async def decide_cover(cover_id: str, body: CoverDecision,
                 clash, _emp_name(db, body.venue_id, claimant_id) + " is") + " \u2014 decline this request instead.")
         # The roster is the source of truth — a cover is only approved if the
         # shift genuinely moves. Fail loud if the roster changed underneath us.
-        if not _reassign_shift(db, body.venue_id, cover["shift_id"], cover["claimed_by"]):
+        if (_live_shift(db, body.venue_id, cover) is None
+                or not _reassign_shift(db, body.venue_id, cover["shift_id"], cover["claimed_by"])):
             raise HTTPException(
                 status_code=409,
                 detail="That shift no longer exists on the roster — it may have "

@@ -342,6 +342,10 @@ def seed_demo_environment(db, reassert_showcase: bool = True) -> None:
                     total_cost=Decimal(str(round(sum(float(s.cost or 0) for s in all_shifts), 2))),
                     created_at=datetime.utcnow(),
                 ))
+            # The seeded week is the venue's live roster: the staff phone and
+            # kiosk only show a published one (services/current_roster).
+            if db.get_roster(rid) is not None and db.get_roster_state(rid) == "draft":
+                db.update_roster_state(rid, "published", "Demo roster seeded as published", "system")
     except Exception:
         pass
 

@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
+from rosteriq.services.current_roster import live_shifts
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.events import audit
@@ -88,7 +89,7 @@ def _employee_or_404(db, venue_id: str, employee_id: str):
 def _todays_shift_for(db, venue_id: str, employee_id: str, on_date: date):
     """The employee's rostered shift today, if any (for variance reconciliation)."""
     try:
-        shifts = db.get_shifts(venue_id, on_date, on_date) or []
+        shifts = live_shifts(db, venue_id, on_date, on_date, staff=True)
     except Exception:
         return None
     for s in shifts:
@@ -120,7 +121,7 @@ async def clock_board(venue_id: str = Query(...)) -> dict:
 
     shifts_today = {}
     try:
-        for s in db.get_shifts(venue_id, today, today) or []:
+        for s in live_shifts(db, venue_id, today, today, staff=True):
             shifts_today[str(s.employee_id)] = {
                 "start": s.start_time.strftime("%H:%M"),
                 "end": s.end_time.strftime("%H:%M"),

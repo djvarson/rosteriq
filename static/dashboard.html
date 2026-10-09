@@ -8777,7 +8777,7 @@ async function loadVenueData() {
     // charts and alerts — as if the venue had no data at all.
     const [empRes, rosterRes, forecastRes] = await Promise.allSettled([
       fetchAPI('/employees'),
-      fetchAPI('/rosters'),
+      fetchAPI(`/rosters?current=true&venue_id=${state.currentVenue}`),
       fetchAPI(`/forecasts?venue_id=${state.currentVenue}`),
     ]);
     const unwrap = (res, what) => {
@@ -12047,7 +12047,7 @@ async function obRosterContext() {
 function obNextMonday() {
   const d = new Date();
   d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
-  return d.toISOString().slice(0, 10);
+  return localIso(d);
 }
 
 async function obGenerateFirstRoster() {
