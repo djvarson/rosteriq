@@ -419,15 +419,11 @@ class BaseStore:
     # they didn't exist, and every such tool silently returned an error.
 
     def get_shifts(self, venue_id: str, start_date, end_date) -> list:
-        """All shifts for a venue within [start_date, end_date], flattened from
-        the venue's rosters (shifts live inside Roster.shifts)."""
-        shifts = []
-        for roster in (self.get_rosters_by_date_range(venue_id, start_date, end_date) or []):
-            for s in (getattr(roster, "shifts", None) or []):
-                sd = getattr(s, "date", None)
-                if sd is None or (start_date <= sd <= end_date):
-                    shifts.append(s)
-        return shifts
+        """Shifts for a venue within [start_date, end_date] from ONE roster per
+        week — the manager view in services/current_roster (published, else
+        the newest). Staff-facing readers use live_shifts(staff=True)."""
+        from rosteriq.services.current_roster import live_shifts
+        return live_shifts(self, venue_id, start_date, end_date)
 
     def get_venue_config(self, venue_id: str):
         """Alias for get_venue — the AI agent calls it get_venue_config."""

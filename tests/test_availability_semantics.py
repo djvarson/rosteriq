@@ -49,6 +49,10 @@ def test_demo_rosters_publish_as_seeded_and_as_generated():
     seeded = [rid for rid, r in get_db()._rosters.items() if r.venue_id == DEMO_VENUE_ID]
     assert seeded
     for rid in seeded:
+        # Seeded as the venue's live (published) week; recall it to prove it
+        # publishes cleanly as seeded.
+        assert get_db().get_roster_state(rid) == "published"
+        assert c.post(f"/api/v1/rosters/{rid}/recall", json={"reason": "t"}, headers=h).status_code == 200
         r = c.post(f"/api/v1/rosters/{rid}/publish", json={"skip_approval": True}, headers=h).json()
         assert r.get("success") is True, r
     gen = c.post("/rosters/generate", json={"venue_id": DEMO_VENUE_ID, "week_start": "2026-10-05"}, headers=h).json()

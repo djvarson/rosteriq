@@ -1371,7 +1371,9 @@ class AgentContext:
                    if getattr(r, "venue_id", None) == self.venue_id]
         if not rosters:
             return {"message": "No roster generated yet for this venue."}
+        from rosteriq.services.current_roster import current_roster
         roster = max(rosters, key=lambda r: r.week_start)
+        roster = current_roster(self.db, self.venue_id, roster.week_start) or roster
         try:
             forecasts = self.db.get_forecasts(
                 self.venue_id, roster.week_start, roster.week_end) or []

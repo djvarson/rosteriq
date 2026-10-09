@@ -361,6 +361,8 @@ async def import_roster(body: RosterImportBody) -> dict:
                                "shifts": len(all_shifts), "total_cost": str(roster.total_cost)})
         except Exception as e:
             skipped.append({"week_of": week_start.isoformat(), "reason": f"roster save failed: {e}"})
+    from rosteriq.services.current_roster import supersede_for_import
+    supersede_for_import(db, body.venue_id, weeks)
 
     logger.info(f"Roster import at {body.venue_id}: {imported} shifts across "
                 f"{rosters_written} week(s), {len(skipped)} skipped ({duplicates} already imported)")

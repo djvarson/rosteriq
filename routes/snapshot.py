@@ -31,6 +31,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
+from rosteriq.services.current_roster import live_rosters
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.menu_costing import GST_RATE
 
@@ -52,9 +53,10 @@ def _shift_paid_minutes(shift) -> int:
 
 
 def _labour_by_day(db, venue_id: str, start: date, end: date) -> dict:
-    """Rostered labour $ per day. Prefers each shift's stored cost; falls back
-    to paid hours x the employee's base rate so a shift with no cached cost
-    still counts (never silently zero)."""
+    """Rostered labour $ per day from ONE roster per week (published, else the
+    newest). Prefers each shift's stored cost; falls back to paid hours x the
+    employee's base rate so a shift with no cached cost still counts (never
+    silently zero)."""
     rates = {}
     for e in (db.get_employees(venue_id) or []):
         try:
@@ -63,7 +65,7 @@ def _labour_by_day(db, venue_id: str, start: date, end: date) -> dict:
             rates[e.id] = 0.0
     by_day: dict = {}
     try:
-        rosters = db.get_rosters_by_date_range(venue_id, start, end) or []
+        rosters = live_rosters(db, venue_id, start, end)
     except Exception as ex:
         logger.warning(f"Roster lookup failed for {venue_id}: {ex}")
         rosters = []

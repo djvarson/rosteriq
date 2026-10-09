@@ -2864,6 +2864,7 @@ def _venue_employees(venue_id: str) -> list:
 @app.post("/rosters/generate")
 async def generate_roster(req: GenerateRosterRequest):
     enforce_venue_manager(req.venue_id)
+    req.week_start = req.week_start - timedelta(days=req.week_start.weekday())
     venue = _store["venues"].get(req.venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")
@@ -2914,24 +2915,20 @@ async def generate_roster(req: GenerateRosterRequest):
     # week's roster plus the stored previous week vs each employee's
     # fortnight cap, and any expired/expiring visas among rostered staff.
     from rosteriq.services.visa import fortnight_cap_flags, visa_alerts
+    from rosteriq.services.current_roster import current_roster, supersede_week_drafts
     prev_week_start = req.week_start - timedelta(days=7)
-    # Regenerating a week accumulates drafts — the fortnight must count the
-    # NEWEST roster for the previous week, never a stale first attempt.
-    def _roster_age(r):
-        try:
-            return r.created_at.timestamp()
-        except Exception:
-            return 0.0
-    _prev_candidates = [r for r in _store["rosters"].values()
-                        if getattr(r, "venue_id", None) == req.venue_id
-                        and getattr(r, "week_start", None) == prev_week_start]
-    prev_roster = max(_prev_candidates, key=_roster_age, default=None)
+    prev_roster = current_roster(_db, req.venue_id, prev_week_start)
     visa_flags = fortnight_cap_flags(roster, employees, prev_roster)
     rostered_ids = {str(sh.employee_id) for sh in roster.shifts}
     visa_expiry_alerts = [a for a in visa_alerts(employees)
                           if a["employee_id"] in rostered_ids]
 
     _store["rosters"][roster.id] = roster
+    try:
+        supersede_week_drafts(_db, req.venue_id, req.week_start, roster.id,
+                              reason=f"Replaced by regenerated roster {roster.id}")
+    except Exception as e:
+        logger.warning(f"Could not supersede older drafts for {req.venue_id} {req.week_start}: {e}")
     try:
         from rosteriq.services.events import audit as _audit
         _audit("roster.generate", req.venue_id, "roster", roster.id,
@@ -3065,10 +3062,12 @@ async def generate_daily(req: DailyRosterRequest):
 async def list_rosters(
     venue_id: Optional[str] = Query(None, description="Filter to one venue"),
     week_start: Optional[str] = Query(None, description="Filter to a week (YYYY-MM-DD)"),
+    current: bool = Query(False, description="Only the live roster per venue-week"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
     enforce_venue_access(venue_id)
+    from rosteriq.services.current_roster import SUPERSEDED, current_per_week, roster_state
     all_rosters = list(_store["rosters"].values())
     # Scope to the caller's venues (owners see all).
     _tenant = get_tenant_context_optional()
@@ -3079,6 +3078,10 @@ async def list_rosters(
         all_rosters = [r for r in all_rosters if getattr(r, "venue_id", None) == venue_id]
     if week_start:
         all_rosters = [r for r in all_rosters if str(getattr(r, "week_start", "")) == week_start]
+    # Superseded rosters are history: readable by id, never listed.
+    all_rosters = [r for r in all_rosters if roster_state(_db, r.id) != SUPERSEDED]
+    if current:
+        all_rosters = current_per_week(_db, all_rosters)
     total = len(all_rosters)
     items = all_rosters[offset:offset + limit]
     return {

@@ -77,6 +77,7 @@ def test_a_cover_that_would_double_book_is_refused_at_claim_and_at_approval():
                             _shift("cg-b-day", b, day, dtime(11, 0), dtime(18, 0))],
                     total_cost=None, created_at=datetime(2026, 7, 1))
     db.save_roster(roster)
+    db.update_roster_state(roster.id, "published", "test", "test")   # staff see published rosters only
     a_h, b_h = _staff_login(c, a_email, vid), _staff_login(c, b_email, vid)
 
     cover = c.post("/api/me/shifts/cg-a-eve/cover", json={"reason": "Sick"}, headers=a_h).json()["cover_id"]

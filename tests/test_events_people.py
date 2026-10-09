@@ -302,6 +302,7 @@ def _roster_with_shift(vid, emp_id, shift_id):
                       break_minutes=30, status=ShiftStatus.scheduled, role="bar")],
         total_cost=None, created_at=datetime(2026, 7, 1),
     ))
+    get_db().update_roster_state(f"{vid}-roster", "published", "test", "test")   # staff see published rosters only
     return shift_day
 
 

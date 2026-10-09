@@ -23,6 +23,7 @@ from fastapi import APIRouter, Query
 
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.services.current_roster import is_imported
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,8 @@ async def setup_status(venue_id: str = Query(...)) -> dict:
         connected = bool(deputy and deputy.get("status") not in (None, "uninstalled"))
     except Exception:
         connected = False
-    history_done = connected or any(
-        str(getattr(r, "id", "") or "").startswith("imported-") for r in rosters)
+    history_done = connected or any(is_imported(r) for r in rosters)
+    generated = [r for r in rosters if not is_imported(r)]
 
     steps = [
         {
@@ -71,8 +72,8 @@ async def setup_status(venue_id: str = Query(...)) -> dict:
         },
         {
             "key": "roster", "label": "Generate your first roster",
-            "done": len(rosters) > 0,
-            "detail": "Roster generated" if rosters
+            "done": len(generated) > 0,
+            "detail": "Roster generated" if generated
                       else "On the Roster page, Generate Roster — the AI builds a week from your staff and demand.",
             "cta": "Roster", "optional": False,
         },
