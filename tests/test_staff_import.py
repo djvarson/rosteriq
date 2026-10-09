@@ -47,7 +47,7 @@ def test_import_with_header_and_extra_columns():
     assert set(emps) == {"Emma Thompson", "James Wilson", "Sarah Chen"}
     assert str(emps["Emma Thompson"].hourly_base_rate) == "32.50"
     assert emps["Emma Thompson"].email == "emma@brass.com"
-    assert emps["Emma Thompson"].skills == ["floor"]  # areas are matched lower-case
+    assert emps["Emma Thompson"].skills == ["floor"]  # skills are stored normalised
     assert emps["James Wilson"].employment_type.value == "part_time"
     assert emps["Sarah Chen"].employment_type.value == "full_time"
 

@@ -142,12 +142,17 @@ PART_TIME_MINIMUM_ENGAGEMENT_HOURS = 3.0
 FULL_TIME_MINIMUM_ENGAGEMENT_HOURS = 0.0  # No minimum for full-time
 MAX_CONSECUTIVE_DAYS = 6
 
-# Break requirements (minutes)
-BREAK_REQUIREMENTS = {
-    5: 30,      # Shifts > 5 hours: 30 min unpaid
-    7: 50,      # Shifts > 7 hours: 30 min unpaid + 20 min paid = 50 total
-    10: 90,     # Shifts > 10 hours: 30 min unpaid + 40 min paid = 70 total
-}
+# Break entitlements by shift length, longest first:
+#   (shift longer than N hours, unpaid meal break minutes, paid rest break minutes)
+# Only the unpaid meal break comes off paid hours (Shift.break_minutes); paid
+# rest breaks are worked time and are never deducted.
+# ADVISOR TO CONFIRM: RosterIQ's working reading of the award's break clause,
+# not a legal determination. Change the numbers here and nowhere else.
+BREAK_ENTITLEMENTS = (
+    (10, 30, 40),   # over 10h: 30 min unpaid meal + 2 x 20 min paid rest
+    (7, 30, 20),    # over 7h:  30 min unpaid meal + 20 min paid rest
+    (5, 30, 0),     # over 5h:  30 min unpaid meal
+)
 
 
 # ============================================================================
@@ -485,28 +490,36 @@ def _get_hour_from_shift_start(shift: Shift) -> int:
 # ============================================================================
 
 
+def get_break_entitlement(shift_duration_hours: float) -> tuple:
+    """(unpaid meal break minutes, paid rest break minutes) for a shift of this
+    length, from BREAK_ENTITLEMENTS (advisor to confirm)."""
+    for over_hours, unpaid_meal, paid_rest in BREAK_ENTITLEMENTS:
+        if shift_duration_hours > over_hours:
+            return unpaid_meal, paid_rest
+    return 0, 0
+
+
 def get_minimum_break_minutes(shift_duration_hours: float) -> int:
     """
-    Return the minimum required unpaid break for a given shift duration.
+    Return the minimum unpaid meal break a shift of this length must record.
 
-    Fair Work requires:
-    - Shifts > 5 hours: minimum 30 minutes unpaid break
-    - Shifts > 7 hours: minimum 30 min unpaid + 20 min paid = 50 total
-    - Shifts > 10 hours: minimum 30 min unpaid + 40 min paid = 70 total
+    This is what Shift.break_minutes is held to and what comes off paid hours.
+    Paid rest breaks are separate (get_paid_rest_break_minutes) and never
+    deducted. Thresholds live in BREAK_ENTITLEMENTS (advisor to confirm).
 
     Args:
         shift_duration_hours: Total shift duration in hours (before breaks)
 
     Returns:
-        Minimum required break minutes
+        Minimum unpaid break minutes
     """
-    if shift_duration_hours > 10:
-        return 70  # 30 min unpaid + 2x20 min paid
-    elif shift_duration_hours > 7:
-        return 50  # 30 min unpaid + 20 min paid
-    elif shift_duration_hours > 5:
-        return 30  # 30 min unpaid
-    return 0
+    return get_break_entitlement(shift_duration_hours)[0]
+
+
+def get_paid_rest_break_minutes(shift_duration_hours: float) -> int:
+    """Paid rest break minutes for a shift of this length (worked time, never
+    deducted). Thresholds live in BREAK_ENTITLEMENTS (advisor to confirm)."""
+    return get_break_entitlement(shift_duration_hours)[1]
 
 
 def get_minimum_engagement_hours(employment_type: EmploymentType) -> float:

@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 from rosteriq.models import (
     Employee, Shift, Roster, DemandForecast, VenueConfig,
     EmploymentType, ShiftStatus, AwardLevel, State,
-    CostBreakdown,
+    CostBreakdown, holds_skill, normalise_area,
 )
 from rosteriq.award_rules import (
     get_penalty_multiplier, get_day_type, get_minimum_break_minutes,
@@ -56,7 +56,7 @@ SHIFT_TEMPLATES = {
     "evening":   (17, 23, 0),    # 6h no break needed
     "short_am":  (8, 13, 0),     # 5h no break needed
     "short_pm":  (17, 22, 0),    # 5h no break needed
-    "full_day":  (9, 18, 50),    # 9h with 50min break
+    "full_day":  (9, 18, 30),    # 9h with 30min unpaid meal break (paid rest is worked time)
     "split_eve": (18, 23, 0),    # 5h evening
 }
 
@@ -371,13 +371,13 @@ def _employee_can_fill_role(employee: Employee, role: str) -> bool:
     An employee may work a role if:
     - the role is a generic/catch-all role (no specialised skill required), OR
     - the employee lists no skills at all (treated as a generalist), OR
-    - the role is one of the employee's listed skills.
+    - the role is one of the employee's listed skills (ignoring case).
     """
     if role.lower() in GENERIC_ROLES:
         return True
     if not employee.skills:
         return True
-    return role in employee.skills
+    return holds_skill(employee.skills, role)
 
 
 # ============================================================================
@@ -853,9 +853,10 @@ def apply_budget_cap(
     report says so plainly, instead of silently rostering an unsafe service.
 
     Cuts remove whole shifts, most expensive first (biggest savings, fewest
-    people affected). A shift is removable only if, for every hour it spans,
-    the remaining same-role shifts still meet the venue's min_staff for that
-    role. Mutates roster.shifts / roster.total_cost in place.
+    people affected). A shift is removable only if, for every hour it spans
+    through to close (past midnight included), the remaining same-role shifts
+    still meet the venue's min_staff for that role. Mutates roster.shifts /
+    roster.total_cost in place.
 
     Returns a report dict:
         {"cap", "initial_cost", "final_cost", "met", "removed": [...], "note"}
@@ -878,31 +879,29 @@ def apply_budget_cap(
         report["note"] = "Already within budget — nothing was cut."
         return report
 
-    def _covering(shifts, day, role):
-        """hour -> count of shifts of this role covering that hour on day."""
+    floors = {normalise_area(r): int(n or 0) for r, n in min_staff_by_role.items()}
+
+    def _covering(shifts):
+        """(area, date, hour) -> count of shifts of that area on in that clock hour."""
         cover = defaultdict(int)
         for s in shifts:
-            if s.date != day or s.role != role:
-                continue
-            end_hour = s.end_time.hour + (1 if s.end_time.minute else 0)
-            for h in range(s.start_time.hour, max(end_hour, s.start_time.hour + 1)):
-                cover[h] += 1
+            area = normalise_area(s.role)
+            for day, hour in s.clock_hours():
+                cover[(area, day, hour)] += 1
         return cover
 
-    def _removable(shift, shifts):
-        floor = int(min_staff_by_role.get(shift.role, 0) or 0)
+    def _removable(shift, cover):
+        area = normalise_area(shift.role)
+        floor = floors.get(area, 0)
         if floor <= 0:
             return True
-        cover = _covering(shifts, shift.date, shift.role)
-        end_hour = shift.end_time.hour + (1 if shift.end_time.minute else 0)
-        for h in range(shift.start_time.hour, max(end_hour, shift.start_time.hour + 1)):
-            if cover[h] - 1 < floor:
-                return False
-        return True
+        return all(cover[(area, day, hour)] - 1 >= floor
+                   for day, hour in shift.clock_hours())
 
     current_cost = initial_cost
     while current_cost > weekly_budget:
-        candidates = [s for s in roster.shifts if _removable(s, roster.shifts)]
+        cover = _covering(roster.shifts)
+        candidates = [s for s in roster.shifts if _removable(s, cover)]
         if not candidates:
             break
         # most expensive first: fastest route under the cap

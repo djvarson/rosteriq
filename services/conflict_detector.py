@@ -25,10 +25,11 @@ import logging
 from collections import defaultdict
 
 from rosteriq.models import (
-    Shift, Roster, Employee, VenueConfig, EmploymentType, ShiftStatus, State
+    Shift, Roster, Employee, VenueConfig, EmploymentType, ShiftStatus, State,
+    DemandForecast, holds_skill, normalise_area,
 )
 from rosteriq.award_rules import (
-    get_minimum_break_minutes, get_minimum_engagement_hours,
+    get_minimum_break_minutes, get_paid_rest_break_minutes, get_minimum_engagement_hours,
     MAX_SHIFT_LENGTH_HOURS, MINIMUM_HOURS_BETWEEN_SHIFTS, MAX_CONSECUTIVE_DAYS,
     get_day_type, DayType,
 )
@@ -96,6 +97,7 @@ class ConflictDetector:
         roster: Roster,
         venue: VenueConfig,
         employees: List[Employee],
+        forecasts: Optional[List[DemandForecast]] = None,
     ) -> List[RosterConflict]:
         """
         Detect all conflicts in the roster.
@@ -104,6 +106,8 @@ class ConflictDetector:
             roster: The roster to check
             venue: Venue configuration with staffing requirements
             employees: List of all employees for reference
+            forecasts: The week's demand forecasts; their hours with demand are
+                the trading hours the staffing check covers
 
         Returns:
             List of detected conflicts
@@ -139,7 +143,7 @@ class ConflictDetector:
                 self._check_overtime_breach(employee, emp_shifts, roster)
                 self._check_consecutive_days_violation(employee, emp_shifts)
 
-        self._check_staffing_levels(roster, venue, employees_dict)
+        self._check_staffing_levels(roster, venue, employees_dict, forecasts)
 
         return self.conflicts
 
@@ -213,7 +217,7 @@ class ConflictDetector:
         if shift.role.lower() in self._GENERIC_ROLES:
             return
 
-        if shift.role not in employee.skills:
+        if not holds_skill(employee.skills, shift.role):
             self.conflicts.append(RosterConflict(
                 conflict_type=ConflictType.SKILL_MISMATCH,
                 severity=ConflictSeverity.WARNING,
@@ -261,20 +265,28 @@ class ConflictDetector:
             ))
 
     def _check_break_violation(self, shift: Shift) -> None:
-        """Check if shift has required breaks based on duration."""
+        """Check the recorded unpaid meal break against the break table.
+
+        Paid rest breaks are worked time, so they are never expected in
+        break_minutes. The table is advisor-to-confirm, so a short break is a
+        warning for the manager, never a publish block.
+        """
         required_break = get_minimum_break_minutes(shift.duration_hours)
         if shift.break_minutes < required_break:
+            paid_rest = get_paid_rest_break_minutes(shift.duration_hours)
+            rest_note = f", plus {paid_rest}min paid rest (not deducted)" if paid_rest else ""
             self.conflicts.append(RosterConflict(
                 conflict_type=ConflictType.BREAK_VIOLATION,
-                severity=ConflictSeverity.CRITICAL,
+                severity=ConflictSeverity.WARNING,
                 message=(
-                    f"Shift {shift.id} ({shift.duration_hours:.1f}h) has {shift.break_minutes}min break, "
-                    f"needs {required_break}min"
+                    f"Shift {shift.id} ({shift.duration_hours:.1f}h) records a "
+                    f"{shift.break_minutes}min unpaid meal break; the break table expects "
+                    f"{required_break}min{rest_note} (advisor to confirm)"
                 ),
                 employee_ids=[shift.employee_id],
                 shift_ids=[shift.id],
                 date=shift.date,
-                suggestion=f"Add {required_break - shift.break_minutes}min break"
+                suggestion=f"Record a {required_break}min unpaid meal break"
             ))
 
     @staticmethod
@@ -386,62 +398,144 @@ class ConflictDetector:
         self,
         roster: Roster,
         venue: VenueConfig,
-        employees_dict: Dict[str, Employee]
+        employees_dict: Dict[str, Employee],
+        forecasts: Optional[List[DemandForecast]] = None,
     ) -> None:
-        """Check for understaffing/overstaffing by hour."""
-        if not venue.min_staff:
+        """Check each area's minimum across every trading hour, empty hours too.
+
+        Trading hours are the forecast hours with demand; a day with no
+        forecast falls back to the span from its first rostered start to its
+        last rostered end. Shortfalls are warnings in plain words, one per run
+        of hours ("Front bar: nobody 21:00-24:00 Mon"), never a publish block.
+        """
+        minimums = {
+            normalise_area(area): int(count)
+            for area, count in (venue.min_staff or {}).items() if int(count or 0) > 0
+        }
+        if not minimums and not forecasts:
             return
 
-        staffing_by_hour: Dict[Tuple[date, int], List[str]] = {}
-
+        on_by_cell: Dict[Tuple[date, int], List[str]] = defaultdict(list)
+        on_by_area: Dict[str, Dict[Tuple[date, int], List[str]]] = defaultdict(lambda: defaultdict(list))
+        span_by_day: Dict[date, Tuple[datetime, datetime]] = {}
         for shift in roster.shifts:
-            current_time = shift.start_time
-            current_date = shift.date
+            if shift.status in (ShiftStatus.cancelled, ShiftStatus.no_show):
+                continue
+            area = normalise_area(shift.role)
+            for cell in shift.clock_hours():
+                on_by_cell[cell].append(shift.employee_id)
+                on_by_area[area][cell].append(shift.employee_id)
+            start_dt = datetime.combine(shift.date, shift.start_time)
+            end_dt = start_dt + timedelta(hours=shift.duration_hours)
+            lo, hi = span_by_day.get(shift.date, (start_dt, end_dt))
+            span_by_day[shift.date] = (min(lo, start_dt), max(hi, end_dt))
 
-            while current_time < shift.end_time:
-                hour_key = (current_date, current_time.hour)
-                if hour_key not in staffing_by_hour:
-                    staffing_by_hour[hour_key] = []
-                staffing_by_hour[hour_key].append(shift.employee_id)
+        forecast_cells: Dict[date, Set[Tuple[date, int]]] = defaultdict(set)
+        for fc in forecasts or []:
+            if fc.venue_id != roster.venue_id or fc.predicted_covers <= 0:
+                continue
+            if roster.week_start <= fc.date <= roster.week_end:
+                forecast_cells[fc.date].add((fc.date, fc.hour))
 
-                current_time = time(hour=(current_time.hour + 1) % 24)
-                if current_time.hour == 0:
-                    current_date = current_date + timedelta(days=1)
+        trading: Set[Tuple[date, int]] = set()
+        for cells in forecast_cells.values():
+            trading |= cells
+        if minimums:
+            for day, (lo, hi) in span_by_day.items():
+                if day in forecast_cells:
+                    continue
+                cur = lo.replace(minute=0, second=0, microsecond=0)
+                for _ in range(48):
+                    if cur >= hi:
+                        break
+                    trading.add((cur.date(), cur.hour))
+                    cur += timedelta(hours=1)
+        cells = sorted(trading)
 
-        for (check_date, hour), staff_ids in staffing_by_hour.items():
-            # Total minimum bodies = the SUM of each role's minimum (the venue
-            # needs e.g. bar>=1 AND floor>=2 = 3 total), not min() of one role.
-            total_min = sum(venue.min_staff.values()) if venue.min_staff else 0
+        if minimums:
+            for area, need in sorted(minimums.items()):
+                label = area[:1].upper() + area[1:]
+                self._flag_short_runs(cells, on_by_area.get(area, {}), need, label)
+        else:
+            self._flag_short_runs(cells, on_by_cell, 1, None)
 
-            if total_min > 0 and len(staff_ids) < total_min:
-                self.conflicts.append(RosterConflict(
-                    conflict_type=ConflictType.UNDERSTAFFED_HOUR,
-                    severity=ConflictSeverity.WARNING,
-                    message=(
-                        f"Only {len(staff_ids)} staff at {check_date} {hour:02d}:00, "
-                        f"minimum {total_min} required"
-                    ),
-                    employee_ids=staff_ids,
-                    shift_ids=[],
-                    hour=hour,
-                    date=check_date,
-                    suggestion=f"Add {total_min - len(staff_ids)} staff for that hour"
-                ))
+        total_min = sum(minimums.values())
+        if total_min > 0:
+            for (check_date, hour), staff_ids in sorted(on_by_cell.items()):
+                if len(staff_ids) > total_min * 1.5:
+                    self.conflicts.append(RosterConflict(
+                        conflict_type=ConflictType.OVERSTAFFED_HOUR,
+                        severity=ConflictSeverity.INFO,
+                        message=(
+                            f"Over-staffed at {check_date} {hour:02d}:00: {len(staff_ids)} staff, "
+                            f"target is {total_min} ({total_min * 1.5:.0f} acceptable)"
+                        ),
+                        employee_ids=staff_ids,
+                        shift_ids=[],
+                        hour=hour,
+                        date=check_date,
+                        suggestion=f"Consider removing {len(staff_ids) - int(total_min * 1.5)} staff"
+                    ))
 
-            if total_min > 0 and len(staff_ids) > total_min * 1.5:
-                self.conflicts.append(RosterConflict(
-                    conflict_type=ConflictType.OVERSTAFFED_HOUR,
-                    severity=ConflictSeverity.INFO,
-                    message=(
-                        f"Over-staffed at {check_date} {hour:02d}:00: {len(staff_ids)} staff, "
-                        f"target is {total_min} ({total_min * 1.5:.0f} acceptable)"
-                    ),
-                    employee_ids=staff_ids,
-                    shift_ids=[],
-                    hour=hour,
-                    date=check_date,
-                    suggestion=f"Consider removing {len(staff_ids) - int(total_min * 1.5)} staff"
-                ))
+    def _flag_short_runs(
+        self,
+        cells: List[Tuple[date, int]],
+        on: Dict[Tuple[date, int], List[str]],
+        need: int,
+        label: Optional[str],
+    ) -> None:
+        """One UNDERSTAFFED_HOUR warning per run of consecutive short hours with
+        the same head count. label=None means the venue as a whole."""
+        run: List[Tuple[date, int]] = []
+        run_count = None
+
+        def _flush():
+            if not run:
+                return
+            first, last = run[0], run[-1]
+            start_dt = datetime.combine(first[0], time(first[1]))
+            end_dt = datetime.combine(last[0], time(last[1])) + timedelta(hours=1)
+            end_label = "24:00" if end_dt == datetime.combine(first[0] + timedelta(days=1), time(0)) \
+                else f"{end_dt.hour:02d}:00"
+            when = f"{start_dt.hour:02d}:00-{end_label} {first[0].strftime('%a')}"
+            ids: List[str] = []
+            for cell in run:
+                ids.extend(i for i in on.get(cell, []) if i not in ids)
+            if label is None:
+                message = f"Nobody rostered {when}"
+                suggestion = f"Roster someone {when}, or confirm the venue is closed"
+            elif run_count == 0:
+                message = f"{label}: nobody {when}"
+                suggestion = f"Add {need} {label.lower()} staff {when}"
+            else:
+                message = f"{label}: {run_count} of {need} on {when}"
+                suggestion = f"Add {need - run_count} {label.lower()} staff {when}"
+            self.conflicts.append(RosterConflict(
+                conflict_type=ConflictType.UNDERSTAFFED_HOUR,
+                severity=ConflictSeverity.WARNING,
+                message=message,
+                employee_ids=ids,
+                shift_ids=[],
+                hour=first[1],
+                date=first[0],
+                suggestion=suggestion,
+            ))
+
+        prev_dt = None
+        for cell in cells:
+            count = len(on.get(cell, []))
+            cell_dt = datetime.combine(cell[0], time(cell[1]))
+            if count >= need:
+                _flush()
+                run, run_count, prev_dt = [], None, None
+                continue
+            if run and (count != run_count or cell_dt - prev_dt != timedelta(hours=1)):
+                _flush()
+                run = []
+            run.append(cell)
+            run_count = count
+            prev_dt = cell_dt
+        _flush()
 
     @staticmethod
     def _shifts_overlap(shift1: Shift, shift2: Shift) -> bool:
@@ -464,9 +558,10 @@ def detect_conflicts(
     roster: Roster,
     venue: VenueConfig,
     employees: List[Employee],
+    forecasts: Optional[List[DemandForecast]] = None,
 ) -> List[RosterConflict]:
     """Module-level convenience wrapper around ConflictDetector.detect_conflicts."""
-    return ConflictDetector().detect_conflicts(roster, venue, employees)
+    return ConflictDetector().detect_conflicts(roster, venue, employees, forecasts)
 
 
 class ConflictSummary:
