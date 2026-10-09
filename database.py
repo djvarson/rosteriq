@@ -3800,6 +3800,7 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, employment_type=EXCLUDED.employment_type,
+                    award_level=EXCLUDED.award_level,
                     hourly_base_rate=EXCLUDED.hourly_base_rate, skills=EXCLUDED.skills,
                     availability=EXCLUDED.availability, max_hours_per_week=EXCLUDED.max_hours_per_week,
                     phone=EXCLUDED.phone, email=EXCLUDED.email,
