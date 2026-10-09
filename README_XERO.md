@@ -78,7 +78,7 @@ GET    /api/xero/pnl/{venue_id}        — Get P&L metrics
 - **P&L Reporting** — Labour % of revenue for KPI dashboard
 - **Rate Limiting** — 60 req/min with token bucket
 - **Retry Logic** — Exponential backoff + token refresh on 401
-- **AU Compliance** — GST 10%, super 11.5%, BAS periods, Fair Work
+- **AU Compliance** — GST 10%, Superannuation Guarantee rate for the date, BAS periods, Fair Work
 
 ## Key Classes
 

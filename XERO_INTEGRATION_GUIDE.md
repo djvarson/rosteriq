@@ -11,7 +11,7 @@ The Xero integration provides:
 3. **P&L Reporting** — Calculate labour % of revenue for dashboard
 4. **OAuth2 PKCE Security** — Industry-standard token-based authorization
 5. **Rate Limiting & Retry** — 60 req/min with exponential backoff
-6. **Australian Compliance** — GST 10%, super 11.5%, BAS periods
+6. **Australian Compliance** — GST 10%, Superannuation Guarantee rate for the date (12% from 1 July 2025), BAS periods
 
 ## Architecture
 
@@ -242,7 +242,7 @@ Content-Type: application/json
 2. Build labour journal with:
    - **Wages Expense** (debit, account 6000) — total wages
    - **Wages Payable** (credit, account 2005) — accrual
-   - **Super Expense** (debit, account 6200) — 11.5% of wages
+   - **Super Expense** (debit, account 6200) — Superannuation Guarantee on ordinary time earnings
    - **Super Payable** (credit, account 2010) — accrual
 
 3. Push to Xero as draft journal for review
@@ -253,8 +253,8 @@ Example journal entry (daily):
 |---------|-------------|-------|--------|
 | 6000 | Wages Expense - 2026-04-23 | $1,200.50 | |
 | 2005 | Wages Payable | | $1,200.50 |
-| 6200 | Superannuation Expense (11.5%) | $138.06 | |
-| 2010 | Superannuation Payable | | $138.06 |
+| 6200 | Superannuation Expense (12%) | $144.06 | |
+| 2010 | Superannuation Payable | | $144.06 |
 
 **Note:** Journals stay in draft until approved in Xero, avoiding double-posting errors.
 
@@ -332,14 +332,14 @@ except RuntimeError:
 
 ## Australian Compliance
 
-### Superannuation (11.5%)
+### Superannuation
 
-Super is calculated as:
+Super is calculated on ordinary time earnings (overtime excluded) at the
+Superannuation Guarantee rate in force on the date — 11.5% until 30 June 2025,
+12% from 1 July 2025 (`cost_calculator.SUPER_GUARANTEE_RATES`):
 ```
-Super = Gross Wages × 11.5%
+Super = Ordinary Time Earnings × SG rate
 ```
-
-No super on wages below the superannuation guarantee threshold (~$20,800/year).
 
 ### GST (10%)
 

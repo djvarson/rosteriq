@@ -56,8 +56,8 @@ def test_full_time_45h_week_triggers_overtime():
     # OT = 2h*30*1.5 + 5h*30*2.0 = 90 + 300 = 390
     assert r["overtime_cost"] == Decimal("390.00")
     # super on ordinary earnings only (1140), NOT on OT
-    assert r["super_contribution"] == Decimal("131.10")  # 1140 * 0.115
-    assert r["total_cost"] == Decimal("1661.10")  # 1140 + 390 + 131.10
+    assert r["super_contribution"] == Decimal("136.80")  # 1140 * 0.12
+    assert r["total_cost"] == Decimal("1666.80")  # 1140 + 390 + 136.80
 
 
 def test_under_38h_has_no_overtime():
@@ -68,7 +68,7 @@ def test_under_38h_has_no_overtime():
     assert r["overtime_hours"] == Decimal("0")
     assert r["overtime_cost"] == Decimal("0.00")
     assert r["base_cost"] == Decimal("900.00")  # 30 * 30
-    assert r["super_contribution"] == Decimal("103.50")  # 900 * 0.115
+    assert r["super_contribution"] == Decimal("108.00")  # 900 * 0.12
 
 
 def test_casual_never_accrues_overtime():
@@ -102,7 +102,7 @@ def test_calculate_roster_cost_applies_overtime():
         shifts=shifts, total_cost=Decimal("0"), created_at=datetime(2026, 6, 20),
     )
     cost = calculate_roster_cost(roster, {"e1": emp}, State.vic)
-    assert cost == Decimal("1661.10")
+    assert cost == Decimal("1666.80")
     # Sanity: strictly more than costing all 45h as ordinary ($1140 + super).
     ordinary_only = Decimal("45") * Decimal("30")  # 1350 base if no OT split
     assert cost > ordinary_only

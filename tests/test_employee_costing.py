@@ -171,8 +171,8 @@ class TestShiftCostCalculation:
         # No casual loading for FT
         assert casual_loading == Decimal("0.00")
 
-        # Super at 11.5% on base
-        expected_super = (Decimal("187.50") * Decimal("0.115")).quantize(
+        # Super at the 12% SG rate (from 1 July 2025) on base
+        expected_super = (Decimal("187.50") * Decimal("0.12")).quantize(
             Decimal("0.01")
         )
         assert super_contrib == expected_super

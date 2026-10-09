@@ -4,7 +4,7 @@ Comprehensive employee costing service for RosterIQ.
 Provides detailed labour cost calculations including:
 - Base hourly rates with penalty multipliers
 - Casual loading (25% on top of base)
-- Superannuation (11.5% of ordinary time earnings)
+- Superannuation (Superannuation Guarantee rate for the date, on ordinary time earnings)
 - WorkCover levies (state-specific)
 - Payroll tax (state-specific, over threshold)
 - Leave accrual costs (annual, personal/carer's, long service)
@@ -34,15 +34,13 @@ from rosteriq.award_rules import (
 )
 from rosteriq.cost_calculator import (
     calculate_shift_cost_breakdown,
+    super_guarantee_rate,
 )
 
 
 # ============================================================================
 # CONSTANTS
 # ============================================================================
-
-# Superannuation rate for FY 2025-26
-SUPER_RATE = Decimal("0.115")
 
 # Casual loading rate (applies to casual employees on top of base)
 CASUAL_LOADING_RATE = Decimal("0.25")
@@ -268,7 +266,7 @@ class EmployeeCostingService:
         ordinary_earnings = base_pay + penalty_pay + casual_loading
 
         # Superannuation on ordinary time earnings
-        super_contribution = (ordinary_earnings * SUPER_RATE).quantize(
+        super_contribution = (ordinary_earnings * super_guarantee_rate(shift.date)).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
 
