@@ -12496,7 +12496,13 @@ async function publishRoster() {
     });
     if (result && result.success) {
       const notified = result.notifications_sent || 0;
-      showToast('Roster published' + (notified ? ' — ' + notified + ' staff notified.' : '.'), 'success', 4000);
+      const short = result.staffing_warnings || [];
+      if (short.length) {
+        showToast('Roster published, but short-staffed: ' + short.slice(0, 3).join('; ') +
+          (short.length > 3 ? ' (+' + (short.length - 3) + ' more)' : ''), 'warning', 9000);
+      } else {
+        showToast('Roster published' + (notified ? ' — ' + notified + ' staff notified.' : '.'), 'success', 4000);
+      }
     } else {
       showToast('Could not publish: ' + ((result && result.message) || 'roster not in a publishable state'), 'warning', 6000);
     }

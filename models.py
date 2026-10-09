@@ -151,6 +151,44 @@ class UserRole(str, Enum):
 # ============================================================================
 
 
+def normalise_area(name) -> str:
+    """An area/skill/role name as compared everywhere: trimmed, single-spaced,
+    lower-case (venue minimums are stored lower-case)."""
+    return " ".join(str(name or "").split()).lower()
+
+
+def normalise_skills(value) -> List[str]:
+    """Skills as stored: normalised, de-duplicated, with a joined export cell
+    ('Front Bar, Sports Bar') split into its areas."""
+    import json
+    import re
+    if value is None:
+        return []
+    if isinstance(value, str) and value.strip().startswith("["):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            pass
+    items = list(value) if isinstance(value, (list, tuple, set)) else [value]
+    out: List[str] = []
+    for item in items:
+        if item is None:
+            continue
+        for part in re.split(r"[,;|/]", str(item)):
+            part = normalise_area(part)
+            if part and part not in out:
+                out.append(part)
+    return out
+
+
+def holds_skill(skills, role) -> bool:
+    """Whether skills cover role, ignoring case. A role naming several areas
+    ('bar/cellar') needs every one of them."""
+    wanted = normalise_skills(role)
+    held = set(normalise_skills(skills))
+    return bool(wanted) and all(w in held for w in wanted)
+
+
 class Employee(BaseModel):
     """Employee record with availability and constraints."""
 
@@ -190,6 +228,11 @@ class Employee(BaseModel):
             raise ValueError("hourly_base_rate must be greater than 0")
         return v
 
+    @field_validator("skills", mode="before")
+    @classmethod
+    def normalise_skill_list(cls, v: Any) -> List[str]:
+        return normalise_skills(v)
+
     @field_validator("max_hours_per_week")
     @classmethod
     def validate_max_hours_per_week(cls, v: float) -> float:
@@ -226,7 +269,7 @@ class Shift(BaseModel):
     date: date
     start_time: time
     end_time: time
-    break_minutes: int = 0
+    break_minutes: int = 0  # unpaid meal break only; paid rest breaks are worked time
     status: ShiftStatus
     role: str
     cost: Optional[Decimal] = None
@@ -263,6 +306,19 @@ class Shift(BaseModel):
     def net_hours(self) -> float:
         """Calculate net hours worked (duration minus break)."""
         return max(0, self.duration_hours - self.break_minutes / 60.0)
+
+    def clock_hours(self) -> List[tuple]:
+        """(date, hour) for every clock hour the shift touches, on the calendar
+        date that hour falls on: an 18:00-01:00 close covers 00:00 of the next
+        day. Never more than 24 cells."""
+        start = datetime.combine(self.date, self.start_time)
+        end = start + timedelta(hours=self.duration_hours)
+        cur = start.replace(minute=0, second=0, microsecond=0)
+        cells: List[tuple] = []
+        while cur < end and len(cells) < 24:
+            cells.append((cur.date(), cur.hour))
+            cur += timedelta(hours=1)
+        return cells
 
 
 class Roster(BaseModel):

@@ -75,6 +75,18 @@ class AutoFixResponse(BaseModel):
     summary: str
 
 
+def _roster_context(db, roster):
+    """The roster's own venue's staff, and its week's forecasts (whose hours
+    with demand are the trading hours the staffing check covers)."""
+    employees = [e for e in db.list_employees() if getattr(e, "venue_id", None) == roster.venue_id]
+    try:
+        forecasts = list(db.get_forecasts(roster.venue_id, roster.week_start, roster.week_end) or [])
+    except Exception as e:
+        logger.warning(f"Forecast lookup failed for roster {roster.id}: {e}")
+        forecasts = []
+    return employees, forecasts
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -117,11 +129,11 @@ async def detect_conflicts(
         if not venue:
             raise HTTPException(404, f"Venue {roster.venue_id} not found")
 
-        employees = db.list_employees()
+        employees, forecasts = _roster_context(db, roster)
 
         # Run conflict detection
         detector = ConflictDetector()
-        conflicts = detector.detect_conflicts(roster, venue, employees)
+        conflicts = detector.detect_conflicts(roster, venue, employees, forecasts)
 
         # Apply filters if specified
         if severity_filter:
@@ -186,11 +198,11 @@ async def get_conflicts_summary(roster_id: str) -> ConflictSummaryResponse:
         if not venue:
             raise HTTPException(404, f"Venue {roster.venue_id} not found")
 
-        employees = db.list_employees()
+        employees, forecasts = _roster_context(db, roster)
 
         # Run conflict detection
         detector = ConflictDetector()
-        conflicts = detector.detect_conflicts(roster, venue, employees)
+        conflicts = detector.detect_conflicts(roster, venue, employees, forecasts)
 
         # Build summary
         summary = ConflictSummary(conflicts)
@@ -239,11 +251,11 @@ async def auto_fix_conflicts(
         if not venue:
             raise HTTPException(404, f"Venue {roster.venue_id} not found")
 
-        employees = db.list_employees()
+        employees, forecasts = _roster_context(db, roster)
 
         # Run conflict detection
         detector = ConflictDetector()
-        conflicts = detector.detect_conflicts(roster, venue, employees)
+        conflicts = detector.detect_conflicts(roster, venue, employees, forecasts)
 
         # Filter to fixable types (non-critical, non-manual)
         fixable_types = {
@@ -273,7 +285,8 @@ async def auto_fix_conflicts(
                                 # Extend shift by 30 minutes
                                 from datetime import time, timedelta
                                 new_end = shift.end_time
-                                total_minutes = new_end.hour * 60 + new_end.minute + 30
+                                # Past midnight wraps: an end before the start is the next day.
+                                total_minutes = (new_end.hour * 60 + new_end.minute + 30) % (24 * 60)
                                 new_end = time(hour=total_minutes // 60, minute=total_minutes % 60)
                                 shift.end_time = new_end
                                 changes_made += 1

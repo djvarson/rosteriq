@@ -55,7 +55,7 @@ def test_map_employee_full_record():
     assert emp.hourly_base_rate == Decimal("34.50")
     assert emp.employment_type == EmploymentType.full_time
     assert emp.state == State.wa            # venue's state carried through
-    assert "Bartender" in emp.skills
+    assert "bartender" in emp.skills  # skills are stored normalised
     assert a._rate_review_ids == []         # real rate -> nothing to review
 
 

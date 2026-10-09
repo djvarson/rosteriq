@@ -26,7 +26,7 @@ import uuid
 
 from rosteriq.database import get_db
 from rosteriq.models import Roster, Shift, VenueConfig, Employee
-from rosteriq.services.conflict_detector import ConflictDetector, ConflictSeverity
+from rosteriq.services.conflict_detector import ConflictDetector, ConflictSeverity, ConflictType
 from rosteriq.services.approval_workflow import approval_workflow, ApprovalStatus
 from rosteriq.services.notification_hub import get_notification_hub, NotificationEventType
 from rosteriq.services.tanda_roster_push import TandaRosterPush as TandaRosterPusher
@@ -83,6 +83,9 @@ class PublishResult:
     message: str = ""
     timestamp: str = ""
     approval_request_id: Optional[str] = None
+    # Plain-words under-minimum hours ("Front bar: nobody 21:00-24:00 Mon");
+    # warnings only, the publish still goes through.
+    staffing_warnings: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -136,6 +139,15 @@ class RosterPublisher:
         # is a module-level singleton, so a cached db would point at a stale store
         # after the test harness resets the global DB (and is simply more correct).
         return get_db()
+
+    def _week_forecasts(self, roster) -> list:
+        """The roster week's demand forecasts; the staffing check treats their
+        hours with demand as trading hours. Empty if none or unreadable."""
+        try:
+            return list(self.db.get_forecasts(roster.venue_id, roster.week_start, roster.week_end) or [])
+        except Exception as e:
+            logger.warning(f"Forecast lookup failed for roster {roster.id}: {e}")
+            return []
 
     def _tanda_pusher_for(self, venue):
         """Build a TandaRosterPush for a venue's Tanda connection, or None if the
@@ -227,11 +239,16 @@ class RosterPublisher:
                 roster=roster,
                 venue=venue,
                 employees=employees,
+                forecasts=self._week_forecasts(roster),
             )
             result.conflicts_found = len(conflicts)
             result.critical_conflicts = len(
                 [c for c in conflicts if c.severity == ConflictSeverity.CRITICAL]
             )
+            result.staffing_warnings = [
+                c.message for c in conflicts
+                if c.conflict_type == ConflictType.UNDERSTAFFED_HOUR
+            ]
 
             # Step 4: Block if critical conflicts
             if result.critical_conflicts > 0:
@@ -400,6 +417,11 @@ class RosterPublisher:
                 f"{result.conflicts_found} conflicts (warning level). "
                 f"{notifications_sent} staff notified."
             )
+            if result.staffing_warnings:
+                shown = result.staffing_warnings[:3]
+                more = len(result.staffing_warnings) - len(shown)
+                result.message += " Short-staffed: " + "; ".join(shown) + (
+                    f" (+{more} more)." if more else ".")
             logger.info(result.message)
 
             return result

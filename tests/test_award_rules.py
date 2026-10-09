@@ -10,7 +10,7 @@ from rosteriq.models import (
 )
 from rosteriq.award_rules import (
     get_penalty_multiplier, get_day_type, calculate_shift_cost,
-    validate_shift_compliance, get_minimum_break_minutes,
+    validate_shift_compliance, get_minimum_break_minutes, get_paid_rest_break_minutes,
     get_minimum_engagement_hours, check_consecutive_days,
     get_public_holidays, calculate_overtime_hours,
     PENALTY_MULTIPLIERS,
@@ -211,16 +211,23 @@ class TestBreakRequirements:
         assert get_minimum_break_minutes(5.0) == 0  # exactly 5 is not >5
         assert get_minimum_break_minutes(5.5) == 30
 
+    # get_minimum_break_minutes is the UNPAID meal break only (what comes off
+    # paid hours); the paid rest breaks on longer shifts are worked time.
     def test_7_hour_boundary(self):
         assert get_minimum_break_minutes(7.0) == 30  # exactly 7 is >5 but not >7
-        assert get_minimum_break_minutes(7.5) == 50
+        assert get_minimum_break_minutes(7.5) == 30
+        assert get_paid_rest_break_minutes(7.0) == 0
+        assert get_paid_rest_break_minutes(7.5) == 20
 
     def test_10_hour_boundary(self):
-        assert get_minimum_break_minutes(10.0) == 50  # exactly 10 is >7 but not >10
-        assert get_minimum_break_minutes(10.5) == 70
+        assert get_minimum_break_minutes(10.0) == 30
+        assert get_minimum_break_minutes(10.5) == 30
+        assert get_paid_rest_break_minutes(10.0) == 20  # exactly 10 is >7 but not >10
+        assert get_paid_rest_break_minutes(10.5) == 40
 
     def test_long_shift(self):
-        assert get_minimum_break_minutes(11.0) == 70
+        assert get_minimum_break_minutes(11.0) == 30
+        assert get_paid_rest_break_minutes(11.0) == 40
 
 
 # ============================================================================
@@ -245,8 +252,8 @@ class TestMinimumEngagement:
 class TestShiftCompliance:
     def test_valid_shift_no_violations(self):
         emp = make_employee()
-        # 9:00-17:00 is an 8h shift, which requires a 50min break under the
-        # Hospitality Award (>7h). Provide a compliant break.
+        # 9:00-17:00 is an 8h shift: a 30min unpaid meal break is required
+        # (the 20min paid rest break is worked time, not recorded here).
         shift = make_shift(break_minutes=50)
         violations = validate_shift_compliance(emp, shift)
         assert violations == []
@@ -263,7 +270,7 @@ class TestShiftCompliance:
         shift = make_shift(
             start_time=time(9, 0), end_time=time(17, 0), break_minutes=10
         )
-        # 8h shift needs 50min break, only has 10
+        # 8h shift needs a 30min unpaid meal break, only has 10
         violations = validate_shift_compliance(emp, shift)
         assert any("break" in v.lower() for v in violations)
 

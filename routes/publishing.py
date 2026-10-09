@@ -103,6 +103,7 @@ class PublishRosterResponse(BaseModel):
     message: str
     timestamp: str
     approval_request_id: Optional[str] = None
+    staffing_warnings: List[str] = []
 
 
 class RecallRosterRequest(BaseModel):
@@ -244,6 +245,7 @@ async def publish_roster(
         message=result.message,
         timestamp=result.timestamp,
         approval_request_id=result.approval_request_id,
+        staffing_warnings=result.staffing_warnings,
     )
 
 
@@ -602,4 +604,5 @@ async def auto_publish_roster(
         message=result.message,
         timestamp=result.timestamp,
         approval_request_id=result.approval_request_id,
+        staffing_warnings=result.staffing_warnings,
     )

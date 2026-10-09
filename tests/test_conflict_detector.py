@@ -302,7 +302,8 @@ def test_break_violation_detection():
 
     break_violations = [c for c in conflicts if c.conflict_type == ConflictType.BREAK_VIOLATION]
     assert len(break_violations) > 0, "Should detect break violation"
-    assert any(c.severity == ConflictSeverity.CRITICAL for c in break_violations)
+    # The break table is advisor-to-confirm: a short break warns, never blocks publish.
+    assert all(c.severity == ConflictSeverity.WARNING for c in break_violations)
 
     print("PASS")
 
@@ -399,9 +400,8 @@ def test_clean_roster_no_conflicts():
     venue = create_test_venue()
     detector = ConflictDetector()
 
-    # Properly scheduled shifts. 7h shifts only require a 30min unpaid break
-    # (shifts over 7h require 50min total per the award), so a 30min break
-    # here is fully compliant.
+    # Properly scheduled shifts: a 30min unpaid meal break is what the break
+    # table expects of any shift over 5h (paid rest breaks are never recorded).
     shifts = [
         create_test_shift("s1", "emp1", week_start, 9, 16, break_minutes=30),
         create_test_shift("s2", "emp1", week_start + timedelta(days=2), 10, 17, break_minutes=30),
