@@ -27,11 +27,10 @@ from rosteriq.award_rules import (
     PENALTY_MULTIPLIERS, EVENING_LOADING_THRESHOLDS, DayType,
 )
 from rosteriq.database import get_db
+from rosteriq.cost_calculator import super_guarantee_rate
 
 logger = logging.getLogger(__name__)
 
-# Superannuation rate for FY 2025-26
-SUPER_RATE = Decimal("0.115")
 CASUAL_LOADING_RATE = Decimal("0.25")
 
 
@@ -137,7 +136,7 @@ class PenaltyCalculator:
         penalty_cost = self._calculate_penalty_cost(base_cost, penalties, employee)
         casual_loading = self._calculate_casual_loading(employee, base_cost)
         gross_pay = base_cost + penalty_cost + casual_loading
-        super_contribution = self._calculate_super(gross_pay)
+        super_contribution = self._calculate_super(gross_pay, shift_date)
         total_cost = gross_pay + super_contribution
 
         # Calculate effective hourly rate
@@ -149,7 +148,7 @@ class PenaltyCalculator:
 
         # Calculate cost comparison vs weekday
         cost_comparison = self._calculate_cost_comparison(
-            employee, base_cost, day_type, start_time.hour
+            employee, base_cost, day_type, start_time.hour, shift_date
         )
 
         return PenaltyBreakdown(
@@ -227,7 +226,7 @@ class PenaltyCalculator:
         )
         casual_loading = self._calculate_casual_loading_for_type(emp_type, base_cost)
         gross_pay = base_cost + penalty_cost + casual_loading
-        super_contribution = self._calculate_super(gross_pay)
+        super_contribution = self._calculate_super(gross_pay, shift_date)
         total_cost = gross_pay + super_contribution
 
         total_hourly_cost = (
@@ -237,7 +236,7 @@ class PenaltyCalculator:
         )
 
         cost_comparison = self._calculate_cost_comparison_for_type(
-            hourly_rate, base_cost, day_type, start_time.hour, emp_type
+            hourly_rate, base_cost, day_type, start_time.hour, emp_type, shift_date
         )
 
         return PenaltyBreakdown(
@@ -664,9 +663,9 @@ class PenaltyCalculator:
             )
         return Decimal("0.00")
 
-    def _calculate_super(self, gross_pay: Decimal) -> Decimal:
-        """Calculate superannuation at 11.5% of gross pay."""
-        return (gross_pay * SUPER_RATE).quantize(
+    def _calculate_super(self, gross_pay: Decimal, on: date) -> Decimal:
+        """Superannuation at the Superannuation Guarantee rate in force on ``on``."""
+        return (gross_pay * super_guarantee_rate(on)).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
 
@@ -689,6 +688,7 @@ class PenaltyCalculator:
         base_cost: Decimal,
         day_type: DayType,
         start_hour: int,
+        shift_date: date,
     ) -> CostComparison:
         """Calculate cost comparison vs weekday baseline."""
         # Calculate what weekday cost would be
@@ -702,7 +702,7 @@ class PenaltyCalculator:
             weekday_casual = Decimal("0.00")
 
         weekday_gross = base_cost + (weekday_cost_base - base_cost) + weekday_casual
-        weekday_total = weekday_gross + self._calculate_super(weekday_gross)
+        weekday_total = weekday_gross + self._calculate_super(weekday_gross, shift_date)
 
         # Current cost
         current_multiplier = PENALTY_MULTIPLIERS[employee.employment_type][day_type]
@@ -714,7 +714,7 @@ class PenaltyCalculator:
             current_casual = Decimal("0.00")
 
         current_gross = base_cost + (current_cost_base - base_cost) + current_casual
-        current_total = current_gross + self._calculate_super(current_gross)
+        current_total = current_gross + self._calculate_super(current_gross, shift_date)
 
         premium = current_total - weekday_total
         premium_pct = float(
@@ -741,6 +741,7 @@ class PenaltyCalculator:
         day_type: DayType,
         start_hour: int,
         employment_type: EmploymentType,
+        shift_date: date,
     ) -> CostComparison:
         """Calculate cost comparison without Employee object."""
         # Weekday calculation
@@ -753,7 +754,7 @@ class PenaltyCalculator:
             weekday_casual = Decimal("0.00")
 
         weekday_gross = base_cost + (weekday_cost_base - base_cost) + weekday_casual
-        weekday_total = weekday_gross + self._calculate_super(weekday_gross)
+        weekday_total = weekday_gross + self._calculate_super(weekday_gross, shift_date)
 
         # Current calculation
         current_multiplier = PENALTY_MULTIPLIERS[employment_type][day_type]
@@ -765,7 +766,7 @@ class PenaltyCalculator:
             current_casual = Decimal("0.00")
 
         current_gross = base_cost + (current_cost_base - base_cost) + current_casual
-        current_total = current_gross + self._calculate_super(current_gross)
+        current_total = current_gross + self._calculate_super(current_gross, shift_date)
 
         premium = current_total - weekday_total
         premium_pct = float(

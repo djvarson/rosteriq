@@ -27,6 +27,7 @@ from rosteriq.database import get_db
 from rosteriq.services.clock import venue_timezone
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.models import Shift, ShiftStatus, State
+from rosteriq.cost_calculator import super_guarantee_rate, super_rate_label
 from rosteriq.services.payroll_export import (
     PayrollExporter, PayrollBatch, PayrollStatus
 )
@@ -140,8 +141,8 @@ async def prepare_payroll_batch(
 
     Aggregates shifts and leave to calculate:
     - Ordinary and penalty hours
-    - Superannuation (11.5%)
-    - Allowances per MA000009
+    - Superannuation at the Superannuation Guarantee rate
+    - Allowances only from venue-configured rules (none otherwise)
     - Validation status
 
     Returns payroll batch ready for approval and export.
@@ -335,6 +336,9 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
     if not batch or batch.get("venue_id") != venue_id:
         raise HTTPException(status_code=404, detail="Payroll batch not found")
 
+    super_rate = (Decimal(batch["super_rate"]) if batch.get("super_rate")
+                  else super_guarantee_rate(date.fromisoformat(batch["period_end"])))
+
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([f"RosterIQ payroll batch {batch['batch_id']}",
@@ -345,13 +349,13 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
     w.writerow(["Employee", "Ordinary hours", "Ordinary rate", "Ordinary gross",
                 "Penalty hours detail", "Penalty gross", "Overtime hours",
                 "Overtime gross", "Allowance detail", "Allowances", "Total gross",
-                "Super (11.5%)", "Total incl super"])
+                f"Super ({super_rate_label(super_rate)})", "Total incl super"])
     for e in batch.get("employees", []):
         penalty_detail = "; ".join(
             f"{p['penalty_type']} {p['hours']}h x{p['multiplier']}"
             for p in e.get("penalty_entries", []))
         # Every allowance dollar is NAMED — an accountant should never have to
-        # guess what a $15.09 line is.
+        # guess what an allowance line is.
         allowance_detail = "; ".join(
             f"{a['allowance_type']} ${a['amount']}"
             for a in e.get("allowances", []))

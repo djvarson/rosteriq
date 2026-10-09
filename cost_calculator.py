@@ -5,7 +5,8 @@ Provides detailed labour cost breakdowns for shifts and rosters, including
 base costs, penalty multipliers, casual loading, and superannuation.
 
 All monetary values use Decimal for precision.
-Superannuation rate: 11.5% (FY 2025-26).
+Superannuation is the Superannuation Guarantee rate in force on the date
+(SUPER_GUARANTEE_RATES).
 """
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -20,7 +21,7 @@ from rosteriq.models import (
     CostBreakdown,
     RosterComparison,
 )
-from datetime import time
+from datetime import date, time, timedelta
 from rosteriq.award_rules import (
     get_penalty_multiplier,
     get_day_type,
@@ -37,8 +38,16 @@ _NIGHT_MULT = Decimal("1") + EVENING_LOADING_THRESHOLDS["midnight"]   # 1.175
 _BAND_MULTS = {"ordinary": Decimal("1"), "evening": _EVENING_MULT, "night": _NIGHT_MULT}
 
 
-# Superannuation rate for FY 2025-26
-SUPER_RATE = Decimal("0.115")
+# Superannuation Guarantee rate from each effective date (Superannuation
+# Guarantee (Administration) Act 1992 s19). Statutory, not an award value.
+SUPER_GUARANTEE_RATES = (
+    (date(2014, 7, 1), Decimal("0.095")),
+    (date(2021, 7, 1), Decimal("0.10")),
+    (date(2022, 7, 1), Decimal("0.105")),
+    (date(2023, 7, 1), Decimal("0.11")),
+    (date(2024, 7, 1), Decimal("0.115")),
+    (date(2025, 7, 1), Decimal("0.12")),
+)
 
 # Casual loading rate
 CASUAL_LOADING_RATE = Decimal("0.25")
@@ -48,6 +57,48 @@ WEEKLY_OVERTIME_THRESHOLD = Decimal("38")
 # The first 2 overtime hours of the week are at 1.5x; the rest at 2x.
 OT_FIRST_TIER_HOURS = Decimal("2")
 _CENT = Decimal("0.01")
+
+
+def super_guarantee_rate(on: date) -> Decimal:
+    """The Superannuation Guarantee rate in force on ``on``."""
+    rate = SUPER_GUARANTEE_RATES[0][1]
+    for effective, r in SUPER_GUARANTEE_RATES:
+        if on >= effective:
+            rate = r
+    return rate
+
+
+def super_rate_label(rate: Decimal) -> str:
+    """A super rate as people read it: Decimal("0.12") -> "12%"."""
+    return f"{(rate * 100).normalize():f}%"
+
+
+def split_at_midnight(shift_date: date, start_time, end_time, net_hours) -> list:
+    """
+    Split a shift's NET worked hours at midnight into the calendar days they
+    were worked on: ``[(day, start, end, hours), ...]`` in time order, summing
+    to ``net_hours``. Each part is priced on its own day type, so the hours
+    after midnight on a Saturday close are Sunday hours and a Sunday close
+    running into a public holiday is holiday time after midnight. The unpaid
+    break is deducted proportionally across the worked span, as in
+    ``split_weekday_hours_by_band``.
+
+    Pricing each calendar day's hours at that day's rate is the award
+    interpretation in use; advisor to confirm.
+    """
+    net = Decimal(str(net_hours))
+    if not (start_time and end_time):
+        return [(shift_date, start_time, end_time, net)]
+    start_min = start_time.hour * 60 + start_time.minute
+    end_min = end_time.hour * 60 + end_time.minute
+    if net <= 0 or end_min >= start_min or end_min == 0:
+        return [(shift_date, start_time, end_time, net)]
+    before_min = 24 * 60 - start_min
+    first = net * Decimal(before_min) / Decimal(before_min + end_min)
+    return [
+        (shift_date, start_time, time(0, 0), first),
+        (shift_date + timedelta(days=1), time(0, 0), end_time, net - first),
+    ]
 
 
 def calculate_shift_cost_breakdown(
@@ -73,8 +124,6 @@ def calculate_shift_cost_breakdown(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
 
-    # Get the penalty multiplier for this shift context
-    day_type = get_day_type(shift.date, state)
     is_casual = employee.employment_type == EmploymentType.casual
 
     # Calculate casual loading and penalty separately
@@ -87,40 +136,47 @@ def calculate_shift_cost_breakdown(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
 
-    if day_type == DayType.weekday and shift.start_time and shift.end_time:
-        # Weekday: evening/night loading applies to the hours ACTUALLY WORKED in
-        # those windows, not to the whole shift gated on its start hour.
-        bands = split_weekday_hours_by_band(shift.start_time, shift.end_time, net_hours)
-        for band, bhrs in bands.items():
-            band_mult = _BAND_MULTS[band]
-            if bhrs <= 0 or band_mult <= Decimal("1"):
-                continue
-            b_base = (bhrs * base_hourly).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            penalty_cost += (b_base * (band_mult - Decimal("1"))).quantize(
+    for day, part_start, part_end, part_hours in split_at_midnight(
+        shift.date, shift.start_time, shift.end_time, net_hours
+    ):
+        day_type = get_day_type(day, state)
+        if day_type == DayType.weekday and part_start and part_end:
+            # Weekday: evening/night loading applies to the hours ACTUALLY WORKED
+            # in those windows, not to the whole shift gated on its start hour.
+            bands = split_weekday_hours_by_band(part_start, part_end, part_hours)
+            for band, bhrs in bands.items():
+                band_mult = _BAND_MULTS[band]
+                if bhrs <= 0 or band_mult <= Decimal("1"):
+                    continue
+                b_base = (bhrs * base_hourly).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                penalty_cost += (b_base * (band_mult - Decimal("1"))).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+        else:
+            # Sat/Sun/PH (or missing times): the day's hours at the day-type penalty.
+            shift_hour = part_start.hour if part_start else 12
+            multiplier = get_penalty_multiplier(
+                employee.employment_type, day_type,
+                hour=shift_hour,
+                overtime_hours=getattr(shift, 'overtime_hours', 0),
+            )
+            part_base = (part_hours * base_hourly).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
-    else:
-        # Sat/Sun/PH (or missing times): whole shift at the day-type penalty.
-        shift_hour = shift.start_time.hour if shift.start_time else 12
-        multiplier = get_penalty_multiplier(
-            employee.employment_type, day_type,
-            hour=shift_hour,
-            overtime_hours=getattr(shift, 'overtime_hours', 0),
-        )
-        if is_casual:
-            if multiplier > Decimal("1.25"):
-                penalty_cost = (
-                    base_cost * (multiplier - Decimal("1.25"))
-                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        else:
-            if multiplier > Decimal("1"):
-                penalty_cost = (
-                    base_cost * (multiplier - Decimal("1"))
-                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if is_casual:
+                if multiplier > Decimal("1.25"):
+                    penalty_cost += (
+                        part_base * (multiplier - Decimal("1.25"))
+                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                if multiplier > Decimal("1"):
+                    penalty_cost += (
+                        part_base * (multiplier - Decimal("1"))
+                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     # Superannuation on gross pay (base + penalty + casual loading)
     gross = base_cost + penalty_cost + casual_loading
-    super_contribution = (gross * SUPER_RATE).quantize(
+    super_contribution = (gross * super_guarantee_rate(shift.date)).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
 
@@ -192,12 +248,12 @@ def cost_employee_week(
     ot_used = Decimal("0")
     ordinary_hours = Decimal("0")
     overtime_hours = Decimal("0")
+    super_exact = Decimal("0")
 
     for shift in chrono:
         hrs = Decimal(str(shift.net_hours))
         if hrs <= 0:
             continue
-        day_type = get_day_type(shift.date, state)
 
         if is_casual:
             ord_hrs, ot_hrs = hrs, Decimal("0")
@@ -208,50 +264,64 @@ def cost_employee_week(
         cumulative += hrs
         ordinary_hours += ord_hrs
         overtime_hours += ot_hrs
+        ote_before = base_cost + penalty_cost + casual_loading
 
-        # Ordinary portion. On a weekday, evening/night loading applies to the
-        # hours ACTUALLY WORKED in those windows (19:00-24:00, 00:00-07:00), not
-        # to the whole shift gated on its start hour — so a 09:00-23:00 shift
-        # earns evening loading on its 19:00-23:00 hours. Sat/Sun/PH use the
-        # whole day-type penalty (those rates already exceed evening loading and
-        # the award does not stack them).
-        if ord_hrs > 0 and day_type == DayType.weekday and shift.start_time and shift.end_time:
-            bands = split_weekday_hours_by_band(shift.start_time, shift.end_time, hrs)
-            factor = (ord_hrs / hrs) if hrs > 0 else Decimal("0")
-            for band, bhrs in bands.items():
-                bhrs = bhrs * factor
-                if bhrs <= 0:
-                    continue
-                b_base = (bhrs * base_hourly).quantize(_CENT, ROUND_HALF_UP)
-                base_cost += b_base
-                band_mult = _BAND_MULTS[band]
+        # Overtime is the LAST hours worked, so ordinary hours fill the shift
+        # from its start and each calendar day's part is priced on its own day.
+        ord_left = ord_hrs
+        for day, part_start, part_end, part_hrs in split_at_midnight(
+            shift.date, shift.start_time, shift.end_time, hrs
+        ):
+            day_type = get_day_type(day, state)
+            part_ord = min(part_hrs, ord_left)
+            ord_left -= part_ord
+            part_ot = part_hrs - part_ord
+
+            # Ordinary portion. On a weekday, evening/night loading applies to
+            # the hours ACTUALLY WORKED in those windows (19:00-24:00,
+            # 00:00-07:00), not to the whole shift gated on its start hour — so
+            # a 09:00-23:00 shift earns evening loading on its 19:00-23:00
+            # hours. Sat/Sun/PH use the whole day-type penalty (those rates
+            # already exceed evening loading and the award does not stack them).
+            if part_ord > 0 and day_type == DayType.weekday and part_start and part_end:
+                bands = split_weekday_hours_by_band(part_start, part_end, part_hrs)
+                factor = part_ord / part_hrs
+                for band, bhrs in bands.items():
+                    bhrs = bhrs * factor
+                    if bhrs <= 0:
+                        continue
+                    b_base = (bhrs * base_hourly).quantize(_CENT, ROUND_HALF_UP)
+                    base_cost += b_base
+                    band_mult = _BAND_MULTS[band]
+                    if is_casual:
+                        casual_loading += (b_base * CASUAL_LOADING_RATE).quantize(_CENT, ROUND_HALF_UP)
+                    if band_mult > Decimal("1"):
+                        penalty_cost += (b_base * (band_mult - Decimal("1"))).quantize(_CENT, ROUND_HALF_UP)
+            elif part_ord > 0:
+                shift_hour = part_start.hour if part_start else 12
+                mult = get_penalty_multiplier(
+                    employee.employment_type, day_type, hour=shift_hour, overtime_hours=0
+                )
+                ord_base = (part_ord * base_hourly).quantize(_CENT, ROUND_HALF_UP)
+                base_cost += ord_base
                 if is_casual:
-                    casual_loading += (b_base * CASUAL_LOADING_RATE).quantize(_CENT, ROUND_HALF_UP)
-                if band_mult > Decimal("1"):
-                    penalty_cost += (b_base * (band_mult - Decimal("1"))).quantize(_CENT, ROUND_HALF_UP)
-        else:
-            shift_hour = shift.start_time.hour if shift.start_time else 12
-            mult = get_penalty_multiplier(
-                employee.employment_type, day_type, hour=shift_hour, overtime_hours=0
-            )
-            ord_base = (ord_hrs * base_hourly).quantize(_CENT, ROUND_HALF_UP)
-            base_cost += ord_base
-            if is_casual:
-                casual_loading += (ord_base * CASUAL_LOADING_RATE).quantize(_CENT, ROUND_HALF_UP)
-                if mult > Decimal("1.25"):
-                    penalty_cost += (ord_base * (mult - Decimal("1.25"))).quantize(_CENT, ROUND_HALF_UP)
-            else:
-                if mult > Decimal("1"):
-                    penalty_cost += (ord_base * (mult - Decimal("1"))).quantize(_CENT, ROUND_HALF_UP)
+                    casual_loading += (ord_base * CASUAL_LOADING_RATE).quantize(_CENT, ROUND_HALF_UP)
+                    if mult > Decimal("1.25"):
+                        penalty_cost += (ord_base * (mult - Decimal("1.25"))).quantize(_CENT, ROUND_HALF_UP)
+                else:
+                    if mult > Decimal("1"):
+                        penalty_cost += (ord_base * (mult - Decimal("1"))).quantize(_CENT, ROUND_HALF_UP)
 
-        # Overtime portion (permanents only).
-        if ot_hrs > 0:
-            overtime_cost += _overtime_cost(ot_hrs, ot_used, base_hourly, day_type)
-            ot_used += ot_hrs
+            # Overtime portion (permanents only).
+            if part_ot > 0:
+                overtime_cost += _overtime_cost(part_ot, ot_used, base_hourly, day_type)
+                ot_used += part_ot
+
+        shift_ote = base_cost + penalty_cost + casual_loading - ote_before
+        super_exact += shift_ote * super_guarantee_rate(shift.date)
 
     # Super on Ordinary Time Earnings only — excludes overtime.
-    super_base = base_cost + penalty_cost + casual_loading
-    super_contribution = (super_base * SUPER_RATE).quantize(_CENT, ROUND_HALF_UP)
+    super_contribution = super_exact.quantize(_CENT, ROUND_HALF_UP)
     total = base_cost + penalty_cost + casual_loading + overtime_cost + super_contribution
 
     return {

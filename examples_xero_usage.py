@@ -131,7 +131,7 @@ async def example_labour_cost_export():
         venue_id=venue_id,
         journal_date=date(2026, 4, 23),
         total_wages_expense=Decimal("1250.50"),
-        total_super_payable=Decimal("143.81"),  # 11.5% of wages
+        total_super_payable=Decimal("150.06"),  # 12% Superannuation Guarantee
         breakdown={
             "venue": {
                 "v1": Decimal("1250.50")

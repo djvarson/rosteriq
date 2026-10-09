@@ -141,7 +141,7 @@
   - [ ] Award level breakdown in journal entries
 
 - [ ] **Superannuation Tracking**
-  - [ ] Super calculated at 11.5% of gross wages
+  - [ ] Super calculated at the Superannuation Guarantee rate (12% from 1 July 2025) of ordinary time earnings
   - [ ] Threshold check (no super below ~$20,800/year)
   - [ ] Separate super journal entries (credit 2010)
 

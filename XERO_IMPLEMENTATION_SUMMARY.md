@@ -86,7 +86,7 @@ A production-ready Xero integration module for RosterIQ enabling bi-directional 
 
 ### 6. Australian Compliance
 - **GST 10%:** Reversed from inclusive revenue
-- **Superannuation 11.5%:** Calculated and tracked separately
+- **Superannuation Guarantee (12% from 1 July 2025):** Calculated and tracked separately
 - **BAS periods:** Quarterly (Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec)
 - **Fair Work:** Award level breakdown in journal entries
 - **Penalty rates:** Tracked (weekends, public holidays, overtime)
@@ -273,7 +273,7 @@ pytest tests/test_xero_integration.py::test_live_revenue_sync -v
 
 ### Australian Regulations
 - **Fair Work Act:** Penalty rates tracked by award level
-- **Superannuation Guarantee:** 11.5% calculated and accrued
+- **Superannuation Guarantee:** rate for the date (12% from 1 July 2025) calculated and accrued
 - **GST:** 10% handled correctly (reversed from inclusive totals)
 - **Payroll Tax:** State-based (NSW, VIC, QLD, etc. handled in award_rules.py)
 - **BAS:** Quarterly periods supported in external_signals table

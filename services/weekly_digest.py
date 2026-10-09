@@ -31,7 +31,7 @@ from rosteriq.models import (
 from rosteriq.services.analytics import AnalyticsService
 from rosteriq.services.notifications import NotificationService
 from rosteriq.award_rules import validate_shift_compliance
-from rosteriq.cost_calculator import calculate_shift_cost_breakdown, SUPER_RATE
+from rosteriq.cost_calculator import calculate_shift_cost_breakdown
 
 logger = logging.getLogger(__name__)
 

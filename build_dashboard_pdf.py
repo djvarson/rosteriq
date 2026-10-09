@@ -72,7 +72,7 @@ cost_breakdown = [
     {"name": "Base pay", "value": 6840, "color": PRIMARY},
     {"name": "Penalty rates", "value": 1920, "color": WARNING},
     {"name": "Casual loading", "value": 612, "color": PURPLE},
-    {"name": "Super (11.5%)", "value": 1078, "color": ACCENT},
+    {"name": "Super (12%)", "value": 1078, "color": ACCENT},
 ]
 
 signals = [

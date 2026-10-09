@@ -41,7 +41,7 @@ const costBreakdown = [
   { name: "Base pay", value: 6840, color: BRAND.primary },
   { name: "Penalty rates", value: 1920, color: BRAND.warning },
   { name: "Casual loading", value: 612, color: "#a78bfa" },
-  { name: "Super (11.5%)", value: 1078, color: BRAND.accent },
+  { name: "Super (12%)", value: 1078, color: BRAND.accent },
 ];
 
 const alerts = [

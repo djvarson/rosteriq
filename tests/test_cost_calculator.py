@@ -12,7 +12,7 @@ from rosteriq.cost_calculator import (
     calculate_shift_cost_breakdown, calculate_roster_cost,
     compare_rosters, estimate_daily_labour_cost,
     calculate_labour_percentage, find_cost_savings_opportunities,
-    SUPER_RATE,
+    super_guarantee_rate,
 )
 
 
@@ -67,10 +67,10 @@ class TestShiftCostBreakdown:
         assert breakdown.penalty_cost == Decimal("0.00")
         # Not casual
         assert breakdown.casual_loading == Decimal("0.00")
-        # Super: 11.5% of $225 = $25.88
-        assert breakdown.super_contribution == Decimal("25.88")
-        # Total: $225 + $25.88 = $250.88
-        assert breakdown.total_cost == Decimal("250.88")
+        # Super: 12% SG (from 1 July 2025) of $225 = $27.00
+        assert breakdown.super_contribution == Decimal("27.00")
+        # Total: $225 + $27.00 = $252.00
+        assert breakdown.total_cost == Decimal("252.00")
 
     def test_saturday_full_time(self):
         emp = make_employee()
@@ -105,7 +105,7 @@ class TestShiftCostBreakdown:
         assert breakdown.penalty_cost == Decimal("112.50")
 
     def test_super_rate_correct(self):
-        assert SUPER_RATE == Decimal("0.115")
+        assert super_guarantee_rate(date(2026, 4, 7)) == Decimal("0.12")
 
     def test_total_equals_components(self):
         emp = make_employee(employment_type=EmploymentType.casual)

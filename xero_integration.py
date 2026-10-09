@@ -7,7 +7,7 @@ Provides:
 - Labour cost export (daily journal entries for wages)
 - Supplier bill push (draft ACCPAY bills from RosterIQ supplier invoices)
 - P&L reporting with labour % calculations
-- Australian context: GST 10%, super 11.5%, BAS periods
+- Australian context: GST 10%, Superannuation Guarantee rate for the date, BAS periods
 
 Usage:
     async with XeroClient(credentials, db) as xero:
@@ -28,6 +28,8 @@ from urllib.parse import urlencode, parse_qs, urlparse
 
 import httpx
 from pydantic import BaseModel, field_validator
+
+from rosteriq.cost_calculator import super_guarantee_rate, super_rate_label
 
 
 def _op_name(endpoint: str) -> str:
@@ -89,7 +91,7 @@ class LabourCostJournal(BaseModel):
     venue_id: str
     journal_date: date
     total_wages_expense: Decimal
-    total_super_payable: Decimal  # 11.5% of gross wages
+    total_super_payable: Decimal  # Superannuation Guarantee on ordinary time earnings
     breakdown: Dict[str, Dict[str, Decimal]]  # {venue: {role: amount}}
     award_levels: Dict[str, Decimal]  # {level: amount}
     description: str = ""
@@ -635,9 +637,10 @@ class XeroClient:
             "AccountCode": "2005",  # Wages Payable
         })
 
-        # Superannuation expense debit (11.5% of gross)
+        # Superannuation expense debit
+        sg_label = super_rate_label(super_guarantee_rate(journal.journal_date))
         line_items.append({
-            "Description": f"Superannuation Expense - {journal.journal_date.strftime('%Y-%m-%d')} (11.5%)",
+            "Description": f"Superannuation Expense - {journal.journal_date.strftime('%Y-%m-%d')} ({sg_label})",
             "LineAmount": float(journal.total_super_payable),
             "AccountCode": "6200",  # Superannuation Expense
         })

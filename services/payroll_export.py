@@ -5,8 +5,8 @@ Prepares timesheet data for export to payroll systems (Xero Payroll, KeyPay).
 Handles:
 - Timesheet aggregation (ordinary, penalty, overtime hours)
 - Leave reconciliation
-- Superannuation calculations (11.5%)
-- Allowances (meal, split shift, laundry per MA000009)
+- Superannuation at the Superannuation Guarantee rate for the pay period
+- Allowances, only from rules the venue configured
 - Pay period grouping (weekly/fortnightly)
 - Data validation and reconciliation
 
@@ -26,7 +26,7 @@ from rosteriq.award_rules import (
     get_penalty_multiplier,
     split_weekday_hours_by_band,
 )
-from rosteriq.cost_calculator import SUPER_RATE
+from rosteriq.cost_calculator import split_at_midnight, super_guarantee_rate
 
 
 class PayrollStatus(str, Enum):
@@ -63,6 +63,24 @@ class Allowance:
     """Allowance entry for an employee."""
     allowance_type: str  # "meal", "split_shift", "laundry"
     amount: Decimal
+
+
+@dataclass
+class AllowanceRule:
+    """
+    An allowance the venue configured, at the amount its payroll advisor set.
+    Paid once for every shift that reaches both thresholds: at least
+    ``min_shift_hours`` worked and at least ``min_overtime_hours`` of overtime
+    on that shift. RosterIQ holds no allowance amounts of its own.
+    """
+    allowance_type: str
+    amount: Decimal
+    min_shift_hours: Decimal = Decimal("0")
+    min_overtime_hours: Decimal = Decimal("0")
+
+    def applies_to(self, shift_hours: Decimal, overtime_hours: Decimal) -> bool:
+        return (shift_hours >= self.min_shift_hours
+                and overtime_hours >= self.min_overtime_hours)
 
 
 @dataclass
@@ -224,6 +242,7 @@ class PayrollBatch:
             "total_allowances": str(self.total_allowances),
             "total_gross": str(self.total_gross),
             "total_super": str(self.total_super),
+            "super_rate": str(super_guarantee_rate(self.period_end)),
             "employees": [_employee_payroll_to_dict(e) for e in self.employees],
             "validation_errors": self.validation_errors,
         }
@@ -369,6 +388,7 @@ class PayrollExporter:
         state: State,
         shifts: List[Shift],
         employees: Dict[str, Employee],
+        allowance_rules: Optional[List[AllowanceRule]] = None,
     ) -> PayrollBatch:
         """
         Prepare timesheet data for a pay period.
@@ -378,8 +398,10 @@ class PayrollExporter:
         - Penalty rates (Saturday, Sunday, Public Holiday, evening, night)
         - Overtime hours and costs
         - Leave hours (if provided)
-        - Superannuation
-        - Allowances
+        - Superannuation at the Superannuation Guarantee rate in force at
+          period_end, standing in for the pay date (SG follows the date wages
+          are paid, and RosterIQ never pays)
+        - Allowances, only from the venue's allowance_rules
 
         Args:
             venue_id: Venue ID
@@ -388,6 +410,7 @@ class PayrollExporter:
             state: State for public holiday calculations
             shifts: List of Shift objects for the period
             employees: Dict of {employee_id: Employee}
+            allowance_rules: the venue's configured allowances (none if omitted)
 
         Returns:
             PayrollBatch with prepared timesheet data
@@ -415,7 +438,8 @@ class PayrollExporter:
 
             emp = employees[emp_id]
             emp_payroll = self._process_employee_shifts(
-                emp, emp_shifts, state, period_start, period_end
+                emp, emp_shifts, state, period_start, period_end,
+                allowance_rules=allowance_rules,
             )
             if emp_payroll:
                 batch.employees.append(emp_payroll)
@@ -432,6 +456,7 @@ class PayrollExporter:
         state: State,
         period_start: date,
         period_end: date,
+        allowance_rules: Optional[List[AllowanceRule]] = None,
     ) -> Optional[EmployeePayroll]:
         """
         Process shifts for a single employee.
@@ -463,6 +488,7 @@ class PayrollExporter:
         # fortnightly run gave one 38-hour allowance across two weeks and
         # invented ~38 hours of overtime. Reset them at each Monday.
         current_week = None
+        allowance_counts: Dict[int, int] = {}
 
         for shift in sorted(shifts, key=lambda s: (s.date, s.start_time or time(0, 0))):
             week_start = shift.date - timedelta(days=shift.date.weekday())
@@ -470,7 +496,6 @@ class PayrollExporter:
                 current_week = week_start
                 cumulative = Decimal("0")
                 ot_used = Decimal("0")
-            day_type = get_day_type(shift.date, state)
             net_hours = Decimal(str(shift.net_hours))
             if net_hours <= 0:
                 continue
@@ -485,58 +510,73 @@ class PayrollExporter:
                 ot_hrs = net_hours - ord_hrs
             cumulative += net_hours
 
-            # Bucket the ORDINARY portion by penalty type.
-            if ord_hrs > 0:
-                if day_type == DayType.public_holiday:
-                    penalties_by_type[PenaltyType.public_holiday] = (
-                        penalties_by_type.get(PenaltyType.public_holiday, Decimal("0.00")) + ord_hrs
-                    )
-                elif day_type == DayType.sunday:
-                    penalties_by_type[PenaltyType.sunday] = (
-                        penalties_by_type.get(PenaltyType.sunday, Decimal("0.00")) + ord_hrs
-                    )
-                elif day_type == DayType.saturday:
-                    penalties_by_type[PenaltyType.saturday] = (
-                        penalties_by_type.get(PenaltyType.saturday, Decimal("0.00")) + ord_hrs
-                    )
-                else:
-                    # Weekday: evening/night loading applies to the hours ACTUALLY
-                    # WORKED in each window (19:00-24:00 evening, 00:00-07:00 night),
-                    # not to the whole shift gated on its start hour. Distribute the
-                    # ordinary portion across bands in the shift's own proportions.
-                    if shift.start_time and shift.end_time:
-                        bands = split_weekday_hours_by_band(
-                            shift.start_time, shift.end_time, net_hours
-                        )
-                        factor = (ord_hrs / net_hours) if net_hours > 0 else Decimal("0")
-                        ordinary_total += bands["ordinary"] * factor
-                        if bands["evening"] > 0:
-                            penalties_by_type[PenaltyType.evening] = (
-                                penalties_by_type.get(PenaltyType.evening, Decimal("0.00"))
-                                + bands["evening"] * factor
-                            )
-                        if bands["night"] > 0:
-                            penalties_by_type[PenaltyType.night] = (
-                                penalties_by_type.get(PenaltyType.night, Decimal("0.00"))
-                                + bands["night"] * factor
-                            )
-                    else:
-                        ordinary_total += ord_hrs
+            for i, rule in enumerate(allowance_rules or []):
+                if rule.applies_to(net_hours, ot_hrs):
+                    allowance_counts[i] = allowance_counts.get(i, 0) + 1
 
-            # Overtime portion: first 2 OT hours of the week at 1.5x, then 2x;
-            # Sunday/public-holiday OT at their flat rates.
-            if ot_hrs > 0:
-                overtime_total += ot_hrs
-                if day_type == DayType.public_holiday:
-                    overtime_amount += ot_hrs * base_rate * Decimal("2.5")
-                elif day_type == DayType.sunday:
-                    overtime_amount += ot_hrs * base_rate * Decimal("2.0")
-                else:
-                    first_tier = max(Decimal("0.00"), Decimal("2") - ot_used)
-                    at_15 = min(ot_hrs, first_tier)
-                    at_20 = ot_hrs - at_15
-                    overtime_amount += at_15 * base_rate * Decimal("1.5") + at_20 * base_rate * Decimal("2.0")
-                ot_used += ot_hrs
+            # Overtime is the LAST hours worked, so ordinary hours fill the shift
+            # from its start and each calendar day's part is priced on its own day.
+            ord_left = ord_hrs
+            for day, part_start, part_end, part_hrs in split_at_midnight(
+                shift.date, shift.start_time, shift.end_time, net_hours
+            ):
+                day_type = get_day_type(day, state)
+                part_ord = min(part_hrs, ord_left)
+                ord_left -= part_ord
+                part_ot = part_hrs - part_ord
+
+                # Bucket the ORDINARY portion by penalty type.
+                if part_ord > 0:
+                    if day_type == DayType.public_holiday:
+                        penalties_by_type[PenaltyType.public_holiday] = (
+                            penalties_by_type.get(PenaltyType.public_holiday, Decimal("0.00")) + part_ord
+                        )
+                    elif day_type == DayType.sunday:
+                        penalties_by_type[PenaltyType.sunday] = (
+                            penalties_by_type.get(PenaltyType.sunday, Decimal("0.00")) + part_ord
+                        )
+                    elif day_type == DayType.saturday:
+                        penalties_by_type[PenaltyType.saturday] = (
+                            penalties_by_type.get(PenaltyType.saturday, Decimal("0.00")) + part_ord
+                        )
+                    else:
+                        # Weekday: evening/night loading applies to the hours ACTUALLY
+                        # WORKED in each window (19:00-24:00 evening, 00:00-07:00 night),
+                        # not to the whole shift gated on its start hour. Distribute the
+                        # ordinary portion across bands in the part's own proportions.
+                        if part_start and part_end:
+                            bands = split_weekday_hours_by_band(
+                                part_start, part_end, part_hrs
+                            )
+                            factor = part_ord / part_hrs
+                            ordinary_total += bands["ordinary"] * factor
+                            if bands["evening"] > 0:
+                                penalties_by_type[PenaltyType.evening] = (
+                                    penalties_by_type.get(PenaltyType.evening, Decimal("0.00"))
+                                    + bands["evening"] * factor
+                                )
+                            if bands["night"] > 0:
+                                penalties_by_type[PenaltyType.night] = (
+                                    penalties_by_type.get(PenaltyType.night, Decimal("0.00"))
+                                    + bands["night"] * factor
+                                )
+                        else:
+                            ordinary_total += part_ord
+
+                # Overtime portion: first 2 OT hours of the week at 1.5x, then 2x;
+                # Sunday/public-holiday OT at their flat rates.
+                if part_ot > 0:
+                    overtime_total += part_ot
+                    if day_type == DayType.public_holiday:
+                        overtime_amount += part_ot * base_rate * Decimal("2.5")
+                    elif day_type == DayType.sunday:
+                        overtime_amount += part_ot * base_rate * Decimal("2.0")
+                    else:
+                        first_tier = max(Decimal("0.00"), Decimal("2") - ot_used)
+                        at_15 = min(part_ot, first_tier)
+                        at_20 = part_ot - at_15
+                        overtime_amount += at_15 * base_rate * Decimal("1.5") + at_20 * base_rate * Decimal("2.0")
+                    ot_used += part_ot
 
         # Calculate ordinary gross (band-split can yield long decimals; round hours).
         # A casual's ORDINARY hours carry the 25% loading — the multiplier table
@@ -551,7 +591,9 @@ class PayrollExporter:
             ordinary_total * employee.hourly_base_rate * emp_payroll.ordinary_multiplier
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-        emp_payroll.overtime_hours = overtime_total
+        emp_payroll.overtime_hours = overtime_total.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
         emp_payroll.overtime_amount = overtime_amount.quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
@@ -576,14 +618,17 @@ class PayrollExporter:
             )
             emp_payroll.penalty_gross += amount
 
-        # Add allowances (based on MA000009)
-        # Meal allowance: $15.09 per week (if applicable)
-        # Split shift loading: $3.26 per shift (if applicable)
-        # Laundry: part of uniform provision
-        emp_payroll.allowances.append(
-            Allowance(allowance_type="meal", amount=Decimal("15.09"))
+        for i, rule in enumerate(allowance_rules or []):
+            if allowance_counts.get(i):
+                emp_payroll.allowances.append(Allowance(
+                    allowance_type=rule.allowance_type,
+                    amount=(rule.amount * allowance_counts[i]).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    ),
+                ))
+        emp_payroll.allowances_total = sum(
+            (a.amount for a in emp_payroll.allowances), Decimal("0.00")
         )
-        emp_payroll.allowances_total = sum(a.amount for a in emp_payroll.allowances)
 
         # Superannuation is on Ordinary Time Earnings — OVERTIME is excluded
         # (overtime is not OTE under SG law), so overtime_amount is NOT added.
@@ -593,7 +638,7 @@ class PayrollExporter:
             + emp_payroll.leave_gross
         )
         emp_payroll.super_amount = (
-            gross_for_super * SUPER_RATE
+            gross_for_super * super_guarantee_rate(period_end)
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         return emp_payroll if emp_payroll.total_hours > 0 else None
