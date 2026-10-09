@@ -2,7 +2,7 @@
   "name": "RosterIQ",
   "short_name": "RosterIQ",
   "description": "AI-Powered Rostering for Hospitality",
-  "start_url": "/dashboard",
+  "start_url": "/static/dashboard.html",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

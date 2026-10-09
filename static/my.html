@@ -7,7 +7,9 @@
   <meta name="theme-color" content="#F5F3EF">
   <title>My RosterIQ</title>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="manifest" href="/static/manifest.json">
+  <link rel="manifest" href="/static/manifest-my.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="RosterIQ Staff">
   <style>
     :root {
       --navy: #F5F3EF; /* the system page grey (warm) — cards must pop against it */
@@ -186,6 +188,7 @@
         <button class="btn" id="join-btn" onclick="submitJoinCode()">Link my account</button>
         <p id="join-err" style="color:#B42318;font-size:13px;margin-top:8px;display:none;"></p>
       </div>
+      <p style="margin-top:22px;font-size:13px;">Setting up a new venue instead? <a href="/static/dashboard.html?setup=venue" style="color:var(--text);font-weight:600;">Start here</a></p>
     </div>
 
     <div id="view-home" style="display:none;">
@@ -345,8 +348,39 @@ if (!token && !demoStaff) window.location.href = '/login';
 let demoRetried = demoStaff && !!sessionStorage.getItem('demo_staff_retried');
 let reauthing = false;
 
-async function api(path, opts) {
+// Access tokens last an hour; trade the refresh token for a new pair rather
+// than sending someone back to the login screen. One exchange at a time — the
+// refresh token rotates on use, and Home fires several calls at once.
+let refreshing = null;
+function refreshSession() {
+  if (refreshing) return refreshing;
+  refreshing = (async function () {
+    let rt = '';
+    try { rt = localStorage.getItem('jwt_refresh_token') || ''; } catch (e) { return false; }
+    if (!rt) return false;
+    try {
+      const r = await fetch('/api/auth/refresh', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      if (!r.ok) return false;
+      const j = await r.json();
+      if (!j || !j.access_token) return false;
+      token = j.access_token;
+      try {
+        localStorage.setItem('jwt_token', j.access_token);
+        if (j.refresh_token) localStorage.setItem('jwt_refresh_token', j.refresh_token);
+      } catch (e) { /* the in-memory token still works for this visit */ }
+      return true;
+    } catch (e) { return false; }
+  })();
+  refreshing.then(function () { refreshing = null; });
+  return refreshing;
+}
+
+async function api(path, opts, retried) {
   opts = opts || {};
+  const sent = token;
   const res = await fetch(path, {
     method: opts.method || 'GET',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
@@ -361,6 +395,8 @@ async function api(path, opts) {
         sessionStorage.setItem('demo_staff_retried', '1');
         window.location.reload();
       }
+    } else if (!demoStaff && !retried && ((token && token !== sent) || await refreshSession())) {
+      return api(path, opts, true);
     } else if (!reauthing) {
       window.location.href = '/login';
     }
