@@ -47,7 +47,7 @@ def test_import_with_header_and_extra_columns():
     assert set(emps) == {"Emma Thompson", "James Wilson", "Sarah Chen"}
     assert str(emps["Emma Thompson"].hourly_base_rate) == "32.50"
     assert emps["Emma Thompson"].email == "emma@brass.com"
-    assert emps["Emma Thompson"].skills == ["Floor"]
+    assert emps["Emma Thompson"].skills == ["floor"]  # areas are matched lower-case
     assert emps["James Wilson"].employment_type.value == "part_time"
     assert emps["Sarah Chen"].employment_type.value == "full_time"
 
@@ -90,12 +90,14 @@ def test_import_dedupes_and_reports_skips_honestly():
     content = "Name,Email,Rate\nEmma T,emma@x.com,30\n"
     c.post("/api/setup/import-staff", json={"venue_id": vid, "content": content}, headers=h)
 
-    # Re-import: same email -> skipped (not duplicated); a blank-name row -> skipped
+    # Re-import: same email -> skipped (not duplicated) unless update_existing;
+    # a blank-name row -> skipped
     content2 = "Name,Email,Rate\nEmma T,emma@x.com,30\n,nobody@x.com,25\nNew Person,new@x.com,31\n"
     out = c.post("/api/setup/import-staff", json={"venue_id": vid, "content": content2}, headers=h).json()
     assert out["created_count"] == 1  # only New Person
     reasons = {s.get("reason") for s in out["skipped"]}
-    assert "email already exists" in reasons and "no name" in reasons
+    assert "already exists — tick update existing to refresh their details" in reasons
+    assert "no name" in reasons
     assert len(get_db().get_employees(vid)) == 2  # Emma + New Person, no dupe
 
 
