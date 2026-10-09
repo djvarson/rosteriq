@@ -292,6 +292,52 @@
             font-weight: 500;
         }
 
+        .path-ctas {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 28px;
+        }
+
+        .path-cta {
+            display: block;
+            padding: 14px 14px 13px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--white);
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: var(--transition);
+        }
+
+        .path-cta:hover {
+            border-color: var(--brand-blue);
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+        }
+
+        .path-cta-q {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .path-cta-a {
+            display: block;
+            margin-top: 3px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .path-cta-a::after {
+            content: '\00a0\2192';
+            color: #D97706;
+        }
+
+        @media (max-width: 380px) {
+            .path-ctas { grid-template-columns: 1fr; }
+        }
+
         .signup-prompt {
             text-align: center;
             margin-top: 32px;
@@ -517,9 +563,20 @@
         <!-- Right Panel - Login Form -->
         <div class="right-panel">
             <div class="form-container">
+                <div class="path-ctas">
+                    <a class="path-cta" href="/register">
+                        <span class="path-cta-q">New venue?</span>
+                        <span class="path-cta-a">Create your account</span>
+                    </a>
+                    <a class="path-cta" href="/register?join=1">
+                        <span class="path-cta-q">Joining your team?</span>
+                        <span class="path-cta-a">Use your join code</span>
+                    </a>
+                </div>
+
                 <div class="form-header">
-                    <h1>Welcome back</h1>
-                    <p>Sign in to your RosterIQ account</p>
+                    <h1>Sign in</h1>
+                    <p>Welcome back to RosterIQ</p>
                 </div>
 
                 <form id="loginForm">
@@ -570,7 +627,7 @@
                 </button>
 
                 <div class="signup-prompt">
-                    Don't have an account? <a href="/static/register.html">Create one</a>
+                    Don't have an account? <a href="/register">Set up a venue</a> or <a href="/register?join=1">join your team</a>
                 </div>
             </div>
         </div>

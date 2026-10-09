@@ -2471,7 +2471,7 @@
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
           <span>Reports</span>
         </div>
-        <div class="nav-item" onclick="window.open('/timeclock','_blank')" style="cursor:pointer;">
+        <div class="nav-item" onclick="openTimeClock()" style="cursor:pointer;">
           <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2h4"/><path d="m12 14 3-3"/><circle cx="12" cy="14" r="8"/></svg></span>
           <span>Time Clock</span>
         </div>
@@ -2643,7 +2643,7 @@
             <div class="kpi-label">Staff On Shift</div>
             <div style="display: flex; align-items: baseline; gap: 8px;">
               <div class="kpi-value" id="kpi-staff-count">—</div>
-              <div class="kpi-detail">at optimal capacity</div>
+              <div class="kpi-detail" id="kpi-staff-detail">at optimal capacity</div>
             </div>
             <div class="kpi-detail" id="staff-breakdown" style="margin-top: 8px;">—</div>
           </div>
@@ -3207,6 +3207,7 @@
             <button class="btn btn-secondary btn-small" onclick="document.getElementById('roster-import-card').style.display='none'">Cancel</button>
             <span id="roster-import-result" style="font-size:12px; color:var(--text-muted); margin-left:auto;"></span>
           </div>
+          <div id="roster-import-report"></div>
         </div>
 
         <div class="grid-1">
@@ -3491,11 +3492,15 @@
               <div style="font-weight:600; margin-bottom:4px;">Import your team — no live connection needed</div>
               <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">In Deputy, Tanda, or your spreadsheet, export your staff list to CSV and paste it below. Columns are matched automatically (name, email, pay rate, role) — extra columns are ignored.</div>
               <textarea id="staff-import-text" rows="6" placeholder="Paste your exported staff list here (with or without a header row)…" style="width:100%; font-family:monospace; font-size:12px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); color:var(--text-primary);"></textarea>
+              <label style="display:flex; gap:6px; align-items:center; margin-top:8px; font-size:12px; color:var(--text-secondary); cursor:pointer;">
+                <input type="checkbox" id="staff-import-update"> Update people already imported (matched by email) instead of skipping them
+              </label>
               <div style="display:flex; gap:8px; margin-top:10px; align-items:center;">
                 <button class="btn btn-primary btn-small" onclick="runStaffImport()">Import staff</button>
                 <button class="btn btn-secondary btn-small" onclick="document.getElementById('staff-import-card').style.display='none'">Cancel</button>
                 <span id="staff-import-result" style="font-size:12px; color:var(--text-muted); margin-left:auto;"></span>
               </div>
+              <div id="staff-import-report"></div>
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
@@ -3513,6 +3518,7 @@
               </select>
             </div>
 
+            <div id="staff-count-note" style="display:none; margin-bottom:10px; padding:10px 12px; border-radius:8px; background:rgba(245,158,11,0.12); color:var(--text-primary); font-size:13px; font-weight:600;"></div>
             <div class="table-container">
               <table class="table" id="staff-table">
                 <thead>
@@ -5008,10 +5014,14 @@
       <div class="onboarding-step-title">Your team</div>
       <div class="onboarding-step-subtitle">Export your staff list from Deputy, Tanda or a spreadsheet and paste it here. Columns are matched automatically (name, email, pay rate, role) — extra columns are ignored.</div>
       <textarea id="ob-staff-csv" rows="8" placeholder="Name,Email,Pay Rate,Role&#10;Emma Thompson,emma@venue.com.au,31.50,floor&#10;Marcus Johnson,marcus@venue.com.au,33.00,bar" style="width:100%; font-family:ui-monospace,monospace; font-size:12px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); color:var(--text-primary);"></textarea>
+      <label style="display:flex; gap:6px; align-items:center; margin-top:8px; font-size:12px; color:var(--text-secondary); cursor:pointer;">
+        <input type="checkbox" id="ob-staff-update"> Update people already imported (matched by email) instead of skipping them
+      </label>
       <div style="display:flex; align-items:center; gap:12px; margin-top:10px;">
         <button class="btn btn-primary btn-small" id="ob-staff-import-btn" onclick="obImportStaff()">Import staff</button>
         <span id="ob-staff-result" style="font-size:13px; color:var(--text-muted);"></span>
       </div>
+      <div id="ob-staff-report"></div>
       <div class="ob-note">Each person later links their phone with a join code from the Staff page — no passwords to hand out. You can skip this and import later.</div>
     </div>
 
@@ -5047,6 +5057,28 @@
     <button class="btn btn-primary" id="ob-btn-next" onclick="obNextStep()">Next</button>
   </div>
 </div>
+
+<div class="onboarding-overlay" id="no-venue-choice">
+  <div class="onboarding-body">
+    <div class="onboarding-step active">
+      <div class="onboarding-step-title">Welcome to RosterIQ</div>
+      <div class="onboarding-step-subtitle">Your login isn't part of a venue yet. Which one are you?</div>
+      <div class="onboarding-card-grid">
+        <div class="onboarding-card" style="cursor:default;">
+          <div class="onboarding-card-name">Setting up a venue</div>
+          <div class="onboarding-card-desc">You own or manage the venue and want to set up rosters, staff and costing.</div>
+          <button class="btn btn-primary" onclick="noVenueSetUp()">Set up my venue</button>
+        </div>
+        <div class="onboarding-card" style="cursor:default;">
+          <div class="onboarding-card-name">Joining your team</div>
+          <div class="onboarding-card-desc">Your manager gave you a join code. Your shifts, hours and leave are in the staff app.</div>
+          <a class="btn btn-secondary" href="/my" style="text-decoration:none;">Enter my join code</a>
+        </div>
+      </div>
+      <div class="ob-note"><a href="#" onclick="handleLogout(); return false;" style="color:var(--text-muted);">Sign out</a></div>
+    </div>
+  </div>
+</div><!-- /no-venue-choice -->
 
 <!-- MODALS -->
 <div class="modal" id="modal-access">
@@ -5109,7 +5141,7 @@
       <p id="jc-who" style="color:var(--text-muted); margin-bottom:12px;"></p>
       <div id="jc-code" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:34px;font-weight:800;letter-spacing:4px;text-align:center;padding:14px;border:1px dashed var(--border);border-radius:12px;background:var(--light-bg);color:var(--text-primary);user-select:all;">····-····</div>
       <p style="color:var(--text-muted);font-size:13px;margin-top:12px;line-height:1.5;">
-        Give this code to the staff member. They sign up at <b>/login</b> with the email shown, open the staff app and enter it once — that links their login to this record. The code doesn't expire; it changes only if the platform secret is rotated.
+        Give this code to the staff member. They sign up at <b>/register?join=1</b> (or tap <b>Joining your team?</b> on the sign-in page) with the email shown and enter the code once — that links their login to this record and opens their staff app. The code doesn't expire; it changes only if the platform secret is rotated.
       </p>
       <p id="jc-email-warn" style="display:none;color:#B45309;font-size:13px;margin-top:8px;">This staff record has no email yet — the code will still work and their login email will be saved onto the record when they link.</p>
     </div>
@@ -5922,10 +5954,53 @@ function handleLogout() {
 // ============================================
 // UTILITIES
 // ============================================
-async function fetchAPI(endpoint, options = {}) {
+// The access token lasts an hour; the refresh token rotates on every use, so
+// a burst of parallel 401s must share ONE exchange or all but the first fail.
+let _refreshInFlight = null;
+function _refreshAccessToken() {
+  if (_refreshInFlight) return _refreshInFlight;
+  _refreshInFlight = (async function () {
+    let rt = '';
+    try { rt = localStorage.getItem('jwt_refresh_token') || ''; } catch (e) { return false; }
+    if (!rt) return false;
+    try {
+      const r = await fetch(`${state.baseUrl}/api/auth/refresh`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      if (!r.ok) return false;
+      const j = await r.json();
+      if (!j || !j.access_token) return false;
+      state.authToken = j.access_token;
+      state.token = j.access_token;
+      try {
+        localStorage.setItem('jwt_token', j.access_token);
+        if (j.refresh_token) localStorage.setItem('jwt_refresh_token', j.refresh_token);
+      } catch (e) { /* the in-memory token still works for this session */ }
+      return true;
+    } catch (e) { return false; }
+  })();
+  _refreshInFlight.then(function () { _refreshInFlight = null; });
+  return _refreshInFlight;
+}
+
+let _sessionEnding = false;
+function _sessionExpired() {
+  if (_sessionEnding) return;
+  _sessionEnding = true;
+  try {
+    localStorage.removeItem('jwt_token');
+    localStorage.removeItem('jwt_refresh_token');
+    localStorage.removeItem('auth_token');
+  } catch (e) { /* the redirect still ends the session */ }
+  window.location.href = '/static/login.html';
+}
+
+async function fetchAPI(endpoint, options = {}, _retried = false) {
   const headers = {
     'Content-Type': 'application/json',
   };
+  const sentToken = state.authToken;
   if (state.authToken) {
     headers['Authorization'] = `Bearer ${state.authToken}`;
   }
@@ -5935,6 +6010,12 @@ async function fetchAPI(endpoint, options = {}) {
     ...options,
     headers: { ...headers, ...(options.headers || {}) },
   });
+
+  if (response.status === 401 && !_retried && !state.isDemo && sentToken) {
+    const renewed = (state.authToken && state.authToken !== sentToken) || await _refreshAccessToken();
+    if (renewed) return fetchAPI(endpoint, options, true);
+    _sessionExpired();
+  }
 
   // Parse response body
   let data;
@@ -6038,6 +6119,12 @@ function formatDate(date) {
 // ============================================
 // UI NAVIGATION
 // ============================================
+// The kiosk opens on the venue selected here, not whichever it last used.
+function openTimeClock() {
+  const v = state.currentVenue;
+  window.open(v ? '/timeclock?venue_id=' + encodeURIComponent(v) : '/timeclock', '_blank');
+}
+
 // Referenced by the AI insight action buttons and by executeAIAction's
 // redirect, but never defined — so every one of those buttons threw
 // "navigateTo is not defined" and did nothing. It is just showPage with a
@@ -8398,32 +8485,130 @@ function createChart(canvasId, config) {
   if (charts[canvasId]) {
     charts[canvasId].destroy();
   }
+  chartClearEmptyState(canvas);
   charts[canvasId] = new Chart(canvas.getContext('2d'), config);
   return charts[canvasId];
 }
 
-// Hourly Breakdown Chart (last 12 hours revenue vs forecast)
+const NO_SALES_MSG = 'No sales recorded yet — paste your POS export or record today’s takings on Menu & Sales.';
+
+// Swap a chart for a plain message. A chart with nothing real to plot says
+// so; it never falls back to sample numbers on a real venue.
+function chartEmptyState(canvasId, message) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !canvas.parentElement) return;
+  if (charts[canvasId]) { charts[canvasId].destroy(); delete charts[canvasId]; }
+  if (canvasId === 'hourly-sparkline-chart' && hourlySparklineChart) {
+    hourlySparklineChart.destroy();
+    hourlySparklineChart = null;
+  }
+  canvas.style.display = 'none';
+  let note = canvas.parentElement.querySelector('.chart-empty');
+  if (!note) {
+    note = document.createElement('div');
+    note.className = 'chart-empty';
+    note.style.cssText = 'display:flex; align-items:center; justify-content:center; text-align:center; height:100%; min-height:120px; padding:16px; color:var(--text-muted); font-size:13px; line-height:1.5;';
+    canvas.parentElement.appendChild(note);
+  }
+  note.textContent = message;
+}
+
+function chartClearEmptyState(canvas) {
+  if (!canvas) return;
+  canvas.style.display = '';
+  const note = canvas.parentElement && canvas.parentElement.querySelector('.chart-empty');
+  if (note) note.remove();
+}
+
+// Real venues: the Hourly Breakdown, Revenue vs Labour and Labour % charts
+// draw only this venue's own numbers — net sales and rostered labour per day
+// from the Business snapshot. Hourly bars come from a live POS feed
+// (updateHourlySparkline); recorded takings are daily, so without that feed
+// the hourly card says so.
+async function loadRealRevenueCharts() {
+  const venueId = state.currentVenue;
+  if (!venueId || state.isDemo) return;
+  let snap = null;
+  try {
+    snap = await fetchAPI('/api/snapshot?venue_id=' + encodeURIComponent(venueId));
+  } catch (e) { snap = null; }
+  if (state.currentVenue !== venueId) return;
+  whenChartReady(function () { drawRealRevenueCharts(snap); });
+}
+
+function drawRealRevenueCharts(snap) {
+  const days = (snap && Array.isArray(snap.days)) ? snap.days : [];
+  const hasSales = !!snap && Number(snap.net_sales) > 0 && days.length > 0;
+  const noSales = snap ? NO_SALES_MSG : 'Couldn’t load this venue’s sales just now — refresh to try again.';
+  chartEmptyState('hourly-sparkline-chart', hasSales
+    ? 'Hourly sales show here once your POS sends them live. Your recorded daily takings are in the Business snapshot.'
+    : noSales);
+  const rlCanvas = document.getElementById('revenue-labour-chart');
+  const rlTitle = rlCanvas && rlCanvas.closest('.chart-container') && rlCanvas.closest('.chart-container').querySelector('.chart-title');
+  if (rlTitle) rlTitle.textContent = 'Revenue vs Labour — last ' + (days.length || 7) + ' days';
+  if (!hasSales) {
+    chartEmptyState('revenue-labour-chart', noSales);
+    chartEmptyState('labour-pct-trend-chart', noSales);
+    return;
+  }
+  const labels = days.map(function (d) {
+    const p = String(d.date).split('-').map(Number);
+    return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric' });
+  });
+  const revenue = days.map(function (d) { return Number(d.revenue_net) || 0; });
+  const labour = days.map(function (d) { return Number(d.labour) || 0; });
+  createChart('revenue-labour-chart', {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: 'Net sales ($)', data: revenue, backgroundColor: dotFill('rgba(22,163,74,0.35)'), borderColor: colors.success, borderWidth: 1 },
+        { label: 'Rostered labour ($)', data: labour, backgroundColor: dotFill('rgba(226,164,95,0.55)'), borderColor: colors.primary, borderWidth: 1 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: true, labels: { boxWidth: 12, padding: 16, font: { size: 12 } } } },
+      scales: { y: { beginAtZero: true, ticks: { callback: function (v) { return '$' + Number(v).toLocaleString(); } } } },
+    },
+  });
+  // A day with no sales has no labour %, not 0% — leave a gap.
+  const pct = days.map(function (d, i) { return revenue[i] > 0 ? labour[i] / revenue[i] : null; });
+  const venue = (state.venues || []).find(function (v) { return v.id === state.currentVenue; });
+  const target = venue && Number(venue.max_labour_pct) > 0 ? Number(venue.max_labour_pct) / 100 : null;
+  const datasets = [{
+    label: 'Labour %', data: pct, borderColor: colors.primary, backgroundColor: dotFill('rgba(226,164,95,0.55)'),
+    borderWidth: 2, fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: colors.primary, spanGaps: false,
+  }];
+  if (target !== null) {
+    datasets.push({
+      label: 'Your target (' + Math.round(target * 1000) / 10 + '%)', data: days.map(function () { return target; }),
+      borderColor: colors.success, borderWidth: 2, borderDash: [5, 5], fill: false, tension: 0, pointRadius: 0,
+    });
+  }
+  createChart('labour-pct-trend-chart', {
+    type: 'line',
+    data: { labels: labels, datasets: datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: true, labels: { boxWidth: 12, padding: 16, font: { size: 11 }, color: '#55606E' } } },
+      scales: {
+        y: { beginAtZero: true, ticks: { callback: function (v) { return (v * 100).toFixed(0) + '%'; }, color: '#55606E' }, grid: { color: 'rgba(17,24,39,0.08)' } },
+        x: { ticks: { color: '#55606E' }, grid: { color: 'rgba(17,24,39,0.08)' } },
+      },
+    },
+  });
+}
+
+// Hourly Breakdown Chart (last 12 hours revenue vs forecast) — demo showcase;
+// real venues are drawn by drawRealRevenueCharts / updateHourlySparkline.
 function initHourlyBreakdownChart(isDemo = false) {
   const canvas = document.getElementById('hourly-sparkline-chart');
   if (!canvas) return;
+  if (!isDemo || !state.isDemo) return;
 
-  let data;
-  if (isDemo) {
-    data = demoData.hourly_breakdown;
-  } else {
-    // Realistic hourly data for last 12 hours
-    const now = new Date();
-    const realisticRevenue = [180, 220, 380, 520, 680, 750, 620, 450, 580, 720, 810, 650];
-    const realisticForecast = [200, 250, 400, 500, 700, 720, 600, 480, 560, 700, 780, 680];
-    data = Array.from({ length: 12 }, function(_, i) {
-      var hour = now.getHours() - (11 - i);
-      return {
-        hour: hour < 0 ? hour + 24 : hour,
-        revenue: realisticRevenue[i],
-        forecast: realisticForecast[i],
-      };
-    });
-  }
+  const data = demoData.hourly_breakdown;
 
   const labels = data.map(h => `${h.hour}:00`);
   const revenueData = data.map(h => h.revenue);
@@ -8475,8 +8660,9 @@ function initHourlyBreakdownChart(isDemo = false) {
   });
 }
 
-// Revenue vs Labour Chart
+// Revenue vs Labour Chart — demo showcase (real venues: drawRealRevenueCharts)
 function initRevenueLabourChart() {
+  if (!state.isDemo) return;
   const hours = Array.from({ length: 24 }, (_, i) => `${i}:00`);
   // Realistic Saturday revenue curve (hospitality)
   const revenueData = [0, 0, 0, 0, 0, 0, 50, 120, 280, 420, 510, 680, 750, 620, 450, 380, 420, 580, 720, 810, 650, 420, 180, 60];
@@ -8588,8 +8774,9 @@ function initLabourPctChart() {
   });
 }
 
-// Labour % Trend Chart (Dashboard)
+// Labour % Trend Chart (Dashboard) — demo showcase (real venues: drawRealRevenueCharts)
 function initLabourPctTrendChart() {
+  if (!state.isDemo) return;
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const data = [0.27, 0.29, 0.31, 0.28, 0.30, 0.33, 0.29];
 
@@ -8716,15 +8903,21 @@ async function loadVenues() {
       connectWebSocket();
       loadVenueData();
     } else {
-      // New user with no venues — show onboarding wizard, NOT demo data
-      console.log('No venues found — launching onboarding wizard');
+      // No venues yet. Owner sign-up (or an explicit ?setup=venue) goes
+      // straight to the wizard; anyone else chooses first — a casual who
+      // lands here must not be walked into creating a venue of their own.
       const pendingName = localStorage.getItem('pending_venue_name');
-      if (pendingName) {
-        const obName = document.getElementById('ob-venue-name');
-        if (obName) obName.value = pendingName;
-        localStorage.removeItem('pending_venue_name');
+      const wantsSetup = !!pendingName || new URLSearchParams(window.location.search).get('setup') === 'venue';
+      if (wantsSetup) {
+        if (pendingName) {
+          const obName = document.getElementById('ob-venue-name');
+          if (obName) obName.value = pendingName;
+          localStorage.removeItem('pending_venue_name');
+        }
+        showOnboardingWizard();
+      } else {
+        showNoVenueChoice();
       }
-      showOnboardingWizard();
     }
     connectionManager.hide();
   } catch (error) {
@@ -8760,8 +8953,40 @@ function loadDemoVenue() {
   }
 }
 
+// Walk a paged list endpoint ({items, total}) until the reported total is in
+// hand. A short page or a missing total ends the walk; callers compare
+// items.length with total to say when the list came back incomplete.
+async function fetchAllPages(path, pageSize) {
+  const sep = path.indexOf('?') >= 0 ? '&' : '?';
+  let items = [], total = null;
+  for (let page = 0; page < 100; page++) {
+    const res = await fetchAPI(path + sep + 'limit=' + pageSize + '&offset=' + items.length);
+    if (Array.isArray(res)) { items = items.concat(res); break; }
+    const batch = (res && res.items) || [];
+    if (res && typeof res.total === 'number') total = res.total;
+    items = items.concat(batch);
+    if (!batch.length || total === null || items.length >= total) break;
+  }
+  return { items: items, total: total === null ? items.length : total };
+}
+
+// Every staff record at one venue, not the first 50 across all of them.
+async function fetchVenueEmployees(venueId) {
+  const path = '/employees?venue_id=' + encodeURIComponent(venueId);
+  try {
+    return await fetchAllPages(path, 500);
+  } catch (e) {
+    return fetchAllPages(path, 200);   // a server that caps a page at 200 rejects limit=500
+  }
+}
+
+function fetchVenueRosters(venueId) {
+  return fetchAllPages('/rosters?current=true&venue_id=' + encodeURIComponent(venueId), 200);
+}
+
 async function loadVenueData() {
   if (!state.currentVenue) return;
+  const venueId = state.currentVenue;
 
   // A compose audience picked for the old venue must not silently target
   // the new one.
@@ -8776,10 +9001,12 @@ async function loadVenueData() {
     // the whole thing and blank every panel on the page — staff table, KPIs,
     // charts and alerts — as if the venue had no data at all.
     const [empRes, rosterRes, forecastRes] = await Promise.allSettled([
-      fetchAPI('/employees'),
-      fetchAPI(`/rosters?current=true&venue_id=${state.currentVenue}`),
-      fetchAPI(`/forecasts?venue_id=${state.currentVenue}`),
+      fetchVenueEmployees(venueId),
+      fetchVenueRosters(venueId),
+      fetchAPI(`/forecasts?venue_id=${venueId}`),
     ]);
+    // Switched again while these were in flight: the newer load owns the screen.
+    if (state.currentVenue !== venueId) return;
     const unwrap = (res, what) => {
       if (res.status !== 'fulfilled') {
         console.warn('Could not load ' + what + ':', res.reason && res.reason.message);
@@ -8791,8 +9018,9 @@ async function loadVenueData() {
 
     // Extract .items from paginated responses (API returns {items:[], total, limit, offset})
     state.employees = unwrap(empRes, 'employees');
+    state.employeesTotal = empRes.status === 'fulfilled' ? (empRes.value.total || 0) : 0;
     const allRosters = unwrap(rosterRes, 'rosters');
-    state.rosters = allRosters.filter(r => r.venue_id === state.currentVenue);
+    state.rosters = allRosters.filter(r => r.venue_id === venueId);
     state.forecasts = unwrap(forecastRes, 'forecasts');
 
     clearState('kpi-row');
@@ -8802,12 +9030,15 @@ async function loadVenueData() {
       showEmptyVenueStates();
     } else {
       updateDashboardKPIs();
-      initRevenueLabourChart();
-      initLabourPctTrendChart();
-      initHourlyBreakdownChart();
+      if (state.isDemo) {
+        initRevenueLabourChart();
+        initLabourPctTrendChart();
+        initHourlyBreakdownChart(true);
+      }
       populateAlerts();
       populateStaffList();
     }
+    if (!state.isDemo) { loadRealRevenueCharts(); fetchAndUpdateLiveRevenue(); }
     try { renderStaffTable(); } catch (e) { console.warn('staff table:', e); }
     if (!state.isDemo) {
       const rec = document.getElementById('onshift-recommendations');
@@ -8876,6 +9107,7 @@ function showEmptyVenueStates() {
       if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
   });
+  ['hourly-sparkline-chart', 'revenue-labour-chart', 'labour-pct-trend-chart'].forEach(id => chartEmptyState(id, NO_SALES_MSG));
 }
 
 function loadDemoVenueData() {
@@ -9156,6 +9388,15 @@ function renderStaffTable() {
   }
   var venueId = state.currentVenue;
   var emps = (state.employees || []).filter(function(e) { return !venueId || !e.venue_id || e.venue_id === venueId; });
+  var countNote = document.getElementById('staff-count-note');
+  if (countNote) {
+    var expected = state.employeesTotal || 0;
+    var short = expected > emps.length;
+    countNote.textContent = short
+      ? 'Showing ' + emps.length + ' of ' + expected + ' staff — the rest didn’t load. Refresh the page to try again before handing out join codes.'
+      : '';
+    countNote.style.display = short ? 'block' : 'none';
+  }
   if (!emps.length) {
     body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:36px;color:var(--text-muted);">No staff yet. Use <b>Import staff</b> (CSV export from Deputy/Tanda) or add them one by one.</td></tr>';
     return;
@@ -9507,7 +9748,9 @@ function _setKpi(id, value, fallback) {
 async function updateDashboardKPIs() {
   const venueId = _getVenueId();
   if (!venueId) return;
-  _setKpi('kpi-staff-count', state.employees.length || '—');   // replaced below once the briefing lands
+  // Rostered today, from the briefing — never the team's headcount.
+  _setKpi('kpi-staff-count', '—');
+  _setKpi('kpi-staff-detail', 'rostered today');
 
   let brief = null, snap = null;
   try {
@@ -9558,8 +9801,8 @@ async function updateDashboardKPIs() {
   _setKpi('kpi-covers', covers === null ? '—' : covers);
   _setKpi('kpi-covers-detail', cov.peak_hour ? ('Busiest hour: ' + cov.peak_hour) : '');
 
+  if (typeof today.staff_rostered === 'number') _setKpi('kpi-staff-count', today.staff_rostered);
   if (typeof today.staff_rostered === 'number' && today.coverage) {
-    _setKpi('kpi-staff-count', today.staff_rostered);
     _setKpi('staff-breakdown', cov.status === 'covered'
       ? 'Covered for today' + (cov.required ? ' (' + cov.rostered + '/' + cov.required + ' needed)' : '')
       : (cov.gap ? cov.gap + ' short of the ' + cov.required + ' needed today' : ''));
@@ -9939,20 +10182,57 @@ function populateDemoStaffList() {
 // ============================================
 // EVENT LISTENERS
 // ============================================
-document.getElementById('venue-select').addEventListener('change', (e) => {
-  state.currentVenue = e.target.value;
-  state.currentRosterId = null;   // the old venue's roster is no longer on screen
-  if (state.currentVenue) {
-    // Close old WS connection if any and connect to new venue
-    if (state.ws) {
-      state.ws.close();
-      if (wsReconnectTimeout) {
-        clearTimeout(wsReconnectTimeout);
-      }
+// Everything the pages hold about the venue on screen. A switch drops all of
+// it, so no page keeps showing — or acting on — the previous venue's records.
+function resetVenuePageState() {
+  state.currentRosterId = null;
+  state.currentRosterWeek = null;
+  state.employees = [];
+  state.employeesTotal = 0;
+  state.rosters = [];
+  tsRows = []; lvRows = []; anRows = []; mfPosts = []; sopDocs = []; cvRows = [];
+  ivRows = []; ivOpenStocktake = null; ivOpenStocktakes = []; ivOrders = []; siLines = [];
+  ivInvoices = []; ivXeroPushes = {}; ivMyobPushes = {};
+  msRecipes = []; msIngredients = []; rbEditingId = null; rbLines = []; piUnmapped = [];
+  ckRun = null; etsIndex = null;
+  rosterSection = ''; ivSection = '';
+  ['ck-run-card', 'rb-card', 'iv-waste-card', 'iv-inv-card', 'ing-import-card', 'roster-import-card', 'staff-import-card']
+    .forEach(function (id) { const c = document.getElementById(id); if (c) c.style.display = 'none'; });
+  document.querySelectorAll('.modal.active').forEach(function (m) { m.classList.remove('active'); });
+  clearAIChat();
+}
+
+async function onVenueSelected(venueId) {
+  state.currentVenue = venueId;
+  // Remembered so a refresh lands back on this venue, not the first one.
+  try { if (venueId) localStorage.setItem('rosteriq_current_venue', venueId); } catch (e) { /* this tab still switches */ }
+  resetVenuePageState();
+  if (!venueId) return;
+  // Close old WS connection if any and connect to new venue
+  if (state.ws) {
+    state.ws.close();
+    if (wsReconnectTimeout) {
+      clearTimeout(wsReconnectTimeout);
     }
-    connectWebSocket();
-    loadVenueData();
   }
+  connectWebSocket();
+  // The visible page still shows the old venue until its loader re-runs —
+  // hold clicks until then.
+  const page = state.currentPage || 'dashboard';
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) { pageEl.style.opacity = '0.45'; pageEl.style.pointerEvents = 'none'; }
+  try {
+    await loadVenueData();
+  } finally {
+    if (pageEl) { pageEl.style.opacity = ''; pageEl.style.pointerEvents = ''; }
+  }
+  if (state.currentVenue !== venueId) return;
+  // loadVenueData already reloads the home cards.
+  if (page !== 'dashboard') showPage(page);
+}
+
+document.getElementById('venue-select').addEventListener('change', (e) => {
+  onVenueSelected(e.target.value);
 });
 
 // Every "Generate roster" button opens the modal through here, defaulting the
@@ -10004,7 +10284,7 @@ document.getElementById('btn-modal-generate').addEventListener('click', async ()
         ? a.name + "'s visa has EXPIRED — confirm work rights before publishing."
         : a.name + "'s visa expires " + a.expiry + ' — re-check VEVO.', 'warning');
     }
-    if (result && result.id) state.currentRosterId = result.id;
+    if (result && result.id) { state.currentRosterId = result.id; state.currentRosterWeek = date; }
     await loadVenueData();
     showRosterWeekOf(date, result);
     if (result && result.id) checkRosterCoverage(result.id, coversPerStaff);
@@ -10086,14 +10366,133 @@ function openRosterImport() {
   if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
   document.getElementById('roster-import-text').value = '';
   document.getElementById('roster-import-result').textContent = '';
+  document.getElementById('roster-import-report').innerHTML = '';
   document.getElementById('roster-import-card').style.display = 'block';
+}
+
+// ----- Import reports: what a pasted import actually did, row by row -----
+function importFlagText(f) {
+  if (f && typeof f === 'object') f = f.label || f.flag || f.code || f.message || '';
+  const known = {
+    rate_defaulted: 'pay rate defaulted', no_rate: 'no pay rate', no_mobile: 'no mobile',
+    no_phone: 'no mobile', no_email: 'no email', type_defaulted: 'employment type defaulted',
+  };
+  const key = String(f || '');
+  return known[key] || key.replace(/_/g, ' ');
+}
+
+// flags_summary arrives as [{flag, count, message}], {flag: count} or plain lines.
+function importFlagsSummary(summary) {
+  if (!summary) return [];
+  if (Array.isArray(summary)) {
+    return summary.map(function (s) {
+      if (typeof s === 'string') return s;
+      if (s && s.message) return String(s.message);
+      return (s && s.count != null ? s.count + ' × ' : '') + importFlagText(s) + ' — check these';
+    }).filter(Boolean);
+  }
+  if (typeof summary === 'object') {
+    return Object.keys(summary).map(function (k) {
+      const v = summary[k];
+      if (v && typeof v === 'object') return v.message ? String(v.message) : ((v.count != null ? v.count + ' × ' : '') + importFlagText(k) + ' — check these');
+      return v + ' × ' + importFlagText(k) + ' — check these';
+    });
+  }
+  return [String(summary)];
+}
+
+function staffImportCounts(r) {
+  const rows = Array.isArray(r.rows) ? r.rows : [];
+  const n = function (field, status) {
+    return r[field] != null ? (+r[field] || 0) : rows.filter(function (x) { return x.status === status; }).length;
+  };
+  return { created: n('created_count', 'created'), updated: n('updated_count', 'updated'), skipped: n('skipped_count', 'skipped') };
+}
+
+function _importExtras(r) {
+  const out = [];
+  if (r.location) out.push('<div style="margin-bottom:6px;">Location: <b>' + esc(r.location) + '</b></div>');
+  const unmapped = Array.isArray(r.unmapped_columns) ? r.unmapped_columns : [];
+  if (unmapped.length) out.push('<div style="margin-bottom:6px; color:var(--text-secondary);">Columns not used: ' + esc(unmapped.join(', ')) + '</div>');
+  if (r.column_map && typeof r.column_map === 'object' && Object.keys(r.column_map).length) {
+    out.push('<div style="margin-bottom:6px; color:var(--text-muted);">Columns read: ' +
+      Object.keys(r.column_map).map(function (k) { return esc(k) + ' = ' + esc(r.column_map[k]); }).join(' · ') + '</div>');
+  }
+  return out.join('');
+}
+
+function renderStaffImportReport(r) {
+  r = r || {};
+  let rows = Array.isArray(r.rows) ? r.rows.slice() : null;
+  if (!rows) {
+    rows = (r.created || []).map(function (c) {
+      return { line: c.line || c.row || '', name: c.name, email: c.email, status: 'created', reason: '', flags: c.flags || [] };
+    }).concat((r.skipped || []).map(function (s) {
+      return { line: s.line || s.row || '', name: s.name || '', email: s.email || '', status: 'skipped', reason: s.reason || '', flags: [] };
+    }));
+  }
+  // Problems first: skipped rows, then rows the parser had to guess about.
+  const rank = function (x) { return x.status === 'skipped' ? 0 : ((x.flags || []).length ? 1 : 2); };
+  rows.sort(function (a, b) { return rank(a) - rank(b) || ((+a.line || 0) - (+b.line || 0)); });
+  const badge = {
+    created: '<span class="alert-badge badge-success">Created</span>',
+    updated: '<span class="alert-badge badge-secondary">Updated</span>',
+    skipped: '<span class="alert-badge badge-danger">Skipped</span>',
+  };
+  const flagLines = importFlagsSummary(r.flags_summary);
+  let html = _importExtras(r);
+  if (flagLines.length) {
+    html += '<div style="margin-bottom:8px; padding:8px 10px; border-radius:8px; background:rgba(245,158,11,0.12); color:var(--text-primary); font-weight:600;">' +
+      flagLines.map(function (l) { return '<div>⚠ ' + esc(l) + '</div>'; }).join('') + '</div>';
+  }
+  if (rows.length) {
+    html += '<div style="max-height:280px; overflow:auto; border:1px solid var(--border); border-radius:8px;">' +
+      '<table class="table" style="font-size:12px; margin:0;"><thead><tr><th>Line</th><th>Name</th><th>Email</th><th>Result</th><th>Notes</th></tr></thead><tbody>' +
+      rows.map(function (x) {
+        const notes = [];
+        if (x.reason) notes.push(esc(x.reason));
+        (x.flags || []).forEach(function (f) { notes.push(esc(importFlagText(f))); });
+        return '<tr><td>' + esc(x.line) + '</td><td>' + esc(x.name || '') + '</td><td>' + esc(x.email || '') +
+          '</td><td>' + (badge[x.status] || esc(x.status || '')) + '</td><td>' + notes.join(' · ') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  return html ? '<div style="margin-top:12px; font-size:12px;">' + html + '</div>' : '';
+}
+
+function renderRosterImportReport(r) {
+  r = r || {};
+  const skipped = Array.isArray(r.rows)
+    ? r.rows.filter(function (x) { return !x.status || x.status === 'skipped'; })
+    : (r.skipped || []).map(function (s) {
+        return { line: s.line || s.row || '', name: s.name || s.employee || '', date: s.date || '', reason: s.reason || '' };
+      });
+  const dupes = Array.isArray(r.duplicates_skipped) ? r.duplicates_skipped.length : (+r.duplicates_skipped || 0);
+  let html = _importExtras(r);
+  if (dupes) {
+    html += '<div style="margin-bottom:6px;">' + dupes + ' duplicate shift' + (dupes === 1 ? '' : 's') +
+      ' skipped — already in the roster.</div>';
+  }
+  if (skipped.length) {
+    if ((+r.skipped_count || 0) > skipped.length) {
+      html += '<div style="margin-bottom:6px; color:var(--text-muted);">Showing the first ' + skipped.length + ' of ' + (+r.skipped_count) + ' skipped lines.</div>';
+    }
+    html += '<div style="max-height:240px; overflow:auto; border:1px solid var(--border); border-radius:8px;">' +
+      '<table class="table" style="font-size:12px; margin:0;"><thead><tr><th>Line</th><th>Who</th><th>Date</th><th>Why it was skipped</th></tr></thead><tbody>' +
+      skipped.map(function (x) {
+        return '<tr><td>' + esc(x.line) + '</td><td>' + esc(x.name || '') + '</td><td>' + esc(x.date || '') +
+          '</td><td>' + esc(x.reason || '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  return html ? '<div style="margin-top:12px; font-size:12px;">' + html + '</div>' : '';
 }
 
 async function runRosterImport() {
   const content = document.getElementById('roster-import-text').value.trim();
   if (!content) { showToast('Paste your roster export first', 'warning'); return; }
   const res = document.getElementById('roster-import-result');
+  const report = document.getElementById('roster-import-report');
   res.textContent = 'Importing…';
+  if (report) report.innerHTML = '';
   try {
     const r = await fetchAPI('/api/setup/import-roster', {
       method: 'POST',
@@ -10102,6 +10501,7 @@ async function runRosterImport() {
     let msg = r.shifts_imported + ' shifts across ' + r.weeks + ' week(s)';
     if (r.skipped_count) msg += ', ' + r.skipped_count + ' skipped';
     res.textContent = msg;
+    if (report) report.innerHTML = renderRosterImportReport(r);
     showToast(msg, r.shifts_imported ? 'success' : 'warning');
     if (r.shifts_imported && typeof loadVenueData === 'function') loadVenueData();
     if (r.shifts_imported) refreshRealRoster();
@@ -10115,6 +10515,7 @@ function openStaffImport() {
   if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
   document.getElementById('staff-import-text').value = '';
   document.getElementById('staff-import-result').textContent = '';
+  document.getElementById('staff-import-report').innerHTML = '';
   document.getElementById('staff-import-card').style.display = 'block';
 }
 
@@ -10122,18 +10523,24 @@ async function runStaffImport() {
   const content = document.getElementById('staff-import-text').value.trim();
   if (!content) { showToast('Paste your staff list first', 'warning'); return; }
   const res = document.getElementById('staff-import-result');
+  const report = document.getElementById('staff-import-report');
+  const update = document.getElementById('staff-import-update');
   res.textContent = 'Importing…';
+  if (report) report.innerHTML = '';
   try {
     const r = await fetchAPI('/api/setup/import-staff', {
       method: 'POST',
-      body: JSON.stringify({ venue_id: state.currentVenue, content: content }),
+      body: JSON.stringify({ venue_id: state.currentVenue, content: content, update_existing: !!(update && update.checked) }),
     });
-    let msg = r.created_count + ' staff imported';
-    if (r.skipped_count) msg += ', ' + r.skipped_count + ' skipped';
+    const n = staffImportCounts(r);
+    let msg = n.created + ' staff imported';
+    if (n.updated) msg += ', ' + n.updated + ' updated';
+    if (n.skipped) msg += ', ' + n.skipped + ' skipped';
     res.textContent = msg;
-    showToast(msg + (r.created_count ? ' — review pay rates before running pays' : ''),
-      r.created_count ? 'success' : 'warning');
-    if (r.created_count) {
+    if (report) report.innerHTML = renderStaffImportReport(r);
+    showToast(msg + ((n.created || n.updated) ? ' — review pay rates before running pays' : ''),
+      (n.created || n.updated) ? 'success' : 'warning');
+    if (n.created || n.updated) {
       document.getElementById('staff-import-text').value = '';
       if (typeof loadStaff === 'function') loadStaff();
       else if (typeof loadVenueData === 'function') loadVenueData();
@@ -10367,7 +10774,7 @@ document.getElementById('btn-optimiser-discard').addEventListener('click', () =>
 async function scanConflicts() {
   const rosterId = displayedRosterId();
   if (!rosterId) {
-    showError('#page-dashboard', 'No roster available for conflict detection');
+    showError('#page-dashboard', 'Open a week on the Roster page first, then scan it for conflicts');
     return;
   }
 
@@ -11496,41 +11903,29 @@ let hourlySparklineChart = null;
 async function fetchAndUpdateLiveRevenue() {
   if (!state.currentVenue || state.isDemo) return;
 
+  const venueId = state.currentVenue;
   try {
-    // Fetch current live revenue
-    const revResponse = await fetch(`/api/pos/live/revenue/${state.currentVenue}`);
-    if (!revResponse.ok) {
-      connectionManager.show();
-      throw new Error('Failed to fetch revenue');
-    }
-
-    const revData = await revResponse.json();
-    if (revData.current_hour) {
-      document.getElementById('live-hour-revenue').textContent =
-        revData.current_hour.revenue.toFixed(2);
-      document.getElementById('live-hour-count').textContent =
-        revData.current_hour.transaction_count;
-    }
-    if (revData.today_total) {
-      document.getElementById('live-today-revenue').textContent =
-        revData.today_total.total_revenue.toFixed(2);
-      document.getElementById('live-today-count').textContent =
-        revData.today_total.transaction_count;
-    }
+    // Fetch current live revenue (fetchAPI: these endpoints need the session token)
+    const revData = await fetchAPI(`/api/pos/live/revenue/${encodeURIComponent(venueId)}`);
+    if (state.currentVenue !== venueId) return;
+    // No live feed for this venue means zero live sales — never the previous venue's figures.
+    const hour = revData.current_hour || { revenue: 0, transaction_count: 0 };
+    const day = revData.today_total || { total_revenue: 0, transaction_count: 0 };
+    document.getElementById('live-hour-revenue').textContent = Number(hour.revenue || 0).toFixed(2);
+    document.getElementById('live-hour-count').textContent = hour.transaction_count || 0;
+    document.getElementById('live-today-revenue').textContent = Number(day.total_revenue || 0).toFixed(2);
+    document.getElementById('live-today-count').textContent = day.transaction_count || 0;
 
     // Fetch variance data
-    const varResponse = await fetch(`/api/pos/live/variance/${state.currentVenue}`);
-    if (varResponse.ok) {
-      const varData = await varResponse.json();
-      updateVarianceDisplay(varData);
-    }
+    try {
+      updateVarianceDisplay(await fetchAPI(`/api/pos/live/variance/${encodeURIComponent(venueId)}`));
+    } catch (e) { /* the variance bar keeps its dash */ }
 
     // Fetch hourly breakdown for sparkline
-    const hourlyResponse = await fetch(`/api/pos/live/hourly/${state.currentVenue}`);
-    if (hourlyResponse.ok) {
-      const hourlyData = await hourlyResponse.json();
-      updateHourlySparkline(hourlyData);
-    }
+    try {
+      const hourlyData = await fetchAPI(`/api/pos/live/hourly/${encodeURIComponent(venueId)}`);
+      if (state.currentVenue === venueId) updateHourlySparkline(hourlyData);
+    } catch (e) { /* the hourly card keeps its empty state */ }
 
     connectionManager.hide();
   } catch (e) {
@@ -11590,6 +11985,7 @@ function updateHourlySparkline(hourlyData) {
   if (hourlySparklineChart) {
     hourlySparklineChart.destroy();
   }
+  chartClearEmptyState(canvas);
 
   hourlySparklineChart = new Chart(canvas, {
     type: 'bar',
@@ -11931,6 +12327,16 @@ function hideOnboardingWizard() {
   document.body.style.overflow = '';
 }
 
+function showNoVenueChoice() {
+  document.getElementById('no-venue-choice').classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
+
+function noVenueSetUp() {
+  document.getElementById('no-venue-choice').classList.remove('active');
+  showOnboardingWizard();
+}
+
 function obGoToStep(step) {
   obState.currentStep = step;
   document.querySelectorAll('.onboarding-step').forEach(s => s.classList.remove('active'));
@@ -11998,14 +12404,19 @@ async function obImportStaff() {
   const out = document.getElementById('ob-staff-result');
   if (!content) { out.textContent = 'Paste your staff export first.'; return; }
   const btn = document.getElementById('ob-staff-import-btn');
+  const report = document.getElementById('ob-staff-report');
+  const update = document.getElementById('ob-staff-update');
   btn.disabled = true;
+  if (report) report.innerHTML = '';
   try {
     const r = await fetchAPI('/api/setup/import-staff', {
-      method: 'POST', body: JSON.stringify({ venue_id: obState.venueId, content: content }),
+      method: 'POST',
+      body: JSON.stringify({ venue_id: obState.venueId, content: content, update_existing: !!(update && update.checked) }),
     });
-    const skipped = (r.skipped || []).length;
-    out.textContent = (r.created || []).length + ' imported' +
-      (skipped ? ' · ' + skipped + ' skipped (' + esc((r.skipped[0] || {}).reason || '') + (skipped > 1 ? ', …' : '') + ')' : ' ✓');
+    const n = staffImportCounts(r);
+    out.textContent = n.created + ' imported' + (n.updated ? ' · ' + n.updated + ' updated' : '') +
+      (n.skipped ? ' · ' + n.skipped + ' skipped — see below' : ' ✓');
+    if (report) report.innerHTML = renderStaffImportReport(r);
   } catch (err) {
     out.textContent = 'Import failed: ' + err.message;
   } finally {
@@ -12090,7 +12501,7 @@ async function obPublishFirstRoster() {
       btn.disabled = false;
       return;
     }
-    out.textContent += '\nPublished — staff with linked phones see their shifts in /my.';
+    out.textContent += '\nPublished — staff with linked phones see their shifts in /my. ' + rosterDeliverySummary(result).text;
     btn.textContent = 'Published ✓';
   } catch (err) {
     out.textContent += '\nPublish failed: ' + err.message;
@@ -12277,23 +12688,7 @@ async function saveVenueSettings() {
 // Trade the refresh token for a pair minted with the current role.
 async function refreshSessionRole() {
   if (state.isDemo) return;
-  let rt = '';
-  try { rt = localStorage.getItem('jwt_refresh_token') || ''; } catch (e) { return; }
-  if (!rt) return;
-  try {
-    const r = await fetch(`${state.baseUrl}/api/auth/refresh`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: rt }),
-    });
-    if (!r.ok) return;
-    const j = await r.json();
-    if (!j || !j.access_token) return;
-    state.authToken = j.access_token;
-    try {
-      localStorage.setItem('jwt_token', j.access_token);
-      if (j.refresh_token) localStorage.setItem('jwt_refresh_token', j.refresh_token);
-    } catch (e) { /* the in-memory token still works for this session */ }
-  } catch (e) { /* keep the current session; a re-login also fixes it */ }
+  await _refreshAccessToken();   // on failure the current session stands; a re-login also fixes it
 }
 
 async function obFinish() {
@@ -12475,6 +12870,40 @@ function exportRosterCSV() {
   showToast('CSV downloaded', 'success');
 }
 
+// Who a roster notification actually reached. 'delivered' {email, sms, push,
+// in_app} is the truth when the server sends it; otherwise only email/SMS/push
+// in 'sent' count — a websocket "send" reaches nobody who isn't looking.
+function rosterDeliverySummary(result) {
+  result = result || {};
+  let email = 0, sms = 0, push = 0, inApp = 0;
+  if (result.delivered && typeof result.delivered === 'object') {
+    email = +result.delivered.email || 0; sms = +result.delivered.sms || 0;
+    push = +result.delivered.push || 0; inApp = +result.delivered.in_app || 0;
+  } else if (result.sent && typeof result.sent === 'object') {
+    email = +result.sent.email || 0; sms = +result.sent.sms || 0; push = +result.sent.push || 0;
+  } else if (+result.notifications_sent > 0) {
+    const n = +result.notifications_sent;
+    return { reached: n, text: n + ' staff notified.' };
+  }
+  const reached = email + sms + push;
+  const app = inApp ? ' ' + inApp + (inApp === 1 ? ' person sees' : ' people see') + ' it in the staff app.' : '';
+  if (reached) {
+    const parts = [];
+    if (email) parts.push(email + ' emailed');
+    if (sms) parts.push(sms + ' texted');
+    if (push) parts.push(push + ' sent a phone notification');
+    return { reached: reached, text: parts.join(', ') + '.' + app };
+  }
+  const avail = Array.isArray(result.channels_available) ? result.channels_available : [];
+  const switchedOn = avail.indexOf('email') >= 0 || avail.indexOf('sms') >= 0;
+  return {
+    reached: 0,
+    text: (switchedOn
+      ? 'Nobody was messaged — nobody had a working email or mobile on file; share the /my link.'
+      : 'Nobody was messaged — email/SMS aren’t switched on yet; share the /my link.') + app,
+  };
+}
+
 // ── Roster Push to Connected System ─────────────────────────────────
 // ── Publish Roster (connector-independent) ──────────────────────────
 // Publishes the current roster internally (marks it published, runs conflict
@@ -12486,7 +12915,18 @@ async function publishRoster() {
   const venueId = state.currentVenue;
   if (!venueId) { showToast('No venue selected', 'error'); return; }
   const rosterId = displayedRosterId();
-  if (!rosterId) { showToast('Generate a roster first, then publish.', 'warning', 4000); return; }
+  if (!rosterId) {
+    showToast(state.isDemo ? 'Generate a roster first, then publish.'
+      : 'Load a week first — show a week that has a roster on the Roster page (or generate one), then publish.', 'warning', 5000);
+    return;
+  }
+  const venue = (state.venues || []).find(v => v.id === venueId);
+  let week = '';
+  if (state.currentRosterWeek) {
+    const p = String(state.currentRosterWeek).split('-').map(Number);
+    week = new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  if (!window.confirm('Publish ' + ((venue && venue.name) || venueId) + (week ? ', week of ' + week : '') + '?')) return;
 
   if (btn) { btn.disabled = true; btn.textContent = 'Publishing...'; }
   try {
@@ -12495,13 +12935,13 @@ async function publishRoster() {
       body: JSON.stringify({ skip_approval: true })
     });
     if (result && result.success) {
-      const notified = result.notifications_sent || 0;
+      const reach = rosterDeliverySummary(result);
       const short = result.staffing_warnings || [];
       if (short.length) {
         showToast('Roster published, but short-staffed: ' + short.slice(0, 3).join('; ') +
-          (short.length > 3 ? ' (+' + (short.length - 3) + ' more)' : ''), 'warning', 9000);
+          (short.length > 3 ? ' (+' + (short.length - 3) + ' more)' : '') + '. ' + reach.text, 'warning', 9000);
       } else {
-        showToast('Roster published' + (notified ? ' — ' + notified + ' staff notified.' : '.'), 'success', 4000);
+        showToast('Roster published. ' + reach.text, reach.reached ? 'success' : 'warning', 7000);
       }
     } else {
       showToast('Could not publish: ' + ((result && result.message) || 'roster not in a publishable state'), 'warning', 6000);
@@ -12631,8 +13071,8 @@ async function sendRosterToStaff() {
       })
     });
 
-    const sent = result.total_targets || 0;
-    showToast('Roster sent to ' + sent + ' staff member' + (sent !== 1 ? 's' : ''), 'success', 4000);
+    const reach = rosterDeliverySummary(result);
+    showToast(reach.reached ? 'Roster sent — ' + reach.text : reach.text, reach.reached ? 'success' : 'warning', 7000);
   } catch (err) {
     console.error('Send roster failed:', err);
     showToast('Send failed: ' + (err.message || 'Unknown error'), 'error', 5000);
@@ -12799,9 +13239,12 @@ async function loadRosterForWeek() {
   const costEl = document.getElementById('roster-total-cost');
   try {
     const resp = await fetchAPI('/rosters?venue_id=' + encodeURIComponent(venueId) + '&week_start=' + dateStr);
+    // The manager switched venue while this was in flight: it is not on screen.
+    if (state.currentVenue !== venueId) return;
     const rosters = ((resp && resp.items) || (Array.isArray(resp) ? resp : []))
       .slice().sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
     state.currentRosterId = rosters.length > 0 ? rosters[0].id : null;
+    state.currentRosterWeek = rosters.length > 0 ? dateStr : null;
     if (rosters.length > 0) {
       renderRosterTable(rosters[0]);
     } else {
@@ -12813,6 +13256,8 @@ async function loadRosterForWeek() {
       if (varEl) varEl.textContent = '—';
     }
   } catch (err) {
+    if (state.currentVenue !== venueId) return;
+    state.currentRosterId = null;
     // Never leave placeholder sample rows on screen for a real venue
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">Couldn’t load this week’s roster — try again in a moment.</td></tr>';
     console.log('Could not load roster for week:', dateStr, err);
@@ -12846,10 +13291,9 @@ function showRosterWeekOf(dateStr, roster) {
   refreshRealRoster();
 }
 
-// The roster Publish / conflict scan act on: the one on screen, else the newest.
+// The roster Publish / conflict scan act on: the one on screen, or none.
 function displayedRosterId() {
-  if (state.currentRosterId) return state.currentRosterId;
-  return (state.rosters && state.rosters.length > 0) ? state.rosters[0].id : null;
+  return state.currentRosterId || null;
 }
 
 function renderRosterTable(roster) {
@@ -13087,7 +13531,7 @@ function addAIChatMessage(role, content, extras) {
         const btn = document.createElement('button');
         btn.className = 'ai-action-btn';
         btn.textContent = action.message?.replace(/^Ready to /, '').replace(/\. Click.*$/, '') || 'Execute';
-        btn.onclick = () => executeAIAction(action);
+        btn.onclick = () => executeAIAction(action, extras.venue_id);
         div.appendChild(btn);
       }
     }
@@ -13145,8 +13589,8 @@ async function sendAIMessage() {
   sendBtn.disabled = true;
   sendBtn.textContent = '...';
 
+  const venueId = _getVenueId();
   try {
-    const venueId = _getVenueId();
     const data = await fetchAPI('/api/ai/chat', {
       method: 'POST',
       body: JSON.stringify({
@@ -13160,6 +13604,9 @@ async function sendAIMessage() {
     // Remove thinking indicator
     const thinking = document.getElementById('ai-thinking');
     if (thinking) thinking.remove();
+    // The venue changed while the agent was answering: this reply (and any
+    // action it proposes) belongs to the old venue's conversation.
+    if (_getVenueId() !== venueId) return;
 
     aiState.conversationId = data.conversation_id;
     aiState.history.push({ role: 'user', content: message });
@@ -13169,10 +13616,12 @@ async function sendAIMessage() {
       actions: data.actions,
       tool_calls: data.tool_calls,
       question: message,
+      venue_id: venueId,
     });
   } catch (err) {
     const thinking = document.getElementById('ai-thinking');
     if (thinking) thinking.remove();
+    if (_getVenueId() !== venueId) return;
     console.error('AI chat error:', err);
 
     if (err.message?.includes('503') || err.message?.includes('not configured')) {
@@ -13187,9 +13636,15 @@ async function sendAIMessage() {
   }
 }
 
-async function executeAIAction(action) {
+async function executeAIAction(action, proposedFor) {
+  const venueId = _getVenueId();
+  if (proposedFor && proposedFor !== venueId) {
+    const v = (state.venues || []).find(function (x) { return x.id === proposedFor; });
+    addAIChatMessage('assistant', 'That suggestion was made for ' + ((v && v.name) || proposedFor) +
+      ', not the venue you have selected now. Switch back to it, or ask again here.', { rateable: false });
+    return;
+  }
   try {
-    const venueId = _getVenueId();
     const result = await fetchAPI('/api/ai/action', {
       method: 'POST',
       body: JSON.stringify({

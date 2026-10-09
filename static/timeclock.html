@@ -5,6 +5,7 @@
   <link rel="icon" href="/static/logo-icon.svg" type="image/svg+xml">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>RosterIQ — Time Clock</title>
+<link rel="manifest" href="/static/manifest-timeclock.json">
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -128,7 +129,10 @@ async function resolveVenue() {
   try {
     const v = await api('/venues');
     const items = v.items || v || [];
-    const match = (venueId && items.find(x => x.id === venueId)) || items[0];
+    // ?venue_id wins when this login holds it; otherwise the kiosk's last venue, then the first.
+    const stored = localStorage.getItem('clock_venue_id');
+    const match = (venueId && items.find(x => x.id === venueId))
+      || (stored && items.find(x => x.id === stored)) || items[0];
     if (match) {
       venueId = match.id;
       venueName = match.name || '';

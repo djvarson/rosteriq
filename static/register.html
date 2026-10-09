@@ -129,8 +129,7 @@
             padding: 60px 50px;
             display: flex;
             flex-direction: column;
-            justify-content: center;
-            overflow-y: auto;
+            overflow-y: auto;   /* auto margins centre when there's room, never clip */
         }
 
         .form-container {
@@ -270,6 +269,50 @@
         .button-primary:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+        }
+
+        .mode-toggle {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            padding: 4px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: #F1EFEA;
+        }
+
+        .mode-toggle button {
+            padding: 10px 8px;
+            border: none;
+            border-radius: 7px;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 700;
+            font-family: inherit;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .mode-toggle button.active {
+            background: var(--white);
+            color: var(--text-primary);
+            box-shadow: 0 1px 2px rgba(17, 24, 39, 0.12);
+        }
+
+        .field-hint {
+            margin-top: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .skip-link {
+            display: none;
+            margin-top: 14px;
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-secondary);
         }
 
         .signin-prompt {
@@ -446,10 +489,27 @@
                     </svg>
                     <span>Roster<span>IQ</span></span>
                 </div>
-                <div class="tagline">
+                <div class="tagline" id="ownerTagline">
                     Get your venue up and running in under 5 minutes
                 </div>
-                <div class="steps">
+                <div class="tagline" id="staffTagline" style="display:none;">
+                    Your shifts, hours and leave &mdash; on your phone
+                </div>
+                <div class="steps" id="staffSteps" style="display:none;">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-text">Use the email your manager has on file for you</div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-text">Enter the join code your manager gave you</div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-text">Add the staff app to your home screen</div>
+                    </div>
+                </div>
+                <div class="steps" id="ownerSteps">
                     <div class="step">
                         <div class="step-number">1</div>
                         <div class="step-text">Create your account</div>
@@ -468,7 +528,7 @@
                     </div>
                 </div>
             </div>
-            <div class="footer-text">
+            <div class="footer-text" id="ownerFooter">
                 No credit card required. 14-day free trial.
             </div>
         </div>
@@ -476,9 +536,14 @@
         <!-- Right Panel - Register Form -->
         <div class="right-panel">
             <div class="form-container">
+                <div class="mode-toggle" id="modeToggle" role="group" aria-label="What are you signing up for?">
+                    <button type="button" id="modeVenue" class="active" aria-pressed="true" onclick="setMode('venue')">Setting up a venue</button>
+                    <button type="button" id="modeJoin" aria-pressed="false" onclick="setMode('join')">I'm joining my team</button>
+                </div>
+
                 <div class="form-header">
-                    <h1>Create your account</h1>
-                    <p>Start optimising your rosters today</p>
+                    <h1 id="formTitle">Create your account</h1>
+                    <p id="formSubtitle">Start optimising your rosters today</p>
                 </div>
 
                 <form id="registerForm">
@@ -509,7 +574,23 @@
                         >
                     </div>
 
-                    <div class="form-group">
+                    <div class="form-group" id="joinGroup" style="display:none;">
+                        <label for="joinCode">Join code</label>
+                        <input
+                            type="text"
+                            id="joinCode"
+                            name="joinCode"
+                            placeholder="ABCD-EFGH"
+                            maxlength="9"
+                            autocomplete="one-time-code"
+                            autocapitalize="characters"
+                            spellcheck="false"
+                            style="text-transform:uppercase; letter-spacing:2px;"
+                        >
+                        <div class="field-hint">Your manager gets this from the Staff page in RosterIQ.</div>
+                    </div>
+
+                    <div class="form-group" id="venueGroup">
                         <label for="venueName">Venue name</label>
                         <input
                             type="text"
@@ -555,6 +636,10 @@
                         Create Account
                     </button>
 
+                    <div class="skip-link" id="skipToApp">
+                        Or <a href="/my">open the staff app</a> and enter the code there.
+                    </div>
+
                     <div class="terms">
                         By creating an account, you agree to the RosterIQ
                         Terms of Service and Privacy Policy
@@ -579,6 +664,39 @@
         const registerBtn = document.getElementById('registerBtn');
         const errorMessage = document.getElementById('errorMessage');
         const successMessage = document.getElementById('successMessage');
+        const joinInput = document.getElementById('joinCode');
+
+        // Two sign-ups share this page: an owner setting up a venue (then the
+        // venue wizard) and a staff member joining with a join code (then the
+        // staff app). /register?join=1 opens on the second.
+        let mode = new URLSearchParams(window.location.search).has('join') ? 'join' : 'venue';
+        let accountCreated = false;   // join mode: the login exists, only the code is left
+        let accessToken = '';
+
+        function setMode(m) {
+            if (accountCreated) return;
+            mode = m === 'join' ? 'join' : 'venue';
+            const join = mode === 'join';
+            document.getElementById('venueGroup').style.display = join ? 'none' : '';
+            document.getElementById('joinGroup').style.display = join ? '' : 'none';
+            venueInput.required = !join;
+            joinInput.required = join;
+            document.getElementById('modeVenue').classList.toggle('active', !join);
+            document.getElementById('modeJoin').classList.toggle('active', join);
+            document.getElementById('modeVenue').setAttribute('aria-pressed', String(!join));
+            document.getElementById('modeJoin').setAttribute('aria-pressed', String(join));
+            document.getElementById('formTitle').textContent = join ? 'Join your team' : 'Create your account';
+            document.getElementById('formSubtitle').textContent = join
+                ? 'Sign up with the email your manager has for you, then enter your join code.'
+                : 'Start optimising your rosters today';
+            registerBtn.textContent = join ? 'Create account & join' : 'Create Account';
+            document.getElementById('ownerTagline').style.display = join ? 'none' : '';
+            document.getElementById('ownerSteps').style.display = join ? 'none' : '';
+            document.getElementById('staffTagline').style.display = join ? '' : 'none';
+            document.getElementById('staffSteps').style.display = join ? '' : 'none';
+            document.getElementById('ownerFooter').style.visibility = join ? 'hidden' : '';
+            clearError();
+        }
 
         // Password strength indicator
         passwordInput.addEventListener('input', () => {
@@ -611,7 +729,7 @@
         });
 
         // Clear error on any input
-        [nameInput, emailInput, venueInput, confirmInput].forEach(input => {
+        [nameInput, emailInput, venueInput, confirmInput, joinInput].forEach(input => {
             input.addEventListener('input', clearError);
         });
 
@@ -632,11 +750,120 @@
             successMessage.classList.add('show');
         }
 
+        function registerErrorText(data) {
+            let msg = data.error?.message || data.detail?.message || data.detail || data.message;
+            if (Array.isArray(msg)) msg = 'Check your details \u2014 ' + (msg[0] && msg[0].loc && msg[0].loc.includes('email') ? 'that email address doesn\u2019t look right.' : 'something is missing or invalid.');
+            if (/already exists/i.test(String(msg || ''))) {
+                msg = mode === 'join'
+                    ? 'There\u2019s already an account with that email \u2014 sign in instead, then enter your join code in the staff app.'
+                    : 'There\u2019s already an account with that email \u2014 sign in instead, or use \u201cForgot password?\u201d on the sign-in page.';
+            }
+            return typeof msg === 'string' && msg ? msg : 'Registration failed. Please try again.';
+        }
+
+        function storeTokens(data) {
+            const token = data.access_token || (data.tokens && data.tokens.access_token) || data.token;
+            if (token) {
+                localStorage.setItem('jwt_token', token);
+            }
+            const refreshToken = data.refresh_token || (data.tokens && data.tokens.refresh_token);
+            if (refreshToken) {
+                localStorage.setItem('jwt_refresh_token', refreshToken);
+            }
+            return token || '';
+        }
+
+        async function submitJoin() {
+            const name = nameInput.value.trim();
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+            const code = joinInput.value.trim();
+
+            if (!accountCreated) {
+                if (!name || !email || !password || !confirmInput.value || !code) {
+                    showError('Please fill in all fields.');
+                    return;
+                }
+                if (password.length < 8) {
+                    showError('Password must be at least 8 characters.');
+                    return;
+                }
+                if (password !== confirmInput.value) {
+                    showError('Passwords do not match.');
+                    confirmInput.focus();
+                    return;
+                }
+            }
+            if (code.replace(/[^A-Za-z0-9]/g, '').length < 8) {
+                showError('Enter the 8-character join code from your manager, e.g. ABCD-EFGH.');
+                joinInput.focus();
+                return;
+            }
+
+            registerBtn.disabled = true;
+            if (!accountCreated) {
+                registerBtn.textContent = 'Creating account...';
+                try {
+                    const response = await fetch('/api/auth/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: name, email: email, password: password }),
+                    });
+                    const data = await response.json();
+                    if (!(response.ok || response.status === 201)) {
+                        showError(registerErrorText(data));
+                        registerBtn.disabled = false;
+                        registerBtn.textContent = 'Create account & join';
+                        return;
+                    }
+                    accessToken = storeTokens(data);
+                    accountCreated = true;
+                    // This login is staff: never hand it the owner's venue wizard.
+                    localStorage.removeItem('pending_venue_name');
+                    [nameInput, emailInput, passwordInput, confirmInput].forEach(i => { i.disabled = true; });
+                    document.getElementById('modeToggle').style.display = 'none';
+                } catch (error) {
+                    console.error('Registration error:', error);
+                    showError('Connection error. Please check your internet and try again.');
+                    registerBtn.disabled = false;
+                    registerBtn.textContent = 'Create account & join';
+                    return;
+                }
+            }
+
+            registerBtn.textContent = 'Linking...';
+            try {
+                const r = await fetch('/api/me/link', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
+                    body: JSON.stringify({ code: code }),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (r.ok) {
+                    showSuccess('Linked to ' + (d.venue_name || 'your venue') + ' \u2014 opening your staff app...');
+                    setTimeout(() => { window.location.href = '/my'; }, 800);
+                    return;
+                }
+                let why = d.error?.message || d.detail?.message || d.detail || '';
+                if (typeof why !== 'string') why = '';
+                showError('Your account is ready, but that join code didn\u2019t link' + (why ? ': ' + why : '') +
+                    '. Check the code with your manager and try again.');
+            } catch (error) {
+                showError('Your account is ready, but the join code couldn\u2019t be checked just now. Try again in a moment.');
+            }
+            document.getElementById('skipToApp').style.display = 'block';
+            registerBtn.disabled = false;
+            registerBtn.textContent = 'Try the code again';
+        }
+
+        setMode(mode);
+
         // Handle registration
         registerForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorMessage.classList.remove('show');
             successMessage.classList.remove('show');
+            if (mode === 'join') return submitJoin();
 
             const name = nameInput.value.trim();
             const email = emailInput.value.trim();
@@ -681,14 +908,7 @@
 
                 if (response.ok || response.status === 201) {
                     // Store token — API returns { user: {...}, tokens: { access_token, refresh_token } }
-                    const token = data.access_token || (data.tokens && data.tokens.access_token) || data.token;
-                    if (token) {
-                        localStorage.setItem('jwt_token', token);
-                    }
-                    const refreshToken = data.refresh_token || (data.tokens && data.tokens.refresh_token);
-                    if (refreshToken) {
-                        localStorage.setItem('jwt_refresh_token', refreshToken);
-                    }
+                    storeTokens(data);
 
                     // Store venue name for onboarding wizard
                     localStorage.setItem('pending_venue_name', venue);
@@ -699,10 +919,7 @@
                         window.location.href = '/static/dashboard.html';
                     }, 800);
                 } else {
-                    let msg = data.error?.message || data.detail?.message || data.detail || data.message;
-                    if (Array.isArray(msg)) msg = 'Check your details \u2014 ' + (msg[0] && msg[0].loc && msg[0].loc.includes('email') ? 'that email address doesn\u2019t look right.' : 'something is missing or invalid.');
-                    if (/already exists/i.test(String(msg || ''))) msg = 'There\u2019s already an account with that email \u2014 sign in instead, or use \u201cForgot password?\u201d on the sign-in page.';
-                    showError(typeof msg === 'string' && msg ? msg : 'Registration failed. Please try again.');
+                    showError(registerErrorText(data));
                     registerBtn.disabled = false;
                     registerBtn.textContent = originalText;
                 }
