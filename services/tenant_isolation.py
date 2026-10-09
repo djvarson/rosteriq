@@ -273,8 +273,11 @@ class TenantScopedDB:
         """Record login attempt (auth-agnostic)."""
         return self._store.record_login_attempt(email, ip_address, success)
 
-    def check_login_rate_limit(self, ip_address: str, minutes: int = 1) -> int:
+    def check_login_rate_limit(self, ip_address: str, minutes: int = 1,
+                               email: Optional[str] = None) -> int:
         """Check login rate limit (auth-agnostic)."""
+        if email:
+            return self._store.check_login_rate_limit(ip_address, minutes, email=email)
         return self._store.check_login_rate_limit(ip_address, minutes)
 
     # ========================================================================

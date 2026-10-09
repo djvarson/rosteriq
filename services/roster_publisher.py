@@ -83,6 +83,8 @@ class PublishResult:
     message: str = ""
     timestamp: str = ""
     approval_request_id: Optional[str] = None
+    delivered: Optional[Dict[str, int]] = None
+    channels_available: Optional[List[str]] = None
 
 
 @dataclass
@@ -379,12 +381,12 @@ class RosterPublisher:
             result.state = RosterPublishState.PUBLISHED.value
 
             # Step 8: Notify all affected staff
-            notifications_sent = await self._notify_staff(
+            notified = await self._notify_staff(
                 roster=roster,
                 venue=venue,
                 conflicts_count=result.conflicts_found,
             )
-            result.notifications_sent = notifications_sent
+            self._apply_notify_summary(result, notified)
 
             # Step 9: Log publication event
             self._log_publication_event(
@@ -398,8 +400,8 @@ class RosterPublisher:
             result.message = (
                 f"Roster published successfully. "
                 f"{result.conflicts_found} conflicts (warning level). "
-                f"{notifications_sent} staff notified."
-            )
+                f"{notified.get('message', '')}"
+            ).strip()
             logger.info(result.message)
 
             return result
@@ -511,15 +513,15 @@ class RosterPublisher:
                 result.state = RosterPublishState.PUBLISHED.value
 
                 # Notify staff
-                notifications_sent = await self._notify_staff(
+                notified = await self._notify_staff(
                     roster=roster,
                     venue=venue,
                     conflicts_count=0,
                 )
-                result.notifications_sent = notifications_sent
+                self._apply_notify_summary(result, notified)
 
                 result.success = True
-                result.message = f"Roster approved and published. {notifications_sent} staff notified."
+                result.message = f"Roster approved and published. {notified.get('message', '')}".strip()
 
             else:
                 # Rejected - go back to DRAFT
@@ -767,9 +769,9 @@ class RosterPublisher:
         roster: Roster,
         venue: VenueConfig,
         conflicts_count: int,
-    ) -> int:
+    ) -> Dict[str, Any]:
         """
-        Notify all affected staff of roster publication.
+        Tell the staff rostered on this roster that it's published.
 
         Args:
             roster: Roster object
@@ -777,38 +779,35 @@ class RosterPublisher:
             conflicts_count: Number of conflicts (for context)
 
         Returns:
-            Number of notifications sent
+            The hub's dispatch summary: who was actually reached, per channel.
         """
+        employee_ids = list(dict.fromkeys(s.employee_id for s in roster.shifts if s.employee_id))
         try:
-            employees = set(s.employee_id for s in roster.shifts)
-            notifications_sent = 0
-
-            for employee_id in employees:
-                try:
-                    await self.notification_hub.dispatch(
-                        event_type=NotificationEventType.ROSTER_PUBLISHED.value,
-                        venue_id=venue.id,
-                        payload={
-                            "roster_id": roster.id,
-                            "week_start": roster.week_start.isoformat(),
-                            "week_end": roster.week_end.isoformat(),
-                            "employee_id": employee_id,
-                            "conflicts_warning": conflicts_count > 0,
-                        },
-                        employee_ids=[employee_id],
-                    )
-                    notifications_sent += 1
-                except Exception as e:
-                    logger.error(
-                        f"Error notifying employee {employee_id}: {str(e)}",
-                        exc_info=True,
-                    )
-
-            return notifications_sent
-
+            summary = await self.notification_hub.dispatch(
+                NotificationEventType.ROSTER_PUBLISHED,
+                venue.id,
+                {
+                    "roster_id": roster.id,
+                    "week_start": roster.week_start.isoformat(),
+                    "week_end": roster.week_end.isoformat(),
+                    "conflicts_warning": conflicts_count > 0,
+                },
+                target_employee_ids=employee_ids,
+            )
         except Exception as e:
             logger.error(f"Error notifying staff: {str(e)}", exc_info=True)
-            return 0
+            summary = {"error": str(e)}
+        if "error" in summary:
+            return {"reached": 0, "delivered": {"email": 0, "sms": 0, "push": 0, "in_app": 0},
+                    "channels_available": [],
+                    "message": "Staff weren't notified — sending failed; share the /my link."}
+        return summary
+
+    @staticmethod
+    def _apply_notify_summary(result: PublishResult, summary: Dict[str, Any]) -> None:
+        result.notifications_sent = int(summary.get("reached", 0) or 0)
+        result.delivered = summary.get("delivered")
+        result.channels_available = summary.get("channels_available")
 
     def _log_publication_event(
         self,

@@ -50,6 +50,12 @@ class DispatchResponse(BaseModel):
     sent: Dict[str, int]
     failed: Dict[str, int]
     skipped: Dict[str, int]
+    # What actually reached people (email/sms/push/in_app), how many staff
+    # that is, which outbound channels are switched on, and a plain summary.
+    delivered: Dict[str, int] = {}
+    reached: int = 0
+    channels_available: List[str] = []
+    message: str = ""
 
 
 class BulkDispatchRequest(BaseModel):
@@ -174,11 +180,16 @@ async def dispatch_notification(
 
     try:
         hub = get_notification_hub()
+        targets = request.target_employee_ids
+        if targets is None:
+            # "Everyone" means staff who can act on it: a linked login or an
+            # upcoming shift here — not every name an import left behind.
+            targets = hub.reachable_staff_ids(request.venue_id)
         result = await hub.dispatch(
             event_type,
             request.venue_id,
             request.payload,
-            request.target_employee_ids,
+            targets,
         )
 
         if "error" in result:
@@ -194,6 +205,10 @@ async def dispatch_notification(
             sent=result["sent"],
             failed=result["failed"],
             skipped=result["skipped"],
+            delivered=result.get("delivered") or {},
+            reached=result.get("reached", 0),
+            channels_available=result.get("channels_available") or [],
+            message=result.get("message", ""),
         )
     except HTTPException:
         raise
@@ -252,7 +267,9 @@ async def bulk_dispatch(
                     "event_type": event_type.value,
                     "venue_id": req.venue_id,
                     "payload": req.payload,
-                    "target_employee_ids": req.target_employee_ids,
+                    "target_employee_ids": (req.target_employee_ids
+                                            if req.target_employee_ids is not None
+                                            else hub.reachable_staff_ids(req.venue_id)),
                 })
             except ValueError:
                 logger.warning(f"Skipping event with invalid type: {req.event_type}")

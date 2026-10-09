@@ -53,6 +53,7 @@ def _audit_publish(roster, result, **extra) -> None:
                  "conflicts_found": result.conflicts_found,
                  "critical_conflicts": result.critical_conflicts,
                  "notifications_sent": result.notifications_sent,
+                 "delivered": result.delivered,
                  "approval_request_id": result.approval_request_id,
                  "message": result.message, **extra},
     )
@@ -103,6 +104,10 @@ class PublishRosterResponse(BaseModel):
     message: str
     timestamp: str
     approval_request_id: Optional[str] = None
+    # What actually reached staff, per channel (email/sms/push/in_app), and
+    # which outbound channels are switched on at all.
+    delivered: Optional[dict] = None
+    channels_available: Optional[List[str]] = None
 
 
 class RecallRosterRequest(BaseModel):
@@ -244,6 +249,8 @@ async def publish_roster(
         message=result.message,
         timestamp=result.timestamp,
         approval_request_id=result.approval_request_id,
+        delivered=result.delivered,
+        channels_available=result.channels_available,
     )
 
 
@@ -602,4 +609,6 @@ async def auto_publish_roster(
         message=result.message,
         timestamp=result.timestamp,
         approval_request_id=result.approval_request_id,
+        delivered=result.delivered,
+        channels_available=result.channels_available,
     )

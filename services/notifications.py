@@ -34,12 +34,25 @@ class NotificationService:
         self.smtp_port = int(os.environ.get("SMTP_PORT", "587"))
         self.smtp_user = os.environ.get("SMTP_USER", "")
         self.smtp_pass = os.environ.get("SMTP_PASS", "")
-        self.from_email = os.environ.get("FROM_EMAIL", "noreply@rosteriq.com")
+        # SMTP_FROM is the documented name (.env.example, services/config);
+        # FROM_EMAIL is the older one. A From the SMTP account can't send as
+        # fails SPF/DMARC, so the login itself is the next best sender.
+        self.from_email = (
+            os.environ.get("SMTP_FROM", "").strip()
+            or os.environ.get("FROM_EMAIL", "").strip()
+            or (self.smtp_user if "@" in self.smtp_user else "")
+            or "noreply@rosteriq.com"
+        )
         # Base URL for links in email templates. Reuse the centralized
         # APP_URL config so dashboard/roster links point at the deployed app
         # rather than a developer's localhost. Falls back to APP_BASE_URL,
         # then a production-safe default.
         self.base_url = self._resolve_base_url()
+
+    @property
+    def email_configured(self) -> bool:
+        """Whether outbound email can actually be sent (SMTP login set)."""
+        return bool(self.smtp_user and self.smtp_pass)
 
     @staticmethod
     def _resolve_base_url() -> str:
