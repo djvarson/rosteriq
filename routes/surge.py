@@ -25,7 +25,7 @@ from rosteriq.services.surge_detector import (
     OnCallEmployee,
 )
 from rosteriq.services.ws_events import get_dispatcher
-from rosteriq.middleware.tenant import enforce_venue_manager
+from rosteriq.middleware.tenant import enforce_venue_manager, enforce_venue_manager_any
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +58,12 @@ class SurgeStatusResponse(BaseModel):
     surge_level: str  # "none", "mild", "moderate", "critical"
     deviation_pct: float
     predicted_covers: float
-    estimated_actual_covers: float
+    estimated_actual_covers: Optional[float] = None  # None = no live sales data
     additional_staff_needed: Dict[str, int]
     available_oncall: List[OnCallEmployeeResponse]
     suggested_action: str
     estimated_extra_cost: str  # Decimal as string
+    live_data: bool = True
 
 
 class SurgeHistoryEventResponse(BaseModel):
@@ -109,6 +110,7 @@ class QuietStatusResponse(BaseModel):
     staff_releasable: int
     estimated_savings: str  # Decimal as string
     suggested_action: str
+    live_data: bool = True
 
 
 # ============================================================================
@@ -131,6 +133,8 @@ async def get_surge_status(
     Compares actual POS data against forecasted demand and returns
     surge level, staff needed, and recommended action.
     """
+    # On-call phones and hourly costs are in the payload.
+    enforce_venue_manager_any(venue_id)
     try:
         db = get_db()
         detector = get_detector(database=db)
@@ -160,6 +164,7 @@ async def get_surge_status(
             ],
             suggested_action=status.suggested_action,
             estimated_extra_cost=str(status.estimated_extra_cost),
+            live_data=status.live_data,
         )
     except Exception as e:
         logger.error(f"Failed to get surge status for {venue_id}: {e}")
@@ -185,6 +190,7 @@ async def get_surge_history(
     Returns surge events over the past N days, useful for trend analysis
     and identifying recurring surge patterns.
     """
+    enforce_venue_manager_any(venue_id)
     try:
         db = get_db()
         detector = get_detector(database=db)
@@ -323,6 +329,7 @@ async def get_quiet_status(
     Identifies when actual demand is significantly below forecast,
     suggesting opportunity to release staff early and save costs.
     """
+    enforce_venue_manager_any(venue_id)
     try:
         db = get_db()
         detector = get_detector(database=db)
@@ -337,6 +344,7 @@ async def get_quiet_status(
             staff_releasable=status.staff_releasable,
             estimated_savings=str(status.estimated_savings),
             suggested_action=status.suggested_action,
+            live_data=status.live_data,
         )
     except Exception as e:
         logger.error(f"Failed to get quiet status for {venue_id}: {e}")

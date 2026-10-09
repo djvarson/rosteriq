@@ -14,6 +14,7 @@ Usage:
 import os
 import json
 import logging
+from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Optional
@@ -38,6 +39,22 @@ def _json(obj) -> str:
     these values through str()/Decimal() anyway.
     """
     return json.dumps(obj, default=str)
+
+
+@contextmanager
+def _explicit_transaction(cur):
+    """BEGIN/COMMIT on one cursor of PostgresStore's autocommit connection,
+    ROLLBACK if the block raises."""
+    cur.execute("BEGIN")
+    try:
+        yield
+    except BaseException:
+        try:
+            cur.execute("ROLLBACK")
+        except Exception:  # noqa: BLE001 — the original error is the one to raise
+            pass
+        raise
+    cur.execute("COMMIT")
 
 
 def _jsonb(value, default=None):
@@ -140,6 +157,10 @@ class BaseStore:
         raise NotImplementedError
 
     def revoke_refresh_token(self, token_hash: str) -> None:
+        raise NotImplementedError
+
+    def revoke_refresh_tokens_for_user(self, user_id: str) -> int:
+        """Revoke every live refresh token the user holds; returns how many."""
         raise NotImplementedError
 
     def record_login_attempt(self, email: str, ip_address: str, success: bool) -> None:
@@ -526,6 +547,11 @@ class BaseStore:
     def list_shift_covers(self, venue_id: str) -> list:
         raise NotImplementedError
 
+    def claim_shift_cover(self, cover_id: str, employee_id: str) -> bool:
+        """open -> claimed by ``employee_id`` in one step. False if the cover
+        was no longer open, so of two simultaneous claimants only one wins."""
+        raise NotImplementedError
+
     # --- Announcements (communication hub) ---------------------------------
 
     def save_announcement(self, ann: dict) -> None:
@@ -535,6 +561,11 @@ class BaseStore:
         raise NotImplementedError
 
     def list_announcements(self, venue_id: str) -> list:
+        raise NotImplementedError
+
+    def mark_announcement_read(self, ann_id: str, employee_id: str) -> bool:
+        """Add ``employee_id`` to read_by without rewriting the row. False if
+        already read or no such announcement."""
         raise NotImplementedError
 
     # --- SOP / JSP document library (procedures + acknowledgements) --------
@@ -777,9 +808,9 @@ class BaseStore:
         raise NotImplementedError
 
     def prune_events(self, before) -> int:
-        """Delete events older than ``before``; returns the number removed.
-        Traffic-driven categories (perf/integration/ai) are what make the table
-        grow, so retention is what keeps the log affordable."""
+        """Delete traffic events (services.events.RETENTION_PRUNABLE) older
+        than ``before``; returns the number removed. Audit and security rows,
+        and rows with no category, are never pruned."""
         raise NotImplementedError
 
     # --- Credential Management (API Keys & Webhook Secrets) ---
@@ -1330,6 +1361,14 @@ class MemoryStore(BaseStore):
             key=lambda c: str(c.get("created_at")), reverse=True,
         )
 
+    def claim_shift_cover(self, cover_id, employee_id):
+        cover = self._shift_covers.get(cover_id)
+        if not cover or cover.get("status") != "open":
+            return False
+        cover["claimed_by"] = employee_id
+        cover["status"] = "claimed"
+        return True
+
     # --- Announcements ---
 
     def save_announcement(self, ann):
@@ -1343,6 +1382,13 @@ class MemoryStore(BaseStore):
             [a for a in self._announcements.values() if a.get("venue_id") == venue_id],
             key=lambda a: (not a.get("pinned"), str(a.get("created_at"))),
         )
+
+    def mark_announcement_read(self, ann_id, employee_id):
+        ann = self._announcements.get(ann_id)
+        if not ann or employee_id in (ann.get("read_by") or []):
+            return False
+        ann["read_by"] = list(ann.get("read_by") or []) + [employee_id]
+        return True
 
     # --- SOP / JSP document library ---
 
@@ -1740,6 +1786,14 @@ class MemoryStore(BaseStore):
     def revoke_refresh_token(self, token_hash):
         if token_hash in self._refresh_tokens:
             self._refresh_tokens[token_hash]["is_revoked"] = True
+
+    def revoke_refresh_tokens_for_user(self, user_id):
+        revoked = 0
+        for rec in self._refresh_tokens.values():
+            if rec.get("user_id") == user_id and not rec.get("is_revoked"):
+                rec["is_revoked"] = True
+                revoked += 1
+        return revoked
 
     def record_login_attempt(self, email, ip_address, success):
         self._login_attempts.append({
@@ -2319,8 +2373,15 @@ class MemoryStore(BaseStore):
         return True
 
     def prune_events(self, before):
-        keep = [r for r in self._audit_logs
-                if not (r.get("created_at") and r["created_at"] < before)]
+        from rosteriq.services.events import RETENTION_PRUNABLE
+
+        def _prunable(r):
+            details = r.get("details")
+            category = details.get("category") if isinstance(details, dict) else None
+            return (bool(r.get("created_at")) and r["created_at"] < before
+                    and category in RETENTION_PRUNABLE)
+
+        keep = [r for r in self._audit_logs if not _prunable(r)]
         removed = len(self._audit_logs) - len(keep)
         self._audit_logs[:] = keep          # in place: other refs stay valid
         return removed
@@ -2768,6 +2829,7 @@ class PostgresStore(BaseStore):
             pass
         self._conn = psycopg2.connect(self._dsn)
         self._conn.autocommit = True
+        self.__dict__.pop("_ensured_tables", None)  # the server may have been restored
         logger.warning("PostgreSQL connection re-established after a dropped connection")
 
     def _cursor(self):
@@ -3452,8 +3514,13 @@ class PostgresStore(BaseStore):
         any read/write method that references the table.
         """
         ddl = self._TABLE_DDL.get(name)
-        if ddl:
-            cur.execute(ddl)
+        if not ddl:
+            return
+        ensured = self.__dict__.setdefault("_ensured_tables", set())
+        if name in ensured:
+            return
+        cur.execute(ddl)
+        ensured.add(name)
 
     # Core tables provisioned by migration 001, mirrored here as idempotent
     # CREATE TABLE IF NOT EXISTS so the app self-heals when 001 never completed
@@ -3712,6 +3779,44 @@ class PostgresStore(BaseStore):
             except Exception as e:  # noqa: BLE001
                 logger.warning("Core-schema column ensure failed: %s", e)
         self._retire_legacy_blob_tables()
+        self._ensure_indexes()
+
+    # (table, index) for the per-venue lookups every screen makes. The core
+    # ones repeat migration 001's names, so they are no-ops where 001 applied.
+    _INDEX_DDL = (
+        ("employees", "CREATE INDEX IF NOT EXISTS idx_employees_venue_id ON employees (venue_id)"),
+        ("rosters", "CREATE INDEX IF NOT EXISTS idx_rosters_venue_week ON rosters (venue_id, week_start)"),
+        ("shifts", "CREATE INDEX IF NOT EXISTS idx_shifts_roster_id ON shifts (roster_id)"),
+        ("shifts", "CREATE INDEX IF NOT EXISTS idx_shifts_employee_id ON shifts (employee_id)"),
+        ("shifts", "CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts (shift_date)"),
+        ("forecasts", "CREATE INDEX IF NOT EXISTS idx_forecasts_venue_date ON forecasts (venue_id, forecast_date)"),
+        ("refresh_tokens", "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens (user_id)"),
+        ("timesheets", "CREATE INDEX IF NOT EXISTS idx_timesheets_venue_date ON timesheets (venue_id, work_date)"),
+        ("timesheets", "CREATE INDEX IF NOT EXISTS idx_timesheets_venue_employee ON timesheets (venue_id, employee_id, clock_in DESC)"),
+        ("leave_requests", "CREATE INDEX IF NOT EXISTS idx_leave_requests_venue_created ON leave_requests (venue_id, created_at DESC)"),
+        ("shift_covers", "CREATE INDEX IF NOT EXISTS idx_shift_covers_venue_created ON shift_covers (venue_id, created_at DESC)"),
+        ("announcements", "CREATE INDEX IF NOT EXISTS idx_announcements_venue_created ON announcements (venue_id, created_at DESC)"),
+        ("sop_documents", "CREATE INDEX IF NOT EXISTS idx_sop_documents_venue ON sop_documents (venue_id)"),
+        ("sop_acknowledgements", "CREATE INDEX IF NOT EXISTS idx_sop_acks_venue_doc ON sop_acknowledgements (venue_id, doc_id)"),
+        ("feed_posts", "CREATE INDEX IF NOT EXISTS idx_feed_posts_venue_created ON feed_posts (venue_id, created_at DESC)"),
+        ("dish_sales", "CREATE INDEX IF NOT EXISTS idx_dish_sales_venue_date ON dish_sales (venue_id, sale_date)"),
+        ("ingredients", "CREATE INDEX IF NOT EXISTS idx_ingredients_venue ON ingredients (venue_id)"),
+        ("stocktakes", "CREATE INDEX IF NOT EXISTS idx_stocktakes_venue_started ON stocktakes (venue_id, started_at DESC)"),
+        ("supplier_orders", "CREATE INDEX IF NOT EXISTS idx_supplier_orders_venue_created ON supplier_orders (venue_id, created_at DESC)"),
+        ("supplier_invoices", "CREATE INDEX IF NOT EXISTS idx_supplier_invoices_venue_created ON supplier_invoices (venue_id, created_at DESC)"),
+        ("payroll_batches", "CREATE INDEX IF NOT EXISTS idx_payroll_batches_venue ON payroll_batches (venue_id)"),
+    )
+
+    def _ensure_indexes(self) -> None:
+        """Best-effort: a feature table is created first (it is otherwise made
+        lazily) so its index lands on a fresh database. Never raises."""
+        for table, ddl in self._INDEX_DDL:
+            try:
+                with self._cursor() as cur:
+                    self._ensure_table(cur, table)
+                    cur.execute(ddl)
+            except Exception as e:  # noqa: BLE001 — two workers may race the same index
+                logger.warning("Index ensure on %s failed: %s", table, e)
 
     # (table, the column the code reads) for tables an early migration 003
     # created in a normalised shape no code uses.
@@ -3737,6 +3842,7 @@ class PostgresStore(BaseStore):
                     if row["has_table"] and not row["has_column"]:
                         cur.execute(f"ALTER TABLE {table} RENAME TO {table}_legacy003")
                         logger.warning("Renamed legacy-shaped %s to %s_legacy003", table, table)
+                        self.__dict__.get("_ensured_tables", set()).discard(table)
                     self._ensure_table(cur, table)
             except Exception as e:  # noqa: BLE001 — two workers may race the rename
                 logger.warning("Legacy table check for %s failed: %s", table, e)
@@ -3750,7 +3856,7 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, tanda_org_id=EXCLUDED.tanda_org_id,
-                    state=EXCLUDED.state, min_staff=EXCLUDED.min_staff,
+                    state=EXCLUDED.state, timezone=EXCLUDED.timezone, min_staff=EXCLUDED.min_staff,
                     max_labour_pct=EXCLUDED.max_labour_pct, pos_system=EXCLUDED.pos_system,
                     updated_at=now()
             """, (
@@ -3803,6 +3909,7 @@ class PostgresStore(BaseStore):
                     award_level=EXCLUDED.award_level,
                     hourly_base_rate=EXCLUDED.hourly_base_rate, skills=EXCLUDED.skills,
                     availability=EXCLUDED.availability, max_hours_per_week=EXCLUDED.max_hours_per_week,
+                    consecutive_days=EXCLUDED.consecutive_days,
                     phone=EXCLUDED.phone, email=EXCLUDED.email,
                     visa_status=EXCLUDED.visa_status, visa_expiry=EXCLUDED.visa_expiry,
                     visa_work_limit_fortnight=EXCLUDED.visa_work_limit_fortnight,
@@ -3821,7 +3928,8 @@ class PostgresStore(BaseStore):
     def list_employees(self):
         with self._cursor() as cur:
             cur.execute("SELECT * FROM employees WHERE active = true ORDER BY name")
-            return [self._row_to_employee(r) for r in cur.fetchall()]
+            venue_states = {}
+            return [self._row_to_employee(r, venue_states) for r in cur.fetchall()]
 
     # --- Native time clock ---
 
@@ -4134,6 +4242,15 @@ class PostgresStore(BaseStore):
             """, (venue_id,))
             return [dict(r) for r in cur.fetchall()]
 
+    def claim_shift_cover(self, cover_id, employee_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "shift_covers")
+            cur.execute("""
+                UPDATE shift_covers SET claimed_by = %s, status = 'claimed', updated_at = now()
+                WHERE id = %s AND status = 'open'
+            """, (employee_id, cover_id))
+            return cur.rowcount > 0
+
     def save_announcement(self, ann):
         with self._cursor() as cur:
             self._ensure_table(cur, "announcements")
@@ -4171,6 +4288,16 @@ class PostgresStore(BaseStore):
                 ORDER BY pinned DESC, created_at DESC
             """, (venue_id,))
             return [dict(r) for r in cur.fetchall()]
+
+    def mark_announcement_read(self, ann_id, employee_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "announcements")
+            cur.execute("""
+                UPDATE announcements
+                SET read_by = COALESCE(read_by, '[]'::jsonb) || to_jsonb(%s::text)
+                WHERE id = %s AND NOT (COALESCE(read_by, '[]'::jsonb) ? %s)
+            """, (employee_id, ann_id, employee_id))
+            return cur.rowcount > 0
 
     # --- SOP / JSP document library (procedures + acknowledgements) ---
 
@@ -4696,7 +4823,8 @@ class PostgresStore(BaseStore):
                 )
             else:
                 cur.execute("SELECT * FROM employees WHERE active = true ORDER BY name")
-            return [self._row_to_employee(r) for r in cur.fetchall()]
+            venue_states = {}
+            return [self._row_to_employee(r, venue_states) for r in cur.fetchall()]
 
     def get_employee(self, employee_id):
         with self._cursor() as cur:
@@ -4704,7 +4832,9 @@ class PostgresStore(BaseStore):
             row = cur.fetchone()
             return self._row_to_employee(row) if row else None
 
-    def _row_to_employee(self, row):
+    def _row_to_employee(self, row, venue_states=None):
+        """``venue_states`` (venue_id -> State) is shared across one listing so
+        each venue is looked up once, not once per employee row."""
         avail = row["availability"]
         if isinstance(avail, str):
             avail = json.loads(avail)
@@ -4713,9 +4843,13 @@ class PostgresStore(BaseStore):
         emp_state = None
         venue_id = row.get("venue_id")
         if venue_id:
-            venue = self.get_venue(venue_id)
-            if venue:
-                emp_state = venue.state
+            if venue_states is not None and venue_id in venue_states:
+                emp_state = venue_states[venue_id]
+            else:
+                venue = self.get_venue(venue_id)
+                emp_state = venue.state if venue else None
+                if venue_states is not None:
+                    venue_states[venue_id] = emp_state
         if emp_state is None and row.get("state"):
             try:
                 emp_state = State(row["state"])
@@ -4795,7 +4929,9 @@ class PostgresStore(BaseStore):
     # --- Rosters ---
 
     def save_roster(self, roster):
-        with self._cursor() as cur:
+        # The roster is the whole truth for its shifts: one removed from
+        # roster.shifts is deleted, atomically with the upserts.
+        with self._cursor() as cur, _explicit_transaction(cur):
             # Saving an existing roster id must be a real update — including its
             # week. (Previously only total_cost updated on conflict, so a
             # re-saved roster kept its old week_start/week_end forever.)
@@ -4830,6 +4966,10 @@ class PostgresStore(BaseStore):
                     float(shift.cost) if shift.cost else None,
                     shift.penalty_multiplier,
                 ))
+            cur.execute(
+                "DELETE FROM shifts WHERE roster_id = %s AND NOT (id = ANY(%s::text[]))",
+                (roster.id, [shift.id for shift in roster.shifts]),
+            )
 
     def list_rosters(self):
         with self._cursor() as cur:
@@ -5224,6 +5364,14 @@ class PostgresStore(BaseStore):
                 "UPDATE refresh_tokens SET is_revoked = true WHERE token_hash = %s",
                 (token_hash,)
             )
+
+    def revoke_refresh_tokens_for_user(self, user_id):
+        with self._cursor() as cur:
+            cur.execute(
+                "UPDATE refresh_tokens SET is_revoked = true WHERE user_id = %s AND is_revoked = false",
+                (user_id,)
+            )
+            return cur.rowcount or 0
 
     def record_login_attempt(self, email, ip_address, success):
         """Record a login attempt."""
@@ -6245,9 +6393,13 @@ class PostgresStore(BaseStore):
             return cur.fetchone() is not None
 
     def prune_events(self, before):
+        from rosteriq.services.events import RETENTION_PRUNABLE
         with self._cursor() as cur:
             self._ensure_table(cur, "audit_logs")
-            cur.execute("DELETE FROM audit_logs WHERE created_at < %s", (before,))
+            cur.execute(
+                "DELETE FROM audit_logs WHERE created_at < %s AND details->>'category' = ANY(%s)",
+                (before, list(RETENTION_PRUNABLE)),
+            )
             return cur.rowcount or 0
 
     # --- White-Label Theming ---

@@ -203,11 +203,11 @@ def test_staff_callers_never_see_colleague_visa_fields():
     mine = {e["id"]: e for e in c.get(f"/employees?venue_id={vid}",
                                       headers=staff_h).json()["items"]}
     e = mine[f"{vid}-m"]
-    assert e["visa_status"] is None and e["visa_expiry"] is None
-    assert e["visa_work_limit_fortnight"] is None
+    assert e.get("visa_status") is None and e.get("visa_expiry") is None
+    assert e.get("visa_work_limit_fortnight") is None
 
     single = c.get(f"/employees/{vid}-m", headers=staff_h).json()
-    assert single["visa_status"] is None
+    assert single.get("visa_status") is None
 
     boss = {e["id"]: e for e in c.get(f"/employees?venue_id={vid}",
                                       headers=h).json()["items"]}

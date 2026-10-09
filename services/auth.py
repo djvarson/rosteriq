@@ -295,8 +295,10 @@ class AuthService:
         self.db.save_user(user)
 
         # A successful reset revokes every outstanding token for the user,
-        # not just the one consumed.
+        # not just the one consumed — and signs out every existing session
+        # (a lost or shared phone stops refreshing).
         self.db.delete_password_reset_tokens_for_user(user_id)
+        self.db.revoke_refresh_tokens_for_user(user_id)
 
         return True
 

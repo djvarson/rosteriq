@@ -2379,6 +2379,9 @@ async def create_venue(venue: VenueConfig):
         enforce_venue_manager(venue.id)
         _store["venues"][venue.id] = venue
 
+    from rosteriq.services.clock import forget_venue_tz
+    forget_venue_tz(venue.id)
+
     # Invalidate venue cache
     if get_cache_manager:
         try:
@@ -2576,7 +2579,7 @@ async def bulk_create_employees(employees: list[Employee]):
 
 @app.get("/employees")
 async def list_employees(
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     venue_id: Optional[str] = Query(None),
     request: Request = None,
@@ -2585,14 +2588,16 @@ async def list_employees(
     # (owners/platform admins see all). If a specific venue_id is requested, it must
     # be one they own. The cache key includes the scope so results never leak across
     # users.
+    if venue_id is None and limit > 200:
+        raise HTTPException(422, "limit above 200 needs venue_id")
     enforce_venue_access(venue_id)
     _tenant = get_tenant_context_optional()
     _scope = "owner" if (_tenant is None or _tenant.is_owner) else ",".join(sorted(_tenant.venue_ids))
-    # Work-rights data is sensitive: staff-role callers see colleagues without
-    # visa fields. The role is part of the cache key so payloads never mix.
+    # Staff-role callers see colleagues as name/skills only, and their own
+    # record in full — so the staff payload is per user in the cache key.
     _is_mgr = (_tenant is None or _tenant.is_owner
                or getattr(_tenant, "role", None) in ("manager", "owner"))
-    _scope += "_mgr" if _is_mgr else "_staff"
+    _scope += "_mgr" if _is_mgr else f"_staff_{_tenant.user_id}"
 
     # Use cache if available
     if get_cache_manager and request and _response_cacheable():
@@ -2619,7 +2624,8 @@ async def list_employees(
     total = len(all_employees)
     items = all_employees[offset:offset + limit]
     if not _is_mgr:
-        items = [_strip_visa_fields(e) for e in items]
+        _me = _caller_email(_tenant)
+        items = [e if _is_own_record(e, _me) else _colleague_view(e) for e in items]
     result = {
         "items": items,
         "total": total,
@@ -2640,11 +2646,26 @@ async def list_employees(
     return result
 
 
-def _strip_visa_fields(emp: Employee) -> Employee:
-    """Copy without work-rights data — a staff login can see who works with
-    them, never a colleague's visa record."""
-    return emp.model_copy(update={"visa_status": None, "visa_expiry": None,
-                                  "visa_work_limit_fortnight": None})
+_COLLEAGUE_FIELDS = ("id", "name", "skills", "employment_type")
+
+
+def _colleague_view(emp: Employee) -> dict:
+    """What a staff login may see of a colleague: who they are and what they
+    do — never pay rate, contact details, availability or work rights."""
+    return {f: getattr(emp, f, None) for f in _COLLEAGUE_FIELDS}
+
+
+def _caller_email(tenant) -> str:
+    try:
+        user = getattr(_db, "_store", _db).get_user_by_id(tenant.user_id)
+        return ((user or {}).get("email") or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def _is_own_record(emp, caller_email: str) -> bool:
+    """Same email match the staff portal links by (services/linking.py)."""
+    return bool(caller_email) and (getattr(emp, "email", "") or "").strip().lower() == caller_email
 
 
 @app.get("/employees/{employee_id}")
@@ -2657,7 +2678,9 @@ async def get_employee(employee_id: str):
     _tenant = get_tenant_context_optional()
     if not (_tenant is None or _tenant.is_owner
             or getattr(_tenant, "role", None) in ("manager", "owner")):
-        return _strip_visa_fields(emp)
+        if _is_own_record(emp, _caller_email(_tenant)):
+            return emp
+        return _colleague_view(emp)
     return emp
 
 

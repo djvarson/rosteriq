@@ -45,7 +45,7 @@ from rosteriq.services.clock import venue_today
 from rosteriq.services.availability_rules import day_windows
 from typing import Optional, List
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager, enforce_venue_manager_any
 from rosteriq.services.demo import (
     DEMO_USER_ID, DEMO_USER_EMAIL, DEMO_VENUE_ID,
     DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL,
@@ -701,9 +701,8 @@ async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_use
     clash = _clashing_shift(db, vid, emp.id, cover)
     if clash is not None:
         raise HTTPException(status_code=409, detail=_clash_detail(clash, "You're"))
-    cover["claimed_by"] = emp.id
-    cover["status"] = "claimed"
-    db.save_shift_cover(cover)
+    if not db.claim_shift_cover(cover_id, emp.id):
+        raise HTTPException(status_code=409, detail="Someone else has just claimed this shift")
     logger.info(f"Cover claimed: {emp.name} claims {cover_id} at {vid}")
     return {"status": "claimed", "cover_id": cover_id,
             "message": "Claimed — your manager still needs to approve the change"}
@@ -734,7 +733,7 @@ async def cancel_cover(cover_id: str, user: UserContext = Depends(get_current_us
 
 @router.get("/api/leave")
 async def venue_leave(venue_id: str = Query(...), status: str = Query("")) -> dict:
-    enforce_venue_access(venue_id)
+    enforce_venue_manager_any(venue_id)
     db = get_db()
     emp_names = {e.id: e.name for e in (db.get_employees(venue_id) or [])}
     rows = db.list_leave_requests(venue_id) or []
@@ -755,7 +754,7 @@ async def team_availability(venue_id: str = Query(...)) -> dict:
     """Manager view: the whole team's weekly availability at a glance, so a
     manager knows who's off before building the roster. Same source the
     generator reads (employee.availability)."""
-    enforce_venue_access(venue_id)
+    enforce_venue_manager_any(venue_id)
     db = get_db()
     rows = []
     for emp in (db.get_employees(venue_id) or []):
@@ -785,7 +784,7 @@ async def team_availability(venue_id: str = Query(...)) -> dict:
 @router.get("/api/cover")
 async def venue_covers(venue_id: str = Query(...), status: str = Query("")) -> dict:
     """Manager view of the venue's shift cover requests."""
-    enforce_venue_access(venue_id)
+    enforce_venue_manager_any(venue_id)
     db = get_db()
     emp_names = {e.id: e.name for e in (db.get_employees(venue_id) or [])}
     rows = db.list_shift_covers(venue_id) or []
