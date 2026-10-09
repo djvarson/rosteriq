@@ -9,10 +9,13 @@ bounded by the dispatching venue's own staff.
 """
 
 import uuid
+from datetime import date, datetime, time, timedelta
 
 from fastapi.testclient import TestClient
 
 from rosteriq.api import app
+from rosteriq.database import get_db
+from rosteriq.models import Roster, Shift, ShiftStatus
 
 PW = "Passw0rd!234"
 
@@ -39,6 +42,16 @@ def _venue_with_staff(c, n_staff):
             "created_at": "2026-07-01T00:00:00", "updated_at": "2026-07-01T00:00:00"}, headers=h)
         assert r.status_code == 200, r.text
         ids.append(eid)
+    # "Everyone" for Send to Staff means staff with a login or an upcoming
+    # shift here, so give them this week's shifts.
+    today = date.today()
+    ws = today - timedelta(days=today.weekday())
+    get_db().save_roster(Roster(
+        id=f"{vid}-r", venue_id=vid, week_start=ws, week_end=ws + timedelta(days=6),
+        created_at=datetime(2026, 7, 1),
+        shifts=[Shift(id=f"{eid}-s", employee_id=eid, date=today, start_time=time(10),
+                      end_time=time(16), status=ShiftStatus.scheduled, role="bar")
+                for eid in ids]))
     return h, vid, ids
 
 

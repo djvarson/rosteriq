@@ -6,8 +6,11 @@ Implements per-client token bucket rate limiting with different tiers:
 - Authenticated (JWT): 200 req/min
 - API key: 500 req/min
 
-Clients are identified by IP address (from X-Forwarded-For or client.host).
-Exempt paths: /health, /ready, /metrics (never rate limited).
+Clients are identified by the user id in a valid JWT (so a whole venue on one
+Wi-Fi IP doesn't share one bucket), otherwise by client IP (client.host).
+Time-clock kiosk calls (/api/clock/*) draw from their own bucket.
+Exempt paths: /health, /ready, /metrics, and GETs of the HTML pages and static
+files (/login, /my, /register, /timeclock, /static/*, /sw.js, ...).
 
 Uses Redis for atomic counter increments across workers, falls back to in-memory.
 """
@@ -99,6 +102,15 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
     # Exempt paths (never rate limited)
     EXEMPT_PATHS = {"/health", "/ready", "/metrics"}
 
+    # Pages and static assets: a room of phones on one IP all opening /login
+    # or /my at once must get the page, not a JSON 429. GET/HEAD only.
+    PAGE_PATHS = {"/", "/login", "/my", "/register", "/timeclock", "/reset-password",
+                  "/savings", "/connections", "/admin", "/staff", "/sw.js", "/favicon.ico"}
+    PAGE_PREFIXES = ("/static/",)
+
+    # Kiosk punches must not be starved by everyone else's traffic.
+    SEPARATE_BUCKET_PREFIXES = ("/api/clock/",)
+
     # Rate limits: (capacity, refill_rate_per_second)
     TIER_LIMITS = {
         "unauthenticated": (60, 1.0),           # 60 req/min
@@ -134,12 +146,13 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         """Apply rate limiting to request."""
 
         # Exempt paths bypass rate limiting
-        if request.url.path in self.EXEMPT_PATHS:
+        if self._is_exempt(request):
             return await call_next(request)
 
         # Get client identifier and tier
-        client_id = self._get_client_id(request)
-        tier = self._get_client_tier(request)
+        client_id, tier = self._identify(request)
+        if request.url.path.startswith(self.SEPARATE_BUCKET_PREFIXES):
+            client_id = f"{client_id}:clock"
         capacity, refill_rate = self.TIER_LIMITS[tier]
 
         # Use Redis atomic counter if available, otherwise use token bucket
@@ -265,6 +278,51 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         if request.client:
             return request.client.host
         return "unknown"
+
+    def _is_exempt(self, request: Request) -> bool:
+        path = request.url.path
+        if path in self.EXEMPT_PATHS:
+            return True
+        if request.method in ("GET", "HEAD") and (
+                path in self.PAGE_PATHS or path.startswith(self.PAGE_PREFIXES)):
+            return True
+        return False
+
+    def _identify(self, request: Request) -> Tuple[str, str]:
+        """(bucket identity, tier). A verified access token is keyed by its
+        user id; an unverifiable one is treated as unauthenticated so junk
+        bearer headers can't mint fresh buckets or buy the higher tier."""
+        if request.headers.get("X-API-Key"):
+            return self._get_client_id(request), "api_key"
+        auth_header = request.headers.get("Authorization") or ""
+        if auth_header.lower().startswith("bearer "):
+            user_id = self._token_user_id(auth_header[7:].strip())
+            if user_id:
+                if self._is_shared_login(user_id):
+                    # One demo login serves every visitor: keep them apart.
+                    return f"user:{user_id}@{self._get_client_id(request)}", "authenticated"
+                return f"user:{user_id}", "authenticated"
+        return self._get_client_id(request), "unauthenticated"
+
+    @staticmethod
+    def _is_shared_login(user_id: str) -> bool:
+        try:
+            from rosteriq.services.demo import is_demo_identity
+            return bool(is_demo_identity(user_id))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _token_user_id(token: str) -> Optional[str]:
+        if not token:
+            return None
+        try:
+            from rosteriq.services.auth import AuthService
+            payload = AuthService.verify_access_token(token)
+        except Exception:
+            return None
+        sub = (payload or {}).get("sub")
+        return str(sub) if sub else None
 
     def _get_client_tier(self, request: Request) -> str:
         """Determine rate limit tier based on authentication."""

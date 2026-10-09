@@ -166,8 +166,10 @@ class BaseStore:
     def record_login_attempt(self, email: str, ip_address: str, success: bool) -> None:
         raise NotImplementedError
 
-    def check_login_rate_limit(self, ip_address: str, minutes: int = 1) -> int:
-        """Return count of failed login attempts in last N minutes from this IP."""
+    def check_login_rate_limit(self, ip_address: str, minutes: int = 1,
+                               email: Optional[str] = None) -> int:
+        """Return count of failed login attempts in last N minutes from this IP
+        (for that email only, when one is given; compared case-insensitively)."""
         raise NotImplementedError
 
     def save_onboarding_state(self, state: dict) -> None:
@@ -1799,13 +1801,15 @@ class MemoryStore(BaseStore):
             "created_at": datetime.utcnow(),
         })
 
-    def check_login_rate_limit(self, ip_address, minutes=1):
+    def check_login_rate_limit(self, ip_address, minutes=1, email=None):
         cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        wanted = email.strip().lower() if email else None
         failed_count = sum(
             1 for attempt in self._login_attempts
             if attempt["ip_address"] == ip_address
             and not attempt["success"]
             and attempt["created_at"] > cutoff
+            and (wanted is None or (attempt["email"] or "").strip().lower() == wanted)
         )
         return failed_count
 
@@ -5377,14 +5381,22 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, %s, %s)
             """, (email, ip_address, success, datetime.utcnow()))
 
-    def check_login_rate_limit(self, ip_address, minutes=1):
-        """Count failed login attempts from IP in last N minutes."""
+    def check_login_rate_limit(self, ip_address, minutes=1, email=None):
+        """Count failed login attempts from IP in last N minutes (for one
+        email when given)."""
         with self._cursor() as cur:
             cutoff = datetime.utcnow() - timedelta(minutes=minutes)
-            cur.execute("""
-                SELECT COUNT(*) as count FROM login_attempts
-                WHERE ip_address = %s AND success = false AND attempted_at > %s
-            """, (ip_address, cutoff))
+            if email:
+                cur.execute("""
+                    SELECT COUNT(*) as count FROM login_attempts
+                    WHERE ip_address = %s AND success = false AND attempted_at > %s
+                      AND lower(trim(email)) = %s
+                """, (ip_address, cutoff, email.strip().lower()))
+            else:
+                cur.execute("""
+                    SELECT COUNT(*) as count FROM login_attempts
+                    WHERE ip_address = %s AND success = false AND attempted_at > %s
+                """, (ip_address, cutoff))
             row = cur.fetchone()
             return row["count"] if row else 0
 

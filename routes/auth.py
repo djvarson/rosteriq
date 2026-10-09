@@ -163,6 +163,8 @@ def _send_in_background(coro, what: str) -> None:
     def _done(t):
         _bg_sends.discard(t)
         exc = None if t.cancelled() else t.exception()
+        if exc is None and not t.cancelled() and t.result() is False:
+            exc = RuntimeError("email was not accepted by the SMTP server")
         if exc is not None:
             logger.error(f"Background {what} send failed: {exc}")
             try:
@@ -304,8 +306,8 @@ async def login(
     # Get client IP for rate limiting
     client_ip = req.client.host if req.client else "unknown"
 
-    # Check rate limit
-    if not auth_service.check_login_rate_limit(client_ip):
+    # Check rate limit: per (email, IP), with a looser ceiling for the IP
+    if not auth_service.check_login_rate_limit(client_ip, email=request.email):
         # Attempt while locked out: an attack signal in its own right (the
         # api.py middleware deliberately skips /api/auth/* so record it here).
         security("auth.login_failed", outcome="denied", email=request.email,
@@ -333,8 +335,8 @@ async def login(
         security("auth.login_failed", outcome="failed", email=request.email,
                  reason=reason, client_ip=client_ip,
                  user_id=(user or {}).get("id"))
-        # Did this failure trip the per-IP lockout? Record the trigger once.
-        if not auth_service.check_login_rate_limit(client_ip):
+        # Did this failure trip the lockout? Record the trigger once.
+        if not auth_service.check_login_rate_limit(client_ip, email=request.email):
             security("auth.locked", outcome="denied", email=request.email,
                      client_ip=client_ip, window_minutes=1, max_attempts=5)
         raise HTTPException(
@@ -595,6 +597,20 @@ async def forgot_password(
     Always returns 200 to prevent email enumeration attacks.
     If email exists, sends reset link. Otherwise, silently succeeds.
     """
+    notification_service = get_notification_service()
+    if not notification_service.email_configured:
+        # Nothing can be mailed: say so (the same answer for every address, so
+        # it reveals nothing about accounts), mint no token — a fresh one would
+        # also revoke a reset link a manager already handed over — and leave a
+        # trace so the operator sees people asking.
+        security("auth.password_reset_requested", outcome="unavailable",
+                 reason="email_not_configured", email=request.email,
+                 client_ip=req.client.host if req.client else None)
+        return {
+            "message": "Email reset isn't switched on — ask your manager for a reset link.",
+            "email_configured": False,
+        }
+
     # Try to find user (no error if not found)
     user = db.get_user_by_email(request.email)
 
@@ -607,7 +623,6 @@ async def forgot_password(
             reset_url = f"{public_origin()}/reset-password?token={reset_token}"
 
             # Send email asynchronously (don't block response)
-            notification_service = get_notification_service()
             _send_in_background(
                 notification_service.send_password_reset(
                     email=request.email,
@@ -619,7 +634,8 @@ async def forgot_password(
             )
 
     # Always return 200 (don't reveal if email exists)
-    return {"message": "If an account exists with that email, a reset link has been sent."}
+    return {"message": "If an account exists with that email, a reset link has been sent.",
+            "email_configured": True}
 
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)

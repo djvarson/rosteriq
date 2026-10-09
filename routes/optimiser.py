@@ -28,8 +28,9 @@ Uses background task queue (Celery or similar) for async execution.
 All monetary values use Decimal for precision.
 """
 
+import asyncio
 import logging
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional, List
 from uuid import uuid4
@@ -38,7 +39,9 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import load_roster_in_scope, enforce_venue_manager
+from rosteriq.middleware.tenant import (
+    load_roster_in_scope, enforce_venue_access, enforce_venue_manager,
+)
 from rosteriq.models import (
     VenueConfig, Employee, DemandForecast, Roster, State,
     User, UserRole,
@@ -249,87 +252,89 @@ async def optimise_roster(
     except HTTPException:
         raise
 
+    # Rosters run Monday to Sunday; any day picks the week it falls in.
+    week_start = request.week_start - timedelta(days=request.week_start.weekday())
+
     logger.info(
         f"Optimisation requested for venue {request.venue_id} "
-        f"week {request.week_start} by user {current_user.id}"
+        f"week {week_start} by user {current_user.user_id}"
     )
+
+    employees: List[Employee] = list(db.get_employees(request.venue_id) or [])
+    if not employees:
+        raise HTTPException(
+            status_code=422,
+            detail="Add or import staff for this venue before generating an optimal roster.",
+        )
+    week_end = week_start + timedelta(days=6)
+    forecasts: List[DemandForecast] = db.get_forecasts(request.venue_id, week_start, week_end)
+    if not forecasts:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"There's no demand forecast for the week starting "
+                    f"{week_start.strftime('%a %d %b')} yet, so the optimiser has nothing "
+                    "to staff against. Use Generate Roster, or create a forecast first."),
+        )
 
     # Create job
     job_id = str(uuid4())
-    job = OptimisationJob(job_id, request.venue_id, request.week_start)
+    job = OptimisationJob(job_id, request.venue_id, week_start)
     _job_store[job_id] = job
 
-    # Queue background task (simplified; use Celery in production)
-    # For now, run synchronously
     try:
         job.status = OptimisationJobStatus.RUNNING
 
-        # Fetch employees for venue
-        employees: List[Employee] = [
-            e for e in db.list_employees() if e.venue_id == request.venue_id
-        ]
-
-        if not employees:
-            raise ValueError("No employees found for venue")
-
-        # Fetch forecasts for week
-        week_end = request.week_start + __import__('datetime').timedelta(days=6)
-        forecasts: List[DemandForecast] = db.get_forecasts(
-            request.venue_id, request.week_start, week_end
-        )
-
-        if not forecasts:
-            raise ValueError("No demand forecasts found for week")
-
-        # Run optimiser
         strategy = OptimisationStrategy[request.strategy]
 
-        if request.solver_preference == "milp":
-            optimiser = MILPRosterOptimiser(
-                venue_config=venue,
-                employees=employees,
-                forecasts=forecasts,
-                week_start=request.week_start,
-                week_end=week_end,
-                strategy=strategy,
-                covers_per_staff=request.covers_per_staff,
-            )
-            roster = optimiser.solve(request.timeout_seconds)
-            if roster is None:
-                raise ValueError("MILP solver returned no feasible solution")
+        # The solver is CPU-bound for up to timeout_seconds; off the event loop
+        # so the rest of the venue's requests keep being served meanwhile.
+        def _solve():
+            if request.solver_preference == "milp":
+                optimiser = MILPRosterOptimiser(
+                    venue_config=venue,
+                    employees=employees,
+                    forecasts=forecasts,
+                    week_start=week_start,
+                    week_end=week_end,
+                    strategy=strategy,
+                    covers_per_staff=request.covers_per_staff,
+                )
+                roster = optimiser.solve(request.timeout_seconds)
+                if roster is None:
+                    raise ValueError("MILP solver returned no feasible solution")
 
-        elif request.solver_preference == "hybrid":
-            optimiser = HybridOptimiser(
-                venue_config=venue,
-                employees=employees,
-                forecasts=forecasts,
-                week_start=request.week_start,
-                week_end=week_end,
-                strategy=strategy,
-                covers_per_staff=request.covers_per_staff,
-            )
-            roster = optimiser.solve(request.timeout_seconds)
-            job.solver_used = optimiser.solver_used.value
-            job.solver_message = optimiser.solver_message
+            elif request.solver_preference == "hybrid":
+                optimiser = HybridOptimiser(
+                    venue_config=venue,
+                    employees=employees,
+                    forecasts=forecasts,
+                    week_start=week_start,
+                    week_end=week_end,
+                    strategy=strategy,
+                    covers_per_staff=request.covers_per_staff,
+                )
+                roster = optimiser.solve(request.timeout_seconds)
+                job.solver_used = optimiser.solver_used.value
+                job.solver_message = optimiser.solver_message
 
-        else:  # greedy
-            # Use greedy fallback directly
-            optimiser = HybridOptimiser(
-                venue_config=venue,
-                employees=employees,
-                forecasts=forecasts,
-                week_start=request.week_start,
-                week_end=week_end,
-                strategy=strategy,
-                covers_per_staff=request.covers_per_staff,
-            )
-            roster = optimiser._greedy_solve()
-            job.solver_used = "greedy"
-            job.solver_message = "Greedy solver executed"
+            else:  # greedy
+                # Use greedy fallback directly
+                optimiser = HybridOptimiser(
+                    venue_config=venue,
+                    employees=employees,
+                    forecasts=forecasts,
+                    week_start=week_start,
+                    week_end=week_end,
+                    strategy=strategy,
+                    covers_per_staff=request.covers_per_staff,
+                )
+                roster = optimiser._greedy_solve()
+                job.solver_used = "greedy"
+                job.solver_message = "Greedy solver executed"
+            return roster
 
-        # Save roster
-        db.add(roster)
-        db.commit()
+        roster = await asyncio.to_thread(_solve)
+        db.save_roster(roster)
 
         job.roster_id = roster.id
         job.status = OptimisationJobStatus.COMPLETED
@@ -345,9 +350,9 @@ async def optimise_roster(
         job_id=job_id,
         status=job.status,
         venue_id=request.venue_id,
-        week_start=request.week_start.isoformat(),
+        week_start=week_start.isoformat(),
         message="Optimisation complete" if job.status == OptimisationJobStatus.COMPLETED
-                else f"Optimisation {job.status}"
+                else f"Optimisation {job.status}: {job.error_message}"
     )
 
 
@@ -373,6 +378,12 @@ async def get_optimisation_status(
         raise HTTPException(status_code=404, detail="Job not found")
 
     job = _job_store[job_id]
+    try:
+        enforce_venue_access(job.venue_id)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise HTTPException(status_code=404, detail="Job not found")
+        raise
 
     return OptimisationStatusResponse(
         job_id=job.job_id,
@@ -408,6 +419,12 @@ async def cancel_optimisation_job(
         raise HTTPException(status_code=404, detail="Job not found")
 
     job = _job_store[job_id]
+    try:
+        enforce_venue_manager(job.venue_id)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise HTTPException(status_code=404, detail="Job not found")
+        raise
 
     if job.status in [OptimisationJobStatus.COMPLETED, OptimisationJobStatus.FAILED]:
         raise HTTPException(
@@ -416,7 +433,7 @@ async def cancel_optimisation_job(
         )
 
     job.status = OptimisationJobStatus.CANCELLED
-    logger.info(f"Optimisation job {job_id} cancelled by user {current_user.id}")
+    logger.info(f"Optimisation job {job_id} cancelled by user {current_user.user_id}")
 
     return {"message": f"Job {job_id} cancelled"}
 

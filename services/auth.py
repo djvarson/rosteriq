@@ -31,6 +31,12 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour
 REFRESH_TOKEN_EXPIRE_DAYS = 14  # 14 days
 API_KEY_PREFIX = "riq_"
 
+# Failed-login lockout, per minute. A whole pub signs in from one public IP on
+# its Wi-Fi, so the tight limit is per (email, IP) — one person's typos lock
+# only that account from there — with a looser ceiling on the IP as a whole.
+LOGIN_MAX_FAILURES_PER_ACCOUNT = 5
+LOGIN_MAX_FAILURES_PER_IP = 50
+
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -171,14 +177,21 @@ class AuthService:
         self.db.revoke_refresh_token(token_hash)
         return True
 
-    def check_login_rate_limit(self, ip_address: str, max_attempts: int = 5) -> bool:
+    def check_login_rate_limit(self, ip_address: str, max_attempts: int = 5,
+                               email: Optional[str] = None,
+                               ip_max_attempts: int = LOGIN_MAX_FAILURES_PER_IP) -> bool:
         """
         Check if login is rate limited.
         Returns False if rate limited (too many attempts), True if allowed.
-        Limit: max_attempts failed attempts per minute per IP.
+        With an email: max_attempts failed attempts per minute for that email
+        from this IP, and ip_max_attempts for the IP overall. Without one:
+        max_attempts failed attempts per minute per IP.
         """
-        failed_count = self.db.check_login_rate_limit(ip_address, minutes=1)
-        return failed_count < max_attempts
+        if not email:
+            return self.db.check_login_rate_limit(ip_address, minutes=1) < max_attempts
+        if self.db.check_login_rate_limit(ip_address, minutes=1, email=email) >= max_attempts:
+            return False
+        return self.db.check_login_rate_limit(ip_address, minutes=1) < ip_max_attempts
 
     def record_login_attempt(self, email: str, ip_address: str, success: bool):
         """Record a login attempt for rate limiting."""

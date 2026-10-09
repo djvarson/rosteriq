@@ -3812,6 +3812,24 @@ def _generate_demo_signals(venue_id: str, target_date: date) -> list[dict]:
     return signals
 
 
+def _sample_signals_only_for_demo(venue_id: str, what: str) -> Optional[dict]:
+    """_generate_demo_signals is sample data for the public demo venue. Any
+    other venue gets an honest 'not connected' answer instead of signals made
+    up from a hash of the date. None means: this is the demo, carry on."""
+    from rosteriq.services.demo import DEMO_VENUE_ID
+    if venue_id == DEMO_VENUE_ID:
+        return None
+    return {
+        "venue_id": venue_id,
+        "connected": False,
+        "status": "not_connected",
+        "data": what,
+        "message": ("Demand signals (weather, events, bookings) aren't connected for "
+                    "this venue yet, so there is nothing to show here — nothing is "
+                    "estimated or filled in."),
+    }
+
+
 def _demand_classification(predicted_covers: float, venue_avg: float = 45) -> str:
     """Classify demand level based on covers."""
     if predicted_covers < venue_avg * 0.4:
@@ -3826,7 +3844,8 @@ def _demand_classification(predicted_covers: float, venue_avg: float = 45) -> st
         return "extreme"
 
 
-def _get_today_costs(roster: Optional[Roster], employees_lookup: dict) -> float:
+def _get_today_costs(roster: Optional[Roster], employees_lookup: dict,
+                     state: State = State.vic) -> float:
     """Calculate total labour cost for today's active shifts."""
     if not roster:
         return 0.0
@@ -3836,8 +3855,8 @@ def _get_today_costs(roster: Optional[Roster], employees_lookup: dict) -> float:
     for shift in today_shifts:
         emp = employees_lookup.get(shift.employee_id)
         if emp:
-            bd = calculate_shift_cost_breakdown(emp, shift, State.vic)
-            total += float(bd.get("total_cost", 0))
+            bd = calculate_shift_cost_breakdown(emp, shift, state)
+            total += float(getattr(bd, "total_cost", 0) or 0)
     return total
 
 
@@ -3852,6 +3871,9 @@ async def dashboard_overview(venue_id: str):
     venue = _store["venues"].get(venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {venue_id} not found")
+    not_connected = _sample_signals_only_for_demo(venue_id, "overview")
+    if not_connected is not None:
+        return not_connected
 
     today = date.today()
 
@@ -3899,7 +3921,7 @@ async def dashboard_overview(venue_id: str):
     if today_roster:
         today_shifts = [s for s in today_roster.shifts if s.date == today]
 
-    staff_cost_today = _get_today_costs(today_roster, _store["employees"])
+    staff_cost_today = _get_today_costs(today_roster, _store["employees"], venue.state)
     # VenueConfig has no daily-budget field; use it if present, else a default.
     _venue_budget = getattr(venue, "budget", None) or 1000
 
@@ -3917,7 +3939,7 @@ async def dashboard_overview(venue_id: str):
             "id": venue.id,
             "name": venue.name,
             "state": venue.state.value,
-            "timezone": "Australia/Melbourne",
+            "timezone": venue.timezone,
         },
         "demand_outlook_today": {
             "classification": demand_level,
@@ -3960,6 +3982,9 @@ async def dashboard_signals(
     venue = _store["venues"].get(venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {venue_id} not found")
+    not_connected = _sample_signals_only_for_demo(venue_id, "signals")
+    if not_connected is not None:
+        return not_connected
 
     if start_date is None:
         start_date = date.today()
@@ -4005,6 +4030,9 @@ async def dashboard_demand_outlook(
     venue = _store["venues"].get(venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {venue_id} not found")
+    not_connected = _sample_signals_only_for_demo(venue_id, "demand_outlook")
+    if not_connected is not None:
+        return not_connected
 
     if target_date is None:
         target_date = date.today()
@@ -4201,6 +4229,9 @@ async def dashboard_week_ahead(venue_id: str):
     venue = _store["venues"].get(venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {venue_id} not found")
+    not_connected = _sample_signals_only_for_demo(venue_id, "week_ahead")
+    if not_connected is not None:
+        return not_connected
 
     today = date.today()
     week_data = []
@@ -4219,7 +4250,7 @@ async def dashboard_week_ahead(venue_id: str):
             pred_covers = 30.0  # Static default estimate when no forecast data
 
         demand_level = _demand_classification(pred_covers)
-        day_type = get_day_type(d, State.vic)
+        day_type = get_day_type(d, venue.state)
         # Peak covers: use actual forecast max if available, otherwise estimate at 1.2x average
         if has_day_forecast:
             peak_covers = max(f.predicted_covers for f in d_forecasts)
@@ -4304,6 +4335,9 @@ async def dashboard_signals_history(
     venue = _store["venues"].get(venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {venue_id} not found")
+    not_connected = _sample_signals_only_for_demo(venue_id, "signals_history")
+    if not_connected is not None:
+        return not_connected
 
     today = date.today()
     start_date = today - timedelta(days=days)

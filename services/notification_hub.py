@@ -26,9 +26,11 @@ Usage:
 """
 
 import asyncio
+import html
 import logging
 import hashlib
-from datetime import datetime, timedelta
+import os
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from time import time
@@ -107,6 +109,86 @@ class NotificationHub:
         if self._push_service is None:
             self._push_service = get_push_service(self._db)
         return self._push_service
+
+    def channels_available(self) -> List[str]:
+        """Outbound channels that are switched on for this deployment. A
+        channel that isn't configured can't reach anyone, whatever a staff
+        member's preferences say."""
+        out = []
+        if getattr(self._email_service, "email_configured", False):
+            out.append("email")
+        try:
+            if self._sms_service.is_configured():
+                out.append("sms")
+        except Exception:
+            pass
+        try:
+            from rosteriq.services.push_notifications import HAS_WEBPUSH
+            if HAS_WEBPUSH and os.environ.get("VAPID_PUBLIC_KEY") and os.environ.get("VAPID_PRIVATE_KEY"):
+                out.append("push")
+        except Exception:
+            pass
+        return out
+
+    def _linked_logins(self, venue_id: str) -> Dict[str, List[str]]:
+        """email -> login ids holding this venue: how an employee record maps
+        to logins (services/linking's rule: same email, venue held)."""
+        try:
+            users = self._db.list_users() or []
+        except Exception:
+            return {}
+        out: Dict[str, List[str]] = {}
+        for u in users:
+            email = (u.get("email") or "").strip().lower()
+            if email and u.get("id") and venue_id in (u.get("venue_ids") or []):
+                out.setdefault(email, []).append(u["id"])
+        return out
+
+    def reachable_staff_ids(self, venue_id: str, today: Optional[date] = None,
+                            days_ahead: int = 21) -> List[str]:
+        """This venue's staff worth messaging about the roster: those with a
+        linked login, or with a shift in the coming weeks. Someone imported
+        from a spreadsheet who has neither is left alone."""
+        from rosteriq.services.clock import venue_today
+        today = today or venue_today(venue_id, self._db)
+        staff = self._db.get_employees(venue_id) or []
+        try:
+            rostered = {str(getattr(s, "employee_id", "")) for s in
+                        (self._db.get_shifts(venue_id, today, today + timedelta(days=days_ahead)) or [])}
+        except Exception:
+            rostered = set()
+        linked_emails = set(self._linked_logins(venue_id))
+        return [e.id for e in staff
+                if e.id in rostered
+                or (getattr(e, "email", "") or "").strip().lower() in linked_emails]
+
+    @staticmethod
+    def delivery_message(summary: Dict[str, Any]) -> str:
+        """Plain words for what actually left the building."""
+        delivered = summary.get("delivered") or {}
+        reached = summary.get("reached", 0)
+        available = summary.get("channels_available") or []
+        if reached:
+            parts = [f"{n} {label}" for key, label in
+                     (("email", "by email"), ("sms", "by SMS"), ("push", "by push"),
+                      ("in_app", "in the app"))
+                     for n in [delivered.get(key, 0)] if n]
+            return f"{reached} staff notified ({', '.join(parts)})."
+        if summary.get("venue_id") == DEMO_VENUE_ID:
+            return "The demo never emails or texts anyone — staff see the roster in the app."
+        if not available:
+            return ("Nobody was messaged — email and SMS aren't switched on. "
+                    "Share the /my link so staff can see their shifts.")
+        if (summary.get("skipped") or {}).get("duplicate"):
+            return ("Nobody was messaged again — these staff were already notified "
+                    "in the last few minutes.")
+        if not summary.get("total_targets"):
+            return ("Nobody was messaged — no staff here have a linked login or an "
+                    "upcoming shift.")
+        return ("Nobody was messaged — none of the staff could be reached by "
+                f"{' or '.join('SMS' if c == 'sms' else c for c in available)} "
+                "(check their email and mobile on the Staff page). "
+                "Share the /my link so they can see their shifts.")
 
     def _make_dedup_key(self, employee_id: str, event_type: str, venue_id: str) -> str:
         """Create deduplication cache key."""
@@ -321,7 +403,12 @@ class NotificationHub:
                 "failed": {"email": 0, "sms": 0, "push": 0, "ws": 0},
                 "skipped": {"duplicate": 0, "rate_limit": 0, "preference": 0,
                             "quiet_hours": 0, "outside_venue": outside_venue},
+                "reached": 0,
+                "channels_available": [] if venue_id == DEMO_VENUE_ID else self.channels_available(),
             }
+
+            payload = {**(payload or {}), "venue_id": venue_id}
+            linked = self._linked_logins(venue_id)
 
             # Dispatch to each employee
             tasks = []
@@ -333,11 +420,17 @@ class NotificationHub:
                         emp_id,
                         payload,
                         summary,
+                        linked=linked,
                     )
                 )
 
             # Run dispatches concurrently
             await asyncio.gather(*tasks, return_exceptions=True)
+
+            sent = summary["sent"]
+            summary["delivered"] = {"email": sent["email"], "sms": sent["sms"],
+                                    "push": sent["push"], "in_app": sent["ws"]}
+            summary["message"] = self.delivery_message(summary)
 
             logger.info(f"Dispatched {event_type.value} to {venue_id}: {summary}")
             return summary
@@ -353,6 +446,7 @@ class NotificationHub:
         employee_id: str,
         payload: Dict[str, Any],
         summary: Dict[str, Any],
+        linked: Optional[Dict[str, List[str]]] = None,
     ) -> None:
         """Dispatch notification to a single employee across all channels."""
         try:
@@ -415,20 +509,68 @@ class NotificationHub:
                 else:
                     summary["failed"]["push"] += 1
 
-            # Send via websocket (always)
+            # In-app (websocket): counted only when an open session received it
             try:
-                await self._send_websocket_notification(employee_id, event_type, payload)
-                channels_sent["ws"] = True
-                summary["sent"]["ws"] += 1
+                email_key = (getattr(employee, "email", "") or "").strip().lower()
+                user_ids = (linked or {}).get(email_key, []) if email_key else []
+                if await self._send_websocket_notification(employee_id, event_type, payload,
+                                                           user_ids=user_ids):
+                    channels_sent["ws"] = True
+                    summary["sent"]["ws"] += 1
             except Exception as e:
                 logger.debug(f"WebSocket notification failed for {employee_id}: {e}")
                 summary["failed"]["ws"] += 1
+
+            if any(channels_sent.values()):
+                summary["reached"] += 1
 
             # Log to audit trail
             self._log_audit(event_type.value, employee_id, venue_id, channels_sent)
 
         except Exception as e:
             logger.error(f"Error dispatching to {employee_id}: {e}")
+
+    def _message_for(self, event_type: NotificationEventType, payload: Dict[str, Any],
+                     employee_id: Optional[str] = None) -> Dict[str, Any]:
+        """Plain-English subject, lines and SMS for a staff member, with the
+        link to their staff app. Internal payload fields are never listed."""
+        from rosteriq.routes.auth import public_origin
+        link = f"{public_origin()}/my"
+        venue_id = payload.get("venue_id")
+        venue_name = ""
+        employee = None
+        try:
+            employee = self._db.get_employee(employee_id) if employee_id else None
+            venue = self._db.get_venue(venue_id or getattr(employee, "venue_id", None))
+            venue_name = getattr(venue, "name", "") or ""
+        except Exception:
+            pass
+        first = ((getattr(employee, "name", "") or "").split() or [""])[0]
+        greeting = f"Hi {first}," if first else "Hi,"
+        templates = self._get_event_templates(event_type)
+        extra = str(payload.get("message") or "").strip()[:500]
+
+        if event_type == NotificationEventType.ROSTER_PUBLISHED:
+            week = None
+            try:
+                ws = date.fromisoformat(str(payload.get("week_start"))[:10])
+                week = f"the week starting {ws.strftime('%a')} {ws.day} {ws.strftime('%b')}"
+            except (TypeError, ValueError):
+                if payload.get("week"):
+                    week = f"the week of {str(payload['week'])[:60]}"
+            week = week or "the coming week"
+            where = f" at {venue_name}" if venue_name else ""
+            subject = f"Your roster{where} is up"
+            lines = [greeting, f"The roster for {week}{where} has been published.",
+                     "Your shifts are in the RosterIQ staff app."]
+            sms = f"{venue_name + ': ' if venue_name else ''}the roster for {week} is up. See your shifts: {link}"
+        else:
+            subject = templates.get("email_subject", "RosterIQ notification")
+            lines = [greeting, templates.get("email_body", "You have a new notification.")]
+            if extra:
+                lines.append(extra)
+            sms = f"{venue_name + ': ' if venue_name else ''}{templates.get('sms_text', 'You have a new notification.')} {link}"
+        return {"subject": subject, "lines": lines, "sms": sms, "link": link}
 
     async def _send_email_notification(
         self,
@@ -439,20 +581,18 @@ class NotificationHub:
     ) -> bool:
         """Send email notification."""
         try:
-            templates = self._get_event_templates(event_type)
-            subject = templates.get("email_subject", "RosterIQ Notification")
-            body_text = templates.get("email_body", "You have a new notification.")
-
-            # Build HTML email
-            html = self._email_service._wrap_template(
-                title=subject,
-                date_str=datetime.utcnow().isoformat(),
-                body=f"<p>{body_text}</p><p><strong>Details:</strong></p><ul>" +
-                     "".join(f"<li>{k}: {v}</li>" for k, v in payload.items()) +
-                     "</ul>",
+            msg = self._message_for(event_type, payload, employee_id)
+            body = "".join(f"<p>{html.escape(line)}</p>" for line in msg["lines"])
+            link = html.escape(msg["link"], quote=True)
+            body += (f'<p><a href="{link}">Open RosterIQ to see your shifts</a></p>'
+                     f'<p style="color:#666;font-size:13px;">{link}</p>')
+            page = self._email_service._wrap_template(
+                title=html.escape(msg["subject"]),
+                date_str=datetime.utcnow().strftime("%d/%m/%Y"),
+                body=body,
             )
 
-            return await self._email_service.send_email(email, subject, html)
+            return await self._email_service.send_email(email, msg["subject"], page)
         except Exception as e:
             logger.error(f"Email send failed for {employee_id}: {e}")
             return False
@@ -465,8 +605,8 @@ class NotificationHub:
     ) -> bool:
         """Send SMS notification."""
         try:
-            templates = self._get_event_templates(event_type)
-            sms_text = templates.get("sms_text", "You have a new notification.")
+            msg = self._message_for(event_type, payload, employee_id)
+            sms_text = msg["sms"]
 
             employee = self._db.get_employee(employee_id)
             if not employee or not employee.phone:
@@ -507,18 +647,22 @@ class NotificationHub:
         employee_id: str,
         event_type: NotificationEventType,
         payload: Dict[str, Any],
-    ) -> None:
-        """Send websocket notification."""
+        user_ids: Optional[List[str]] = None,
+    ) -> bool:
+        """Send an in-app notification to the employee's open sessions.
+        Sessions are keyed by login (JWT user id), so the employee's linked
+        logins are the addresses. True only if a live session received it."""
         try:
             templates = self._get_event_templates(event_type)
             title = templates.get("push_title", "RosterIQ")
             body = templates.get("push_body", "You have a new notification.")
 
-            await self._ws_dispatcher.send_notification(
-                employee_id,
-                title=title,
-                body=body,
-            )
+            manager = self._ws_dispatcher._get_manager()
+            live = [u for u in (user_ids or []) if manager.user_connections.get(u)]
+            for uid in live:
+                await self._ws_dispatcher.send_notification(uid, title=title, body=body,
+                                                            action_url="/my")
+            return bool(live)
         except Exception as e:
             logger.error(f"WebSocket send failed for {employee_id}: {e}")
             raise

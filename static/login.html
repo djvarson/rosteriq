@@ -735,15 +735,20 @@
             if (forgotInFlight) return;   // every extra send mints another token
             forgotInFlight = true;
             setTimeout(() => { forgotInFlight = false; }, 8000);
+            let emailOff = false;
             try {
-                await fetch('/api/auth/forgot-password', {
+                const res = await fetch('/api/auth/forgot-password', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email: email }),
                 });
+                const data = await res.json().catch(() => ({}));
+                emailOff = data && data.email_configured === false;
             } catch (err) { /* the message below covers every case honestly */ }
-            successMessage.textContent =
-                'If that account exists, a reset is on its way. Fastest path: ask your manager — ' +
-                'they can hand you a one-hour reset link from the Staff page in seconds.';
+            successMessage.textContent = emailOff
+                ? "Email reset isn't switched on — ask your manager for a reset link. " +
+                  'They can hand you a one-hour link from the Staff page in seconds.'
+                : 'If that account exists, a reset is on its way. Fastest path: ask your manager — ' +
+                  'they can hand you a one-hour reset link from the Staff page in seconds.';
             successMessage.classList.add('show');
         });
     </script>
