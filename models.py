@@ -445,9 +445,58 @@ class VenueConfig(BaseModel):
     state: State
     timezone: str = "Australia/Melbourne"
     min_staff: Dict[str, int] = {}  # role -> min count
+    # Areas with per-weekday minimums, and trading hours — read through
+    # services/venue_areas.py, never directly.
+    areas: List[Dict[str, Any]] = []
+    trading_hours: Dict[str, Dict[str, str]] = {}
     max_labour_pct: float
     pos_system: Optional[str] = None
     created_at: datetime
+
+    @field_validator("areas")
+    @classmethod
+    def validate_areas(cls, v: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        import re
+        days = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+        cleaned, seen = [], set()
+        for area in (v or [])[:30]:
+            name = " ".join(str((area or {}).get("name", "")).strip().lower().split())
+            if not name or name in seen:
+                continue
+            if len(name) > 40 or not re.fullmatch(r"[a-z0-9 _/&+.-]+", name):
+                raise ValueError(f"area name {name!r} may only contain letters, digits, spaces, and _ / & + . -")
+            label = str(area.get("label") or name.title()).strip()[:40]
+            if re.search(r"[<>\"']", label):
+                raise ValueError("area labels may not contain < > or quotes")
+            by_day = area.get("min_by_day") or {}
+            mins = {}
+            for d in days:
+                n = int(by_day.get(d, 0) or 0)
+                if not 0 <= n <= 100:
+                    raise ValueError("area minimums must be between 0 and 100")
+                mins[d] = n
+            cleaned.append({"name": name, "label": label, "min_by_day": mins,
+                            "requires_skill": bool(area.get(
+                                "requires_skill",
+                                any(w in name for w in ("duty manager", "manager", "supervisor"))))})
+            seen.add(name)
+        return cleaned
+
+    @field_validator("trading_hours")
+    @classmethod
+    def validate_trading_hours(cls, v: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]:
+        import re
+        cleaned = {}
+        for day, hours in (v or {}).items():
+            day = str(day).strip().lower()[:3]
+            if day not in ("mon", "tue", "wed", "thu", "fri", "sat", "sun") or not hours:
+                continue
+            opens, closes = str(hours.get("open", "")).strip(), str(hours.get("close", "")).strip()
+            for t in (opens, closes):
+                if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d|24:00", t):
+                    raise ValueError(f"trading hours must be HH:MM (got {t!r} for {day})")
+            cleaned[day] = {"open": opens, "close": closes}
+        return cleaned
 
     @field_validator("max_labour_pct")
     @classmethod
