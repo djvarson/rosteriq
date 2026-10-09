@@ -47,6 +47,11 @@ CATEGORIES = ("audit", "security", "error", "perf", "integration", "ai", "job")
 HIGH_VOLUME = ("perf", "integration", "ai")
 MAX_PER_ACTION_PER_MINUTE = 20
 
+# What the retention job may delete once it ages out. audit and security are
+# the venue's record (who corrected a punch, changed a rate, approved leave)
+# and are never pruned.
+RETENTION_PRUNABLE = ("perf", "integration", "ai", "job", "error")
+
 # Keys whose VALUES are never stored (case-insensitive substring match).
 _SECRET_KEY_HINTS = (
     "password", "passwd", "secret", "token", "authorization", "api_key",

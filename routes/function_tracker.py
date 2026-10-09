@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
-from rosteriq.middleware.tenant import enforce_venue_manager
+from rosteriq.middleware.tenant import enforce_venue_manager, enforce_venue_manager_any
 from rosteriq.data_feeds.function_tracker import FunctionTrackerAdapter
 
 logger = logging.getLogger(__name__)
@@ -201,6 +201,7 @@ async def get_status(
     venue_id: str = Query(..., description="RosterIQ venue ID"),
 ) -> dict:
     """Check whether a venue has an active Function Tracker connection."""
+    enforce_venue_manager_any(venue_id)
     db = get_db()
     install = db.get_plugin_install(_org_key(venue_id))
 
@@ -305,6 +306,7 @@ async def get_upcoming(
     Returns a list of events with guest counts, types, and estimated
     staffing impact. Useful for the demand intelligence panel.
     """
+    enforce_venue_manager_any(venue_id)
     install = _get_install_or_404(venue_id)
 
     tokens = install.get("tokens", {})
@@ -353,6 +355,7 @@ async def get_forecast(
     Returns per-day summaries with estimated staffing impact based on
     event size and type. Feeds directly into roster generation.
     """
+    enforce_venue_manager_any(venue_id)
     install = _get_install_or_404(venue_id)
 
     tokens = install.get("tokens", {})
@@ -434,6 +437,7 @@ async def get_event_detail(
     Returns full event data including catering, beverage, equipment,
     running sheet, and staff requirements.
     """
+    enforce_venue_manager_any(venue_id)
     install = _get_install_or_404(venue_id)
 
     tokens = install.get("tokens", {})

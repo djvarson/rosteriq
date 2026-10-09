@@ -246,18 +246,19 @@ def test_prune_events_removes_only_the_old():
     db = get_db()
     vid = f"pr_{uuid.uuid4().hex[:6]}"
     events.audit("roster.publish", vid, "roster", "new")
-    # age one row by hand
+    # age one traffic row by hand (audit rows are never pruned)
     rows = db.list_events(venue_id=vid, limit=5)
     assert rows
     old = dict(rows[0])
     old["created_at"] = datetime.utcnow() - timedelta(days=200)
-    old["action"] = "roster.publish.old"
+    old["action"] = "http.slow.old"
+    old["details"] = {**old["details"], "category": "perf"}
     db.save_audit_log(old)
 
     removed = db.prune_events(datetime.utcnow() - timedelta(days=90))
     assert removed >= 1
     left = {r["action"] for r in db.list_events(venue_id=vid, limit=10)}
-    assert "roster.publish" in left and "roster.publish.old" not in left
+    assert "roster.publish" in left and "http.slow.old" not in left
 
 
 # ---------------------------------------------------------------------------

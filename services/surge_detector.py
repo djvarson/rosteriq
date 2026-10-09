@@ -25,6 +25,9 @@ from rosteriq.services.availability_rules import is_available
 
 logger = logging.getLogger(__name__)
 
+NO_LIVE_SALES = ("No live sales data for this hour — surge and quiet checks need "
+                 "POS sales coming in, so nothing is flagged.")
+
 
 # ============================================================================
 # Data Models
@@ -66,13 +69,16 @@ class SurgeStatus:
     surge_level: str  # "none", "mild", "moderate", "critical"
     deviation_pct: float  # (actual - predicted) / predicted * 100
     predicted_covers: float
-    estimated_actual_covers: float
+    estimated_actual_covers: Optional[float]
     additional_staff_needed: dict[str, int] = field(
         default_factory=dict
     )  # role -> count
     available_oncall: list[OnCallEmployee] = field(default_factory=list)
     suggested_action: str = ""
     estimated_extra_cost: Decimal = Decimal("0.00")
+    # False = no POS sales for this hour: actual covers are unknown (None),
+    # never 0, and nothing is flagged.
+    live_data: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -83,11 +89,13 @@ class SurgeStatus:
             "surge_level": self.surge_level,
             "deviation_pct": round(self.deviation_pct, 2),
             "predicted_covers": round(self.predicted_covers, 1),
-            "estimated_actual_covers": round(self.estimated_actual_covers, 1),
+            "estimated_actual_covers": (round(self.estimated_actual_covers, 1)
+                                        if self.estimated_actual_covers is not None else None),
             "additional_staff_needed": self.additional_staff_needed,
             "available_oncall": [emp.to_dict() for emp in self.available_oncall],
             "suggested_action": self.suggested_action,
             "estimated_extra_cost": str(self.estimated_extra_cost),
+            "live_data": self.live_data,
         }
 
 
@@ -102,6 +110,7 @@ class QuietStatus:
     staff_releasable: int  # Number of staff that can be released
     estimated_savings: Decimal
     suggested_action: str = ""
+    live_data: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -113,6 +122,7 @@ class QuietStatus:
             "staff_releasable": self.staff_releasable,
             "estimated_savings": str(self.estimated_savings),
             "suggested_action": self.suggested_action,
+            "live_data": self.live_data,
         }
 
 
@@ -181,6 +191,7 @@ class SurgeDetector:
             predicted_covers = 50.0
 
         # Get live POS data
+        live_data = False
         try:
             live_revenue = await self._pos_feed.get_live_revenue(venue_id)
             if not live_revenue or not live_revenue.get("current_hour"):
@@ -188,6 +199,7 @@ class SurgeDetector:
                 estimated_actual_covers = 0.0
                 transaction_count = 0
             else:
+                live_data = True
                 hour_data = live_revenue["current_hour"]
                 transaction_count = hour_data.get("transaction_count", 0)
                 avg_ticket = float(hour_data.get("avg_ticket", 50.0))
@@ -202,6 +214,20 @@ class SurgeDetector:
         except Exception as e:
             logger.error(f"Failed to get live revenue for {venue_id}: {e}")
             estimated_actual_covers = 0.0
+            live_data = False
+
+        if not live_data:
+            return SurgeStatus(
+                venue_id=venue_id,
+                timestamp=now.isoformat(),
+                is_surging=False,
+                surge_level="none",
+                deviation_pct=0.0,
+                predicted_covers=predicted_covers,
+                estimated_actual_covers=None,
+                suggested_action=NO_LIVE_SALES,
+                live_data=False,
+            )
 
         # Calculate deviation
         if predicted_covers > 0:
@@ -294,17 +320,34 @@ class SurgeDetector:
             predicted_covers = 50.0
 
         # Get live POS data
+        live_data = False
         try:
             live_revenue = await self._pos_feed.get_live_revenue(venue_id)
             if not live_revenue or not live_revenue.get("current_hour"):
                 estimated_actual_covers = 0.0
             else:
+                live_data = True
                 hour_data = live_revenue["current_hour"]
                 transaction_count = hour_data.get("transaction_count", 0)
                 estimated_actual_covers = float(transaction_count)
         except Exception as e:
             logger.error(f"Failed to get live revenue for {venue_id}: {e}")
             estimated_actual_covers = 0.0
+            live_data = False
+
+        if not live_data:
+            # No sales this hour is unknown demand, not a quiet floor: never
+            # advise sending staff home on it.
+            return QuietStatus(
+                venue_id=venue_id,
+                timestamp=now.isoformat(),
+                is_quiet=False,
+                deviation_pct=0.0,
+                staff_releasable=0,
+                estimated_savings=Decimal("0.00"),
+                suggested_action=NO_LIVE_SALES,
+                live_data=False,
+            )
 
         # Calculate deviation
         if predicted_covers > 0:

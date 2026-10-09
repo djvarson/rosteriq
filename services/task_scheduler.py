@@ -304,13 +304,11 @@ class AsyncTaskScheduler:
         return handlers.get(job_type, self._handle_noop)
 
     async def _handle_event_retention(self, job: JobConfig):
-        """Trim the event log to EVENT_RETENTION_DAYS (default 90).
+        """Trim traffic events older than EVENT_RETENTION_DAYS (default 90).
 
-        Traffic-driven categories (perf/integration/ai) are what make the
-        table grow; without a trim the log becomes an expensive way to store
-        last year's noise. Audit rows worth keeping longer should be exported
-        before they age out — 90 days is a deliberate default, not a limit of
-        the design.
+        Only the traffic categories (services.events.RETENTION_PRUNABLE:
+        perf/integration/ai/job/error) age out — they are what make the table
+        grow. Audit and security rows are the venue's record and are kept.
         """
         import os
         from datetime import datetime, timedelta

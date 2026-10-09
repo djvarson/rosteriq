@@ -323,9 +323,5 @@ async def mark_announcement_read(ann_id: str,
     ann = db.get_announcement(ann_id)
     if not ann or ann.get("venue_id") != vid or not _audience_match(ann.get("audience"), emp):
         raise HTTPException(status_code=404, detail="Announcement not found")
-    read_by = list(ann.get("read_by") or [])
-    if emp.id not in read_by:
-        read_by.append(emp.id)
-        ann["read_by"] = read_by
-        db.save_announcement(ann)
+    db.mark_announcement_read(ann_id, emp.id)
     return {"status": "read", "announcement_id": ann_id}

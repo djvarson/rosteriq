@@ -147,8 +147,20 @@ async def chat(body: ChatRequest) -> dict:
     to look up employees, shifts, costs, compliance, and more.
     It can also suggest actions (roster generation, shift changes, messaging).
     """
-    from rosteriq.middleware.tenant import enforce_venue_access
-    enforce_venue_access(body.venue_id)  # AI reads real venue data -> members only
+    # The agent's tools read pay, labour cost and every colleague's phone and
+    # email, so the chat is a manager tool, not a staff one.
+    from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager_any
+    enforce_venue_access(body.venue_id)
+    try:
+        enforce_venue_manager_any(body.venue_id)
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        raise HTTPException(
+            status_code=403,
+            detail="The AI assistant is for managers — it can see pay rates "
+                   "and everyone's contact details.",
+        )
     _guard_demo_scope(body.venue_id)
     _check_ai_budget(body.venue_id)
 

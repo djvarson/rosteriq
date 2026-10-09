@@ -106,6 +106,7 @@ async def list_feed_configs(
 
     Returns list of feed configs with masked API keys and status.
     """
+    enforce_venue_manager(venue_id)
     try:
         configs = await feed_config_service.list_all_configs(venue_id)
 
