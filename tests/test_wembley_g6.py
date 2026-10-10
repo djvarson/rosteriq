@@ -12,6 +12,7 @@ leave is never also priced as a shift.
 Time-dependent tests freeze the time clock's 'now' at a Perth wall time.
 """
 
+import json
 import re
 import uuid
 from contextlib import contextmanager
@@ -255,7 +256,7 @@ def test_a_correction_recomputes_the_review_flags(clock):
 
 
 @needs_node
-def test_the_edit_modal_prefills_the_rostered_break_and_sends_only_what_changed():
+def test_the_edit_modal_prefills_the_rostered_break_and_sends_what_it_shows():
     src = _main("dashboard.html")
     fns = "\n".join(src[m.start():src.index("\n}\n", m.start()) + 2] for m in (
         re.search(r"^function tsMinutesLabel\(", src, re.M),
@@ -302,7 +303,7 @@ async function main() {
 """)
     assert data["pre"] == "30" and data["label"] == "Save finish time"
     first, second, third = (p["body"] for p in data["posted"])
-    assert first["approve"] is False and first["break_minutes"] is None
+    assert first["approve"] is False and first["break_minutes"] == 30   # the break it showed
     assert first["clock_in"] is None and first["clock_out"]
     assert data["onBreak"] == "0" and "on a break" in data["who"]
     assert second["break_minutes"] is None
@@ -310,6 +311,50 @@ async function main() {
     assert third == {"venue_id": "wem", "approve": True, "clock_in": None, "clock_out": None,
                      "break_minutes": 45, "note": "long dinner"}
     assert "Approve it once checked" in data["toasts"][0]["m"]
+
+
+@needs_node
+@pytest.mark.parametrize("auto, source", [(False, "manager"), (True, "auto")])
+def test_closing_a_punch_from_the_edit_modal_saves_the_break_it_shows(clock, auto, source):
+    w = _world()
+    _roster(w.vid, [("sh-r", w.riley, NEXT, dtime(17), dtime(23), 30)])
+    r = w.c.put("/api/kiosk/settings", json={"venue_id": w.vid, "auto_meal_break": auto}, headers=w.mgr)
+    assert r.status_code == 200, r.text
+    clock(_at(NEXT, 17))
+    ts = _punch(w, w.riley).json()["timesheet_id"]
+    clock(_at(NEXT, 23, 30))
+    row = _rows(w, NEXT, status="open")["timesheets"][0]
+    src = _main("dashboard.html")
+    fns = "\n".join(src[m.start():src.index("\n}\n", m.start()) + 2] for m in (
+        re.search(r"^function tsMinutesLabel\(", src, re.M),
+        re.search(r"^function openEditTimesheet\(", src, re.M)))
+    start = src.index("document.getElementById('ets-save').addEventListener(")
+    listener = src[start:src.index("\n});\n", start) + 5]
+    finish = _utc(_at(NEXT, 23)).strftime("%Y-%m-%dT%H:%M")       # node runs in UTC
+    data = _run(f"""
+global.state = {{ currentVenue: {json.dumps(w.vid)} }};
+global.posted = [];
+global.fetchAPI = async function (url, opts) {{
+  posted.push(JSON.parse(opts.body));
+  return {{ status: 'closed', worked_minutes: 0, break_minutes: 0 }};
+}};
+global.openModal = function () {{}};
+global.closeModal = function () {{}};
+global.loadTimesheets = function () {{}};
+var tsRows = [{json.dumps(row)}];
+""" + fns + "\nlet etsIndex = null;\nlet etsShown = null;\n" + listener + f"""
+async function main() {{
+  openEditTimesheet(0);
+  const shown = String(el('ets-break').value);
+  el('ets-out').value = {json.dumps(finish)}; el('ets-note').value = 'forgot to clock out';
+  await el('ets-save').fire('click');
+  console.log(JSON.stringify({{ shown: shown, body: posted[0] }}));
+}}
+""", env={"TZ": "UTC"})
+    assert data["shown"] == "30"
+    out = w.c.post(f"/api/clock/timesheets/{ts}/review", json=data["body"], headers=w.mgr).json()
+    assert (out["break_minutes"], out["break_source"], out["worked_minutes"]) == (30, source, 330)
+    assert "no_break" not in out["flags"] and out["status"] == "closed"
 
 
 # ---------------------------------------------------------------------------
@@ -727,6 +772,106 @@ def test_one_person_salaried_at_both_venues_is_flagged_and_strangers_stay_out():
     flagged = [e for e in errors if e.startswith("Gina GM is also salaried at")]
     assert flagged and "Apothecary" in flagged[0], errors
     assert "Somebody Else" not in " ".join(errors)
+
+
+@contextmanager
+def _deactivated_on(when):
+    """Run the deactivate route as if it were ``when`` (naive UTC)."""
+    from rosteriq.routes import staff_records as staff_records_routes
+    from rosteriq.services import events as events_module
+
+    class _Then(datetime):
+        @classmethod
+        def utcnow(cls):
+            return when
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(staff_records_routes, "datetime", _Then)
+        mp.setattr(events_module, "datetime", _Then)
+        yield
+
+
+def test_a_salaried_leaver_from_months_ago_stays_out_after_their_record_is_saved_again():
+    w = _world()
+    db = get_db()
+    start, end = date(2026, 9, 28), date(2026, 10, 11)
+    lee = _employee(w.c, w.mgr, w.vid, f"{w.vid}-lee", "Lee Longgone", **SAL)
+    mia = _employee(w.c, w.mgr, w.vid, f"{w.vid}-mia", "Mia Manager", **SAL)
+    with _deactivated_on(datetime(2026, 7, 15, 3)):
+        assert w.c.post(f"/employees/{lee}/deactivate", headers=w.mgr).status_code == 200
+    with _deactivated_on(datetime(2026, 10, 8, 3)):
+        assert w.c.post(f"/employees/{mia}/deactivate", headers=w.mgr).status_code == 200
+    # Saving Lee's record again (a phone number here; a re-import, an integration
+    # re-sync or anonymising on Postgres do the same) stamps updated_at now.
+    r = w.c.put(f"/employees/{lee}", json={"phone": "0400 000 000"}, headers=w.mgr)
+    assert r.status_code == 200, r.text
+    assert db.get_employee(lee).updated_at.date() >= start
+    ci = _utc(_at(start, 10))
+    _sheet(w.vid, f"ts-{uuid.uuid4().hex[:6]}", w.riley, ci, ci + timedelta(hours=6),
+           status="approved", work_date=start)
+
+    batch = _batch(_prepare_actuals(w, start, end))
+    lines = {e["employee_id"]: e for e in batch["employees"]}
+    assert lee not in lines and lines[mia]["salary_amount"] == "3000.00"
+    assert Decimal(batch["total_gross"]) < Decimal("3500")
+    notes = batch["validation_errors"]
+    assert not any("Lee" in n for n in notes), notes
+    assert any(n.startswith("Mia Manager (salaried) is no longer active (marked as left on Thu 08 Oct")
+               for n in notes), notes
+
+
+def test_the_leaving_day_is_the_last_deactivation_unless_reactivated_since(monkeypatch):
+    from rosteriq.services import clock as venue_clock
+    from rosteriq.services.payroll_export import PayrollExporter
+    monkeypatch.setattr(venue_clock, "venue_timezone", lambda venue_id, db=None: "Australia/Perth")
+    db = MemoryStore()
+    vid = f"wem-{uuid.uuid4().hex[:6]}"
+    emp = SimpleNamespace(id="e1", venue_id=vid, active=False, updated_at=datetime(2026, 10, 1, 4))
+
+    def event(action, when, resource_id="e1"):
+        db.save_audit_log({"venue_id": vid, "action": action, "resource_type": "employee",
+                           "resource_id": resource_id, "details": {"category": "audit"},
+                           "created_at": when})
+
+    event("employee.deactivate", datetime(2026, 3, 1, 1))
+    # (back by a whole-record save, which logs no reactivation)
+    event("employee.deactivate", datetime(2026, 7, 14, 17))   # 15 Jul, 01:00 in Perth
+    event("privacy.anonymise", datetime(2026, 9, 20))          # details removed later
+    event("employee.deactivate", datetime(2026, 9, 1), resource_id="e2")
+    event("privacy.anonymise", datetime(2026, 8, 20, 3), resource_id="e3")   # while still active
+    assert PayrollExporter(db).left_on(emp) == date(2026, 7, 15)
+    e3 = SimpleNamespace(id="e3", venue_id=vid, active=False, updated_at=datetime(2026, 10, 1, 4))
+    assert PayrollExporter(db).left_on(e3) == date(2026, 8, 20)
+    # Back, then inactive again by a path that records no event: the record's last save
+    event("employee.reactivate", datetime(2026, 9, 25))
+    assert PayrollExporter(db).marked_left_on(emp) is None
+    assert PayrollExporter(db).left_on(emp) == date(2026, 10, 1)
+    assert PayrollExporter(None).left_on(emp) == date(2026, 10, 1)
+
+
+def test_a_salary_at_the_other_venue_is_flagged_only_when_that_venue_would_pay_it():
+    w = _world()
+    apo = f"apo-{uuid.uuid4().hex[:6]}"
+    _venue(w.c, w.mgr, apo, "Apothecary")
+    mgr = _login(w.c, w.mgr_email)
+    gina = f"gina{uuid.uuid4().hex[:6]}@x.com"
+    _employee(w.c, mgr, w.vid, f"{w.vid}-gina", "Gina GM", email=gina, **SAL)
+    old = _employee(w.c, mgr, apo, f"{apo}-gina", "Gina GM", email=gina, **SAL)
+    with _deactivated_on(datetime(2026, 7, 15, 3)):          # left Apothecary in July
+        assert w.c.post(f"/employees/{old}/deactivate", headers=mgr).status_code == 200
+    ci = _utc(_at(DAY, 10))
+    _sheet(w.vid, f"ts-{uuid.uuid4().hex[:6]}", w.riley, ci, ci + timedelta(hours=6), status="approved")
+
+    def flagged():
+        r = w.c.post("/api/payroll/prepare-actuals", headers=mgr, json={
+            "venue_id": w.vid, "period_start": str(DAY), "period_end": str(DAY), "state": "wa"})
+        assert r.status_code == 200, r.text
+        return [e for e in r.json()["validation_errors"] if e.startswith("Gina GM is also salaried")]
+
+    assert flagged() == []
+    # She covered a shift at Apothecary this period after all: its run pays her too
+    _sheet(apo, f"ts-{uuid.uuid4().hex[:6]}", old, ci, ci + timedelta(hours=4), status="closed")
+    assert ["Apothecary" in e for e in flagged()] == [True]
 
 
 # ---------------------------------------------------------------------------

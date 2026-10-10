@@ -130,10 +130,12 @@ def _cross_venue_hours(db, venue_id: str, period_start: date, period_end: date) 
 
 
 def _salaried_elsewhere(db, venue_id: str, batch) -> List[str]:
-    """Salaried lines here whose person (same email) is also salaried at
-    another venue the caller fully manages: two fixed lines for one person.
-    Flags only — whether both are owed is the advisor's call."""
+    """Salaried lines here whose person (same email) also gets a salary line
+    in another venue's run for the period, at a venue the caller fully
+    manages: two fixed lines for one person. Flags only — whether both are
+    owed is the advisor's call."""
     from rosteriq.middleware.tenant import get_tenant_context_optional
+    from rosteriq.services.current_roster import live_shifts
     from rosteriq.services.pay_basis import is_salaried
     from rosteriq.services.person_identity import person_key, records_by_person
     from rosteriq.services.venue_access import fully_managed_group
@@ -147,10 +149,23 @@ def _salaried_elsewhere(db, venue_id: str, batch) -> List[str]:
             return []
         index = records_by_person(db, others)
         here = {e.id: e for e in (db.get_employees(venue_id) or [])}
+        exporter = PayrollExporter(db)
+        start, end = batch.period_start, batch.period_end
+        rostered: dict = {}
+
+        def paid_there(other, vid) -> bool:
+            # That venue's run for the same period, on either basis.
+            if not is_salaried(other):
+                return False
+            if vid not in rostered:
+                rostered[vid] = {str(s.employee_id)
+                                 for s in live_shifts(db, vid, start, end, staff=True)}
+            return exporter.salaried_line_due(other, vid, start, end, rostered[vid])
+
         out = []
         for line in lines:
             key = person_key(here.get(line.employee_id))
-            venues = sorted({vid for other, vid in index.get(key, []) if is_salaried(other)}) if key else []
+            venues = sorted({vid for other, vid in index.get(key, []) if paid_there(other, vid)}) if key else []
             if venues:
                 names = ", ".join(getattr(db.get_venue(v), "name", None) or v for v in venues)
                 out.append(f"{line.name} is also salaried at {names} — one person with a salary "

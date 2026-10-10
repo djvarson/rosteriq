@@ -15,7 +15,7 @@ All monetary values in AUD using Decimal for precision.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Dict, Any
 from enum import Enum
@@ -418,11 +418,18 @@ def _paid_leave_windows(leave_requests) -> Dict[str, list]:
     return out
 
 
-def _changed_since(emp, day: date) -> bool:
-    """A deactivated record last changed on or after ``day`` left during or
-    after the period (deactivating stamps updated_at; no leaving date is kept)."""
-    when = _as_date(getattr(emp, "updated_at", None))
-    return when is not None and when >= day
+def _local_day(when, tz) -> Optional[date]:
+    """The venue-local date of a naive-UTC timestamp."""
+    if isinstance(when, str):
+        try:
+            when = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(when, datetime):
+        return _as_date(when)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(tz).date()
 
 
 class PayrollExporter:
@@ -436,6 +443,7 @@ class PayrollExporter:
             db: Database store instance (BaseStore)
         """
         self.db = db
+        self._memo: Dict[tuple, Any] = {}
 
     def prepare_timesheet_data(
         self,
@@ -530,16 +538,9 @@ class PayrollExporter:
                 batch.employees.append(emp_payroll)
 
         listed = {e.employee_id for e in batch.employees}
-        punched = None
         for emp in employees.values():
-            if (emp.id in listed or not is_salaried(emp)
-                    or getattr(emp, "venue_id", None) != venue_id):
+            if emp.id in listed or not self.salaried_line_due(emp, venue_id, period_start, period_end):
                 continue
-            if not is_active(emp) and not _changed_since(emp, period_start):
-                if punched is None:
-                    punched = self._punched_ids(venue_id, period_start, period_end)
-                if emp.id not in punched:
-                    continue
             batch.employees.append(self._salaried_line(emp, [], period_start, period_end))
             listed.add(emp.id)
 
@@ -773,14 +774,81 @@ class PayrollExporter:
             Decimal("0.01"), rounding=ROUND_HALF_UP)
         return line
 
+    def salaried_line_due(self, emp, venue_id, period_start, period_end, shift_ids=()) -> bool:
+        """Whether the venue's run for the period carries a fixed salary line
+        for ``emp``: salaried there and active, or marked as left on or after
+        period_start, or with shifts (``shift_ids``) or punches there in it."""
+        if not is_salaried(emp) or getattr(emp, "venue_id", None) != venue_id:
+            return False
+        if is_active(emp) or str(emp.id) in shift_ids:
+            return True
+        left = self.left_on(emp)
+        if left is not None and left >= period_start:
+            return True
+        return str(emp.id) in self._punched_ids(venue_id, period_start, period_end)
+
+    def left_on(self, emp) -> Optional[date]:
+        """The venue-local day an inactive record left: the day it was marked
+        as left, else (made inactive another way) the day it was last saved."""
+        marked = self.marked_left_on(emp)
+        if marked is not None:
+            return marked
+        return _local_day(getattr(emp, "updated_at", None),
+                          self._venue_tz(getattr(emp, "venue_id", None)))
+
+    def marked_left_on(self, emp) -> Optional[date]:
+        """The venue-local day the record was marked as left since it was last
+        reactivated, from the audit log (never pruned): its latest
+        deactivation, else its first anonymisation (which also makes an
+        active record inactive, but is logged on an inactive one too)."""
+        venue_id = getattr(emp, "venue_id", None)
+        deactivated = anonymised = None
+        for ev in self._status_events(venue_id).get(str(emp.id), []):
+            if ev["action"] == "employee.reactivate":
+                deactivated = anonymised = None
+            elif ev["action"] == "employee.deactivate":
+                deactivated = ev["created_at"]
+            elif anonymised is None:
+                anonymised = ev["created_at"]
+        left = deactivated or anonymised
+        return _local_day(left, self._venue_tz(venue_id)) if left is not None else None
+
+    def _venue_tz(self, venue_id):
+        from zoneinfo import ZoneInfo
+        from rosteriq.services.clock import venue_timezone
+        return ZoneInfo(venue_timezone(venue_id, self.db))
+
+    def _status_events(self, venue_id) -> Dict[str, list]:
+        """employee id -> their leave and reactivate audit events, oldest first."""
+        key = ("status_events", venue_id)
+        if key not in self._memo:
+            by_emp: Dict[str, list] = {}
+            if self.db is not None and venue_id:
+                try:
+                    for action in ("employee.deactivate", "employee.reactivate", "privacy.anonymise"):
+                        for ev in self.db.list_events(venue_id=venue_id, category="audit",
+                                                      action_prefix=action, limit=100000) or []:
+                            if ev.get("action") == action and ev.get("created_at"):
+                                by_emp.setdefault(str(ev.get("resource_id")), []).append(ev)
+                except Exception:  # noqa: BLE001 — without the log, the record's last save stands in
+                    by_emp = {}
+            for events in by_emp.values():
+                events.sort(key=lambda ev: str(ev["created_at"]))
+            self._memo[key] = by_emp
+        return self._memo[key]
+
     def _punched_ids(self, venue_id, period_start, period_end) -> set:
-        if self.db is None:
-            return set()
-        try:
-            sheets = self.db.get_timesheets(venue_id, period_start, period_end) or []
-        except Exception:  # noqa: BLE001 — a missing read only hides a leaver's line
-            return set()
-        return {str(t.get("employee_id")) for t in sheets}
+        key = ("punched", venue_id, period_start, period_end)
+        if key not in self._memo:
+            ids = set()
+            if self.db is not None:
+                try:
+                    ids = {str(t.get("employee_id"))
+                           for t in self.db.get_timesheets(venue_id, period_start, period_end) or []}
+                except Exception:  # noqa: BLE001 — a missing read only hides a leaver's line
+                    ids = set()
+            self._memo[key] = ids
+        return self._memo[key]
 
     def _note_salaried(self, batch, employees, leave_requests, period_start, period_end) -> None:
         """Say what the full-period salary line can't: the person has left,
@@ -792,8 +860,10 @@ class PayrollExporter:
             if emp is None:
                 continue
             if not is_active(emp):
+                marked = self.marked_left_on(emp)
+                when = f" (marked as left on {marked:%a %d %b %Y})" if marked else ""
                 batch.notes.append(
-                    f"{line.name} (salaried) is no longer active — the salary line covers "
+                    f"{line.name} (salaried) is no longer active{when} — the salary line covers "
                     f"{period_start} to {period_end}; confirm their last day and prorate "
                     "with your advisor")
             for req in leave_requests or []:

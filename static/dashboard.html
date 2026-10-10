@@ -9063,9 +9063,9 @@ function openEditTimesheet(i) {
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
   };
   // An open punch shows the break it will close with: what was recorded, else the rostered meal break.
-  const brk = open && !t.break_minutes && !t.on_break && t.rostered
-    ? (t.rostered.break_minutes || 0) : (t.break_minutes || 0);
-  etsShown = { clockIn: toLocal(t.clock_in), clockOut: toLocal(t.clock_out), brk: String(brk) };
+  const fromRoster = !!(open && !t.break_minutes && !t.on_break && t.rostered);
+  const brk = fromRoster ? (t.rostered.break_minutes || 0) : (t.break_minutes || 0);
+  etsShown = { clockIn: toLocal(t.clock_in), clockOut: toLocal(t.clock_out), brk: String(brk), fromRoster: fromRoster };
   document.getElementById('ets-in').value = etsShown.clockIn;
   document.getElementById('ets-out').value = etsShown.clockOut;
   document.getElementById('ets-break').value = brk;
@@ -9085,15 +9085,16 @@ document.getElementById('ets-save').addEventListener('click', async function() {
   const inVal = document.getElementById('ets-in').value;
   const outVal = document.getElementById('ets-out').value;
   const brkVal = String(document.getElementById('ets-break').value);
-  // Only what the manager changed is sent: an untouched break leaves the
-  // server's rule to settle it (a break still running, the rostered meal break).
+  // Only what the manager changed is sent, except a pre-filled rostered break:
+  // that is what they saw and are saving. An untouched recorded break leaves the
+  // server to settle it (a break still running ends at the finish time).
   // A punch closed here goes to the review queue; a closed one is approved.
   const body = {
     venue_id: state.currentVenue,
     approve: !open,
     clock_in: inVal !== etsShown.clockIn ? toUTC(inVal) : null,
     clock_out: outVal !== etsShown.clockOut ? toUTC(outVal) : null,
-    break_minutes: brkVal !== etsShown.brk ? parseInt(brkVal || '0', 10) : null,
+    break_minutes: brkVal !== etsShown.brk || etsShown.fromRoster ? parseInt(brkVal || '0', 10) : null,
     note: document.getElementById('ets-note').value.trim(),
   };
   if (!outVal) { showToast('Enter the clock-out time', 'warning'); return; }
