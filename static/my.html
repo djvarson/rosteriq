@@ -970,42 +970,66 @@ async function loadHours() {
   }
 }
 
-// ---- Time clock: my kiosk PIN, and punching from here when the venue allows it
-let myClock = null;
+// ---- Time clock: my kiosk PIN, and punching from here when the venue allows it.
+// One card per venue I work at (each has its own clock rules and my record
+// there); the PIN I set goes on every one of them.
+let myClocks = [];
 
 async function loadMyClock() {
   const card = document.getElementById('clock-card');
   try {
-    const c = await api('/api/me/clock');
-    if (!c.linked) { card.innerHTML = '<div class="empty">Link your account to set a time clock PIN.</div>'; return; }
-    myClock = c;
-    renderMyClock(c);
+    const vids = myVenues.length ? myVenues.map(function (v) { return v.venue_id; }) : [''];
+    const all = await Promise.all(vids.map(function (vid) {
+      return api('/api/me/clock' + (vid ? '?venue_id=' + encodeURIComponent(vid) : ''));
+    }));
+    myClocks = all.filter(function (c) { return c && c.linked; });
+    if (!myClocks.length) { card.innerHTML = '<div class="empty">Link your account to set a time clock PIN.</div>'; return; }
+    renderMyClock(myClocks);
   } catch (e) {
     card.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
   }
 }
 
-function renderMyClock(c) {
+function clockVenueName(c) {
+  const v = myVenues.find(function (x) { return x.venue_id === c.venue_id; });
+  return v ? v.venue_name : '';
+}
+
+function renderMyClock(clocks) {
+  const many = clocks.length > 1;
+  const withPin = clocks.filter(function (c) { return c.has_pin; }).length;
+  const allSet = withPin === clocks.length;
   let html = '<div style="font-weight:700; margin-bottom:4px;">Kiosk PIN</div>' +
-    '<p style="font-size:13px; color:var(--muted); margin-bottom:10px;">' + (c.has_pin
-      ? 'Your PIN is set. You type it on the venue\'s time clock; change it any time.'
-      : 'Pick a 4&ndash;6 digit PIN to type on the venue\'s time clock when you clock in and out.') + '</p>' +
+    '<p style="font-size:13px; color:var(--muted); margin-bottom:10px;">' + (allSet
+      ? 'Your PIN is set' + (many ? ' at every venue you work' : '') + '. You type it on the venue\'s time clock; change it any time.'
+      : withPin
+        ? 'Your PIN is only set at some of your venues. Set it again to use the same PIN at all of them.'
+        : 'Pick a 4&ndash;6 digit PIN to type on the venue\'s time clock when you clock in and out.') + '</p>' +
     '<input id="my-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" placeholder="4&ndash;6 digits">' +
-    '<button class="btn" id="my-pin-btn" onclick="saveMyPin()">' + (c.has_pin ? 'Change my PIN' : 'Set my PIN') + '</button>';
-  if (c.self_clock) {
-    const status = { on: 'You\'re clocked in.', break: 'You\'re on a break.', done: 'You\'ve clocked out today.' }[c.state] || 'You\'re not clocked in.';
-    const btn = function (label, action, ghost) {
-      return '<button class="btn" style="margin-top:8px;' + (ghost ? ' background:var(--card); border:1px solid var(--border);' : '') +
-        '" onclick="selfPunch(\'' + action + '\')">' + label + '</button>';
-    };
-    html += '<div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">' +
-      '<div style="font-weight:700; margin-bottom:4px;">Clock in from your phone</div>' +
-      '<p style="font-size:13px; color:var(--muted);">' + status + '</p>' +
-      (c.state === 'on' ? btn('Start break', 'break/start', true) + btn('Clock out', 'out')
-        : c.state === 'break' ? btn('End break', 'break/end') + btn('Clock out', 'out', true)
-        : btn('Clock in', 'in')) +
-      '</div>';
-  }
+    '<button class="btn" id="my-pin-btn" onclick="saveMyPin()">' + (allSet ? 'Change my PIN' : 'Set my PIN') + '</button>';
+  clocks.forEach(function (c, i) {
+    if (!many && !c.self_clock) return;
+    html += '<div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">';
+    if (many) {
+      html += '<div style="font-weight:700; margin-bottom:4px;">' + esc(clockVenueName(c) || 'Your venue') + '</div>' +
+        '<p style="font-size:13px; color:var(--muted);">' + (c.has_pin
+          ? 'Your PIN works on this venue\'s time clock.'
+          : 'No PIN here yet &mdash; set yours above.') + '</p>';
+    }
+    if (c.self_clock) {
+      const status = { on: 'You\'re clocked in.', break: 'You\'re on a break.', done: 'You\'ve clocked out today.' }[c.state] || 'You\'re not clocked in.';
+      const btn = function (label, action, ghost) {
+        return '<button class="btn" style="margin-top:8px;' + (ghost ? ' background:var(--card); border:1px solid var(--border);' : '') +
+          '" onclick="selfPunch(\'' + action + '\', ' + i + ')">' + label + '</button>';
+      };
+      html += '<div style="font-weight:' + (many ? '600; margin-top:8px' : '700') + '; margin-bottom:4px;">Clock in from your phone</div>' +
+        '<p style="font-size:13px; color:var(--muted);">' + status + '</p>' +
+        (c.state === 'on' ? btn('Start break', 'break/start', true) + btn('Clock out', 'out')
+          : c.state === 'break' ? btn('End break', 'break/end') + btn('Clock out', 'out', true)
+          : btn('Clock in', 'in'));
+    }
+    html += '</div>';
+  });
   document.getElementById('clock-card').innerHTML = html;
 }
 
@@ -1027,11 +1051,12 @@ async function saveMyPin() {
   }
 }
 
-async function selfPunch(action) {
-  if (!myClock) return;
+async function selfPunch(action, i) {
+  const c = myClocks[i || 0];
+  if (!c) return;
   try {
     const r = await api('/api/clock/' + action, { method: 'POST',
-      body: { venue_id: myClock.venue_id, employee_id: myClock.employee_id } });
+      body: { venue_id: c.venue_id, employee_id: c.employee_id } });
     const said = { in: 'Clocked in', out: 'Clocked out', 'break/start': 'Break started', 'break/end': 'Break ended' }[action];
     toast(said + (r.warning ? ' — ' + r.warning : ''), r.warning ? '' : 'ok');
     loadMyClock();

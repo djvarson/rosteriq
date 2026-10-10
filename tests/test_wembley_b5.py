@@ -999,18 +999,18 @@ global.api = async function (path, opts) { calls.push({ path: path, body: opts &
 global.toast = function (m, k) { toasts.push({ m: m, k: k }); };
 global.loadMyClock = function () {};
 global.loadHours = function () {};
-var myClock = { venue_id: 'wem', employee_id: 'e0' };
+var myClocks = [{ venue_id: 'wem', employee_id: 'e0' }];
 """ + _fns(src, "renderMyClock", "saveMyPin", "selfPunch") + r"""
 async function main() {
-  renderMyClock({ linked: true, has_pin: false, self_clock: false, state: 'off' });
+  renderMyClock([{ linked: true, has_pin: false, self_clock: false, state: 'off' }]);
   const plain = el('clock-card').innerHTML;
   el('my-pin').value = '12';
   await saveMyPin();
   el('my-pin').value = '2468';
   await saveMyPin();
-  renderMyClock({ linked: true, has_pin: true, self_clock: true, state: 'on' });
+  renderMyClock([{ linked: true, has_pin: true, self_clock: true, state: 'on' }]);
   const self = el('clock-card').innerHTML;
-  await selfPunch('break/start');
+  await selfPunch('break/start', 0);
   console.log(JSON.stringify({ plain: plain, self: self, calls: calls, toasts: toasts }));
 }
 """)

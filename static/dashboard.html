@@ -9151,12 +9151,21 @@ function openKioskPin(employeeId) {
   openModal('modal-kiosk-pin');
 }
 
+// The PINs the server refuses as too easy to guess (services/kiosk.py weak_pin).
+function weakKioskPin(pin) {
+  if (['1234', '4321', '1212', '6969', '2580', '0852', '123456', '654321'].indexOf(pin) >= 0) return true;
+  if (/^(\d)\1+$/.test(pin)) return true;
+  const steps = new Set();
+  for (let i = 1; i < pin.length; i++) steps.add((+pin[i] - +pin[i - 1] + 10) % 10);
+  return steps.size === 1 && (steps.has(1) || steps.has(9));
+}
+
 function suggestKioskPin() {
   let pin = '';
   do {
     pin = '';
     for (let i = 0; i < 4; i++) pin += String(Math.floor(Math.random() * 10));
-  } while (/^(\d)\1+$/.test(pin) || pin === '1234' || pin === '4321');
+  } while (weakKioskPin(pin));
   document.getElementById('kp-pin').value = pin;
 }
 

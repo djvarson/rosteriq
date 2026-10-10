@@ -135,7 +135,8 @@ def _staff_venue_ids(db, user) -> list:
     return list(held or [])
 
 
-def find_linked_employees(db, user, active_only: bool = False) -> List[Tuple[object, str]]:
+def find_linked_employees(db, user, active_only: bool = False,
+                          include_inactive: bool = False) -> List[Tuple[object, str]]:
     """Every (employee, venue_id) this login is linked to, primary venue
     first: the email match in each venue the user holds, dashboard or
     staff-only. Same scope rules as find_linked_employee (owners: every
@@ -143,8 +144,11 @@ def find_linked_employees(db, user, active_only: bool = False) -> List[Tuple[obj
     inactive are left out unless that would leave nothing, so a leaver still
     sees their own history. ``active_only`` leaves them out regardless: what
     only a current team member does at a venue (its feed, notices,
-    procedures, leave, availability, cover)."""
+    procedures, leave, availability, cover). ``include_inactive`` keeps every
+    record (someone deactivated mid-shift still clocks off)."""
     out = linked_records(db, user)
+    if include_inactive:
+        return out
     active = [(e, v) for e, v in out if getattr(e, "active", True) is not False]
     return active if active_only else (active or out)
 

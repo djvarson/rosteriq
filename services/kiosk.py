@@ -10,7 +10,12 @@ KIOSK_ROUTES and nothing else.
 
 Staff PINs are 4-6 digits, stored as salted PBKDF2 hashes, and lock for
 PIN_LOCK_MINUTES after MAX_PIN_FAILURES wrong tries (counted in the database,
-so both workers see the same count).
+so both workers see the same count). A device that sees DEVICE_PIN_FAILURES
+wrong PINs on more than one card in quick succession, or about that many in a
+rolling DEVICE_PIN_WINDOW_MINUTES, pauses PIN entry briefly
+(DEVICE_PAUSE_SECONDS, doubling while it keeps happening), so nobody can work
+through the staff cards trying common PINs. The pause is short on purpose: a
+long one would let a prankster stop every clock-in.
 """
 
 from __future__ import annotations
@@ -48,6 +53,10 @@ KIOSK_ROUTES = frozenset({
 
 MAX_PIN_FAILURES = 5
 PIN_LOCK_MINUTES = 15
+DEVICE_PIN_FAILURES = 8
+DEVICE_PIN_WINDOW_MINUTES = 10
+DEVICE_PAUSE_SECONDS = 60
+DEVICE_PAUSE_MAX_SECONDS = 10 * 60
 PIN_ITERATIONS = 20000
 MAX_ACTIVE_DEVICES = 20
 TOUCH_EVERY = timedelta(minutes=5)
@@ -229,11 +238,25 @@ def pin_matches(stored: str, venue_id: str, employee_id: str, pin: str) -> bool:
 
 _WEAK = {"1234", "4321", "1212", "6969", "2580", "0852", "123456", "654321"}
 
+WEAK_PIN_MESSAGE = ("That PIN is too easy to guess. Avoid runs like 1234 or 9876, one digit "
+                    "repeated like 1111, and well-known ones like 2580.")
+
+
+def weak_pin(pin) -> bool:
+    """A PIN anyone would try first: a well-known one, one digit repeated, or
+    a run up or down the digits (0123, 7890, 9876)."""
+    if not isinstance(pin, str) or not pin.isdigit():
+        return False
+    if pin in _WEAK or len(set(pin)) == 1:
+        return True
+    steps = {(int(b) - int(a)) % 10 for a, b in zip(pin, pin[1:])}
+    return steps in ({1}, {9})
+
 
 def generate_pin(length: int = 4) -> str:
     while True:
         pin = "".join(str(secrets.randbelow(10)) for _ in range(length))
-        if len(set(pin)) > 1 and pin not in _WEAK:
+        if not weak_pin(pin):
             return pin
 
 
@@ -245,12 +268,55 @@ def _locked(until) -> bool:
     return bool(until) and naive_utc(until) > datetime.utcnow()
 
 
+def _paused(device: Optional[dict]) -> None:
+    """429 with Retry-After while this device's PIN entry is paused."""
+    until = (device or {}).get("pin_cooldown_until")
+    if not _locked(until):
+        return
+    secs = max(1, math.ceil((naive_utc(until) - datetime.utcnow()).total_seconds()))
+    wait = f"{secs} second{'' if secs == 1 else 's'}" if secs < 90 else f"{math.ceil(secs / 60)} minutes"
+    raise HTTPException(status_code=429, headers={"Retry-After": str(secs)}, detail=(
+        f"Too many wrong PINs on this time clock, so PIN entry is paused. Try again in {wait}."))
+
+
+def _note_device_failure(db, device_id: str, venue_id: str, employee_id: str) -> None:
+    """Count a wrong PIN against the device; raises 429 once it is paused."""
+    try:
+        after = db.note_kiosk_pin_failure(device_id, employee_id, DEVICE_PIN_FAILURES,
+                                          DEVICE_PIN_WINDOW_MINUTES, DEVICE_PAUSE_SECONDS,
+                                          DEVICE_PAUSE_MAX_SECONDS) or {}
+    except Exception as e:  # noqa: BLE001 — the card's own lock still applies
+        logger.warning(f"kiosk device PIN count failed for {device_id}: {e}")
+        return
+    if not _locked(after.get("pin_cooldown_until")):
+        return
+    if not after.get("pin_failures"):            # this wrong PIN started the pause
+        streak = int(after.get("pin_cooldowns") or 1)
+        try:
+            from rosteriq.services.events import audit, security
+            security("timeclock.kiosk_pin_paused", venue_id=venue_id, device_id=device_id,
+                     employee_id=employee_id, streak=streak)
+            if streak == 1:
+                # Once per run of pauses: the manager-facing record in Activity.
+                audit("timeclock.kiosk_pin_paused", venue_id, "kiosk_device", device_id,
+                      device=after.get("name"), wrong_pins=DEVICE_PIN_FAILURES,
+                      minutes=DEVICE_PIN_WINDOW_MINUTES)
+        except Exception:  # noqa: BLE001
+            pass
+    _paused(after)
+
+
 def check_pin(db, venue_id: str, employee_id: str, pin: str) -> bool:
     """True when the employee's PIN is right; False when they have no PIN.
-    Raises 403 for a wrong PIN and 429 while the PIN is locked."""
+    Raises 403 for a wrong PIN, and 429 while the PIN is locked or the time
+    clock device asking has paused PIN entry."""
     rec = db.get_timeclock_pin_record(venue_id, employee_id)
     if not rec or not rec.get("pin_hash"):
         return False
+    from rosteriq.middleware.tenant import kiosk_device_id
+    device_id = kiosk_device_id()
+    if device_id:
+        _paused(db.get_kiosk_device(device_id))
     if _locked(rec.get("locked_until")):
         raise HTTPException(status_code=429, detail=(
             f"Too many wrong PINs — this PIN is locked for {_minutes_left(rec['locked_until'])} "
@@ -268,6 +334,8 @@ def check_pin(db, venue_id: str, employee_id: str, pin: str) -> bool:
                  locked=_locked(after.get("locked_until")))
     except Exception:  # noqa: BLE001
         pass
+    if device_id:
+        _note_device_failure(db, device_id, venue_id, employee_id)
     if _locked(after.get("locked_until")):
         raise HTTPException(status_code=429, detail=(
             f"Wrong PIN {MAX_PIN_FAILURES} times — this PIN is locked for {PIN_LOCK_MINUTES} "
@@ -368,8 +436,10 @@ def save_settings(db, venue_id: str, changes: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def own_employee_ids(db, user_rec: Optional[dict], venue_id: str) -> set:
-    """Employee ids at ``venue_id`` that are this login's own records: the
-    staff record carries the login's email. The demo identities only ever
+    """The employee id at ``venue_id`` that is this login's own record: the
+    one staff record there carrying the login's email. Empty when two records
+    share it, since the email then proves nothing about whose login it is
+    (services/staff_records.linked_logins). The demo identities only ever
     match inside the demo venue (services/linking.py rules)."""
     if not user_rec:
         return set()
@@ -382,5 +452,31 @@ def own_employee_ids(db, user_rec: Optional[dict], venue_id: str) -> set:
             return set()
     except Exception:  # noqa: BLE001
         pass
-    return {e.id for e in (db.get_employees(venue_id) or [])
-            if (getattr(e, "email", "") or "").strip().lower() == email}
+    ids = [e.id for e in (db.get_employees(venue_id) or [])
+           if (getattr(e, "email", "") or "").strip().lower() == email]
+    return set(ids) if len(ids) == 1 else set()
+
+
+def my_records(db, user_id: Optional[str], include_inactive: bool = False) -> list:
+    """(employee, venue_id) for every staff record that is this login: the
+    services/linking match in each venue it holds, dashboard or staff-only,
+    where it is the only record there with the login's email. Leavers are
+    left out unless ``include_inactive`` (someone deactivated mid-shift still
+    clocks out)."""
+    from rosteriq.middleware.auth import UserContext
+    from rosteriq.services.linking import find_linked_employees
+    rec = db.get_user_by_id(user_id) if user_id else None
+    if not rec:
+        return []
+    login = UserContext(user_id=rec.get("id"), email=rec.get("email") or "",
+                        name=rec.get("name") or "", role=rec.get("role"),
+                        venue_ids=list(rec.get("venue_ids") or []),
+                        section_grants=rec.get("section_grants") or {},
+                        staff_venue_ids=rec.get("staff_venue_ids") or [])
+    out = []
+    for emp, vid in find_linked_employees(db, login, include_inactive=include_inactive):
+        if not include_inactive and not getattr(emp, "active", True):
+            continue
+        if emp.id in own_employee_ids(db, rec, vid):
+            out.append((emp, vid))
+    return out

@@ -1497,6 +1497,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 "status": exc.status_code,
             }
         },
+        headers=getattr(exc, "headers", None),
     )
 
 
@@ -2642,7 +2643,9 @@ async def create_employee(employee: Employee):
 
 @app.post("/employees/bulk")
 async def bulk_create_employees(employees: list[Employee]):
-    for emp in employees:
+    from rosteriq.services.staff_records import email_holder, email_taken_message
+    _emails_in_batch = {}
+    for _row, emp in enumerate(employees, start=1):
         if not getattr(emp, "venue_id", None):
             raise HTTPException(422, "venue_id is required on every employee")
         _refuse_reserved_id(emp.id, emp.venue_id, _store["employees"].get(emp.id))
@@ -2652,6 +2655,20 @@ async def bulk_create_employees(employees: list[Employee]):
         _rate_problem = hourly_rate_problem(emp.hourly_base_rate, getattr(emp, "pay_basis", "hourly"))
         if _rate_problem:
             raise HTTPException(422, f"{emp.name}: {_rate_problem}")
+        # One email per person per venue, as POST /employees: against the
+        # stored staff list and against the other rows of this batch.
+        _key = (emp.venue_id, (emp.email or "").strip().lower())
+        if _key[1]:
+            _twin = _emails_in_batch.get(_key)
+            if _twin is not None and _twin[1].id != emp.id:
+                raise HTTPException(409, (
+                    f"Row {_row} ({emp.name}): row {_twin[0]} ({_twin[1].name}) also uses "
+                    f"{emp.email}. Each person's email must be their own — it's how their "
+                    "login finds them."))
+            _emails_in_batch[_key] = (_row, emp)
+            _holder = email_holder(_db, emp.venue_id, emp.email, except_id=emp.id)
+            if _holder is not None:
+                raise HTTPException(409, f"Row {_row} ({emp.name}): {email_taken_message(_holder, emp.email)}")
     from rosteriq.services.staff_records import keep_record_state
     for emp in employees:
         previous = _store["employees"].get(emp.id)
