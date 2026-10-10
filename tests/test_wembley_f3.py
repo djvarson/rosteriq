@@ -566,6 +566,15 @@ def test_switching_to_an_empty_venue_clears_the_previous_venues_tiles_and_lists(
         src, "_setKpi", "updateDashboardKPIs", "populateAlerts", "renderAlerts", "populateStaffList",
         "loadVenueData", "resetVenuePageState", "onVenueSelected")
     data = _run(HOME_STUBS + js + r"""
+// The home list is drawn by renderOnShiftNow (tested on its own); a stand-in
+// that lists today's rostered names is enough to see the switch clear it.
+function renderOnShiftNow() {
+  const names = {};
+  (state.employees || []).forEach(function (e) { names[e.id] = e.name; });
+  const on = [];
+  (state.rosters || []).forEach(function (r) { (r.shifts || []).forEach(function (s) { on.push(names[s.employee_id] || 'Staff member'); }); });
+  el('on-shift-list').innerHTML = on.length ? on.join(', ') : 'Nobody rostered on right now';
+}
 function screen() {
   return { staff: el('kpi-staff-count').textContent, labour: el('kpi-labour-cost').textContent,
            alerts: el('alerts-panel-top').innerHTML, onShift: el('on-shift-list').innerHTML };
@@ -650,7 +659,8 @@ const PAYLOAD = { complete: false, steps: [], steps_done: 1, steps_total: 4, per
   total_revenue_inc_gst: 1, total_cogs: 1, gross_profit: 1, food_cost_pct: 1, total_worked_minutes: 60 };
 global.fetchAPI = async function (url) {
   calls.push(url);
-  state.currentVenue = 'apo';            // the manager switched while this was out
+  // the manager switched while this was out (the account-level label lookup is venue-free)
+  if (url.indexOf('/api/me/access') !== 0) state.currentVenue = 'apo';
   await tick(5);
   return PAYLOAD;
 };
@@ -678,6 +688,7 @@ STALE_STUBBED = [
     "renderIngredientRows", "renderInventory", "renderStocktake", "renderOrders", "renderInvoices",
     "renderAnnouncements", "annAudiencePills", "loadChecklistHistory", "loadSystemHealth", "loadPlatformSecurity",
     "initTimesheetDates", "updateDeputyStatus", "updateMYOBStatus", "updateHumanForceStatus",
+    "_obCanManage", "aeLoad",
 ]
 
 

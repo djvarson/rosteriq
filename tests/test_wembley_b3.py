@@ -116,22 +116,11 @@ def _roster(vid, monday, shifts, rid=None, state=None):
     return r
 
 
-class _Inactive(Employee):
-    active: bool = False
-
-
 def _deactivate(monkeypatch, emp_id):
-    """Employee.active arrives with another branch; until then the store hands
-    back an inactive copy of this one person."""
     db = get_db()
-    real = db.get_employee
-
-    def get_employee(eid):
-        e = real(eid)
-        if e is not None and e.id == emp_id:
-            return _Inactive(**e.model_dump())
-        return e
-    monkeypatch.setattr(db, "get_employee", get_employee)
+    emp = db.get_employee(emp_id)
+    emp.active = False
+    db.save_employee(emp)
 
 
 def _codes(resp):
@@ -599,6 +588,7 @@ def test_grid_renders_split_shifts_as_editable_and_escapes_everything():
     import json
     js = _fns(_dash(), "rosterWeekDays", "escAttr", "localIso", "rosterPeople", "renderRosterTable")
     data = _run(GRID_STUBS + js + r"""
+function renderRosterDayView() {}   // the Day view has its own tests
 async function main() {
   const tbl = el('roster-table');
   let foot = null;
