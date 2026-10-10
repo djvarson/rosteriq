@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services import kiosk
 from rosteriq.services.clock import venue_today
 from rosteriq.services.events import audit
@@ -148,20 +148,9 @@ async def generate_pins(body: GeneratePins):
 
 
 def _my_records(db, user: UserContext) -> list:
-    """(employee, venue_id) for every record that is this login, inside the
-    venues it holds."""
-    rec = db.get_user_by_id(user.user_id)
-    if user.is_owner:
-        venue_ids = [v.id for v in (db.list_venues() or [])]
-    else:
-        venue_ids = list(getattr(user, "venue_ids", None) or [])
-    out = []
-    for vid in venue_ids:
-        ids = kiosk.own_employee_ids(db, rec, vid)
-        for emp in db.get_employees(vid) or []:
-            if emp.id in ids and getattr(emp, "active", True):
-                out.append((emp, vid))
-    return out
+    """(employee, venue_id) for every active record that is this login, in
+    every venue it holds, staff-only ones included (services/kiosk.my_records)."""
+    return kiosk.my_records(db, user.user_id)
 
 
 @router.get("/api/me/clock")
@@ -196,14 +185,16 @@ async def my_clock(venue_id: Optional[str] = Query(None),
 
 @router.post("/api/me/clock-pin")
 async def set_my_pin(body: MyPin, user: UserContext = Depends(get_current_user)) -> dict:
-    """Set my own kiosk PIN on every staff record that is me (one per venue)."""
+    """Set my own kiosk PIN on every staff record that is me (one per venue).
+    The records come only from venues this login holds."""
     db = get_db()
     mine = _my_records(db, user)
     if not mine:
         raise HTTPException(status_code=409, detail=(
             "Your login isn't linked to a staff record yet — enter your join code first."))
+    if kiosk.weak_pin(body.pin):
+        raise HTTPException(status_code=422, detail=kiosk.WEAK_PIN_MESSAGE)
     for emp, vid in mine:
-        enforce_venue_access(vid)
         db.set_timeclock_pin(vid, emp.id, kiosk.hash_pin(vid, emp.id, body.pin))
         audit("timeclock.pin_set", vid, "employee", emp.id, employee=emp.name, by="self")
     return {"status": "pin_set", "venues": len(mine)}

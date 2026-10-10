@@ -249,17 +249,22 @@ def _card(emp, shifts, open_ts, done_today, has_pin, now_local, tz) -> dict:
 def _punch_actor(db, venue_id: str, employee_id: str) -> dict:
     """A punch comes from the venue's time clock device, or from a person
     clocking THEMSELVES in when the venue allows it (off by default)."""
-    enforce_venue_access(venue_id)
     device = kiosk_device_id()
     tenant = get_tenant_context_optional()
     if device or tenant is None:
+        enforce_venue_access(venue_id)
         return {"source": "kiosk", "device_id": device}
+    # Their own record at a venue they hold, staff-only venues included (the
+    # tenant context carries dashboard venues only).
+    mine = {e.id for e, v in kiosk.my_records(db, tenant.user_id, include_inactive=True)
+            if v == venue_id}
+    if not mine:
+        enforce_venue_access(venue_id)
     if not kiosk.load_settings(db, venue_id)["allow_self_clock"]:
         raise HTTPException(status_code=403, detail=(
             "Clock in and out on the venue's time clock — clocking in from a phone is "
             "switched off at this venue."))
-    user = db.get_user_by_id(tenant.user_id)
-    if employee_id not in kiosk.own_employee_ids(db, user, venue_id):
+    if employee_id not in mine:
         raise HTTPException(status_code=403, detail="You can only clock yourself in or out.")
     return {"source": "self", "device_id": None}
 
@@ -643,6 +648,8 @@ async def set_pin(body: SetPinRequest) -> dict:
     enforce_venue_manager(body.venue_id)
     db = get_db()
     emp = _employee_or_404(db, body.venue_id, body.employee_id)
+    if kiosk.weak_pin(body.pin):
+        raise HTTPException(status_code=422, detail=kiosk.WEAK_PIN_MESSAGE)
     db.set_timeclock_pin(body.venue_id, body.employee_id,
                          kiosk.hash_pin(body.venue_id, body.employee_id, body.pin))
     audit("timeclock.pin_set", body.venue_id, "employee", emp.id, employee=emp.name, by="manager")

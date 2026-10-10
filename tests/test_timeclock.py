@@ -108,7 +108,7 @@ def test_pin_protection():
 
     # Set a PIN
     r = c.post("/api/clock/pin", json={"venue_id": vid, "employee_id": "clk-emp-1",
-                                       "pin": "4321"}, headers=h)
+                                       "pin": "4826"}, headers=h)
     assert r.status_code == 200
 
     # Wrong PIN rejected
@@ -118,7 +118,7 @@ def test_pin_protection():
 
     # Correct PIN accepted and marked verified
     ok = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1",
-                                       "pin": "4321"}, headers=k)
+                                       "pin": "4826"}, headers=k)
     assert ok.status_code == 200 and ok.json()["pin_verified"] is True
 
 

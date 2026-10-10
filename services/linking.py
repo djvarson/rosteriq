@@ -135,12 +135,13 @@ def _staff_venue_ids(db, user) -> list:
     return list(held or [])
 
 
-def find_linked_employees(db, user) -> List[Tuple[object, str]]:
+def find_linked_employees(db, user, include_inactive: bool = False) -> List[Tuple[object, str]]:
     """Every (employee, venue_id) this login is linked to, primary venue
     first: the email match in each venue the user holds, dashboard or
     staff-only. Same scope rules as find_linked_employee (owners: every
     venue; demo identities: the demo venue only). Records a manager has set
-    inactive are left out unless that would leave nothing."""
+    inactive are left out unless that would leave nothing, or
+    ``include_inactive`` is set."""
     from rosteriq.services.demo import DEMO_VENUE_ID, is_demo_identity
     email = (getattr(user, "email", "") or "").strip().lower()
     if not email:
@@ -163,6 +164,8 @@ def find_linked_employees(db, user) -> List[Tuple[object, str]]:
             if _email_of(emp) == email:
                 out.append((emp, vid))
                 break
+    if include_inactive:
+        return out
     active = [(e, v) for e, v in out if getattr(e, "active", True)]
     return active or out
 
