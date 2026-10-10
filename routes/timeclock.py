@@ -131,8 +131,10 @@ def _flags(ts) -> list:
 
 
 def _employee_or_404(db, venue_id: str, employee_id: str):
+    """Any record at the venue, active or not: clock-in refuses a leaver, but
+    one deactivated mid-shift must still be able to clock out."""
     for emp in db.get_employees(venue_id) or []:
-        if getattr(emp, "id", None) == employee_id and getattr(emp, "active", True):
+        if getattr(emp, "id", None) == employee_id:
             return emp
     raise HTTPException(status_code=404, detail="Employee not found at this venue")
 
