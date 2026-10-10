@@ -563,6 +563,8 @@ class VenueConfig(BaseModel):
                             "requires_skill": bool(area.get(
                                 "requires_skill",
                                 any(w in name for w in ("duty manager", "manager", "supervisor"))))})
+            if area.get("follows_demand") is not None:
+                cleaned[-1]["follows_demand"] = bool(area["follows_demand"])
             seen.add(name)
         return cleaned
 

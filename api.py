@@ -2951,13 +2951,20 @@ async def generate_roster(req: GenerateRosterRequest):
             400, f"Could not produce a demand forecast for {req.venue_id} in week of {req.week_start}"
         )
 
+    # Approved leave and last week's roster (rest across the week boundary,
+    # recorded visa fortnight caps) go into the generator.
+    from rosteriq.services.current_roster import current_roster, supersede_week_drafts
+    leave_map = _approved_leave_map(req.venue_id)
+    prev_week_start = req.week_start - timedelta(days=7)
+    prev_roster = current_roster(_db, req.venue_id, prev_week_start)
     roster = generate_weekly_roster(
-        req.week_start, forecasts, employees, venue, req.covers_per_staff
+        req.week_start, forecasts, employees, venue, req.covers_per_staff,
+        approved_leave=leave_map,
+        prior_week_shifts=list(prev_roster.shifts) if prev_roster else None,
     )
 
     # Approved leave wins over the generator: drop any shift that lands on a
     # day the employee has approved off, and say so rather than hiding it.
-    leave_map = _approved_leave_map(req.venue_id)
     removed_for_leave = []
     if leave_map:
         kept = []
@@ -2979,15 +2986,13 @@ async def generate_roster(req: GenerateRosterRequest):
         budget_report = apply_budget_cap(
             roster, employees, venue.state, Decimal(str(req.weekly_budget)),
             min_staff_by_role=getattr(venue, "min_staff", None) or {},
+            venue=venue,
         )
 
     # Work-rights check against what the venue RECORDED from VEVO: this
     # week's roster plus the stored previous week vs each employee's
     # fortnight cap, and any expired/expiring visas among rostered staff.
     from rosteriq.services.visa import fortnight_cap_flags, visa_alerts
-    from rosteriq.services.current_roster import current_roster, supersede_week_drafts
-    prev_week_start = req.week_start - timedelta(days=7)
-    prev_roster = current_roster(_db, req.venue_id, prev_week_start)
     visa_flags = fortnight_cap_flags(roster, employees, prev_roster)
     rostered_ids = {str(sh.employee_id) for sh in roster.shifts}
     visa_expiry_alerts = [a for a in visa_alerts(employees)
