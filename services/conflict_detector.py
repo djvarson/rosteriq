@@ -34,7 +34,7 @@ from rosteriq.award_rules import (
     get_day_type, DayType,
 )
 from rosteriq.services.availability_rules import is_available
-from rosteriq.services.venue_areas import can_fill, min_staff_for, trading_window, venue_areas
+from rosteriq.services.venue_areas import can_fill, is_closed, min_staff_for, trading_window, venue_areas
 
 logger = logging.getLogger(__name__)
 
@@ -451,8 +451,12 @@ class ConflictDetector:
                 cur += timedelta(hours=1)
 
         recorded_days: Set[date] = set()
+        closed_days: Set[date] = set()
         for offset in range((roster.week_end - roster.week_start).days + 1):
             day = roster.week_start + timedelta(days=offset)
+            if is_closed(venue, day):
+                closed_days.add(day)
+                continue
             window = trading_window(venue, day)
             if window:
                 recorded_days.add(day)
@@ -462,12 +466,13 @@ class ConflictDetector:
         for fc in forecasts or []:
             if fc.venue_id != roster.venue_id or fc.predicted_covers <= 0:
                 continue
-            if roster.week_start <= fc.date <= roster.week_end and fc.date not in recorded_days:
+            if roster.week_start <= fc.date <= roster.week_end \
+                    and fc.date not in recorded_days and fc.date not in closed_days:
                 forecast_days.add(fc.date)
                 trading.setdefault((fc.date, fc.hour), fc.date)
         if areas:
             for day, (lo, hi) in span_by_day.items():
-                if day not in recorded_days and day not in forecast_days:
+                if day not in recorded_days and day not in forecast_days and day not in closed_days:
                     _add_span(day, lo, hi)
         cells = sorted(trading)
 

@@ -3,15 +3,16 @@ The hours a venue trades, as every demand reading uses them: the cold-start
 forecast, roster coverage and the morning briefing.
 
 Each weekday takes the first of:
-    recorded        VenueConfig.trading_hours (Settings → Areas & minimums)
+    recorded        VenueConfig.trading_hours (Settings → Areas & minimums),
+                    hours or {"closed": True}
     roster history  the venue's published or imported rosters: the earliest
                     start and latest end rostered on that weekday
     default         10:00 to midnight
 
-Outside trading hours there is no demand. A forecast's (date, hour) is clock
-time on that date, so a Friday that closes at 01:00 trades in Saturday's
-00:00 hour, and that hour belongs to Friday's trading day (and Friday's
-minimums).
+Outside trading hours there is no demand, so a closed day has none. A
+forecast's (date, hour) is clock time on that date, so a Friday that closes
+at 01:00 trades in Saturday's 00:00 hour, and that hour belongs to Friday's
+trading day (and Friday's minimums).
 """
 
 import logging
@@ -19,7 +20,7 @@ from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from typing import Optional
 
-from rosteriq.services.venue_areas import DAY_KEYS, day_key, trading_window
+from rosteriq.services.venue_areas import DAY_KEYS, day_key, is_closed, trading_window
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +68,18 @@ def inferred_trading_hours(db, venue_id: str, around: date) -> dict:
 
 
 def effective_trading_hours(venue, inferred: Optional[dict] = None) -> dict:
-    """All seven weekdays: recorded hours, else `inferred`, else the default,
-    each tagged with its source."""
+    """All seven weekdays: recorded hours or closed, else `inferred`, else
+    the default, each tagged with its source."""
     recorded = getattr(venue, "trading_hours", None) or {}
     out = {}
     for key in DAY_KEYS:
         rec = recorded.get(key) or {}
-        if rec.get("open") and rec.get("close"):
+        if rec.get("closed") is True:
+            out[key] = {"closed": True, "source": "recorded"}
+        elif rec.get("open") and rec.get("close"):
             out[key] = {"open": rec["open"], "close": rec["close"], "source": "recorded"}
+        elif inferred and (inferred.get(key) or {}).get("closed") is True:
+            out[key] = {"closed": True, "source": inferred[key].get("source") or "recorded"}
         elif inferred and key in inferred:
             out[key] = {"open": inferred[key]["open"], "close": inferred[key]["close"],
                         "source": "roster history"}
@@ -97,17 +102,22 @@ def _window(hours_map: dict, day: date):
     return trading_window(SimpleNamespace(trading_hours=hours_map or {}), day)
 
 
+def _closed(hours_map: dict, day: date) -> bool:
+    return is_closed(SimpleNamespace(trading_hours=hours_map or {}), day)
+
+
 def trading_day_of(hours_map: dict, day: date, hour: int) -> Optional[date]:
     """The trading day the clock hour (day, hour) belongs to: `day`, the day
     before (a close past midnight), or None when it is outside trading hours.
-    A day missing from hours_map is taken as trading all day."""
+    A day missing from hours_map is taken as trading all day; a closed one
+    trades none of its own hours."""
     cell = datetime.combine(day, time(hour))
     cell_end = cell + timedelta(hours=1)
     for d in (day, day - timedelta(days=1)):
         window = _window(hours_map, d)
         if window and window[0] < cell_end and cell < window[1]:
             return d
-    return day if _window(hours_map, day) is None else None
+    return day if _window(hours_map, day) is None and not _closed(hours_map, day) else None
 
 
 def in_trading_hours(hours_map: dict, day: date, hour: int) -> bool:

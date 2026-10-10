@@ -708,6 +708,8 @@ class _RosterBuilder:
 
     def _window(self, day):
         if self.venue is not None:
+            if _areas.is_closed(self.venue, day):
+                return None
             window = _areas.trading_window(self.venue, day)
             if window:
                 return window

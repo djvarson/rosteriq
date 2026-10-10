@@ -33,7 +33,7 @@ from rosteriq.models import Shift, ShiftStatus, normalise_area
 from rosteriq.services.clock import venue_now
 from rosteriq.services.current_roster import live_shifts
 from rosteriq.services.sos import area_choices, employment_type, is_salaried, shift_span, viewer_sections
-from rosteriq.services.venue_areas import area_names, find_area, min_staff_for, trading_window
+from rosteriq.services.venue_areas import area_names, find_area, is_closed, min_staff_for, trading_window
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +105,13 @@ def recorded_settings(venue, areas: List[str], day: date) -> dict:
         notes.append(f"No per-area labour target is recorded; using the venue's "
                      f"overall target of {target:g}%.")
     mins = min_staff_for(venue, day)
+    closed = is_closed(venue, day)
+    if closed:
+        notes.append(f"{day:%A} is recorded as a closed day, so no area minimums apply; "
+                     "never cutting the last person on.")
     if areas:
         for a in areas:
-            if not mins.get(a):
+            if not mins.get(a) and not closed:
                 notes.append(f"No minimum staffing is recorded for {a}; "
                              "never cutting the last person on.")
         skeleton = sum(mins.get(a, 0) for a in areas) or None

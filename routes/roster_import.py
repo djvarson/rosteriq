@@ -436,6 +436,9 @@ def _reconcile(paste: dict, existing: dict, emp_map: dict, state, venue_id: str)
             shifts=shifts, total_cost=None,
             created_at=roster.created_at if roster else datetime.utcnow(),
         )
+        # Saved as the stored week it replaces: Postgres deletes only ids the
+        # copy held when read, so the gone shifts go and one added since stays.
+        rebuilt._saved_shift_ids = frozenset(s.id for s in old)
         costable = [s for s in shifts if s.employee_id in emp_map]
         rebuilt.total_cost = calculate_roster_cost(
             rebuilt.model_copy(update={"shifts": costable}), emp_map, state)

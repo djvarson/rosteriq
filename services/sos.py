@@ -30,7 +30,7 @@ from typing import Iterable, List, Optional
 from rosteriq.models import normalise_area
 from rosteriq.services.availability_rules import is_available
 from rosteriq.services.current_roster import live_shifts, week_monday
-from rosteriq.services.venue_areas import can_fill, find_area, trading_window, venue_areas
+from rosteriq.services.venue_areas import can_fill, find_area, is_closed, trading_window, venue_areas
 from rosteriq.services.visa import cap_headroom
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,9 @@ def default_window(venue, now: datetime):
     fallback = (start, start + timedelta(hours=DEFAULT_CALL_IN_HOURS))
     if windows:
         return (*fallback, f"Trading has finished for today, so the call-in is taken as "
+                           f"{DEFAULT_CALL_IN_HOURS} hours from {start:%H:%M}.")
+    if is_closed(venue, now.date()):
+        return (*fallback, f"Today is recorded as a closed day, so the call-in is taken as "
                            f"{DEFAULT_CALL_IN_HOURS} hours from {start:%H:%M}.")
     return (*fallback, f"No trading hours are recorded for today, so the call-in is taken as "
                        f"{DEFAULT_CALL_IN_HOURS} hours from {start:%H:%M}.")

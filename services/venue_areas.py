@@ -16,8 +16,10 @@ VenueConfig.areas (set in Settings → Areas & minimums):
   * a venue with no areas falls back to min_staff ({area: count}, every day)
 
 VenueConfig.trading_hours:
-    {"mon": {"open": "10:00", "close": "00:00"}, ...}
+    {"mon": {"open": "10:00", "close": "00:00"}, "tue": {"closed": True}, ...}
   * close at or before open runs past midnight (Fri "11:00"-"01:00")
+  * {"closed": True} is a day the venue doesn't trade: no window, no demand,
+    no minimums (a previous night's close past midnight still runs into it)
   * a weekday that is absent, or no hours at all, means "not recorded": callers
     fall back to their own default rather than assuming the venue is closed
 """
@@ -85,7 +87,10 @@ def area_names(venue) -> list:
 
 
 def min_staff_for(venue, day) -> dict:
-    """{area: minimum} for that weekday (areas with 0 are left out)."""
+    """{area: minimum} for that weekday (areas with 0 are left out, and
+    every area on a closed day)."""
+    if is_closed(venue, day):
+        return {}
     key = day_key(day)
     return {a["name"]: a["min_by_day"][key] for a in venue_areas(venue) if a["min_by_day"].get(key)}
 
@@ -122,11 +127,18 @@ def _hhmm(value) -> Optional[time]:
         return None
 
 
+def is_closed(venue, day) -> bool:
+    """The venue recorded that weekday as a day it doesn't trade."""
+    hours = (getattr(venue, "trading_hours", None) or {}).get(day_key(day))
+    return isinstance(hours, dict) and hours.get("closed") is True
+
+
 def trading_window(venue, day: date) -> Optional[tuple]:
     """(open, close) as datetimes for the trading day starting on `day`, or
-    None when the venue hasn't recorded hours for that weekday."""
+    None when the venue hasn't recorded hours for that weekday or recorded
+    it closed (is_closed tells which)."""
     hours = (getattr(venue, "trading_hours", None) or {}).get(day_key(day))
-    if not hours:
+    if not hours or is_closed(venue, day):
         return None
     opens, closes = _hhmm(hours.get("open")), _hhmm(hours.get("close"))
     if opens is None or closes is None:
@@ -140,7 +152,9 @@ def trading_window(venue, day: date) -> Optional[tuple]:
 
 def trading_hours_of_day(venue, day: date) -> Optional[list]:
     """The clock hours (0-23, in order, possibly wrapping past midnight) the
-    venue trades on that day, or None when not recorded."""
+    venue trades on that day: [] on a closed day, None when not recorded."""
+    if is_closed(venue, day):
+        return []
     window = trading_window(venue, day)
     if not window:
         return None
