@@ -8,7 +8,8 @@ punch was auto-closed counts the shift as leave and says why; a salaried
 person's paid leave is shown as inside their salary; a correction that moves
 a shift into a pay run already prepared says to prepare it again; a rate
 change dated inside the shifts a run prices is noted; and the rostered run
-prices the worked part of a part-worked leave day.
+prices the worked part of a part-worked leave day, reckoned across the whole
+leave so a multi-day or straddling leave neither drops nor doubles hours.
 
 Time-dependent tests freeze the time clock's 'now' at a Perth wall time.
 """
@@ -490,3 +491,107 @@ def test_rostered_prep_prices_the_worked_part_of_a_part_worked_leave_day():
             "Fri 16 Oct to Sat 17 Oct, so the other 6.5h is priced from the roster "
             "(Fri 16 Oct 16:00-23:00)") in errors
     assert any(e.startswith("Sam Sportsbar: rostered Sat 17 Oct 16:00-23:00 not priced") for e in errors)
+
+
+def _record_leave(w, monkeypatch, emp, start, end, now):
+    """Record approved personal leave through the API at a Perth wall time,
+    hours left blank (so they default from the roster and the punches)."""
+    from rosteriq.services import leave_shifts
+    monkeypatch.setattr(leave_shifts, "venue_now", lambda *a, **k: now.replace(tzinfo=PERTH))
+    monkeypatch.setattr(leave_shifts, "_venue_now", lambda *a, **k: now)
+    r = w.c.post("/api/leave", json={"venue_id": w.vid, "employee_id": emp, "start_date": str(start),
+                                     "end_date": str(end), "leave_type": "personal"}, headers=w.mgr)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _prepare_rostered(w, monday):
+    r = w.c.post("/api/payroll/prepare", json={"venue_id": w.vid, "period_start": str(monday),
+                                               "period_end": str(monday + timedelta(days=6)),
+                                               "state": "wa"}, headers=w.mgr)
+    line = next(e for e in _batch(r)["employees"] if e["employee_id"] == w.jo)
+    leave = [(le["leave_type"], le["hours"]) for le in line["leave_entries"]]
+    notes = [e for e in r.json()["validation_errors"] if e.startswith("Jo Bar:")]
+    return _hours_by_type(line), leave, notes
+
+
+def test_rostered_prep_prices_the_worked_part_when_the_leave_left_later_shifts_open(clock, monkeypatch):
+    sat, sun = date(2026, 10, 17), date(2026, 10, 18)
+    w = _world()
+    _roster(w.vid, [("sh-sat", w.jo, sat, dtime(16), dtime(23), 30),
+                    ("sh-sun", w.jo, sun, dtime(16), dtime(23), 30)])
+    clock(_at(sat, 16))
+    assert _punch(w, w.jo).status_code == 200
+    clock(_at(sat, 18))
+    assert _punch(w, w.jo, "out").status_code == 200           # went home sick at 6
+    leave = _record_leave(w, monkeypatch, w.jo, sat, sun, _at(sat, 19))
+    assert leave["paid_hours"] == 11.0                          # 4.5h of Saturday + Sunday's 6.5h
+    assert [(o["date"], o["hours"]) for o in leave["opened_shifts"]] == [(str(sun), 6.5)]
+
+    hours, leave_lines, notes = _prepare_rostered(w, WEEK)
+    assert hours == {"saturday": "2.00"}
+    assert leave_lines == [("personal", "11.00")]
+    assert notes == [
+        "Jo Bar: approved personal/carer's leave holds 4.5h of the 6.5h rostered on Sat 17 Oct "
+        "(its other 6.5h is the shifts it left open), so the other 2h is priced from the roster "
+        "(Sat 17 Oct 16:00-18:00)"]
+
+
+@pytest.mark.parametrize("worked_saturday", [False, True])
+def test_rostered_prep_of_leave_across_two_pay_runs_neither_drops_nor_doubles_hours(
+        clock, monkeypatch, worked_saturday):
+    sat, sun, mon, tue = (date(2026, 10, 17), date(2026, 10, 18), date(2026, 10, 19),
+                          date(2026, 10, 20))
+    nxt = WEEK + timedelta(days=7)
+    w = _world()
+    _roster(w.vid, [("sh-sat", w.jo, sat, dtime(16), dtime(23), 30),
+                    ("sh-sun", w.jo, sun, dtime(10), dtime(14), 0)])
+    _roster(w.vid, [("sh-mon", w.jo, mon, dtime(16), dtime(23), 30)], week=nxt)
+    if worked_saturday:
+        clock(_at(sat, 16))
+        assert _punch(w, w.jo).status_code == 200
+        clock(_at(sat, 18))
+        assert _punch(w, w.jo, "out").status_code == 200
+    leave = _record_leave(w, monkeypatch, w.jo, sat, mon, _at(tue, 9))
+    assert leave["paid_hours"] == (15.0 if worked_saturday else 17.0)
+    assert leave["opened_shifts"] == []                         # every shift had started
+
+    first, first_leave, first_notes = _prepare_rostered(w, WEEK)
+    second, second_leave, second_notes = _prepare_rostered(w, nxt)
+    unpriced = "not priced — on approved personal/carer's leave that day (see the leave line)"
+    assert second == {} and second_notes == [f"Jo Bar: rostered Mon 19 Oct 16:00-23:00 {unpriced}"]
+    if worked_saturday:
+        assert first == {"saturday": "2.00"}
+        assert first_notes == [
+            f"Jo Bar: rostered Sun 18 Oct 10:00-14:00 {unpriced}",
+            "Jo Bar: approved personal/carer's leave holds 15h of the 17h rostered on "
+            "Sat 17 Oct to Mon 19 Oct, so the other 2h is priced from the roster (Sat 17 Oct 16:00-18:00)"]
+    else:
+        assert first == {}
+        assert first_notes == [f"Jo Bar: rostered Sat 17 Oct 16:00-23:00 {unpriced}",
+                               f"Jo Bar: rostered Sun 18 Oct 10:00-14:00 {unpriced}"]
+    leave_total = Decimal(first_leave[0][1]) + Decimal(second_leave[0][1])
+    assert leave_total == Decimal(str(leave["paid_hours"]))
+
+
+def test_rostered_prep_says_when_worked_time_before_leave_falls_in_the_next_pay_run():
+    sat, sun, mon = date(2026, 10, 17), date(2026, 10, 18), date(2026, 10, 19)
+    nxt = WEEK + timedelta(days=7)
+    w = _world()
+    _roster(w.vid, [("sh-sat", w.jo, sat, dtime(16), dtime(23), 30),
+                    ("sh-sun", w.jo, sun, dtime(10), dtime(14), 0)])
+    _roster(w.vid, [("sh-mon", w.jo, mon, dtime(16), dtime(23), 30)], week=nxt)
+    _leave(w.vid, w.jo, sat, mon, paid_hours=4.5)       # worked the weekend and 2h of Monday
+
+    first, _, first_notes = _prepare_rostered(w, WEEK)
+    second, _, second_notes = _prepare_rostered(w, nxt)
+    assert first == {"saturday": "6.50", "sunday": "4.00"}
+    assert first_notes == [
+        "Jo Bar: approved personal/carer's leave holds 4.5h of the 17h rostered on Sat 17 Oct to "
+        "Mon 19 Oct, so the other 12.5h is priced from the roster (Sat 17 Oct 16:00-23:00, "
+        "Sun 18 Oct 10:00-14:00; 2h of it in the run for the other dates)"]
+    assert sum(Decimal(h) for h in second.values()) == Decimal("2.00")
+    assert second_notes == [
+        "Jo Bar: approved personal/carer's leave holds 4.5h of the 17h rostered on Sat 17 Oct to "
+        "Mon 19 Oct, so the other 12.5h is priced from the roster (Mon 19 Oct 16:00-18:00; "
+        "10.5h of it in the run for the other dates)"]

@@ -514,9 +514,9 @@ class PayrollExporter:
                 leave loading or pay is calculated)
             rostered: shifts are the rostered plan, not worked time. A
                 person's shifts dated inside their approved paid leave are
-                then priced only for the rostered hours the leave line
-                doesn't hold, and noted. Worked time on such a day is
-                priced and noted.
+                then priced only for the rostered hours the leave doesn't
+                hold (reckoned across the whole leave), and noted. Worked
+                time on such a day is priced and noted.
 
         Salaried employees of the venue get one fixed salary line for the
         period, whether or not they have shifts (services/pay_basis.py),
@@ -555,6 +555,8 @@ class PayrollExporter:
                 shifts_by_emp[shift.employee_id] = []
             shifts_by_emp[shift.employee_id].append(shift)
         for (emp_id, _), (leave, held) in held_by_leave.items():
+            held += self._held_elsewhere(venue_id, emp_id, leave, on_leave.get(str(emp_id), []),
+                                         period_start, period_end)
             self._rostered_on_leave(batch, employees.get(emp_id), emp_id, leave, held,
                                     shifts_by_emp, period_start, period_end)
         for (emp_id, day), (leave, hours) in sorted(worked_on_leave.items()):
@@ -797,43 +799,71 @@ class PayrollExporter:
 
         return emp_payroll if emp_payroll.total_hours > 0 else None
 
+    def _held_elsewhere(self, venue_id, emp_id, leave, windows, period_start, period_end) -> list:
+        """The person's shifts in ``leave`` dated outside this period, from
+        each week's live roster, as the run for their own dates holds them."""
+        start, end = leave[0], leave[1]
+        if period_start <= start and end <= period_end:
+            return []
+        from rosteriq.services.current_roster import live_shifts
+        key = ("live_shifts", venue_id, start, end)
+        if key not in self._memo:
+            self._memo[key] = ([] if self.db is None else
+                               live_shifts(self.db, venue_id, start, end, staff=True))
+        return [s for s in self._memo[key]
+                if str(s.employee_id) == str(emp_id) and s.date is not None
+                and not period_start <= s.date <= period_end
+                and next((w for w in windows if w[0] <= s.date <= w[1]), None) is leave]
+
     def _rostered_on_leave(self, batch, emp, emp_id, leave, held, shifts_by_emp,
                            period_start, period_end) -> None:
-        """A person's rostered shifts inside one approved paid leave. The leave
-        line holds its recorded hours; rostered time beyond them (what they
-        worked before going on leave) is priced from the roster, earliest
-        first, so worked plus leave is what was rostered. A shift with nothing
-        left to price is noted as unpriced."""
-        from rosteriq.services.leave_shifts import leave_hours_in_period
+        """A person's rostered shifts inside one approved paid leave, across
+        the whole leave (``held``). Its recorded hours, less the shifts it
+        left open when approved (they left the person's roster), are the leave
+        on these shifts; the rest of them is what the person worked before
+        going on leave. That is priced from the roster, earliest first, so
+        worked plus leave is what was rostered. Only the parts dated in this
+        period are priced here; a shift here with nothing left to price is
+        noted as unpriced."""
         _start, _end, label, req = leave
         name = getattr(emp, "name", None) or emp_id
         held = sorted(held, key=lambda s: (s.date, s.start_time))
+        ids = {s.id for s in held}
         rostered = sum((Decimal(str(s.net_hours)) for s in held), Decimal("0"))
-        paid = leave_hours_in_period(req, period_start, period_end)
-        left = 0
-        if paid is not None and paid < rostered:
-            left = int(((rostered - paid) * 60).to_integral_value(rounding=ROUND_HALF_UP))
+        left_open = sum((Decimal(str(o.get("hours") or 0)) for o in req.get("opened_shifts") or []
+                         if not ids & set(o.get("shift_ids") or [o.get("shift_id")])), Decimal("0"))
+        paid = req.get("paid_hours")
+        on_held = None if paid is None else max(Decimal("0"), Decimal(str(paid)) - left_open)
+        worked = rostered - on_held if on_held is not None and on_held < rostered else Decimal("0")
+        left = elsewhere = int((worked * 60).to_integral_value(rounding=ROUND_HALF_UP))
         priced = []
         for s in held:
-            if left <= 0:
+            minutes = int(round(s.net_hours * 60))
+            take = min(left, minutes)
+            left -= take
+            if not period_start <= s.date <= period_end:
+                continue
+            if take <= 0:
                 batch.notes.append(
                     f"{name}: rostered {s.date:%a %d %b} {s.start_time:%H:%M}-{s.end_time:%H:%M} "
                     f"not priced — on approved {label} that day (see the leave line)")
                 continue
-            minutes = int(round(s.net_hours * 60))
             part = s
-            if left < minutes:
-                end = datetime.combine(s.date, s.start_time) + timedelta(minutes=left)
+            if take < minutes:
+                end = datetime.combine(s.date, s.start_time) + timedelta(minutes=take)
                 part = s.model_copy(update={"end_time": end.time(), "break_minutes": 0})
             shifts_by_emp.setdefault(s.employee_id, []).append(part)
             priced.append(part)
-            left -= min(left, minutes)
+            elsewhere -= take
         if priced:
             batch.notes.append(
-                f"{name}: approved {label} holds {_hours(paid)} of the {_hours(rostered)} rostered on "
-                f"{_days(held[0].date, held[-1].date)}, so the other {_hours(rostered - paid)} is "
-                "priced from the roster ("
+                f"{name}: approved {label} holds {_hours(on_held)} of the {_hours(rostered)} rostered on "
+                f"{_days(held[0].date, held[-1].date)}"
+                + (f" (its other {_hours(left_open)} is the shifts it left open)" if left_open else "")
+                + f", so the other {_hours(worked)} is priced from the roster ("
                 + ", ".join(f"{p.date:%a %d %b} {p.start_time:%H:%M}-{p.end_time:%H:%M}" for p in priced)
+                + (f"; {_hours(Decimal(elsewhere) / 60)} of it in the run for the other dates"
+                   if elsewhere > 0 else "")
                 + ")")
 
     def _salaried_line(
