@@ -335,9 +335,11 @@ def test_payroll_prep_shows_approved_paid_leave_hours_as_their_own_line():
 
 
 def _approved_punch(c, mgr, vid, emp_id, start=dtime(9), end=dtime(17, 30), brk=30):
-    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": emp_id}, headers=mgr)
+    from rosteriq.tests.kiosk_support import kiosk_headers
+    kiosk = kiosk_headers(c, mgr, vid, "Test clock")
+    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": emp_id}, headers=kiosk)
     ts_id = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": emp_id},
-                   headers=mgr).json()["timesheet_id"]
+                   headers=kiosk).json()["timesheet_id"]
     today = date.today()
     r = c.post(f"/api/clock/timesheets/{ts_id}/review", json={
         "venue_id": vid, "approve": True,
@@ -667,8 +669,9 @@ def test_pg_stores_open_shifts_leave_fields_and_cover_origin():
                     week_end=date(2026, 10, 18), created_at=datetime(2026, 1, 1),
                     shifts=[_shift("s1", "", date(2026, 10, 17), dtime(16), dtime(23), "Duty Manager")])
     PostgresStore.save_roster(pg, roster)
-    insert = _stmt(pg, "INSERT INTO shifts")[0]
-    assert insert[1][2] is None            # "" -> NULL, not a dangling FK
+    sql, params = next((s, p) for s, p in pg.log if "INSERT INTO shifts" in s)
+    ids_at = params.index(["s1"])          # the shift columns go in as arrays, ids first
+    assert params[ids_at + 1] == [None]    # "" -> NULL, not a dangling FK
     row = {"id": "s1", "employee_id": None, "shift_date": date(2026, 10, 17),
            "start_time": dtime(16), "end_time": dtime(23), "break_minutes": 0,
            "status": "scheduled", "role": "Duty Manager", "cost": None, "penalty_multiplier": 1}

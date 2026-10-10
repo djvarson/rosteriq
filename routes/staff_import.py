@@ -22,11 +22,12 @@ Route:
         { venue_id, content, update_existing?: bool, location?: str }
 """
 
+import asyncio
 import logging
 import re
 import uuid
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Optional
 
@@ -37,8 +38,10 @@ from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.models import Employee, EmploymentType, AwardLevel, State
 from rosteriq.services.import_parsing import (
-    LOCATION_KEYS, LocationChoiceNeeded, build_name, clean_header, header_matches,
-    location_matches, map_columns, norm_header, norm_name, read_rows, resolve_location,
+    DAY_FIRST, LOCATION_KEYS, MONTH_FIRST, LocationChoiceNeeded, MixedDateOrder,
+    PasteUnreadable, build_name, cell_date, clean_header, date_order, header_matches,
+    location_choice_response, location_matches, map_columns, norm_header, norm_name,
+    read_rows, resolve_location, unclosed_quote,
 )
 from rosteriq.services.sms import format_au_number
 
@@ -61,6 +64,10 @@ class StaffImportBody(BaseModel):
 
 DEFAULT_RATE = Decimal("31.50")      # award-review placeholder, flagged wherever used
 _HOURLY_CEILING = Decimal("150")     # a bare figure above this is not an hourly rate
+# An hourly figure outside this band is flagged for review — a sanity range,
+# not an award value.
+_PLAUSIBLE_HOURLY = (Decimal("5"), Decimal("100"))
+_RATE_CELL_MAX = 100                 # a longer cell is not a pay figure
 _WEEKS_PER_YEAR = Decimal("52")
 _HOURS_PER_WEEK = Decimal("38")
 _CENT = Decimal("0.01")
@@ -104,35 +111,40 @@ _HEADER_HINT_KEYS = (_NAME_KEYS | _FIRST_KEYS | _LAST_KEYS | _EMAIL_KEYS | _RATE
                      | _POSITION_KEYS | _SKILL_KEYS | _PHONE_KEYS)
 
 
-def _clean_date(v: str):
-    """'01/03/2027' / '2027-03-01' / '' -> date or None. Ambiguous or
-    unparseable dates import as None rather than guessing — a wrong visa
-    expiry is worse than a blank one."""
-    v = str(v or "").strip()
-    if not v:
-        return None
-    from datetime import date as _date
-    m = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", v)
-    if m:
-        try:
-            return _date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-        except ValueError:
-            return None
-    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", v)
-    if m:
-        d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        # AU exports write day/month/year; a "month" over 12 means the
-        # columns were the other way round — refuse rather than guess.
-        try:
-            return _date(y, mth, d)
-        except ValueError:
-            return None
-    return None
+def _shown(raw: str) -> str:
+    raw = str(raw or "").strip()
+    return raw if len(raw) <= 40 else raw[:40] + "…"
+
+
+_EXCEL_SERIAL_RE = re.compile(r"\d{5}(?:\.0+)?")
+_EXCEL_EPOCH = date(1899, 12, 30)
+
+
+def _visa_expiry(v: str, order: Optional[str]):
+    """-> (date | None, note | None). Reads the roster importer's date formats
+    (a time after the date ignored) and Excel day numbers, with the column's
+    day/month order (None when the column mixes both). Anything else stays
+    blank and is flagged — a wrong visa expiry is worse than a blank one."""
+    raw = str(v or "").strip()
+    if not raw:
+        return None, None
+    if _EXCEL_SERIAL_RE.fullmatch(raw) and 20000 <= int(float(raw)) <= 80000:
+        return _EXCEL_EPOCH + timedelta(days=int(float(raw))), None
+    d = cell_date(raw, order or DAY_FIRST)
+    if order is None and d != cell_date(raw, MONTH_FIRST):
+        return None, (f"visa expiry '{_shown(raw)}' couldn't be read — this column has both "
+                      "day/month and month/day dates; left blank, record it by hand")
+    if d is None:
+        return None, f"visa expiry '{_shown(raw)}' couldn't be read — left blank, record it by hand"
+    return d, None
 
 
 # --- Pay rates --------------------------------------------------------------
 
-_AMOUNT = r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+,\d{1,2}(?!\d)|\d+(?:\.\d+)?)"
+# '1.250,00' (dotted thousands, decimal comma) | '1,250.00' | '31,58' | '31.58',
+# then an optional 'k' for thousands ('$78k').
+_AMOUNT = (r"(\d{1,3}(?:\.\d{3})+,\d{1,2}(?!\d)|\d{1,3}(?:,\d{3})+(?:\.\d+)?"
+           r"|\d+,\d{1,2}(?!\d)|\d+(?:\.\d+)?)(\s*[kK](?![A-Za-z]))?")
 _DOLLAR_RE = re.compile(r"\$\s*" + _AMOUNT)
 _NUMBER_RE = re.compile(_AMOUNT)
 _ANNUAL_RE = re.compile(r"/\s*(?:yr|year|annum|a)\b|\bp\.?\s?a\b\.?|per\s+(?:annum|year)"
@@ -141,16 +153,21 @@ _WEEKLY_RE = re.compile(r"/\s*(?:wk|week|w)\b|\bp\.?\s?w\b\.?|per\s+week|\bweekl
 _HOURLY_RE = re.compile(r"/\s*(?:hr|hour|h)\b|\bp\.?\s?h\b\.?|per\s+hour|\bhourly|\ban\s+hour")
 
 
-def _amount(token: str) -> Optional[Decimal]:
-    if re.fullmatch(r"\d+,\d{1,2}", token):     # '31,58' — a decimal comma
+def _amount(m) -> Optional[Decimal]:
+    token = m.group(1)
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+,\d{1,2}", token):      # '1.250,00'
+        token = token.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d+,\d{1,2}", token):                     # '31,58' — a decimal comma
         token = token.replace(",", ".")
     try:
-        return Decimal(token.replace(",", ""))
+        value = Decimal(token.replace(",", ""))
     except (InvalidOperation, ValueError):
         return None
+    return value * 1000 if m.group(2) else value
 
 
 _LEVEL_PREFIX_RE = re.compile(r"(?:\blevel|\blvl|\bgrade|\bl|\bg)\s*[-.:#]?\s*$", re.IGNORECASE)
+_LEVEL_PREFIX_WINDOW = 16
 
 
 def _first_amount(text: str) -> Optional[Decimal]:
@@ -159,15 +176,19 @@ def _first_amount(text: str) -> Optional[Decimal]:
     figure with cents, else the first figure — never a classification number
     ('L2 28' is 28)."""
     s = str(text or "")
+    if len(s) > _RATE_CELL_MAX:
+        return None
     m = _DOLLAR_RE.search(s)
     if m:
-        return _amount(m.group(1))
-    tokens = [m.group(1) for m in _NUMBER_RE.finditer(s)
-              if not _LEVEL_PREFIX_RE.search(s[:m.start()])]
-    if not tokens:
-        return None
-    with_cents = [t for t in tokens if "." in t or re.fullmatch(r"\d+,\d{1,2}", t)]
-    return _amount((with_cents or tokens)[0])
+        return _amount(m)
+    first = None
+    for m in _NUMBER_RE.finditer(s):
+        if _LEVEL_PREFIX_RE.search(s, max(0, m.start() - _LEVEL_PREFIX_WINDOW), m.start()):
+            continue
+        if "." in m.group(1) or re.fullmatch(r"\d+,\d{1,2}", m.group(1)):
+            return _amount(m)
+        first = first or m
+    return _amount(first) if first else None
 
 
 def _unit_of(text: str) -> Optional[str]:
@@ -189,19 +210,28 @@ def _parse_rate(cell: str, header_unit: Optional[str], unit_hint: str = ""):
     """-> (rate | None, flag | None, note | None, weekly_salary | None).
 
     None rate means 'nothing usable' and the caller applies the default with
-    the returned flag. A yearly or weekly figure is a salary: flag 'salaried'
+    the returned flag. A rate flagged rate_unclear is the figure as read,
+    kept for review. A yearly or weekly figure is a salary: flag 'salaried'
     with the weekly salary, and the hourly planning equivalent as the rate. An explicit unit in the cell (or a unit column) wins
     over the header's; a header unit only applies to figures too big to be
-    hourly, so a mixed 'Salary' column of '$78,000' and '31.50' reads both."""
+    hourly, so a mixed 'Salary' column of '$78,000' and '31.50' reads both,
+    the small one flagged."""
     raw = str(cell or "").strip()
     if not raw:
         return None, "rate_defaulted", None, None
+    if len(raw) > _RATE_CELL_MAX:
+        return None, "rate_unclear", (f"pay rate cell is {len(raw):,} characters long — "
+                                      "not a figure we can read"), None
     value = _first_amount(raw)
     if value is None or value <= 0:
         return None, "rate_unclear", f"pay rate '{raw}' couldn't be read", None
     unit = _unit_of(raw) or _unit_of(unit_hint)
-    if unit is None and header_unit and value > _HOURLY_CEILING:
-        unit = header_unit
+    misplaced = None
+    if unit is None and header_unit:
+        if value > _HOURLY_CEILING:
+            unit = header_unit
+        else:
+            misplaced = header_unit
     if unit == "year":
         weekly = (value / _WEEKS_PER_YEAR).quantize(_CENT, rounding=ROUND_HALF_UP)
         hourly = (value / _WEEKS_PER_YEAR / _HOURS_PER_WEEK).quantize(_CENT, rounding=ROUND_HALF_UP)
@@ -215,13 +245,27 @@ def _parse_rate(cell: str, header_unit: Optional[str], unit_hint: str = ""):
             return None, "rate_unclear", (
                 f"pay rate '{raw}' is over ${_HOURLY_CEILING}/h with no unit — it looks "
                 f"like a salary or weekly figure"), None
-        return value.quantize(_CENT, rounding=ROUND_HALF_UP), None, None, None
+        hourly = value.quantize(_CENT, rounding=ROUND_HALF_UP)
+        if misplaced:
+            return hourly, "rate_unclear", (
+                f"'{raw}' is in a {misplaced}ly pay column but is too small to be a "
+                f"{misplaced}'s pay — read as {_money(hourly)}/h; check it"), None
+        return _plausible(raw, hourly, None, None)
     if hourly < Decimal("1"):
         return None, "rate_unclear", f"pay rate '{raw}' couldn't be read as {unit}ly pay", None
-    return hourly, "salaried", (
+    return _plausible(raw, hourly, "salaried", (
         f"'{raw}' read as {_money(value)} {how}: set up as salaried, so labour costs use "
         f"the salary with no penalty rates or overtime; {_money(hourly)}/h (÷ 38 hours) is "
-        f"kept as their planning rate — confirm with your payroll advisor"), weekly
+        f"kept as their planning rate — confirm with your payroll advisor"), weekly)
+
+
+def _plausible(raw: str, hourly: Decimal, flag, note, weekly=None):
+    low, high = _PLAUSIBLE_HOURLY
+    if low <= hourly <= high:
+        return hourly, flag, note, weekly
+    said = note or f"'{raw}' read as {_money(hourly)}/h"
+    return hourly, "rate_unclear", (f"{said} — outside the usual {_money(low)} to "
+                                    f"{_money(high)}/h; check it"), None
 
 
 def _header_unit(header: str) -> Optional[str]:
@@ -258,6 +302,8 @@ def _award_level(v: str):
     s = str(v or "").strip().lower()
     if not s:
         return None, "level_not_recorded"
+    if len(s) > 60:
+        return None, "level_unclear"
     if "intro" in s:
         return AwardLevel.level_1, "level_interpreted"
     m = _LEVEL_RE.search(s) or re.fullmatch(r"([1-6])", s)
@@ -316,6 +362,156 @@ _NOTES = {
 }
 
 
+def _read_staff_paste(content: str, venue_name: str, location: Optional[str]) -> dict:
+    """Every row of the paste read: name, email, pay, type, level, phone,
+    areas and visa, plus the skips the file alone decides. Pure CPU, run off
+    the event loop; nothing here touches the database. Raises HTTPException
+    (422) or LocationChoiceNeeded."""
+    try:
+        rows = read_rows(content)
+    except PasteUnreadable as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if not rows:
+        raise HTTPException(status_code=422, detail="No rows found")
+
+    # Header detection + column mapping
+    header = rows[0][1]
+    has_header = any(header_matches(norm_header(h), _HEADER_HINT_KEYS) for h in header)
+    if has_header:
+        bad_quote = unclosed_quote(*rows[0], len(header))
+        if bad_quote:
+            raise HTTPException(status_code=422, detail=f"Couldn't read the header row: {bad_quote}")
+        col, column_map, unmapped = map_columns(header, _FIELDS, multi=_MULTI)
+        data_rows = rows[1:]
+    else:
+        col = {f: ([] if f in _MULTI else None) for f, _ in _FIELDS}
+        column_map, unmapped = {}, []
+        data_rows = rows  # no header — infer per row below
+    rate_col = col["rate"] if col["rate"] is not None else col["salary"]
+    rate_unit_h = _header_unit(header[col["rate"]]) if col["rate"] is not None else None
+    salary_unit_h = _header_unit(header[col["salary"]]) if col["salary"] is not None else None
+    no_name_cols = col["name"] is None and col["first_name"] is None and col["last_name"] is None
+
+    def get(cells, field):
+        j = col[field]
+        return cells[j] if j is not None and j < len(cells) else ""
+
+    def get_all(cells, field):
+        return [cells[j] for j in col[field] if j < len(cells)]
+
+    def name_and_email(cells):
+        name = build_name(get(cells, "name"), get(cells, "first_name"), get(cells, "last_name"))
+        email_cell = get(cells, "email")
+        if no_name_cols:
+            non_email = [c for c in cells if "@" not in c]
+            name = name or (non_email[0] if non_email else (cells[0] if cells else ""))
+            email_cell = email_cell or next((c for c in cells if "@" in c), "")
+        return re.sub(r"\s+", " ", name).strip(), email_cell
+
+    data = [(line, [c.strip() for c in row]) for line, row in data_rows]
+
+    # Several locations in one export: keep only this venue's rows
+    location_info, kept_location = None, None
+    if col["location"] is not None:
+        active, kept_location, _ = resolve_location(
+            [get(cells, "location") for _, cells in data], venue_name, location)
+        if active:
+            location_info = {"column": clean_header(header[col["location"]]),
+                             "kept": kept_location, "skipped_other": 0}
+
+    def ours(cells):
+        return not kept_location or location_matches(get(cells, "location"), kept_location)
+
+    # An email on rows for different people belongs to nobody in particular.
+    # The same name and email on several rows (one row per area) is one
+    # person, with the areas of every row.
+    names_by_email, areas_by_email = {}, {}
+    for line, cells in data:
+        if unclosed_quote(line, cells, len(header)) or not ours(cells):
+            continue
+        name, email_cell = name_and_email(cells)
+        email = _email(email_cell)
+        if not (name and email):
+            continue
+        names_by_email.setdefault(email, set()).add(norm_name(name))
+        trained, positions = areas_by_email.setdefault(email, ([], []))
+        trained += [s for s in _skills(get_all(cells, "skills")) if s not in trained]
+        positions += [s for s in _skills(get_all(cells, "position")) if s not in positions]
+
+    visa_order = DAY_FIRST
+    if col["visa_expiry"] is not None:
+        try:
+            visa_order = date_order((line, get(cells, "visa_expiry")) for line, cells in data)
+        except MixedDateOrder:
+            visa_order = None
+
+    out, first_line = [], {}
+    for line, cells in data:
+        bad_quote = unclosed_quote(line, cells, len(header))
+        if bad_quote:
+            out.append({"line": line, "name": name_and_email(cells)[0], "email": None,
+                        "skip": bad_quote})
+            continue
+        if not ours(cells):
+            out.append({"line": line, "email": _email(get(cells, "email")),
+                        "name": build_name(get(cells, "name"), get(cells, "first_name"),
+                                           get(cells, "last_name")),
+                        "skip": f"other location: {get(cells, 'location')}"})
+            location_info["skipped_other"] += 1
+            continue
+
+        name, email_cell = name_and_email(cells)
+        if get(cells, "rate"):
+            rate_cell, cell_unit = get(cells, "rate"), rate_unit_h
+        else:
+            rate_cell, cell_unit = get(cells, "salary"), salary_unit_h
+        if no_name_cols and rate_col is None:
+            rate_cell = rate_cell or next((c for c in cells[1:] if _first_amount(c)), "")
+
+        if not name or name.lower() in {"name", "employee", "staff"}:
+            out.append({"line": line, "name": name, "email": None, "skip": "no name"})
+            continue
+
+        email = _email(email_cell)
+        shared = bool(email) and len(names_by_email.get(email, ())) > 1
+        if email and not shared and email in first_line:
+            out.append({"line": line, "name": name, "email": email,
+                        "skip": f"same person as line {first_line[email]} — one record, with "
+                                "the areas from every row"})
+            continue
+        email_flags = []
+        if email_cell.strip() and not email:
+            email_flags.append(("email_invalid", f"'{_shown(email_cell)}' isn't an email — not "
+                                                 "imported; their join code will add their own"))
+        elif shared:
+            email_flags.append(("email_shared", f"{email} is on rows for {len(names_by_email[email])} "
+                                                "different people — imported without it; their "
+                                                "join code will add their own"))
+            email = None
+        if email:
+            first_line[email] = line
+
+        if rate_col is None and has_header:
+            rate = (None, "rate_defaulted", f"no pay-rate column we recognise — set at "
+                                            f"{_money(DEFAULT_RATE)}/h; enter the rate they're paid", None)
+        else:
+            rate = _parse_rate(rate_cell, cell_unit, get(cells, "rate_unit"))
+        if email in areas_by_email:
+            trained, positions = areas_by_email[email]
+        else:
+            trained, positions = _skills(get_all(cells, "skills")), _skills(get_all(cells, "position"))
+        out.append({
+            "line": line, "name": name, "email": email, "email_flags": email_flags,
+            "rate": rate, "rate_cell": rate_cell, "emp_type": _emp_type(get(cells, "type")),
+            "level": _award_level(get(cells, "award_level")), "level_cell": get(cells, "award_level"),
+            "phone": _phone(get(cells, "phone")), "phone_cell": get(cells, "phone"),
+            "trained": trained, "skills": trained + [p for p in positions if p not in trained],
+            "positions": positions, "visa": get(cells, "visa") or None,
+            "visa_expiry": _visa_expiry(get(cells, "visa_expiry"), visa_order),
+        })
+    return {"rows": out, "column_map": column_map, "unmapped": unmapped, "location": location_info}
+
+
 @router.post("/import-staff")
 async def import_staff(body: StaffImportBody) -> dict:
     enforce_venue_manager(body.venue_id)
@@ -327,48 +523,13 @@ async def import_staff(body: StaffImportBody) -> dict:
 
     if not body.content.strip():
         raise HTTPException(status_code=422, detail="Nothing to import")
-    rows = read_rows(body.content)
-    if not rows:
-        raise HTTPException(status_code=422, detail="No rows found")
-
-    # Header detection + column mapping
-    header = rows[0][1]
-    has_header = any(header_matches(norm_header(h), _HEADER_HINT_KEYS) for h in header)
-    if has_header:
-        col, column_map, unmapped = map_columns(header, _FIELDS, multi=_MULTI)
-        data_rows = rows[1:]
-    else:
-        col = {f: ([] if f in _MULTI else None) for f, _ in _FIELDS}
-        column_map, unmapped = {}, []
-        data_rows = rows  # no header — infer per row below
-    rate_col = col["rate"] if col["rate"] is not None else col["salary"]
-    rate_unit_h = _header_unit(header[col["rate"]]) if col["rate"] is not None else None
-    salary_unit_h = _header_unit(header[col["salary"]]) if col["salary"] is not None else None
-
-    def get(cells, field):
-        j = col[field]
-        return cells[j] if j is not None and j < len(cells) else ""
-
-    def get_all(cells, field):
-        return [cells[j] for j in col[field] if j < len(cells)]
-
-    data = [(line, [c.strip() for c in row]) for line, row in data_rows]
-
-    # Several locations in one export: keep only this venue's rows
-    location_info, kept_location = None, None
-    if col["location"] is not None:
-        try:
-            active, kept_location, _ = resolve_location(
-                [get(cells, "location") for _, cells in data],
-                getattr(venue, "name", "") or "", body.location)
-        except LocationChoiceNeeded as e:
-            raise HTTPException(status_code=422, detail=str(e))
-        if active:
-            location_info = {"column": clean_header(header[col["location"]]),
-                             "kept": kept_location, "skipped_other": 0}
-
-    # An email on several rows of one file belongs to nobody in particular
-    email_counts = Counter(e for e in (_email(get(cells, "email")) for _, cells in data) if e)
+    # Reading runs in a worker thread; every database call stays on the
+    # event loop, which PostgresStore's one shared connection needs.
+    try:
+        paste = await asyncio.to_thread(_read_staff_paste, body.content,
+                                        getattr(venue, "name", "") or "", body.location)
+    except LocationChoiceNeeded as e:
+        return location_choice_response(e)
 
     # Existing staff AT THIS VENUE (dedupe by email or name, case-insensitive)
     existing = db.get_employees(body.venue_id) or []
@@ -381,36 +542,12 @@ async def import_staff(body: StaffImportBody) -> dict:
 
     created, skipped, updated, report = [], [], [], []
     now = datetime.utcnow()
-    for line, cells in data:
-        loc_cell = get(cells, "location")
-        if kept_location and not location_matches(loc_cell, kept_location):
-            nm = build_name(get(cells, "name"), get(cells, "first_name"), get(cells, "last_name"))
-            reason = f"other location: {loc_cell}"
-            skipped.append({"row": line, "name": nm, "reason": reason})
-            report.append({"line": line, "name": nm, "email": _email(get(cells, "email")),
-                           "status": "skipped", "reason": reason, "flags": []})
-            location_info["skipped_other"] += 1
-            continue
-
-        name = build_name(get(cells, "name"), get(cells, "first_name"), get(cells, "last_name"))
-        email_cell = get(cells, "email")
-        if get(cells, "rate"):
-            rate_cell, cell_unit = get(cells, "rate"), rate_unit_h
-        else:
-            rate_cell, cell_unit = get(cells, "salary"), salary_unit_h
-
-        if col["name"] is None and col["first_name"] is None and col["last_name"] is None:
-            non_email = [c for c in cells if "@" not in c]
-            name = name or (non_email[0] if non_email else (cells[0] if cells else ""))
-            email_cell = email_cell or next((c for c in cells if "@" in c), "")
-            if rate_col is None:
-                rate_cell = rate_cell or next((c for c in cells[1:] if _first_amount(c)), "")
-
-        name = re.sub(r"\s+", " ", name).strip()
-        if not name or name.lower() in {"name", "employee", "staff"}:
-            skipped.append({"row": line, "reason": "no name"})
-            report.append({"line": line, "name": name, "email": None, "status": "skipped",
-                           "reason": "no name", "flags": []})
+    for row in paste["rows"]:
+        line, name, email = row["line"], row["name"], row["email"]
+        if row.get("skip"):
+            skipped.append({"row": line, "name": name, "reason": row["skip"]})
+            report.append({"line": line, "name": name, "email": email, "status": "skipped",
+                           "reason": row["skip"], "flags": []})
             continue
 
         flags, notes = [], []
@@ -419,26 +556,13 @@ async def import_staff(body: StaffImportBody) -> dict:
             flags.append(code)
             notes.append(note or _NOTES.get(code, code))
 
-        email = _email(email_cell)
-        if email_cell.strip() and not email:
-            flag("email_invalid", f"'{email_cell.strip()}' isn't an email — not imported; "
-                                  "their join code will add their own")
-        elif email and email_counts[email] > 1:
-            flag("email_shared", f"{email} is on {email_counts[email]} rows — imported without "
-                                 "it; their join code will add their own")
-            email = None
-
-        weekly = None
-        if rate_col is None and has_header:
-            rate, rate_flag, rate_note = None, "rate_defaulted", (
-                f"no pay-rate column we recognise — set at {_money(DEFAULT_RATE)}/h; "
-                "enter the rate they're paid")
-        else:
-            rate, rate_flag, rate_note, weekly = _parse_rate(rate_cell, cell_unit, get(cells, "rate_unit"))
-        emp_type = _emp_type(get(cells, "type"))
-        level, level_flag = _award_level(get(cells, "award_level"))
-        phone, phone_flag = _phone(get(cells, "phone"))
-        skills = _skills(get_all(cells, "skills") + get_all(cells, "position"))
+        for code, note in row["email_flags"]:
+            flag(code, note)
+        rate, rate_flag, rate_note, weekly = row["rate"]
+        rate_cell, emp_type = row["rate_cell"], row["emp_type"]
+        level, level_flag = row["level"]
+        phone, phone_flag = row["phone"]
+        trained, positions, skills = row["trained"], row["positions"], row["skills"]
 
         match = by_email.get(email) if email else None
         if match is not None:
@@ -451,7 +575,8 @@ async def import_staff(body: StaffImportBody) -> dict:
             changes = {}
             if name != match.name:
                 changes["name"] = ("name", name)
-            if rate is not None and Decimal(str(match.hourly_base_rate)) != rate:
+            if (rate is not None and rate_flag != "rate_unclear"
+                    and Decimal(str(match.hourly_base_rate)) != rate):
                 changes["rate"] = ("hourly_base_rate", rate)
             if weekly is not None:
                 if getattr(match, "pay_basis", "hourly") != "salaried":
@@ -464,18 +589,24 @@ async def import_staff(body: StaffImportBody) -> dict:
                 changes["level"] = ("award_level", level)
             if phone and phone != (match.phone or None):
                 changes["phone"] = ("phone", phone)
-            if skills and skills != list(match.skills or []):
-                changes["skills"] = ("skills", skills)
+            # A training column states every area they're trained in; a
+            # position or department alone only adds to what's recorded.
+            current = list(match.skills or [])
+            new_skills = skills if trained else current + [p for p in positions if p not in current]
+            removed = [s for s in current if s not in new_skills]
+            if new_skills != current:
+                changes["skills"] = ("skills", new_skills)
             if rate_flag == "salaried" and {"rate", "pay_basis", "salary"} & set(changes):
                 flag("salaried", rate_note)
             elif rate_flag == "rate_unclear":
                 flag("rate_unclear", f"{rate_note} — their current rate was kept")
             if level_flag in ("level_interpreted", "level_unclear"):
-                flag(level_flag, _level_note(level_flag, get(cells, "award_level"),
-                                             updating=True))
+                flag(level_flag, _level_note(level_flag, row["level_cell"], updating=True))
             if phone_flag:
-                flag(phone_flag, f"'{get(cells, 'phone')}' isn't a phone number we can read "
+                flag(phone_flag, f"'{_shown(row['phone_cell'])}' isn't a phone number we can read "
                                  "— their number wasn't changed")
+            if removed:
+                flag("skills_removed", f"areas not in this file were removed: {', '.join(removed)}")
             if not changes:
                 skipped.append({"row": line, "name": name, "reason": "already up to date"})
                 report.append({"line": line, "name": name, "email": email, "status": "skipped",
@@ -526,9 +657,12 @@ async def import_staff(body: StaffImportBody) -> dict:
         if emp_type is None:
             flag("type_defaulted")
         if level_flag:
-            flag(level_flag, _level_note(level_flag, get(cells, "award_level")))
+            flag(level_flag, _level_note(level_flag, row["level_cell"]))
         if phone_flag:
-            flag(phone_flag, f"'{get(cells, 'phone')}' isn't a phone number we can read — not imported")
+            flag(phone_flag, f"'{_shown(row['phone_cell'])}' isn't a phone number we can read — not imported")
+        visa_expiry, visa_note = row["visa_expiry"]
+        if visa_note:
+            flag("visa_expiry_unreadable", visa_note)
 
         try:
             emp = Employee(
@@ -542,8 +676,8 @@ async def import_staff(body: StaffImportBody) -> dict:
                 phone=phone,
                 email=email,
                 skills=skills,
-                visa_status=(get(cells, "visa") or None),
-                visa_expiry=_clean_date(get(cells, "visa_expiry")),
+                visa_status=row["visa"],
+                visa_expiry=visa_expiry,
                 pay_basis="salaried" if weekly is not None else "hourly",
                 weekly_salary=weekly,
                 created_at=now, updated_at=now,
@@ -587,9 +721,9 @@ async def import_staff(body: StaffImportBody) -> dict:
         "skipped": skipped,
         "rows": report,
         "flags_summary": flags_summary,
-        "unmapped_columns": unmapped,
-        "column_map": column_map,
-        "location": location_info,
+        "unmapped_columns": paste["unmapped"],
+        "column_map": paste["column_map"],
+        "location": paste["location"],
         "note": (f"Pay rates default to {_money(DEFAULT_RATE)} where the file had none or "
                  "couldn't be read, and salaries or weekly pay make the person salaried "
                  "(costed as salary, with an hourly planning rate kept) — check the "
@@ -599,7 +733,7 @@ async def import_staff(body: StaffImportBody) -> dict:
 
 
 def _level_note(code: str, value: str, updating: bool = False) -> str:
-    value = (value or "").strip()
+    value = _shown(value)
     if code == "level_interpreted":
         return f"'{value}' recorded as Level 1 (advisor to confirm)"
     if code == "level_unclear":

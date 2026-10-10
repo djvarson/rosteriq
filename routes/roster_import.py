@@ -8,23 +8,37 @@ venue recorded, and save them as rosters.
 Real exports are messy, so the parser is forgiving:
 - delimiter sniffed (comma/tab/semicolon/pipe), Excel BOM stripped
 - header mapped by column aliases; First + Last name columns combined
-- AU-first date parsing (DD/MM/YYYY) plus ISO, 28-Sep-2026, a leading weekday
-  word, and a date carried inside the Start/End cell ('28/09/2026 17:00')
+- dates as DD/MM/YYYY, ISO, 28-Sep-2026, with a leading weekday word, or
+  carried inside the Start/End cell ('28/09/2026 17:00'); the day/month order
+  is decided once per file (AU unless a date only reads month-first, as in
+  10/13/2026), and a file whose dates read both ways is refused
 - 12h ("5:30pm") and 24h ("17:30", "17:30:00") times
 - meal breaks as minutes, H:MM, HH:MM:SS, decimal hours, '1h', '30 min'
 - an export covering several locations keeps only this venue's rows
-- every row reported back: imported or skipped-with-reason; a re-paste of
-  shifts already imported is skipped, never doubled.
+- every row reported back: imported, replaced or skipped-with-reason.
+
+A paste is the truth for each person it names, on the dates it covers: their
+imported shifts on those dates become exactly the pasted ones. An identical
+shift is skipped (never doubled), a moved one is reported 'replaced', one no
+longer in the export is removed, and split shifts stay as two. A row that
+can't be read leaves that person's shifts on that date alone. Only the
+imported roster is written — never a generated roster, and never a week
+already published in RosterIQ.
+
+Spans of zero or over 16 hours are skipped. In a file with no am/pm
+anywhere, an end before its start that would make sense 12 hours later is
+flagged as an ambiguous 12-hour time.
 
 Route:
     POST /api/setup/import-roster  { venue_id, content, location?: str }
 """
 
+import asyncio
 import logging
 import re
 import uuid
 from collections import Counter
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -34,9 +48,13 @@ from rosteriq.cost_calculator import calculate_roster_cost, calculate_shift_cost
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.models import Roster, Shift, ShiftStatus, State
+from rosteriq.services.current_roster import (
+    ARCHIVED, PUBLISHED, roster_state, supersede_for_import, week_monday,
+)
 from rosteriq.services.import_parsing import (
-    LOCATION_KEYS, LocationChoiceNeeded, build_name, clean_header, header_matches,
-    location_matches, map_columns, norm_header, norm_name, read_rows, resolve_location,
+    LOCATION_KEYS, LocationChoiceNeeded, MixedDateOrder, PasteUnreadable, build_name, cell_date,
+    clean_header, date_order, header_matches, location_choice_response, location_matches,
+    map_columns, norm_header, norm_name, read_rows, resolve_location, split_when, unclosed_quote,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,45 +95,8 @@ _FIELDS = [
 _HEADER_HINT_KEYS = _NAME_KEYS | _FIRST_KEYS | _LAST_KEYS | _DATE_KEYS | _START_KEYS | _END_KEYS
 
 _BREAK_FLAG_MINUTES = 120
-
-_WEEKDAY_RE = re.compile(r"^(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+", re.IGNORECASE)
-_DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%d.%m.%Y",
-                 "%d %b %Y", "%d %B %Y", "%d-%b-%Y", "%d-%b-%y", "%d %b %y", "%d-%B-%Y",
-                 "%Y/%m/%d", "%m/%d/%Y")
-_DATETIME_RE = re.compile(
-    r"^\s*((?:[A-Za-z]{3,9}\.?,?\s+)?"
-    r"(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{1,2}[\s-][A-Za-z]{3,9}[\s-]\d{2,4}))"
-    r"(?:[T\s,]+(.+?))?\s*$")
-
-
-def _parse_date(v: str):
-    """Try common export date formats, AU (DD/MM) preferred over US. A
-    leading weekday word ('Mon', 'Monday,') is ignored."""
-    s = _WEEKDAY_RE.sub("", str(v or "").strip())
-    if not s:
-        return None
-    for fmt in _DATE_FORMATS:
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def _split_when(v: str):
-    """'28/09/2026 17:00' -> (date, '17:00'); '17:00' -> (None, '17:00')."""
-    s = str(v or "").strip()
-    m = _DATETIME_RE.match(s)
-    if m:
-        d = _parse_date(m.group(1))
-        if d:
-            return d, (m.group(2) or "").strip()
-    return None, s
-
-
-def _cell_date(v: str):
-    d, _ = _split_when(v)
-    return d or _parse_date(v)
+_MAX_SPAN_MINUTES = 16 * 60
+_AMPM_RE = re.compile(r"\d\s*[ap]\.?\s*m?\.?(?![a-z])", re.IGNORECASE)
 
 
 def _parse_time(v: str):
@@ -179,28 +160,35 @@ def _parse_break(v: str, unit: Optional[str]):
     return mins, None
 
 
-@router.post("/import-roster")
-async def import_roster(body: RosterImportBody) -> dict:
-    enforce_venue_manager(body.venue_id)
-    db = get_db()
-    venue = db.get_venue(body.venue_id)
-    if not venue:
-        raise HTTPException(status_code=404, detail="Venue not found")
-    state = getattr(venue, "state", State.nsw)
+def _span_minutes(st: time, en: time) -> int:
+    return (en.hour * 60 + en.minute - st.hour * 60 - st.minute) % (24 * 60)
 
-    employees = db.get_employees(body.venue_id) or []
-    if not employees:
-        raise HTTPException(status_code=422,
-                            detail="Import your staff first — shifts are matched to staff by name/email.")
-    by_email, by_name = {}, {}
-    for e in employees:
-        em = (getattr(e, "email", "") or "").strip().lower()
-        if em:
-            by_email.setdefault(em, []).append(e.id)
-        by_name.setdefault(norm_name(getattr(e, "name", "")), []).append(e.id)
-    emp_map = {e.id: e for e in employees}
 
-    rows = read_rows(body.content)
+def _interval(s: Shift):
+    start = datetime.combine(s.date, s.start_time)
+    end = datetime.combine(s.date, s.end_time)
+    return start, (end if end > start else end + timedelta(days=1))
+
+
+def _overlaps(a: Shift, b: Shift) -> bool:
+    a0, a1 = _interval(a)
+    b0, b1 = _interval(b)
+    return a0 < b1 and b0 < a1
+
+
+def _hhmm(s: Shift) -> str:
+    return f"{s.start_time:%H:%M}-{s.end_time:%H:%M}"
+
+
+def _read_roster_paste(content: str, venue_name: str, location: Optional[str],
+                       by_email: dict, by_name: dict) -> dict:
+    """The paste read, matched to staff and checked, row by row. Pure CPU, run
+    off the event loop; nothing here touches the database. Raises
+    HTTPException (422) or LocationChoiceNeeded."""
+    try:
+        rows = read_rows(content)
+    except PasteUnreadable as e:
+        raise HTTPException(status_code=422, detail=str(e))
     if not rows:
         raise HTTPException(status_code=422, detail="No rows found")
 
@@ -210,6 +198,9 @@ async def import_roster(body: RosterImportBody) -> dict:
         raise HTTPException(status_code=422,
                             detail="Couldn't find a header row — the roster export needs columns "
                                    "like Name, Date, Start, End (and optionally Role, Break).")
+    bad_quote = unclosed_quote(*rows[0], len(header))
+    if bad_quote:
+        raise HTTPException(status_code=422, detail=f"Couldn't read the header row: {bad_quote}")
     col, column_map, unmapped = map_columns(header, _FIELDS, multi=("date",))
     data = [(line, [c.strip() for c in raw]) for line, raw in rows[1:]]
 
@@ -217,9 +208,15 @@ async def import_roster(body: RosterImportBody) -> dict:
         j = col[field]
         return cells[j] if j is not None and j < len(cells) else ""
 
+    date_cols = col["date"] + [j for j in (col["start"], col["end"]) if j is not None]
+    try:
+        order = date_order((line, cells[j]) for line, cells in data for j in date_cols if j < len(cells))
+    except MixedDateOrder as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     missing = [f for f in ("start", "end") if col[f] is None]
     if not col["date"] and col["start"] is not None and not any(
-            _split_when(cell(cells, "start"))[0] for _, cells in data):
+            split_when(cell(cells, "start"), order)[0] for _, cells in data):
         missing.insert(0, "date")
     if all(col[f] is None for f in ("name", "email", "first_name", "last_name")):
         missing.append("name or email")
@@ -230,31 +227,23 @@ async def import_roster(body: RosterImportBody) -> dict:
 
     location_info, kept_location = None, None
     if col["location"] is not None:
-        try:
-            active, kept_location, _ = resolve_location(
-                [cell(cells, "location") for _, cells in data],
-                getattr(venue, "name", "") or "", body.location)
-        except LocationChoiceNeeded as e:
-            raise HTTPException(status_code=422, detail=str(e))
+        active, kept_location, _ = resolve_location(
+            [cell(cells, "location") for _, cells in data], venue_name, location)
         if active:
             location_info = {"column": clean_header(header[col["location"]]),
                              "kept": kept_location, "skipped_other": 0}
 
-    existing_rosters: dict = {}
-    existing_keys: dict = {}
+    twelve_hour = any(_AMPM_RE.search(cell(cells, f)[:40]) for _, cells in data for f in ("start", "end"))
 
-    def week_keys(week_start):
-        if week_start not in existing_keys:
-            r = db.get_roster(f"imported-{body.venue_id}-{week_start.isoformat()}")
-            existing_rosters[week_start] = r
-            existing_keys[week_start] = {
-                (s.employee_id, s.date, s.start_time, s.end_time) for s in (r.shifts if r else [])}
-        return existing_keys[week_start]
-
-    # Parse rows -> shifts grouped by ISO week (Monday)
-    weeks: dict = {}
-    skipped, report, flagged = [], [], []
-    imported = duplicates = 0
+    out = {"column_map": column_map, "unmapped": unmapped, "location": location_info,
+           "date_order": order,
+           "pasted": {},          # (employee_id, date) -> [(line, name, Shift)]
+           "covered": {},         # week -> employees with a row in it
+           "paste_dates": set(),  # every date a row for this venue names
+           "held": set(),         # (employee_id, date) with a row that couldn't be read
+           "swallowed": False,    # an unclosed quote hid rows: nothing is removed
+           "duplicates": 0, "skipped": [], "report": [], "flagged": []}
+    pasted, held, flagged = out["pasted"], out["held"], out["flagged"]
     seen = set()
     for line, cells in data:
         full = cell(cells, "name")
@@ -262,23 +251,28 @@ async def import_roster(body: RosterImportBody) -> dict:
         shown = build_name(full, cell(cells, "first_name"), cell(cells, "last_name"))
         email = cell(cells, "email").strip().lower()
         date_raw = next((cells[j] for j in col["date"] if j < len(cells) and cells[j]), "")
-        d = next((dd for dd in (_cell_date(cells[j]) for j in col["date"] if j < len(cells)) if dd),
+        d = next((dd for dd in (cell_date(cells[j], order) for j in col["date"] if j < len(cells)) if dd),
                  None)
-        st_date, st_txt = _split_when(cell(cells, "start"))
-        _, en_txt = _split_when(cell(cells, "end"))
+        st_date, st_txt = split_when(cell(cells, "start"), order)
+        _, en_txt = split_when(cell(cells, "end"), order)
         d = d or st_date
 
         def skip(reason):
-            skipped.append({"row": line, "name": shown or email, "reason": reason})
-            report.append({"line": line, "name": shown or email,
-                           "date": d.isoformat() if d else date_raw,
-                           "status": "skipped", "reason": reason})
+            _note_row(out, line, shown or email, d, "skipped", reason, date_raw)
+
+        bad_quote = unclosed_quote(line, cells, len(header))
+        if bad_quote:
+            out["swallowed"] = True
+            skip(bad_quote)
+            continue
 
         loc_cell = cell(cells, "location")
         if kept_location and not location_matches(loc_cell, kept_location):
             location_info["skipped_other"] += 1
             skip(f"other location: {loc_cell}")
             continue
+        if d:
+            out["paste_dates"].add(d)
 
         emp_id, ambiguous = None, None
         if email and len(by_email.get(email, [])) == 1:
@@ -304,16 +298,36 @@ async def import_roster(body: RosterImportBody) -> dict:
         if not d:
             skip(f"bad date '{date_raw or cell(cells, 'start')}'")
             continue
+        out["covered"].setdefault(week_monday(d), set()).add(emp_id)
+
         st = _parse_time(st_txt)
         en = _parse_time(en_txt)
         if not st or not en:
+            held.add((emp_id, d))
             skip("bad start/end time")
             continue
+        span = _span_minutes(st, en)
+        twelve_hour_end = (not twelve_hour and 1 <= en.hour <= 11 and st.hour <= 12 and en < st
+                           and time(en.hour + 12, en.minute) > st)
+        later_end = f"{en.hour + 12}:{en.minute:02d}"
+        if span == 0:
+            held.add((emp_id, d))
+            skip(f"starts and ends at {st:%H:%M} — a shift needs a length")
+            continue
+        if span > _MAX_SPAN_MINUTES:
+            held.add((emp_id, d))
+            reason = f"{st_txt} to {en_txt} reads as a {span / 60:g}-hour shift"
+            if twelve_hour_end:
+                reason += (f" — ambiguous 12-hour time; if it ends at {later_end}, write that "
+                           "(or add am/pm) and paste again")
+            else:
+                reason += " — check the times and paste again"
+            skip(reason)
+            continue
 
-        week_start = d - timedelta(days=d.weekday())
         key = (emp_id, d, st, en)
-        if key in seen or key in week_keys(week_start):
-            duplicates += 1
+        if key in seen:
+            out["duplicates"] += 1
             skip("already imported")
             continue
         seen.add(key)
@@ -325,59 +339,179 @@ async def import_roster(body: RosterImportBody) -> dict:
                       f"meal break '{cell(cells, 'break')}' couldn't be read — imported with no break")
             flagged.append({"line": line, "name": shown or email, "date": d.isoformat(),
                             "flag": brk_flag, "detail": detail})
-        weeks.setdefault(week_start, []).append(Shift(
+        if twelve_hour_end:
+            flagged.append({"line": line, "name": shown or email, "date": d.isoformat(),
+                            "flag": "ambiguous_12h",
+                            "detail": f"ambiguous 12-hour time: {st_txt} to {en_txt} imported as an "
+                                      f"overnight {span / 60:g}-hour shift — if it ends at "
+                                      f"{later_end}, write that and paste again"})
+        pasted.setdefault((emp_id, d), []).append((line, shown or email, Shift(
             id=f"impshift-{uuid.uuid4().hex[:10]}",
             employee_id=emp_id, date=d, start_time=st, end_time=en,
             break_minutes=brk, status=ShiftStatus.scheduled,
             role=(cell(cells, "role") or ""),
-        ))
-        imported += 1
+        )))
+    return out
 
-    # Save one roster per week, MERGING into an existing imported roster for
-    # that week so a re-paste adds rather than clobbers. Every shift is costed
-    # from the rate the venue recorded, so imported weeks carry real labour.
-    rosters_written = 0
-    week_costs = []
-    for week_start, shifts in sorted(weeks.items()):
-        rid = f"imported-{body.venue_id}-{week_start.isoformat()}"
-        existing = existing_rosters.get(week_start)
-        all_shifts = (list(existing.shifts) if existing else []) + shifts
+
+def _note_row(out: dict, line, name, d, status, reason, date_raw=""):
+    if status == "skipped":
+        out["skipped"].append({"row": line, "name": name, "reason": reason})
+    out["report"].append({"line": line, "name": name, "date": d.isoformat() if d else date_raw,
+                          "status": status, "reason": reason})
+
+
+def _paste_weeks(paste: dict) -> list:
+    return sorted(set(paste["covered"]) | {week_monday(d) for _, d in paste["pasted"]})
+
+
+def _reconcile(paste: dict, existing: dict, emp_map: dict, state, venue_id: str) -> dict:
+    """Each week's imported roster rebuilt from the paste and costed from the
+    rates the venue recorded. Pure CPU, run off the event loop. existing:
+    {monday: (imported roster | None, published in RosterIQ)}."""
+    out = {"rosters": [], "imported": 0, "replaced": 0, "removed": []}
+    pasted, held, covered = paste["pasted"], paste["held"], paste["covered"]
+    for week_start in _paste_weeks(paste):
+        roster, published = existing[week_start]
+        week_items = sorted(((pair, line, name, sh) for pair, items in pasted.items()
+                             if week_monday(pair[1]) == week_start for line, name, sh in items),
+                            key=lambda x: x[1])
+        if published:
+            for (_, d), line, name, _ in week_items:
+                _note_row(paste, line, name, d, "skipped",
+                          f"the week of {week_start:%d/%m/%Y} is published in RosterIQ — an "
+                          "import doesn't change a published week")
+            continue
+        old = list(roster.shifts) if roster else []
+        by_key = {}
+        for s in old:
+            by_key.setdefault((s.employee_id, s.date, s.start_time, s.end_time), s)
+        kept_ids, updates, added = set(), {}, []
+        for (emp_id, d), line, name, sh in week_items:
+            prev = by_key.get((emp_id, d, sh.start_time, sh.end_time))
+            if prev is None or prev.id in kept_ids:
+                added.append((line, name, sh))
+                continue
+            kept_ids.add(prev.id)
+            if (prev.break_minutes, prev.role) != (sh.break_minutes, sh.role):
+                updates[prev.id] = prev.model_copy(
+                    update={"break_minutes": sh.break_minutes, "role": sh.role})
+                out["replaced"] += 1
+                _note_row(paste, line, name, d, "replaced",
+                          f"meal break or area changed (was {prev.break_minutes} min, "
+                          f"{prev.role or 'no area'})")
+            else:
+                paste["duplicates"] += 1
+                _note_row(paste, line, name, d, "skipped", "already imported")
+        gone = [s for s in old
+                if s.id not in kept_ids and not paste["swallowed"]
+                and s.employee_id in covered.get(week_start, ())
+                and s.date in paste["paste_dates"] and (s.employee_id, s.date) not in held]
+        replaced_ids = set()
+        for line, name, sh in added:
+            moved = [g for g in gone if g.employee_id == sh.employee_id and g.date == sh.date
+                     and _overlaps(g, sh)]
+            if moved:
+                out["replaced"] += 1
+                replaced_ids.update(g.id for g in moved)
+                _note_row(paste, line, name, sh.date, "replaced",
+                          "replaced " + ", ".join(_hhmm(g) for g in moved))
+        out["imported"] += len(added)
+        for g in gone:
+            if g.id not in replaced_ids:
+                out["removed"].append({
+                    "name": getattr(emp_map.get(g.employee_id), "name", g.employee_id),
+                    "date": g.date.isoformat(), "start": f"{g.start_time:%H:%M}",
+                    "end": f"{g.end_time:%H:%M}"})
+        if not (added or updates or gone):
+            continue
+        gone_ids = {g.id for g in gone}
+        shifts = [updates.get(s.id, s) for s in old if s.id not in gone_ids] + [sh for _, _, sh in added]
+        for s in shifts:
+            if s.employee_id in emp_map:
+                s.cost = calculate_shift_cost_breakdown(emp_map[s.employee_id], s, state).total_cost
+        rebuilt = Roster(
+            id=f"imported-{venue_id}-{week_start.isoformat()}", venue_id=venue_id,
+            week_start=week_start, week_end=week_start + timedelta(days=6),
+            shifts=shifts, total_cost=None,
+            created_at=roster.created_at if roster else datetime.utcnow(),
+        )
+        costable = [s for s in shifts if s.employee_id in emp_map]
+        rebuilt.total_cost = calculate_roster_cost(
+            rebuilt.model_copy(update={"shifts": costable}), emp_map, state)
+        out["rosters"].append(rebuilt)
+    return out
+
+
+@router.post("/import-roster")
+async def import_roster(body: RosterImportBody) -> dict:
+    enforce_venue_manager(body.venue_id)
+    db = get_db()
+    venue = db.get_venue(body.venue_id)
+    if not venue:
+        raise HTTPException(status_code=404, detail="Venue not found")
+    state = getattr(venue, "state", State.nsw)
+
+    employees = db.get_employees(body.venue_id) or []
+    if not employees:
+        raise HTTPException(status_code=422,
+                            detail="Import your staff first — shifts are matched to staff by name/email.")
+    by_email, by_name = {}, {}
+    for e in employees:
+        em = (getattr(e, "email", "") or "").strip().lower()
+        if em:
+            by_email.setdefault(em, []).append(e.id)
+        by_name.setdefault(norm_name(getattr(e, "name", "")), []).append(e.id)
+    emp_map = {e.id: e for e in employees}
+
+    # Reading and costing run in a worker thread; every database call stays
+    # on the event loop, which PostgresStore's one shared connection needs.
+    try:
+        paste = await asyncio.to_thread(_read_roster_paste, body.content,
+                                        getattr(venue, "name", "") or "", body.location,
+                                        by_email, by_name)
+    except LocationChoiceNeeded as e:
+        return location_choice_response(e)
+    existing = {}
+    for week_start in _paste_weeks(paste):
+        roster = db.get_roster(f"imported-{body.venue_id}-{week_start.isoformat()}")
+        existing[week_start] = (roster, roster is not None
+                                and roster_state(db, roster.id) in (PUBLISHED, ARCHIVED))
+    plan = await asyncio.to_thread(_reconcile, paste, existing, emp_map, state, body.venue_id)
+
+    skipped, week_costs, written = paste["skipped"], [], []
+    for roster in plan["rosters"]:
         try:
-            for s in all_shifts:
-                if s.employee_id in emp_map:
-                    s.cost = calculate_shift_cost_breakdown(emp_map[s.employee_id], s, state).total_cost
-            roster = Roster(
-                id=rid, venue_id=body.venue_id,
-                week_start=week_start, week_end=week_start + timedelta(days=6),
-                shifts=all_shifts, total_cost=None,
-                created_at=existing.created_at if existing else datetime.utcnow(),
-            )
-            costable = [s for s in all_shifts if s.employee_id in emp_map]
-            roster.total_cost = calculate_roster_cost(
-                roster.model_copy(update={"shifts": costable}), emp_map, state)
             db.save_roster(roster)
-            rosters_written += 1
-            week_costs.append({"week_start": week_start.isoformat(), "roster_id": rid,
-                               "shifts": len(all_shifts), "total_cost": str(roster.total_cost)})
         except Exception as e:
-            skipped.append({"week_of": week_start.isoformat(), "reason": f"roster save failed: {e}"})
-    from rosteriq.services.current_roster import supersede_for_import
-    supersede_for_import(db, body.venue_id, weeks)
+            skipped.append({"week_of": roster.week_start.isoformat(), "reason": f"roster save failed: {e}"})
+            continue
+        written.append(roster.week_start)
+        week_costs.append({"week_start": roster.week_start.isoformat(), "roster_id": roster.id,
+                           "shifts": len(roster.shifts), "total_cost": str(roster.total_cost)})
+    supersede_for_import(db, body.venue_id, written)
+    report = sorted(paste["report"], key=lambda r: r["line"])
+    flagged = paste["flagged"]
 
-    logger.info(f"Roster import at {body.venue_id}: {imported} shifts across "
-                f"{rosters_written} week(s), {len(skipped)} skipped ({duplicates} already imported)")
+    logger.info(f"Roster import at {body.venue_id}: {plan['imported']} shifts across "
+                f"{len(written)} week(s), {plan['replaced']} replaced, {len(plan['removed'])} removed, "
+                f"{len(skipped)} skipped ({paste['duplicates']} already imported)")
     return {
         "status": "imported",
-        "shifts_imported": imported,
-        "weeks": rosters_written,
+        "shifts_imported": plan["imported"],
+        "weeks": len(written),
         "skipped_count": len(skipped),
         "skipped": skipped[:50],
-        "duplicates_skipped": duplicates,
+        "duplicates_skipped": paste["duplicates"],
+        "shifts_replaced": plan["replaced"],
+        "shifts_removed": len(plan["removed"]),
+        "removed": plan["removed"],
         "rows": report,
         "flagged": flagged,
         "flags_summary": dict(Counter(f["flag"] for f in flagged)),
-        "unmapped_columns": unmapped,
-        "column_map": column_map,
-        "location": location_info,
+        "unmapped_columns": paste["unmapped"],
+        "column_map": paste["column_map"],
+        "location": paste["location"],
+        "date_order": paste["date_order"],
         "week_costs": week_costs,
     }
