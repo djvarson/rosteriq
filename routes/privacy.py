@@ -36,6 +36,7 @@ from rosteriq.middleware.tenant import (
 )
 from rosteriq.services.events import audit
 from rosteriq.services.staff_records import linked_logins, retire_logins
+from rosteriq.services.venue_access import STAFF, access_map, is_platform_owner
 
 logger = logging.getLogger(__name__)
 
@@ -218,11 +219,14 @@ async def anonymise_employee(
         if any(u.get("id") == current_user.user_id for u in logins):
             raise HTTPException(status_code=400,
                                 detail="You can't remove your own details from here")
-        # A manager login's access is changed through Access (single-venue
-        # logins) or by the platform owner, never as a side effect here.
+        # A login that manages THIS venue is changed through Access or by the
+        # platform owner, never as a side effect here. One that is only staff
+        # here (a manager elsewhere) loses just this venue.
         tenant = get_tenant_context_optional()
         if not getattr(tenant, "is_owner", False) and any(
-                u.get("role") in ("manager", "owner") or u.get("is_owner") for u in logins):
+                is_platform_owner(u)
+                or (access_map(u).get(_venue_id) or {}).get("level", STAFF) != STAFF
+                for u in logins):
             raise HTTPException(
                 status_code=409,
                 detail=f"{employee.name}'s login has manager access. Set their access to staff "

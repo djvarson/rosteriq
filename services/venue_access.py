@@ -94,6 +94,19 @@ def access_map(account) -> Dict[str, dict]:
     return out
 
 
+def visible_to(user, account: dict) -> dict:
+    """A copy of ``account`` that reaches only the venues ``user`` fully
+    manages (every venue, for the platform owner). Describe a login through
+    this to a caller who may run only part of it."""
+    seen = {v for v in held_venue_ids(account) if fully_manages(user, v)}
+    view = dict(account)
+    view["venue_ids"] = [v for v in _get(account, "venue_ids", []) or [] if v in seen]
+    view["staff_venue_ids"] = [v for v in _get(account, "staff_venue_ids", []) or [] if v in seen]
+    view["section_grants"] = {v: s for v, s in (_get(account, "section_grants", {}) or {}).items()
+                              if v in seen}
+    return view
+
+
 def apply_access_map(account: dict, amap: Dict[str, dict]) -> dict:
     """Write one access level per venue back onto the account record.
 
@@ -132,6 +145,24 @@ def apply_access_map(account: dict, amap: Dict[str, dict]) -> dict:
         account["venue_ids"] = staff_only
         account["staff_venue_ids"] = []
         account["section_grants"] = {}
+    return account
+
+
+def drop_venue(account: dict, venue_id: str) -> dict:
+    """Take ``venue_id`` off the login, dashboard or staff-only, leaving its
+    access everywhere else as it was. A manager login left managing nothing
+    becomes a staff login holding its staff venues (apply_access_map's
+    rule)."""
+    managed = [v for v in _get(account, "venue_ids", []) or [] if v != venue_id]
+    staff_only = [v for v in _get(account, "staff_venue_ids", []) or []
+                  if v != venue_id and v not in managed]
+    grants = {v: s for v, s in (_get(account, "section_grants", {}) or {}).items() if v != venue_id}
+    if _role(account) == "manager" and not managed:
+        account["role"] = "staff"
+        managed, staff_only, grants = staff_only, [], {}
+    account["venue_ids"] = managed
+    account["staff_venue_ids"] = staff_only
+    account["section_grants"] = grants
     return account
 
 

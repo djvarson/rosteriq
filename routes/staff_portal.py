@@ -146,16 +146,45 @@ def _linked_employee(db, user: UserContext):
     return find_linked_employee(db, user)
 
 
-def _linked_employees(db, user: UserContext) -> list:
+def _linked_employees(db, user: UserContext, active_only: bool = False) -> list:
     """Every (employee, venue_id) this login is linked to, primary first —
     a person who works two venues has a record at each."""
     from rosteriq.services.linking import find_linked_employees
-    return find_linked_employees(db, user)
+    return find_linked_employees(db, user, active_only=active_only)
+
+
+_NO_LONGER_ACTIVE = "Your staff record here is no longer active — ask your manager"
+
+
+def _on_team(links: list) -> list:
+    """The links whose record is still active. A record set inactive (they
+    left) keeps its own history (profile, shifts, hours, leave history) but
+    no longer opens the venue's team surfaces."""
+    return [(e, v) for e, v in links if is_active(e)]
+
+
+def _team_links(db, user: UserContext) -> list:
+    """Links for a write only a current team member makes (leave,
+    availability, cover, acknowledgements). Not linked: 409. Left everywhere:
+    403, the answer someone who left one of two venues gets there."""
+    links = _linked_employees(db, user)
+    if not links:
+        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    links = _on_team(links)
+    if not links:
+        raise HTTPException(status_code=403, detail=_NO_LONGER_ACTIVE)
+    return links
+
+
+def _left_at(db, user: UserContext, venue_id: str) -> bool:
+    """This login's staff record at ``venue_id`` has been set inactive."""
+    from rosteriq.services.linking import linked_records
+    return any(v == venue_id and not is_active(e) for e, v in linked_records(db, user))
 
 
 def _linked_employee_at(db, user: UserContext, venue_id: str):
-    """This login's staff record at ``venue_id``, or None."""
-    for emp, vid in _linked_employees(db, user):
+    """This login's ACTIVE staff record at ``venue_id``, or None."""
+    for emp, vid in _linked_employees(db, user, active_only=True):
         if vid == venue_id:
             return emp
     return None
@@ -233,7 +262,8 @@ async def link_my_account(body: LinkBody, request: Request,
 @router.get("/api/employees/{employee_id}/join-code")
 async def employee_join_code(employee_id: str, user: UserContext = Depends(get_current_user)) -> dict:
     """The join code a manager hands a staff member so they can link their
-    login. Manager/owner only, and only for employees in the caller's venues
+    login. A full manager of the employee's venue only, like the bulk sheet:
+    the code binds a login to the record, so a department manager gets none
     (a foreign id is a 404)."""
     from rosteriq.middleware.tenant import load_employee_in_scope
     from rosteriq.services.linking import join_code
@@ -241,6 +271,7 @@ async def employee_join_code(employee_id: str, user: UserContext = Depends(get_c
         raise HTTPException(status_code=403, detail="Managers only")
     db = get_db()
     emp = load_employee_in_scope(db, employee_id)
+    enforce_venue_manager(getattr(emp, "venue_id", None))
     return {
         "employee_id": emp.id,
         "name": emp.name,
@@ -251,7 +282,22 @@ async def employee_join_code(employee_id: str, user: UserContext = Depends(get_c
     }
 
 
-def _account_management_guards(user, emp, db):
+_LEVEL_RANK = {"staff": 0, "department": 1, "full": 2}
+
+
+def _lowers_access(user, account, lower_to) -> bool:
+    """``lower_to`` = (venue_id, level) is below the login's current access
+    at a venue the caller fully manages."""
+    from rosteriq.services.venue_access import access_map, fully_manages
+    if not lower_to:
+        return False
+    venue_id, level = lower_to
+    current = (access_map(account).get(venue_id) or {}).get("level")
+    return (fully_manages(user, venue_id) and current in _LEVEL_RANK and level in _LEVEL_RANK
+            and _LEVEL_RANK[level] < _LEVEL_RANK[current])
+
+
+def _account_management_guards(user, emp, db, lower_to=None):
     """Shared spine for the two login-management endpoints.
 
     Returns the target ACCOUNT after enforcing, in order:
@@ -266,6 +312,11 @@ def _account_management_guards(user, emp, db):
     account-global, so one venue's manager must never control a login that
     reaches venues they don't run); the target is not the platform owner
     and did not create one of its venues (the venue's owner).
+
+    ``lower_to`` = (venue_id, level) names a change that only LOWERS the
+    login's access at that one venue. It gives the caller nothing anywhere
+    else, so a full manager of that venue may make it whatever else the
+    login reaches; only that venue's creator stays out of reach.
     """
     if user.user_id in _DEMO_USER_IDS or (user.email or "").strip().lower() in _DEMO_EMAILS:
         raise HTTPException(status_code=403, detail="The demo can't manage logins")
@@ -325,7 +376,8 @@ def _account_management_guards(user, emp, db):
     if not fully_manages(user, vid):
         raise HTTPException(status_code=403,
                             detail="Only a full manager of this venue can change staff logins")
-    if not all(fully_manages(user, v) for v in held):
+    scope = [lower_to[0]] if _lowers_access(user, account, lower_to) else held
+    if not all(fully_manages(user, v) for v in scope):
         raise HTTPException(status_code=409,
                             detail="Their login also reaches a venue you don't fully manage — "
                                    "changes to it need a manager of every venue it's linked to, "
@@ -333,7 +385,7 @@ def _account_management_guards(user, emp, db):
     if account.get("role") == "owner" or account.get("is_owner"):
         raise HTTPException(status_code=403, detail="Owner accounts can't be changed here")
     if (not is_platform_owner(user) and account.get("id") != user.user_id
-            and created_venue_ids(db, account.get("id"), held)):
+            and created_venue_ids(db, account.get("id"), scope)):
         raise HTTPException(status_code=403,
                             detail="This is the venue owner's login — only they (or RosterIQ "
                                    "support) can change it")
@@ -391,24 +443,17 @@ async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
     keeps its access there: made a manager here, their other staff venues
     become staff-only (their shifts still reach /my, the dashboard stays
     shut there) rather than silently becoming full manager venues.
-    Guards: a full manager of every venue the login reaches; never an
-    owner account; never your own account (no self-lockouts)."""
+    Guards: a full manager of every venue the login reaches (of this one
+    alone when the change lowers their access here, unless they created
+    it); never an owner account; never your own account (no self-lockouts)."""
     from rosteriq.middleware.tenant import load_employee_in_scope
     from rosteriq.services.events import audit
     from rosteriq.services.venue_access import (
-        DEPARTMENT, FULL, STAFF, access_map, apply_access_map,
+        DEPARTMENT, FULL, STAFF, access_map, apply_access_map, visible_to,
     )
     db = get_db()
     emp = load_employee_in_scope(db, employee_id)
-    account = _account_management_guards(user, emp, db)
-    email = account.get("email")
     vid = getattr(emp, "venue_id", None)
-    # Appointing managers / setting a department scope is a VENUE-WIDE user-
-    # management action — a department manager (section-restricted) must not be
-    # able to do it. enforce_venue_manager rejects section-restricted callers.
-    enforce_venue_manager(vid)
-    if account.get("id") == user.user_id:
-        raise HTTPException(status_code=400, detail="You can't change your own access level")
     # Normalise any requested department scope (free-string sections, like the
     # min_staff keys — strip/lowercase, drop blanks, dedupe preserving order).
     sections: List[str] = []
@@ -418,15 +463,25 @@ async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
         if n and n not in seen:
             seen.add(n)
             sections.append(n)
-    old = account.get("role")
-    before = access_map(account)
     if body.role == "manager":
         level = DEPARTMENT if sections else FULL
     else:
         level = STAFF
+    account = _account_management_guards(user, emp, db, lower_to=(vid, level))
+    email = account.get("email")
+    # Appointing managers / setting a department scope is a VENUE-WIDE user-
+    # management action — a department manager (section-restricted) must not be
+    # able to do it. enforce_venue_manager rejects section-restricted callers.
+    enforce_venue_manager(vid)
+    if account.get("id") == user.user_id:
+        raise HTTPException(status_code=400, detail="You can't change your own access level")
+    old = account.get("role")
+    before = access_map(account)
     apply_access_map(account, {vid: {"level": level, "sections": sections}})
     db.save_user(account)
-    after = access_map(account)
+    # Only the venues the caller fully manages: lowering access here doesn't
+    # need them to run the rest of the login.
+    after = access_map(visible_to(user, account))
     audit("user.role_change", vid, "user", account["id"], email=email,
           old_role=old, new_role=account.get("role"), changed_by=user.user_id,
           sections=sections or None, reason="venue_manager_set",
@@ -565,9 +620,7 @@ async def request_leave(body: LeaveRequestBody,
     """Request leave. Someone who works more than one venue picks which ones
     (``venue_ids``); left out, it goes to every venue they work."""
     db = get_db()
-    links = _linked_employees(db, user)
-    if not links:
-        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    links = _team_links(db, user)
     if body.end_date < body.start_date:
         raise HTTPException(status_code=422, detail="end_date must be on or after start_date")
     by_venue = {vid: emp for emp, vid in links}
@@ -643,9 +696,7 @@ async def my_availability(user: UserContext = Depends(get_current_user)) -> dict
 async def set_my_availability(body: AvailabilityBody,
                               user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    links = _linked_employees(db, user)
-    if not links:
-        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    links = _team_links(db, user)
     emp, vid = links[0]
 
     avail = dict(getattr(emp, "availability", {}) or {})
@@ -734,9 +785,7 @@ async def offer_shift_for_cover(shift_id: str, body: CoverRequestBody,
                                 user: UserContext = Depends(get_current_user)) -> dict:
     """Put one of my upcoming shifts up for a co-worker to cover."""
     db = get_db()
-    links = _linked_employees(db, user)
-    if not links:
-        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    links = _team_links(db, user)
     emp = vid = shift = None
     for link_emp, link_vid in links:
         try:
@@ -779,6 +828,7 @@ async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
     links = _linked_employees(db, user)
     if not links:
         return _no_link_response(user, db)
+    links = _on_team(links)
     from rosteriq.services.cover_checks import can_take
     names = _venue_names(db, [v for _, v in links])
     up_for_grabs, mine, claimed_by_me = [], [], []
@@ -856,9 +906,7 @@ def _clash_detail(sh, whose: str) -> str:
 def _cover_link(db, user: UserContext, cover_id: str):
     """(cover, my record at its venue) — or 404 when the cover isn't at a
     venue I work."""
-    links = _linked_employees(db, user)
-    if not links:
-        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    links = _team_links(db, user)
     cover = db.get_shift_cover(cover_id)
     emp = None
     if cover:

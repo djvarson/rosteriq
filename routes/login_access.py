@@ -10,7 +10,10 @@ owner's venues (services/venue_access.py holds the storage rules).
 Changing a login is account-wide (a password reset reaches every venue it
 holds), so every change goes through the same guards as reset links and
 access-role: the caller must fully manage every venue the login reaches.
-Adding a venue also needs the caller to fully manage that venue.
+Adding a venue also needs the caller to fully manage that venue. Lowering
+the login's access at one venue changes nothing elsewhere, so a full
+manager of that venue may do it alone (never to the venue's creator), and
+the reply names only the venues the caller fully manages.
 """
 
 import logging
@@ -25,7 +28,7 @@ from rosteriq.middleware.tenant import enforce_venue_manager, load_employee_in_s
 from rosteriq.services.events import audit
 from rosteriq.services.venue_access import (
     DEPARTMENT, FULL, STAFF, access_map, apply_access_map, fully_managed_group,
-    held_venue_ids, role_label, section_options,
+    held_venue_ids, role_label, section_options, visible_to,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,11 +73,11 @@ async def my_access(user: UserContext = Depends(get_current_user)) -> dict:
                        for row in _venues_payload(db, account)]}
 
 
-def _target(db, user: UserContext, employee_id: str):
+def _target(db, user: UserContext, employee_id: str, lower_to=None):
     from rosteriq.routes.staff_portal import _account_management_guards
     emp = load_employee_in_scope(db, employee_id)
     enforce_venue_manager(getattr(emp, "venue_id", None))
-    account = _account_management_guards(user, emp, db)
+    account = _account_management_guards(user, emp, db, lower_to=lower_to)
     return emp, account
 
 
@@ -112,7 +115,7 @@ async def set_employee_access(employee_id: str, body: VenueAccessBody,
     to Apothecary'). Staff access somewhere new needs a staff record there
     with their email, or there would be nothing for them to see."""
     db = get_db()
-    emp, account = _target(db, user, employee_id)
+    emp, account = _target(db, user, employee_id, lower_to=(body.venue_id, body.level))
     vid = body.venue_id
     enforce_venue_manager(vid)
     if account.get("id") == user.user_id:
@@ -142,7 +145,11 @@ async def set_employee_access(employee_id: str, body: VenueAccessBody,
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     db.save_user(account)
-    after = access_map(account)
+    # Lowering access here may be done by someone who doesn't run the login's
+    # other venues, so the reply and the audit row describe only the ones
+    # they do.
+    shown = visible_to(user, account)
+    after = access_map(shown)
     if adding:
         audit("user.venue_grant", vid, "user", account["id"], email=account.get("email"),
               employee_id=emp.id, reason="manager_added", changed_by=user.user_id,
@@ -158,4 +165,4 @@ async def set_employee_access(employee_id: str, body: VenueAccessBody,
            f"{name + ' as ' + what if adding else what + ' at ' + name}"
            f" — takes effect on their next sign-in.")
     return {"employee_id": emp.id, "name": emp.name, "message": msg,
-            "label": role_label(db, account), "venues": _venues_payload(db, account)}
+            "label": role_label(db, shown), "venues": _venues_payload(db, shown)}

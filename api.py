@@ -2396,6 +2396,16 @@ async def create_venue(
         _raw = getattr(_db, "_store", _db)  # unscoped store for the bootstrap write
         if _raw.get_venue(venue.id) is not None:
             raise HTTPException(status_code=403, detail="You do not have access to this venue")
+        # A manager someone else appointed can't add venues: one it created
+        # would make it an owner the appointing owner could no longer manage.
+        # Adding another venue is the owner's flow (it created one it holds).
+        from rosteriq.services.venue_access import created_venue_ids, is_manager_login
+        _me = _raw.get_user_by_id(_tenant.user_id) or {}
+        if (is_manager_login(_me) and _me.get("venue_ids")
+                and not created_venue_ids(_raw, _me.get("id"), _me.get("venue_ids"))):
+            raise HTTPException(status_code=403, detail=(
+                "This login manages a venue someone else runs, so it can't add venues. "
+                "Sign up with another email for your own venue, or ask RosterIQ support."))
         venue, kept = merge_venue_update(None, venue)
         _raw.save_venue(venue)
         _user = _raw.get_user_by_id(_tenant.user_id)
@@ -2682,6 +2692,9 @@ async def list_employees(
     _is_mgr = (_tenant is None or _tenant.is_owner
                or getattr(_tenant, "role", None) in ("manager", "owner"))
     _scope += "_mgr" if _is_mgr else f"_staff_{_tenant.user_id}"
+    _left = [] if _is_mgr else _left_venues(_tenant, [venue_id] if venue_id else _tenant.venue_ids)
+    if venue_id and _left:
+        raise HTTPException(403, "Your staff record here is no longer active — ask your manager")
 
     # Use cache if available
     if get_cache_manager and request and _response_cacheable():
@@ -2704,6 +2717,10 @@ async def list_employees(
         ]
     if venue_id:
         all_employees = [e for e in all_employees if e.venue_id == venue_id]
+    if _left:
+        _me = _caller_email(_tenant)
+        all_employees = [e for e in all_employees
+                         if e.venue_id not in _left or _is_own_record(e, _me)]
 
     total = len(all_employees)
     items = all_employees[offset:offset + limit]
@@ -2752,6 +2769,13 @@ def _is_own_record(emp, caller_email: str) -> bool:
     return bool(caller_email) and (getattr(emp, "email", "") or "").strip().lower() == caller_email
 
 
+def _left_venues(tenant, venue_ids) -> list:
+    """Of ``venue_ids``, where this staff caller's own record has been set
+    inactive: they left, so that venue's team list is closed to them."""
+    from rosteriq.services.linking import left_venue_ids
+    return left_venue_ids(getattr(_db, "_store", _db), _caller_email(tenant), venue_ids)
+
+
 @app.get("/employees/{employee_id}")
 async def get_employee(employee_id: str):
     if employee_id not in _store["employees"]:
@@ -2764,6 +2788,8 @@ async def get_employee(employee_id: str):
             or getattr(_tenant, "role", None) in ("manager", "owner")):
         if _is_own_record(emp, _caller_email(_tenant)):
             return emp
+        if _left_venues(_tenant, [emp.venue_id]):
+            raise HTTPException(403, "Your staff record here is no longer active — ask your manager")
         return _colleague_view(emp)
     return emp
 

@@ -50,7 +50,8 @@ def _gate_announcement(venue_id: str, audience) -> None:
         for s in secs:
             enforce_section_manager(venue_id, s)
 from rosteriq.routes.staff_portal import (
-    _linked_employee, _linked_employee_at, _linked_employees, _no_link_response, _venue_names,
+    _NO_LONGER_ACTIVE, _left_at, _linked_employee, _linked_employee_at, _linked_employees,
+    _no_link_response, _on_team, _team_links, _venue_names,
 )
 from rosteriq.services.audience import group_suggestion, matches as audience_matches
 from rosteriq.services.events import audit
@@ -255,6 +256,8 @@ async def venue_announcements(venue_id: str = Query(...),
         # them or to everyone — never someone else's. Their mark-read 404s
         # on it, so showing it here would be a notice they can't dismiss.
         emp = _linked_employee_at(db, user, venue_id)  # None: only whole-venue notices here
+        if emp is None and _left_at(db, user, venue_id):
+            raise HTTPException(status_code=403, detail=_NO_LONGER_ACTIVE)
         rows = [a for a in rows if _audience_match(a.get("audience"), emp)]
     payloads = [_ann_payload(a, staff) for a in rows]
     # The stored sms_result names exactly who has no phone number and whose
@@ -295,6 +298,7 @@ async def my_announcements(user: UserContext = Depends(get_current_user)) -> dic
     links = _linked_employees(db, user)
     if not links:
         return _no_link_response(user)
+    links = _on_team(links)
     names = _venue_names(db, [v for _, v in links])
     feed = []
     unread = 0
@@ -322,9 +326,7 @@ async def my_announcements(user: UserContext = Depends(get_current_user)) -> dic
 async def mark_announcement_read(ann_id: str,
                                  user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    links = _linked_employees(db, user)
-    if not links:
-        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    links = _team_links(db, user)
     ann = db.get_announcement(ann_id)
     emp = next((e for e, v in links if ann and v == ann.get("venue_id")), None)
     if not ann or emp is None or not _audience_match(ann.get("audience"), emp):
