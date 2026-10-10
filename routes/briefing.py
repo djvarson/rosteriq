@@ -114,6 +114,12 @@ async def daily_briefing(venue_id: str = Query(...),
     pending_leave = len([r for r in (db.list_leave_requests(venue_id) or [])
                          if r.get("status") == "pending"])
     covers = db.list_shift_covers(venue_id) or []
+    try:
+        from rosteriq.services.leave_shifts import standing_cover_ids
+        standing = standing_cover_ids(db, venue_id, covers)
+        covers = [c for c in covers if c.get("id") in standing]
+    except Exception as e:
+        logger.warning(f"Briefing cover check failed for {venue_id}: {e}")
     claimed_covers = len([c for c in covers if c.get("status") == "claimed"])
     open_covers = len([c for c in covers if c.get("status") == "open"])
     if pending_leave:

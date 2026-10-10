@@ -8853,7 +8853,7 @@ function renderCoverRequests() {
       (c.status === 'claimed' ? 'READY TO APPROVE' : c.status.toUpperCase()) + '</span>';
     const fromLeave = c.origin === 'leave';
     const actions = c.status === 'claimed'
-      ? '<button class="btn btn-primary btn-small" onclick="decideCover(' + i + ', true)">' + (fromLeave ? 'Approve' : 'Approve swap') + '</button> ' +
+      ? '<button class="btn btn-primary btn-small" onclick="decideCover(' + i + ', true)">' + (fromLeave || c.origin === 'open' ? 'Approve' : 'Approve swap') + '</button> ' +
         '<button class="btn btn-secondary btn-small" onclick="decideCover(' + i + ', false)">Decline</button>'
       : '';
     return '<tr style="border-top:1px solid var(--border);">' +
@@ -8869,9 +8869,10 @@ function renderCoverRequests() {
 
 async function decideCover(i, approve) {
   const c = cvRows[i];
+  const openShift = c.origin === 'leave' || c.origin === 'open';
   let verb = approve
-    ? 'Approve: ' + c.claimed_by_name + ' covers ' + (c.origin === 'leave' ? 'the open ' + (c.role || '') + ' shift' : c.requested_by_name + '\'s shift') + ' on ' + c.shift_date + '?\nThe roster will be updated.'
-    : 'Decline this claim? ' + (c.origin === 'leave' ? 'The shift stays open' : 'The shift stays with ' + c.requested_by_name) + ' and reopens for others.';
+    ? 'Approve: ' + c.claimed_by_name + ' covers ' + (openShift ? 'the open ' + (c.role || '') + ' shift' : c.requested_by_name + '\'s shift') + ' on ' + c.shift_date + '?\nThe roster will be updated.'
+    : 'Decline this claim? ' + (openShift ? 'The shift stays open' : 'The shift stays with ' + c.requested_by_name) + ' and reopens for others.';
   if (approve) {
     let checks;
     try {

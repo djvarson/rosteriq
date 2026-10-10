@@ -8,18 +8,31 @@ that role, it drops off the person's /my, and the Today briefing lists it
 until someone is approved onto it. A shift that has already started stays as
 it was (history).
 
-Both rosters a week can show are updated: the one managers see (published,
-else the newest) and the one staff see (published, else imported) — see
-services/current_roster.py.
+Every roster of those weeks that hasn't been superseded is updated — the one
+staff see (published, else imported), the one managers see, and a newer draft
+not yet published — so publishing that draft can't put the person back on
+their leave day. Only the roster staff can see gets covers straight away; an
+open shift on any other roster goes on the cover board when that roster is
+published (post_open_covers). See services/current_roster.py.
+
+A cover stands while its shift is still on the roster staff see with the
+day, times and area it was posted with, held by the person who asked (or by
+nobody, once it is open). One that doesn't is withdrawn, never approved.
 """
 
+import logging
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Iterable, Optional
 
+from rosteriq.middleware.tenant import scoped_employee_map
 from rosteriq.services.clock import venue_now
-from rosteriq.services.current_roster import live_rosters
+from rosteriq.services.current_roster import (
+    SUPERSEDED, live_rosters, live_shifts, roster_state, week_monday,
+)
+
+logger = logging.getLogger(__name__)
 
 OPEN = ""
 
@@ -35,6 +48,7 @@ PAID_LEAVE_TYPES = frozenset({"annual", "personal"})
 LEAVE_TYPE_PATTERN = "^(" + "|".join(LEAVE_TYPES) + ")$"
 
 _DEAD = ("cancelled", "no_show")
+LIVE_COVER = ("open", "claimed")
 
 
 def is_open(shift) -> bool:
@@ -78,43 +92,123 @@ def _venue_now(db, venue_id) -> datetime:
     return now.replace(tzinfo=None) if getattr(now, "tzinfo", None) else now
 
 
-def _week_rosters(db, venue_id: str, start: date, end: date) -> list:
-    """Every roster a reader sees for these weeks: managers' and staff's."""
-    seen = {}
-    for staff in (False, True):
-        for roster in live_rosters(db, venue_id, start, end, staff=staff):
-            seen.setdefault(roster.id, roster)
-    return list(seen.values())
-
-
 def _staff_roster_ids(db, venue_id: str, start: date, end: date) -> set:
     return {r.id for r in live_rosters(db, venue_id, start, end, staff=True)}
 
 
-def _person_shifts(db, venue_id: str, employee_id: str, start: date, end: date):
-    """[(roster, shift)] of this person's shifts dated inside [start, end]."""
-    out = []
-    for roster in _week_rosters(db, venue_id, start, end):
-        for s in roster.shifts or []:
-            if (str(s.employee_id) == str(employee_id) and start <= s.date <= end
-                    and _status(s) not in _DEAD):
-                out.append((roster, s))
-    return out
+def unsuperseded_rosters(db, venue_id: str, start: date, end: date) -> list:
+    """Every roster of the weeks overlapping [start, end] that hasn't been
+    superseded: the one staff see, the managers' one and any newer draft."""
+    return [r for r in db.get_rosters_by_date_range(venue_id, start, end) or []
+            if getattr(r, "venue_id", None) == venue_id
+            and roster_state(db, r.id) != SUPERSEDED]
 
 
-def _slot(shift) -> tuple:
+def _mine(roster, employee_id: str, start: date, end: date) -> list:
+    return [s for s in roster.shifts or []
+            if str(s.employee_id) == str(employee_id) and start <= s.date <= end
+            and _status(s) not in _DEAD]
+
+
+def shift_slot(shift) -> tuple:
     return (shift.date, shift.start_time, shift.end_time, (shift.role or "").strip().lower())
+
+
+def _hours(value: float) -> str:
+    return f"{round(value, 2):g}h"
+
+
+def _shift_end(shift) -> datetime:
+    return datetime.combine(shift.date, shift.start_time) + timedelta(hours=shift.duration_hours)
+
+
+def _punched_hours(sheet: dict, until: Optional[datetime]) -> Optional[float]:
+    """Hours on one punch less its break. Punches are stored as naive UTC; one
+    not clocked out runs to `until`, or is None (unknown) without one."""
+    ci, co = sheet.get("clock_in"), sheet.get("clock_out")
+    if not ci:
+        return 0.0
+    if not co and until is None:
+        return None
+    try:
+        a = ci if isinstance(ci, datetime) else datetime.fromisoformat(str(ci).replace("Z", "+00:00"))
+        if not co:
+            b = until
+        else:
+            b = co if isinstance(co, datetime) else datetime.fromisoformat(str(co).replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    a, b = a.replace(tzinfo=None), b.replace(tzinfo=None)
+    minutes = (b - a).total_seconds() / 60 - int(sheet.get("break_minutes") or 0)
+    return max(0.0, minutes / 60)
+
+
+def _worked_by_day(db, venue_id: str, employee_id: str, days: set, running: set,
+                   now_utc: datetime) -> tuple:
+    """(day -> hours this person punched at the venue that day, days with a
+    punch never clocked out). A punch still open while that day's shift is
+    running counts up to now; once the shift is over nobody knows when they
+    left, so it isn't counted."""
+    if not days:
+        return {}, set()
+    try:
+        sheets = db.get_timesheets(venue_id, min(days), max(days)) or []
+    except Exception:
+        return {}, set()
+    out: dict = {}
+    unclosed = set()
+    for t in sheets:
+        day = _as_date(t.get("work_date"))
+        if str(t.get("employee_id")) != str(employee_id) or day not in days:
+            continue
+        hours = _punched_hours(t, now_utc if day in running else None)
+        if hours is None:
+            unclosed.add(day)
+        else:
+            out[day] = out.get(day, 0.0) + hours
+    return out, unclosed
 
 
 def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
     """What approving leave for these dates would do, in words a manager reads
     in the approve dialog: 'Jo is rostered Sat 4-11pm as Duty Manager; this
-    shift will be left open'."""
-    now = _venue_now(db, venue_id)
+    shift will be left open'.
+
+    Hours come from one roster per week (the one staff see, else the managers'
+    draft), so a week that has both never counts a day twice. A shift that has
+    started or passed adds only the rostered hours the person didn't punch
+    that day."""
+    local = venue_now(venue_id, db)
+    now = local.replace(tzinfo=None) if local.tzinfo else local
+    now_utc = local.astimezone(timezone.utc).replace(tzinfo=None) if local.tzinfo else datetime.utcnow()
     name = getattr(employee, "name", None) or "They"
+    counted = live_rosters(db, venue_id, start, end, staff=True)
+    staff_weeks = {week_monday(r.week_start) for r in counted}
+    counted += [r for r in live_rosters(db, venue_id, start, end)
+                if week_monday(r.week_start) not in staff_weeks]
+    counted_ids = {r.id for r in counted}
+    hour_shifts = [s for r in counted for s in _mine(r, employee.id, start, end)]
+
     slots = {}
-    for _roster, s in _person_shifts(db, venue_id, employee.id, start, end):
-        slots.setdefault(_slot(s), s)
+    for s in hour_shifts:
+        slots.setdefault(shift_slot(s), s)
+    for r in unsuperseded_rosters(db, venue_id, start, end):
+        if r.id not in counted_ids:
+            for s in _mine(r, employee.id, start, end):
+                slots.setdefault(shift_slot(s), s)
+
+    started: dict = {}
+    running = set()
+    for s in hour_shifts:
+        if _started(s, now):
+            started[s.date] = started.get(s.date, 0.0) + float(s.net_hours)
+            if now < _shift_end(s):
+                running.add(s.date)
+    worked, unclosed = _worked_by_day(db, venue_id, employee.id, set(started), running, now_utc)
+    leave_hours = sum(float(s.net_hours) for s in hour_shifts if not _started(s, now))
+    leave_hours += sum(max(0.0, h - worked.get(d, 0.0)) for d, h in started.items())
+    hour_ids = {s.id for s in hour_shifts}
+
     shifts = []
     for key in sorted(slots):
         s = slots[key]
@@ -123,6 +217,20 @@ def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
         if past:
             message = (f"{name} was rostered {when} as {s.role}; that shift has started "
                        "or passed, so it stays on the roster as it was")
+            if s.id in hour_ids:
+                did = worked.get(s.date, 0.0)
+                left = _hours(max(0.0, started[s.date] - did))
+                if s.date in unclosed and did:
+                    message += (f" — they worked {_hours(did)} that day besides a punch never "
+                                f"clocked out, which isn't counted, so {left} of it counts as "
+                                "leave: check the hours")
+                elif s.date in unclosed:
+                    message += (" — their punch that day was never clocked out, so it isn't "
+                                f"counted and its {left} counts as leave: check the hours")
+                elif did:
+                    message += f" — they worked {_hours(did)} that day, so {left} of it counts as leave"
+                else:
+                    message += f" — nothing was punched that day, so its {left} counts as leave"
         else:
             message = f"{name} is rostered {when} as {s.role}; this shift will be left open"
         shifts.append({
@@ -140,65 +248,202 @@ def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
         "employee_id": employee.id, "employee_name": getattr(employee, "name", None),
         "start_date": start.isoformat(), "end_date": end.isoformat(),
         "shifts": shifts, "will_open_count": len(will_open),
-        "rostered_hours": round(sum(x["hours"] for x in shifts), 2),
+        "rostered_hours": round(sum(float(s.net_hours) for s in hour_shifts), 2),
+        "leave_hours": round(leave_hours, 2),
         "message": summary,
     }
 
 
 def default_paid_hours(impact: dict) -> Optional[float]:
-    """Paid leave defaults to the hours the person was rostered in the window
-    (None when they had none — the manager records the figure)."""
-    hours = impact.get("rostered_hours") or 0
+    """Paid leave defaults to the rostered hours the leave keeps the person
+    from working (None when there are none — the manager records the figure)."""
+    hours = impact.get("leave_hours") or 0
     return round(float(hours), 2) if hours else None
 
 
+def _new_cover(venue_id: str, shift, requested_by: str, origin: str) -> dict:
+    return {
+        "id": f"cv-{uuid.uuid4().hex[:10]}",
+        "venue_id": venue_id,
+        "shift_id": shift.id,
+        "shift_date": shift.date,
+        "shift_start": shift.start_time.strftime("%H:%M"),
+        "shift_end": shift.end_time.strftime("%H:%M"),
+        "role": shift.role,
+        "requested_by": requested_by,
+        "reason": "",
+        "origin": origin,
+        "claimed_by": None,
+        "status": "open",
+        "created_at": datetime.utcnow(),
+    }
+
+
+def _open_on(db, roster_id: str, venue_id: str, employee, start: date, end: date,
+             now: datetime, emp_map: dict, state) -> list:
+    """Re-read one roster under its lock, open the person's not-yet-started
+    shifts in the window, recost and save it. Returns the shifts opened."""
+    from rosteriq.services import roster_edit as edit  # roster_edit imports this module
+
+    with edit.roster_lock(db, roster_id):
+        roster = db.get_roster(roster_id)
+        if roster is None or getattr(roster, "venue_id", None) != venue_id:
+            return []
+        roster = roster.model_copy(deep=True)
+        leaving = [s for s in _mine(roster, employee.id, start, end) if not _started(s, now)]
+        if leaving:
+            for s in leaving:
+                s.employee_id = OPEN
+            edit.recost_total(roster, emp_map, state)
+            db.save_roster(roster)
+        return leaving
+
+
 def open_leave_shifts(db, venue_id: str, employee, start: date, end: date) -> list:
-    """Leave each of the person's not-yet-started shifts in the window open and
-    post the staff-visible ones to the cover board. Returns one entry per shift
-    slot opened (for the leave record, the response and the audit trail)."""
+    """Leave each of the person's not-yet-started shifts in the window open on
+    every roster of those weeks that isn't superseded, and post the ones on
+    the roster staff see to the cover board. Each roster is re-read, changed
+    and saved under its lock; RosterBusy when another save holds the lock of
+    a roster staff see. Returns one entry per shift slot opened (for the
+    leave record, the response and the audit trail)."""
+    from rosteriq.services import roster_edit as edit  # roster_edit imports this module
+
     now = _venue_now(db, venue_id)
     staff_ids = _staff_roster_ids(db, venue_id, start, end)
-    covers = list(db.list_shift_covers(venue_id) or [])
-    covered = {c.get("shift_id") for c in covers if c.get("status") in ("open", "claimed")}
-    touched = {}
+    rosters = sorted(unsuperseded_rosters(db, venue_id, start, end),
+                     key=lambda r: (r.id not in staff_ids, r.week_start, str(r.id)))
+    covered = {c.get("shift_id"): c.get("id") for c in db.list_shift_covers(venue_id) or []
+               if c.get("status") in LIVE_COVER}
+    emp_map = scoped_employee_map(db, venue_id)
+    state = edit.venue_state(db.get_venue(venue_id))
     opened = {}
-    for roster, s in _person_shifts(db, venue_id, employee.id, start, end):
-        if _started(s, now):
+    for rid in [r.id for r in rosters]:
+        try:
+            leaving = _open_on(db, rid, venue_id, employee, start, end, now, emp_map, state)
+        except edit.RosterBusy:
+            if rid in staff_ids:
+                raise
+            # A draft mid-save keeps the shift; publishing it is refused while
+            # it rosters the person on their leave.
+            logger.warning(f"Roster {rid} busy: leave for {employee.id} not applied to it")
             continue
-        s.employee_id = OPEN
-        touched[roster.id] = roster
-        entry = opened.setdefault(_slot(s), {
-            "shift_id": s.id, "roster_id": roster.id,
-            "date": s.date.isoformat(), "start": s.start_time.strftime("%H:%M"),
-            "end": s.end_time.strftime("%H:%M"), "role": s.role,
-            "hours": round(float(s.net_hours), 2), "label": shift_label(s),
-            "cover_id": None, "shift_ids": [],
-        })
-        entry["shift_ids"].append(s.id)
-        if roster.id in staff_ids:
-            entry["shift_id"], entry["roster_id"] = s.id, roster.id
+        for s in leaving:
+            entry = opened.setdefault(shift_slot(s), {
+                "shift_id": s.id, "roster_id": rid,
+                "date": s.date.isoformat(), "start": s.start_time.strftime("%H:%M"),
+                "end": s.end_time.strftime("%H:%M"), "role": s.role,
+                "hours": round(float(s.net_hours), 2), "label": shift_label(s),
+                "cover_id": None, "shift_ids": [],
+            })
+            entry["shift_ids"].append(s.id)
+            if rid not in staff_ids:
+                continue
+            entry["shift_id"], entry["roster_id"] = s.id, rid
             if s.id not in covered:
-                cover = {
-                    "id": f"cv-{uuid.uuid4().hex[:10]}",
-                    "venue_id": venue_id,
-                    "shift_id": s.id,
-                    "shift_date": s.date,
-                    "shift_start": s.start_time.strftime("%H:%M"),
-                    "shift_end": s.end_time.strftime("%H:%M"),
-                    "role": s.role,
-                    "requested_by": employee.id,
-                    "reason": "",
-                    "origin": "leave",
-                    "claimed_by": None,
-                    "status": "open",
-                    "created_at": datetime.utcnow(),
-                }
+                cover = _new_cover(venue_id, s, employee.id, "leave")
                 db.save_shift_cover(cover)
-                covered.add(s.id)
-                entry["cover_id"] = cover["id"]
-    for roster in touched.values():
-        db.save_roster(roster)
+                covered[s.id] = cover["id"]
+            entry["cover_id"] = covered[s.id]
     return [opened[k] for k in sorted(opened)]
+
+
+def opened_summary(opened: list) -> str:
+    """'Left open and posted for cover: Sat 4-11pm Duty Manager.' A shift on a
+    roster staff can't see yet is left open and goes on the cover board when
+    that roster is published."""
+    posted = [o["label"] for o in opened if o.get("cover_id")]
+    waiting = [o["label"] for o in opened if not o.get("cover_id")]
+    parts = []
+    if posted:
+        parts.append(f"Left open and posted for cover: {', '.join(posted)}.")
+    if waiting:
+        parts.append(f"Left open: {', '.join(waiting)} — "
+                     + ("it goes" if len(waiting) == 1 else "they go")
+                     + " on the cover board when the roster is published.")
+    return " ".join(parts)
+
+
+def cover_day(cover: dict) -> Optional[date]:
+    return _as_date(cover.get("shift_date"))
+
+
+def cover_holders(cover: dict) -> set:
+    """Who may hold the shift while the cover stands: nobody, for a shift left
+    open; for a staff member's own request, them, or nobody once their
+    approved leave has left it open (the leave reuses their cover)."""
+    if cover.get("origin") in ("leave", "open"):
+        return {OPEN}
+    return {OPEN, str(cover.get("requested_by") or "")}
+
+
+def cover_stands(cover: dict, shift) -> bool:
+    """Is `shift` still the one the cover was posted for: same day, times and
+    area, held by one of cover_holders?"""
+    if shift is None or getattr(shift, "id", None) != cover.get("shift_id"):
+        return False
+    return (str(shift.employee_id or "") in cover_holders(cover)
+            and shift.date == cover_day(cover)
+            and shift.start_time.strftime("%H:%M") == str(cover.get("shift_start") or "")[:5]
+            and shift.end_time.strftime("%H:%M") == str(cover.get("shift_end") or "")[:5]
+            and (shift.role or "").strip().lower() == str(cover.get("role") or "").strip().lower())
+
+
+def standing_cover_ids(db, venue_id: str, covers: Iterable[dict]) -> set:
+    """Ids of the open or claimed covers whose shift still stands on the
+    roster staff see."""
+    weeks: dict = {}
+    out = set()
+    for c in covers or []:
+        day = cover_day(c)
+        if c.get("status") not in LIVE_COVER or day is None:
+            continue
+        monday = week_monday(day)
+        if monday not in weeks:
+            weeks[monday] = {s.id: s for s in live_shifts(
+                db, venue_id, monday, monday + timedelta(days=6), staff=True)}
+        if cover_stands(c, weeks[monday].get(c.get("shift_id"))):
+            out.add(c.get("id"))
+    return out
+
+
+def withdraw_cover(db, cover: dict, note: str, actor_id: Optional[str] = None) -> dict:
+    cover.update(status="withdrawn", decided_by=actor_id, decided_at=datetime.utcnow(),
+                 decision_note=note)
+    db.save_shift_cover(cover)
+    return cover
+
+
+def post_open_covers(db, roster, now: datetime = None) -> list:
+    """A roster has just become the one staff see: each open shift on it that
+    hasn't started and has no open or claimed cover goes on the cover board
+    (origin 'leave' when approved leave left it open, else 'open'), and the
+    open or claimed covers of that week whose shift isn't on it are withdrawn.
+    Returns the covers posted."""
+    venue_id = roster.venue_id
+    now = now or _venue_now(db, venue_id)
+    covers = list(db.list_shift_covers(venue_id) or [])
+    on_roster = {s.id for s in roster.shifts or []}
+    for c in covers:
+        day = cover_day(c)
+        if (c.get("status") in LIVE_COVER and c.get("shift_id") not in on_roster
+                and day is not None and roster.week_start <= day <= roster.week_end):
+            withdraw_cover(db, c, "The week's roster was replaced and this shift isn't on it.")
+    covered = {c.get("shift_id") for c in covers if c.get("status") in LIVE_COVER}
+    left_by = {}
+    for req in db.list_leave_requests(venue_id) or []:
+        for item in req.get("opened_shifts") or []:
+            for sid in item.get("shift_ids") or [item.get("shift_id")]:
+                left_by[sid] = req.get("employee_id")
+    posted = []
+    for s in roster.shifts or []:
+        if not is_open(s) or _status(s) in _DEAD or _started(s, now) or s.id in covered:
+            continue
+        who = left_by.get(s.id)
+        cover = _new_cover(venue_id, s, who or OPEN, "leave" if who else "open")
+        db.save_shift_cover(cover)
+        covered.add(s.id)
+        posted.append(cover)
+    return posted
 
 
 def open_shift_notices(db, venue_id: str, start: date, end: date, now: datetime = None) -> list:
