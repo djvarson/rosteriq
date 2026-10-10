@@ -65,6 +65,9 @@ TOUCH_EVERY = timedelta(minutes=5)
 STALE_OPEN_HOURS = 14       # an open punch this old is a forgotten clock-out
 LONG_SHIFT_HOURS = 12       # warn on any clock-out longer than this
 CLEAN_VARIANCE_MINUTES = 15
+# Breaks are stored truncated to whole minutes, so a 29:59 break reads as 29;
+# the clean check allows that rounding below the meal-break minimum.
+BREAK_SHORTFALL_GRACE_MINUTES = 1
 
 DEFAULT_SETTINGS = {
     "allow_self_clock": False,

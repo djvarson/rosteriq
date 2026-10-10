@@ -13,6 +13,7 @@ Handles:
 All monetary values in AUD using Decimal for precision.
 """
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
@@ -29,6 +30,8 @@ from rosteriq.award_rules import (
 from rosteriq.cost_calculator import split_at_midnight, super_guarantee_rate
 from rosteriq.services.pay_basis import is_salaried, salary_for_days
 from rosteriq.services.staff_records import is_active
+
+logger = logging.getLogger(__name__)
 
 
 class PayrollStatus(str, Enum):
@@ -404,7 +407,7 @@ def _as_date(v) -> Optional[date]:
 
 
 def _paid_leave_windows(leave_requests) -> Dict[str, list]:
-    """employee_id -> [(start, end, leave label)] of approved paid leave."""
+    """employee_id -> [(start, end, leave label, request)] of approved paid leave."""
     from rosteriq.services.leave_shifts import PAID_LEAVE_TYPES, leave_type_label
     out: Dict[str, list] = {}
     for req in leave_requests or []:
@@ -414,8 +417,36 @@ def _paid_leave_windows(leave_requests) -> Dict[str, list]:
         if start is None or end is None:
             continue
         out.setdefault(str(req.get("employee_id")), []).append(
-            (start, end, leave_type_label(req.get("leave_type")).lower()))
+            (start, end, leave_type_label(req.get("leave_type")).lower(), req))
     return out
+
+
+def _hours(value) -> str:
+    return f"{round(float(value), 2):g}h"
+
+
+def _days(lo: date, hi: date) -> str:
+    return f"{lo:%a %d %b}" if lo == hi else f"{lo:%a %d %b} to {hi:%a %d %b}"
+
+
+def latest_prepared_run(db, venue_id: str, day: Optional[date]) -> Optional[dict]:
+    """The pay run most recently prepared from approved timesheets whose
+    period holds ``day``; it lists the timesheets it was built from."""
+    if day is None:
+        return None
+    iso = day.isoformat()
+    try:
+        runs = [b for b in db.list_payroll_batches(venue_id) or []
+                if "timesheet_ids" in b and str(b.get("period_start")) <= iso <= str(b.get("period_end"))]
+    except Exception as e:  # noqa: BLE001 — a missing read only drops a reminder
+        logger.warning(f"Prepared pay runs unreadable for {venue_id}: {e}")
+        return None
+    return max(runs, key=lambda b: str(b.get("created_at") or ""), default=None)
+
+
+def run_label(run: dict) -> str:
+    """'Mon 05 Oct to Sun 18 Oct'."""
+    return _days(_as_date(run.get("period_start")), _as_date(run.get("period_end")))
 
 
 def _local_day(when, tz) -> Optional[date]:
@@ -482,8 +513,10 @@ class PayrollExporter:
                 becomes a separate hours line for the advisor to price (no
                 leave loading or pay is calculated)
             rostered: shifts are the rostered plan, not worked time. A
-                person's shift dated inside their approved paid leave is then
-                left unpriced (the leave line stands for that day) and noted.
+                person's shifts dated inside their approved paid leave are
+                then priced only for the rostered hours the leave line
+                doesn't hold, and noted. Worked time on such a day is
+                priced and noted.
 
         Salaried employees of the venue get one fixed salary line for the
         period, whether or not they have shifts (services/pay_basis.py),
@@ -501,25 +534,39 @@ class PayrollExporter:
             status=PayrollStatus.draft,
         )
 
-        on_leave = _paid_leave_windows(leave_requests) if rostered else {}
+        on_leave = _paid_leave_windows(leave_requests)
 
         # Group shifts by employee
         shifts_by_emp: Dict[str, List[Shift]] = {}
+        held_by_leave: Dict[tuple, tuple] = {}
+        worked_on_leave: Dict[tuple, list] = {}
         for shift in shifts:
             if shift.date < period_start or shift.date > period_end:
                 continue
             leave = next((w for w in on_leave.get(str(shift.employee_id), [])
                           if w[0] <= shift.date <= w[1]), None)
-            if leave is not None:
-                emp = employees.get(shift.employee_id)
-                batch.notes.append(
-                    f"{getattr(emp, 'name', None) or shift.employee_id}: rostered "
-                    f"{shift.date:%a %d %b} {shift.start_time:%H:%M}-{shift.end_time:%H:%M} "
-                    f"not priced — on approved {leave[2]} that day (see the leave line)")
+            if leave is not None and rostered:
+                held_by_leave.setdefault((shift.employee_id, id(leave)), (leave, []))[1].append(shift)
                 continue
+            if leave is not None:
+                worked_on_leave.setdefault((str(shift.employee_id), shift.date), [leave, Decimal("0")])[1] += \
+                    Decimal(str(shift.net_hours))
             if shift.employee_id not in shifts_by_emp:
                 shifts_by_emp[shift.employee_id] = []
             shifts_by_emp[shift.employee_id].append(shift)
+        for (emp_id, _), (leave, held) in held_by_leave.items():
+            self._rostered_on_leave(batch, employees.get(emp_id), emp_id, leave, held,
+                                    shifts_by_emp, period_start, period_end)
+        for (emp_id, day), (leave, hours) in sorted(worked_on_leave.items()):
+            if emp_id not in employees:
+                continue
+            start, end, label, req = leave
+            paid = req.get("paid_hours")
+            batch.notes.append(
+                f"{employees[emp_id].name}: worked {day:%a %d %b} {_hours(hours)} during approved "
+                f"{label} {_days(start, end)} "
+                f"({_hours(paid) + ' recorded' if paid is not None else 'no hours recorded'}) — "
+                "check the leave hours don't also cover that day")
 
         # Process each employee
         for emp_id, emp_shifts in shifts_by_emp.items():
@@ -536,6 +583,8 @@ class PayrollExporter:
                 )
             if emp_payroll:
                 batch.employees.append(emp_payroll)
+
+        self._note_rate_changes(batch, employees, shifts_by_emp)
 
         listed = {e.employee_id for e in batch.employees}
         for emp in employees.values():
@@ -748,6 +797,45 @@ class PayrollExporter:
 
         return emp_payroll if emp_payroll.total_hours > 0 else None
 
+    def _rostered_on_leave(self, batch, emp, emp_id, leave, held, shifts_by_emp,
+                           period_start, period_end) -> None:
+        """A person's rostered shifts inside one approved paid leave. The leave
+        line holds its recorded hours; rostered time beyond them (what they
+        worked before going on leave) is priced from the roster, earliest
+        first, so worked plus leave is what was rostered. A shift with nothing
+        left to price is noted as unpriced."""
+        from rosteriq.services.leave_shifts import leave_hours_in_period
+        _start, _end, label, req = leave
+        name = getattr(emp, "name", None) or emp_id
+        held = sorted(held, key=lambda s: (s.date, s.start_time))
+        rostered = sum((Decimal(str(s.net_hours)) for s in held), Decimal("0"))
+        paid = leave_hours_in_period(req, period_start, period_end)
+        left = 0
+        if paid is not None and paid < rostered:
+            left = int(((rostered - paid) * 60).to_integral_value(rounding=ROUND_HALF_UP))
+        priced = []
+        for s in held:
+            if left <= 0:
+                batch.notes.append(
+                    f"{name}: rostered {s.date:%a %d %b} {s.start_time:%H:%M}-{s.end_time:%H:%M} "
+                    f"not priced — on approved {label} that day (see the leave line)")
+                continue
+            minutes = int(round(s.net_hours * 60))
+            part = s
+            if left < minutes:
+                end = datetime.combine(s.date, s.start_time) + timedelta(minutes=left)
+                part = s.model_copy(update={"end_time": end.time(), "break_minutes": 0})
+            shifts_by_emp.setdefault(s.employee_id, []).append(part)
+            priced.append(part)
+            left -= min(left, minutes)
+        if priced:
+            batch.notes.append(
+                f"{name}: approved {label} holds {_hours(paid)} of the {_hours(rostered)} rostered on "
+                f"{_days(held[0].date, held[-1].date)}, so the other {_hours(rostered - paid)} is "
+                "priced from the roster ("
+                + ", ".join(f"{p.date:%a %d %b} {p.start_time:%H:%M}-{p.end_time:%H:%M}" for p in priced)
+                + ")")
+
     def _salaried_line(
         self,
         employee: Employee,
@@ -850,6 +938,32 @@ class PayrollExporter:
             self._memo[key] = ids
         return self._memo[key]
 
+    def _note_rate_changes(self, batch, employees, shifts_by_emp) -> None:
+        """Each line is priced at the person's current rate. Say which shifts
+        were worked before a change of rate, whenever it was saved."""
+        for line in batch.employees:
+            emp = employees.get(line.employee_id)
+            shifts = shifts_by_emp.get(line.employee_id) or []
+            if line.pay_basis != "hourly" or emp is None or not shifts:
+                continue
+            for change in getattr(emp, "rate_history", None) or []:
+                since = _as_date(change.get("effective_from"))
+                if since is None or change.get("rate") is None:
+                    continue
+                before = sorted({s.date for s in shifts if s.date < since})
+                if not before:
+                    continue
+                n = sum(1 for s in shifts if s.date < since)
+                many = n != 1
+                was = (f"${Decimal(str(change['previous_rate'])):,.2f}"
+                       if change.get("previous_rate") is not None else "the previous rate")
+                batch.notes.append(
+                    f"{line.name}: rate changed {was} → ${Decimal(str(change.get('rate'))):,.2f} from "
+                    f"{since:%a %d %b}; {n} shift{'s' if many else ''} before then "
+                    f"({', '.join(f'{d:%a %d %b}' for d in before)}) {'are' if many else 'is'} priced "
+                    f"here at the current ${Decimal(str(emp.hourly_base_rate)):,.2f} — advisor to pay "
+                    f"{'them' if many else 'it'} at the rate in effect that day")
+
     def _note_salaried(self, batch, employees, leave_requests, period_start, period_end) -> None:
         """Say what the full-period salary line can't: the person has left,
         or took approved unpaid leave in the period."""
@@ -901,11 +1015,15 @@ class PayrollExporter:
                 batch.employees.append(line)
                 lines[emp_id] = line
             for leave_type, hours, req in entries:
-                note = (f"{leave_type_label(leave_type)} {req.get('start_date')} to "
-                        f"{req.get('end_date')} — hours as recorded; advisor to price")
+                when = f"{leave_type_label(leave_type)} {req.get('start_date')} to {req.get('end_date')}"
+                note = f"{when} — hours as recorded; advisor to price"
                 if hours is None:
-                    note = (f"{leave_type_label(leave_type)} {req.get('start_date')} to "
-                            f"{req.get('end_date')} — no hours recorded; advisor to confirm")
+                    note = f"{when} — no hours recorded; advisor to confirm"
+                if line.pay_basis == "salaried" and line.salary_amount > 0:
+                    note = (f"{when} — {_hours(hours) if hours is not None else 'no hours recorded'}, "
+                            "already paid within the salary line; for their leave balance, not to price")
+                    self._note_salaried_leave(batch, line, leave_type, hours, req,
+                                              period_start, period_end)
                 line.leave_entries.append(LeaveEntry(
                     leave_type=leave_type,
                     hours=hours if hours is not None else Decimal("0.00"),
@@ -913,6 +1031,17 @@ class PayrollExporter:
                     amount=Decimal("0.00"),
                     note=note,
                 ))
+
+    @staticmethod
+    def _note_salaried_leave(batch, line, leave_type, hours, req, period_start, period_end) -> None:
+        from rosteriq.services.leave_shifts import leave_type_label
+        lo = max(_as_date(req.get("start_date")) or period_start, period_start)
+        hi = min(_as_date(req.get("end_date")) or period_end, period_end)
+        batch.notes.append(
+            f"{line.name} (salaried) has approved {leave_type_label(leave_type).lower()} "
+            f"{_days(lo, hi)} ({_hours(hours) if hours is not None else 'no hours recorded'}) — the "
+            "salary line already pays those days; record the hours against their leave balance, "
+            "don't price them on top")
 
     def _get_penalty_multiplier_for_type(
         self,

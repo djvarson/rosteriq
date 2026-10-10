@@ -30,7 +30,7 @@ from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.models import Shift, ShiftStatus, State
 from rosteriq.cost_calculator import super_rate_label
 from rosteriq.services.payroll_export import (
-    PayrollExporter, PayrollBatch, PayrollStatus
+    PayrollExporter, PayrollBatch, PayrollStatus, latest_prepared_run, run_label
 )
 from rosteriq.services.xero_payroll import XeroPayrollClient
 from rosteriq.services.keypay_export import KeyPayClient
@@ -314,6 +314,28 @@ def _overlap_notes(sheets, employees, tz) -> List[str]:
     return out
 
 
+def _missed_by_earlier_run(db, venue_id: str, period_start: date, employees) -> List[str]:
+    """Approved shifts dated in the run prepared for the days just before this
+    period that aren't in it: a correction moved them there, or they were
+    approved after it was prepared."""
+    run = latest_prepared_run(db, venue_id, period_start - timedelta(days=1))
+    if run is None:
+        return []
+    included = set(run.get("timesheet_ids") or [])
+    start = date.fromisoformat(str(run["period_start"])[:10])
+    end = date.fromisoformat(str(run["period_end"])[:10])
+    out = []
+    for t in sorted(db.get_timesheets(venue_id, start, end) or [],
+                    key=lambda t: (str(t.get("work_date")), str(t.get("clock_in")))):
+        if t.get("status") != "approved" or str(t.get("id")) in included:
+            continue
+        name = getattr(employees.get(t.get("employee_id")), "name", t.get("employee_id"))
+        day = date.fromisoformat(str(t.get("work_date"))[:10])
+        out.append(f"{name}: the approved shift on {day:%a %d %b} isn't in the {run_label(run)} pay "
+                   "run, which was prepared before it was approved — prepare that range again")
+    return out
+
+
 @router.post("/prepare-actuals", response_model=PayrollBatchResponse)
 async def prepare_payroll_from_timesheets(
     request: PreparePayrollRequest,
@@ -335,13 +357,14 @@ async def prepare_payroll_from_timesheets(
 
     sheets = db.get_timesheets(request.venue_id, request.period_start,
                                request.period_end) or []
+    employees = {e.id: e for e in (db.get_employees(request.venue_id) or [])}
+    missed = _missed_by_earlier_run(db, request.venue_id, request.period_start, employees)
     if not sheets:
         raise HTTPException(
             status_code=422,
             detail="No timesheets in this period — staff clock in at /timeclock, "
-                   "and approved punches become payroll.")
+                   "and approved punches become payroll." + "".join(f" {m}." for m in missed))
 
-    employees = {e.id: e for e in (db.get_employees(request.venue_id) or [])}
     blockers = []
     for t in sheets:
         status = t.get("status")
@@ -412,8 +435,10 @@ async def prepare_payroll_from_timesheets(
     )
     batch.notes.extend(_overlap_notes(sheets, employees, tz))
     batch.notes.extend(_salaried_elsewhere(db, request.venue_id, batch))
+    batch.notes.extend(missed)
     errors = exporter.validate_batch(batch)
-    db.save_payroll_batch(batch.to_dict())
+    db.save_payroll_batch({**batch.to_dict(),
+                           "timesheet_ids": sorted(str(t.get("id")) for t in sheets)})
     _audit_batch_created(batch, errors, basis="approved_timesheets")
     logger.info(f"Payroll batch {batch.batch_id} prepared from {len(shifts)} "
                 f"approved timesheets at {request.venue_id}")
@@ -461,7 +486,7 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
                 "Overtime gross", "Allowance detail", "Allowances", "Total gross",
                 super_header, "Total incl super",
                 "Pay basis", "Salary (fixed line)", "Hours worked (salaried, not priced)",
-                "Paid leave hours (advisor to price)"])
+                "Paid leave hours (advisor to price)", "Leave within salary (not to price)"])
     for e in batch.get("employees", []):
         penalty_detail = "; ".join(
             f"{p['penalty_type']} {p['hours']}h x{p['multiplier']}"
@@ -484,14 +509,15 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
             e.get("pay_basis") or "hourly",
             e.get("salary_amount") if salaried else "",
             e.get("worked_hours") if salaried else "",
-            leave_detail,
+            "" if salaried else leave_detail,
+            leave_detail if salaried else "",
         ])
     w.writerow([])
     w.writerow(["TOTALS", batch.get("total_ordinary_hours"), "",
                 batch.get("total_ordinary_gross"), "", batch.get("total_penalty_gross"),
                 batch.get("total_overtime_hours"), batch.get("total_overtime_gross"),
                 "", batch.get("total_allowances"), batch.get("total_gross"),
-                batch.get("total_super"), "", "", batch.get("total_salary", ""), "", ""])
+                batch.get("total_super"), "", "", batch.get("total_salary", ""), "", "", ""])
     # What the prep found for the advisor: a leaver to prorate, unpaid leave,
     # a day on paid leave left unpriced, overlapping punches.
     notes = batch.get("validation_errors") or []

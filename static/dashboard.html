@@ -9120,6 +9120,8 @@ document.getElementById('ets-save').addEventListener('click', async function() {
     break_minutes: brkVal !== etsShown.brk || etsShown.fromRoster ? parseInt(brkVal || '0', 10) : null,
     note: document.getElementById('ets-note').value.trim(),
   };
+  // The rostered break left as shown comes off only if the finish makes the shift long enough to need one.
+  if (etsShown.fromRoster && brkVal === etsShown.brk) body.break_from_roster = true;
   if (!outVal) { showToast('Enter the clock-out time', 'warning'); return; }
   if (!body.note) { showToast('Add a note saying what you changed and why', 'warning'); return; }
   try {
@@ -9131,6 +9133,7 @@ document.getElementById('ets-save').addEventListener('click', async function() {
       ? t.employee_name + '\'s finish time saved — ' + tsMinutesLabel(res.worked_minutes) + ' worked, ' +
         (res.break_minutes || 0) + 'm break. Approve it once checked.'
       : t.employee_name + ' corrected & approved — ' + tsMinutesLabel(res.worked_minutes), 'success');
+    if (res.warning) showToast(res.warning, 'warning', 10000);
     loadTimesheets();
   } catch (e) {
     showToast('Save failed: ' + e.message, 'error');
