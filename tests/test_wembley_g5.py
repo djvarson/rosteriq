@@ -207,6 +207,99 @@ def test_lowering_at_one_venue_through_the_access_list_and_the_creator_is_safe()
     assert ben_acct["role"] == "manager" and set(ben_acct["venue_ids"]) == {w.vw, w.va}
 
 
+def _role_change_audit(db, vid):
+    return [e for e in db.list_events(venue_id=vid, category="audit",
+                                      action_prefix="user.role_change", limit=50) or []]
+
+
+def _assert_never_named(blob, *secrets):
+    text = repr(blob).lower()
+    for s in secrets:
+        assert s.lower() not in text, (s, blob)
+
+
+def test_lowering_someone_never_describes_venues_the_caller_cant_open():
+    w = _world()
+    c, db = w.c, get_db()
+    andy = _person(w, w.vw, "Andy")
+    _set_role(w, andy.id)
+    vx, cafe = f"side-{w.tag}", f"cafe-{w.tag}"
+    _gave_himself_a_venue(w, andy.email, vx)
+    side = db.get_venue(vx)
+    side.areas = [{"name": "Rooftop VIP"}, {"name": "Poker room"}]
+    db.save_venue(side)
+    from rosteriq.models import State, VenueConfig
+    db.save_venue(VenueConfig(id=cafe, name="Carl's Corner Cafe", tanda_org_id="", state=State.wa,
+                              timezone="Australia/Perth", min_staff={}, max_labour_pct=30.0,
+                              created_at=datetime(2026, 7, 1)))
+    acct = db.get_user_by_email(andy.email)
+    acct["staff_venue_ids"] = [cafe]
+    db.save_user(acct)
+    assert c.get(f"/venues/{vx}", headers=w.ben).status_code == 403
+    hidden = (vx, cafe, "Side Bar", "Corner Cafe", "rooftop", "poker")
+
+    r = c.post(f"/api/employees/{andy.id}/access", headers=w.ben,
+               json={"venue_id": w.vw, "level": "department", "sections": ["bar"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    _assert_never_named(body, *hidden)
+    assert [v["venue_id"] for v in body["venues"]] == [w.vw]
+    assert body["venues"][0]["level"] == "department"
+    assert body["label"] == "Department manager (The Wembley Hotel)"
+
+    r = c.post(f"/api/employees/{andy.id}/access-role", json={"role": "staff"}, headers=w.ben)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    _assert_never_named(body, *hidden)
+    assert [(v["venue_id"], v["level"]) for v in body["venues"]] == [(w.vw, "staff")]
+    assert body["message"] == "Andy is now staff at The Wembley Hotel — takes effect on their next sign-in."
+
+    # The login itself still holds both other venues as before.
+    acct = db.get_user_by_email(andy.email)
+    assert acct["venue_ids"] == [vx] and set(acct["staff_venue_ids"]) == {w.vw, cafe}
+    # The Wembley's audit log records the change without naming his other venues.
+    events = _role_change_audit(db, w.vw)
+    _assert_never_named(events[:2], *hidden)
+    assert [(e.get("details") or {}).get("venue_access") for e in events[:2]] == [
+        {w.vw: "staff"}, {w.vw: "department"}]
+
+
+def test_a_shared_manager_lowered_at_one_pub_hides_the_other_pub_from_its_manager():
+    w = _world()
+    c, db = w.c, get_db()
+    apo = db.get_venue(w.va)
+    apo.areas = [{"name": "Cocktail lab"}, {"name": "Private dining"}]
+    db.save_venue(apo)
+    andy = _person(w, w.vw, "Andy")
+    _set_role(w, andy.id)
+    sue = _person(w, w.vw, "Sue")
+    _set_role(w, sue.id)
+    r = c.post(f"/api/employees/{sue.id}/access", headers=w.ben,
+               json={"venue_id": w.va, "level": "department", "sections": ["cocktail lab"]})
+    assert r.status_code == 200, r.text
+    assert c.get(f"/venues/{w.va}", headers=andy.h).status_code == 403
+
+    r = c.post(f"/api/employees/{sue.id}/access", headers=andy.h,
+               json={"venue_id": w.vw, "level": "department", "sections": ["bar"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    _assert_never_named(body, w.va, "Apothecary", "cocktail", "private dining")
+    assert body["label"] == "Department manager (The Wembley Hotel)"
+    assert [v["venue_id"] for v in body["venues"]] == [w.vw]
+
+    # Ben runs both pubs, so he sees the whole login.
+    r = c.post(f"/api/employees/{sue.id}/access-role", json={"role": "staff"}, headers=w.ben)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert {v["venue_id"]: v["level"] for v in body["venues"]} == {w.vw: "staff", w.va: "department"}
+    assert body["message"] == "Sue is now staff at The Wembley Hotel — takes effect on their next sign-in."
+    r = c.get(f"/api/employees/{sue.id}/access", headers=w.ben)
+    assert r.status_code == 200, r.text
+    assert r.json()["label"] == "Department manager (Apothecary)"
+    assert _role_change_audit(db, w.vw)[0]["details"]["venue_access"] == {
+        w.vw: "staff", w.va: "department"}
+
+
 def test_an_appointed_manager_cannot_add_a_venue_but_the_owner_can():
     w = _world()
     c, db = w.c, get_db()

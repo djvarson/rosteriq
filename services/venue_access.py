@@ -94,6 +94,19 @@ def access_map(account) -> Dict[str, dict]:
     return out
 
 
+def visible_to(user, account: dict) -> dict:
+    """A copy of ``account`` that reaches only the venues ``user`` fully
+    manages (every venue, for the platform owner). Describe a login through
+    this to a caller who may run only part of it."""
+    seen = {v for v in held_venue_ids(account) if fully_manages(user, v)}
+    view = dict(account)
+    view["venue_ids"] = [v for v in _get(account, "venue_ids", []) or [] if v in seen]
+    view["staff_venue_ids"] = [v for v in _get(account, "staff_venue_ids", []) or [] if v in seen]
+    view["section_grants"] = {v: s for v, s in (_get(account, "section_grants", {}) or {}).items()
+                              if v in seen}
+    return view
+
+
 def apply_access_map(account: dict, amap: Dict[str, dict]) -> dict:
     """Write one access level per venue back onto the account record.
 

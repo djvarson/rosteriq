@@ -445,7 +445,7 @@ async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
     from rosteriq.middleware.tenant import load_employee_in_scope
     from rosteriq.services.events import audit
     from rosteriq.services.venue_access import (
-        DEPARTMENT, FULL, STAFF, access_map, apply_access_map,
+        DEPARTMENT, FULL, STAFF, access_map, apply_access_map, visible_to,
     )
     db = get_db()
     emp = load_employee_in_scope(db, employee_id)
@@ -475,7 +475,9 @@ async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
     before = access_map(account)
     apply_access_map(account, {vid: {"level": level, "sections": sections}})
     db.save_user(account)
-    after = access_map(account)
+    # Only the venues the caller fully manages: lowering access here doesn't
+    # need them to run the rest of the login.
+    after = access_map(visible_to(user, account))
     audit("user.role_change", vid, "user", account["id"], email=email,
           old_role=old, new_role=account.get("role"), changed_by=user.user_id,
           sections=sections or None, reason="venue_manager_set",
