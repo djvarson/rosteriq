@@ -319,6 +319,10 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         try:
             from rosteriq.services.auth import AuthService
             payload = AuthService.verify_access_token(token)
+            if not payload:
+                from rosteriq.services.kiosk import token_claims
+                kiosk = token_claims(token)
+                return f"kiosk:{kiosk['sub']}" if kiosk else None
         except Exception:
             return None
         sub = (payload or {}).get("sub")

@@ -483,6 +483,46 @@ class BaseStore:
         """Return the stored pin hash or None."""
         raise NotImplementedError
 
+    def list_open_timesheets(self, venue_id: str) -> list:
+        """Every still-open punch at the venue, whatever its date."""
+        raise NotImplementedError
+
+    def get_timeclock_pin_record(self, venue_id: str, employee_id: str):
+        """{pin_hash, failed_attempts, locked_until} or None."""
+        raise NotImplementedError
+
+    def list_timeclock_pin_employee_ids(self, venue_id: str) -> set:
+        raise NotImplementedError
+
+    def note_timeclock_pin_failure(self, venue_id: str, employee_id: str,
+                                   max_failures: int, lock_minutes: int):
+        """Count a wrong PIN; the max_failures-th locks the PIN for lock_minutes
+        and restarts the count. Returns the record after the update."""
+        raise NotImplementedError
+
+    def clear_timeclock_pin_failures(self, venue_id: str, employee_id: str) -> None:
+        raise NotImplementedError
+
+    def save_kiosk_device(self, device: dict) -> None:
+        raise NotImplementedError
+
+    def get_kiosk_device(self, device_id: str):
+        raise NotImplementedError
+
+    def list_kiosk_devices(self, venue_id: str) -> list:
+        raise NotImplementedError
+
+    def touch_kiosk_device(self, device_id: str) -> None:
+        """Stamp last_used_at = now."""
+        raise NotImplementedError
+
+    def note_kiosk_exit_failure(self, device_id: str, max_failures: int, lock_minutes: int):
+        """As note_timeclock_pin_failure, for wrong manager PINs at a kiosk's Exit."""
+        raise NotImplementedError
+
+    def clear_kiosk_exit_failures(self, device_id: str) -> None:
+        raise NotImplementedError
+
     # --- Compliance checklists (opening/closing lists, temp logs) ----------
 
     def save_checklist_template(self, tpl: dict) -> None:
@@ -1173,7 +1213,8 @@ class MemoryStore(BaseStore):
         self._publication_events: list[dict] = []  # roster publication events
         self._push_subscriptions: dict[str, dict] = {}  # Key: user_id
         self._timesheets: dict[str, dict] = {}  # Key: timesheet id
-        self._timeclock_pins: dict[str, str] = {}  # Key: f"{venue_id}:{employee_id}" -> pin hash
+        self._timeclock_pins: dict[str, dict] = {}  # Key: f"{venue_id}:{employee_id}" -> {pin_hash, failed_attempts, locked_until}
+        self._kiosk_devices: dict[str, dict] = {}  # Key: device id
         self._checklist_templates: dict[str, dict] = {}
         self._checklist_runs: dict[str, dict] = {}
         self._ingredients: dict[str, dict] = {}
@@ -1270,10 +1311,76 @@ class MemoryStore(BaseStore):
         return sorted(out, key=lambda t: (str(t.get("work_date")), str(t.get("clock_in"))))
 
     def set_timeclock_pin(self, venue_id, employee_id, pin_hash):
-        self._timeclock_pins[f"{venue_id}:{employee_id}"] = pin_hash
+        self._timeclock_pins[f"{venue_id}:{employee_id}"] = {
+            "pin_hash": pin_hash, "failed_attempts": 0, "locked_until": None}
 
     def get_timeclock_pin(self, venue_id, employee_id):
-        return self._timeclock_pins.get(f"{venue_id}:{employee_id}")
+        rec = self._timeclock_pins.get(f"{venue_id}:{employee_id}")
+        return rec.get("pin_hash") if rec else None
+
+    def list_open_timesheets(self, venue_id):
+        return sorted((t for t in self._timesheets.values()
+                       if t.get("venue_id") == venue_id and not t.get("clock_out")),
+                      key=lambda t: str(t.get("clock_in")))
+
+    def get_timeclock_pin_record(self, venue_id, employee_id):
+        rec = self._timeclock_pins.get(f"{venue_id}:{employee_id}")
+        return dict(rec) if rec else None
+
+    def list_timeclock_pin_employee_ids(self, venue_id):
+        prefix = f"{venue_id}:"
+        return {k[len(prefix):] for k in self._timeclock_pins if k.startswith(prefix)}
+
+    @staticmethod
+    def _note_failure(rec, max_failures, lock_minutes):
+        count = int(rec.get("failed_attempts") or 0) + 1
+        if count >= max_failures:
+            rec["failed_attempts"] = 0
+            rec["locked_until"] = datetime.utcnow() + timedelta(minutes=lock_minutes)
+        else:
+            rec["failed_attempts"] = count
+        return rec
+
+    def note_timeclock_pin_failure(self, venue_id, employee_id, max_failures, lock_minutes):
+        rec = self._timeclock_pins.get(f"{venue_id}:{employee_id}")
+        if rec is None:
+            return None
+        return dict(self._note_failure(rec, max_failures, lock_minutes))
+
+    def clear_timeclock_pin_failures(self, venue_id, employee_id):
+        rec = self._timeclock_pins.get(f"{venue_id}:{employee_id}")
+        if rec is not None:
+            rec["failed_attempts"], rec["locked_until"] = 0, None
+
+    def save_kiosk_device(self, device):
+        self._kiosk_devices[device["id"]] = dict(device)
+
+    def get_kiosk_device(self, device_id):
+        d = self._kiosk_devices.get(device_id)
+        return dict(d) if d else None
+
+    def list_kiosk_devices(self, venue_id):
+        return sorted((dict(d) for d in self._kiosk_devices.values() if d.get("venue_id") == venue_id),
+                      key=lambda d: str(d.get("created_at")), reverse=True)
+
+    def touch_kiosk_device(self, device_id):
+        d = self._kiosk_devices.get(device_id)
+        if d is not None:
+            d["last_used_at"] = datetime.utcnow()
+
+    def note_kiosk_exit_failure(self, device_id, max_failures, lock_minutes):
+        d = self._kiosk_devices.get(device_id)
+        if d is None:
+            return None
+        rec = {"failed_attempts": d.get("exit_failures"), "locked_until": d.get("exit_locked_until")}
+        self._note_failure(rec, max_failures, lock_minutes)
+        d["exit_failures"], d["exit_locked_until"] = rec["failed_attempts"], rec["locked_until"]
+        return dict(d)
+
+    def clear_kiosk_exit_failures(self, device_id):
+        d = self._kiosk_devices.get(device_id)
+        if d is not None:
+            d["exit_failures"], d["exit_locked_until"] = 0, None
 
     # --- Compliance checklists ---
 
@@ -3211,6 +3318,11 @@ class PostgresStore(BaseStore):
                 approved_by TEXT,
                 approved_at TIMESTAMP WITH TIME ZONE,
                 adjustment_note TEXT,
+                break_started_at TIMESTAMP WITH TIME ZONE,
+                break_source TEXT,
+                flags JSONB DEFAULT '[]'::jsonb,
+                source TEXT,
+                device_id TEXT,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
@@ -3220,8 +3332,25 @@ class PostgresStore(BaseStore):
                 venue_id TEXT NOT NULL,
                 employee_id TEXT NOT NULL,
                 pin_hash TEXT NOT NULL,
+                failed_attempts INTEGER DEFAULT 0,
+                locked_until TIMESTAMP WITH TIME ZONE,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (venue_id, employee_id)
+            )
+        """,
+        "kiosk_devices": """
+            CREATE TABLE IF NOT EXISTS kiosk_devices (
+                id TEXT PRIMARY KEY,
+                venue_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                token_hash TEXT NOT NULL,
+                created_by TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                last_used_at TIMESTAMP WITH TIME ZONE,
+                revoked_at TIMESTAMP WITH TIME ZONE,
+                revoked_by TEXT,
+                exit_failures INTEGER DEFAULT 0,
+                exit_locked_until TIMESTAMP WITH TIME ZONE
             )
         """,
         "checklist_templates": """
@@ -3749,6 +3878,13 @@ class PostgresStore(BaseStore):
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS approved_by TEXT",
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE",
             "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS adjustment_note TEXT",
+            "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS break_started_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS break_source TEXT",
+            "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS flags JSONB DEFAULT '[]'::jsonb",
+            "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS source TEXT",
+            "ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS device_id TEXT",
+            "ALTER TABLE timeclock_pins ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0",
+            "ALTER TABLE timeclock_pins ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE",
             # tanda_org_id is UNIQUE; venues without Tanda must store NULL (which
             # never collides), not '' (which collides on the second venue ever).
             # The original schema also made it NOT NULL — drop that first or the
@@ -3948,8 +4084,10 @@ class PostgresStore(BaseStore):
                 INSERT INTO timesheets (id, venue_id, employee_id, work_date, clock_in,
                     clock_out, break_minutes, status, pin_verified, rostered_shift_id,
                     variance_minutes, approved_by, approved_at, adjustment_note,
+                    break_started_at, break_source, flags, source, device_id,
                     created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
                     clock_in=EXCLUDED.clock_in, clock_out=EXCLUDED.clock_out,
                     break_minutes=EXCLUDED.break_minutes,
@@ -3957,13 +4095,19 @@ class PostgresStore(BaseStore):
                     rostered_shift_id=EXCLUDED.rostered_shift_id,
                     variance_minutes=EXCLUDED.variance_minutes,
                     approved_by=EXCLUDED.approved_by, approved_at=EXCLUDED.approved_at,
-                    adjustment_note=EXCLUDED.adjustment_note, updated_at=now()
+                    adjustment_note=EXCLUDED.adjustment_note,
+                    break_started_at=EXCLUDED.break_started_at,
+                    break_source=EXCLUDED.break_source, flags=EXCLUDED.flags,
+                    source=EXCLUDED.source, device_id=EXCLUDED.device_id, updated_at=now()
             """, (
                 ts["id"], ts["venue_id"], ts["employee_id"], ts["work_date"],
                 ts["clock_in"], ts.get("clock_out"), ts.get("break_minutes", 0),
                 ts.get("status", "open"), ts.get("pin_verified", False),
                 ts.get("rostered_shift_id"), ts.get("variance_minutes"),
                 ts.get("approved_by"), ts.get("approved_at"), ts.get("adjustment_note"),
+                ts.get("break_started_at"), ts.get("break_source"),
+                _json(list(_jsonb(ts.get("flags"), []) or [])),
+                ts.get("source"), ts.get("device_id"),
                 ts.get("created_at", datetime.utcnow()),
             ))
 
@@ -3999,10 +4143,12 @@ class PostgresStore(BaseStore):
         with self._cursor() as cur:
             self._ensure_table(cur, "timeclock_pins")
             cur.execute("""
-                INSERT INTO timeclock_pins (venue_id, employee_id, pin_hash, updated_at)
-                VALUES (%s, %s, %s, now())
+                INSERT INTO timeclock_pins (venue_id, employee_id, pin_hash, failed_attempts,
+                    locked_until, updated_at)
+                VALUES (%s, %s, %s, 0, NULL, now())
                 ON CONFLICT (venue_id, employee_id) DO UPDATE SET
-                    pin_hash=EXCLUDED.pin_hash, updated_at=now()
+                    pin_hash=EXCLUDED.pin_hash, failed_attempts=0, locked_until=NULL,
+                    updated_at=now()
             """, (venue_id, employee_id, pin_hash))
 
     def get_timeclock_pin(self, venue_id, employee_id):
@@ -4014,6 +4160,114 @@ class PostgresStore(BaseStore):
             """, (venue_id, employee_id))
             row = cur.fetchone()
             return row["pin_hash"] if row else None
+
+    def list_open_timesheets(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timesheets")
+            cur.execute("""
+                SELECT * FROM timesheets
+                WHERE venue_id = %s AND clock_out IS NULL
+                ORDER BY clock_in
+            """, (venue_id,))
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_timeclock_pin_record(self, venue_id, employee_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timeclock_pins")
+            cur.execute("""
+                SELECT pin_hash, failed_attempts, locked_until FROM timeclock_pins
+                WHERE venue_id = %s AND employee_id = %s
+            """, (venue_id, employee_id))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def list_timeclock_pin_employee_ids(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timeclock_pins")
+            cur.execute("SELECT employee_id FROM timeclock_pins WHERE venue_id = %s", (venue_id,))
+            return {r["employee_id"] for r in cur.fetchall()}
+
+    def note_timeclock_pin_failure(self, venue_id, employee_id, max_failures, lock_minutes):
+        # One statement, so two workers counting the same wrong PINs can't
+        # both read 4 and write 5 (SET expressions all see the old row).
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timeclock_pins")
+            cur.execute("""
+                UPDATE timeclock_pins SET
+                    failed_attempts = CASE WHEN COALESCE(failed_attempts, 0) + 1 >= %s
+                                           THEN 0 ELSE COALESCE(failed_attempts, 0) + 1 END,
+                    locked_until = CASE WHEN COALESCE(failed_attempts, 0) + 1 >= %s
+                                        THEN now() + make_interval(mins => %s) ELSE locked_until END
+                WHERE venue_id = %s AND employee_id = %s
+                RETURNING pin_hash, failed_attempts, locked_until
+            """, (max_failures, max_failures, int(lock_minutes), venue_id, employee_id))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def clear_timeclock_pin_failures(self, venue_id, employee_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timeclock_pins")
+            cur.execute("""
+                UPDATE timeclock_pins SET failed_attempts = 0, locked_until = NULL
+                WHERE venue_id = %s AND employee_id = %s
+            """, (venue_id, employee_id))
+
+    def save_kiosk_device(self, device):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "kiosk_devices")
+            cur.execute("""
+                INSERT INTO kiosk_devices (id, venue_id, name, token_hash, created_by,
+                    created_at, last_used_at, revoked_at, revoked_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    name=EXCLUDED.name, last_used_at=EXCLUDED.last_used_at,
+                    revoked_at=EXCLUDED.revoked_at, revoked_by=EXCLUDED.revoked_by
+            """, (
+                device["id"], device["venue_id"], device["name"], device["token_hash"],
+                device.get("created_by"), device.get("created_at") or datetime.utcnow(),
+                device.get("last_used_at"), device.get("revoked_at"), device.get("revoked_by"),
+            ))
+
+    def get_kiosk_device(self, device_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "kiosk_devices")
+            cur.execute("SELECT * FROM kiosk_devices WHERE id = %s", (device_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def list_kiosk_devices(self, venue_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "kiosk_devices")
+            cur.execute("SELECT * FROM kiosk_devices WHERE venue_id = %s ORDER BY created_at DESC",
+                        (venue_id,))
+            return [dict(r) for r in cur.fetchall()]
+
+    def touch_kiosk_device(self, device_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "kiosk_devices")
+            cur.execute("UPDATE kiosk_devices SET last_used_at = now() WHERE id = %s", (device_id,))
+
+    def note_kiosk_exit_failure(self, device_id, max_failures, lock_minutes):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "kiosk_devices")
+            cur.execute("""
+                UPDATE kiosk_devices SET
+                    exit_failures = CASE WHEN COALESCE(exit_failures, 0) + 1 >= %s
+                                         THEN 0 ELSE COALESCE(exit_failures, 0) + 1 END,
+                    exit_locked_until = CASE WHEN COALESCE(exit_failures, 0) + 1 >= %s
+                                             THEN now() + make_interval(mins => %s)
+                                             ELSE exit_locked_until END
+                WHERE id = %s
+                RETURNING *
+            """, (max_failures, max_failures, int(lock_minutes), device_id))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def clear_kiosk_exit_failures(self, device_id):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "kiosk_devices")
+            cur.execute("UPDATE kiosk_devices SET exit_failures = 0, exit_locked_until = NULL "
+                        "WHERE id = %s", (device_id,))
 
     # --- Compliance checklists ---
 

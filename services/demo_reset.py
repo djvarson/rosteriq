@@ -81,6 +81,8 @@ PG_RULES = [
     ("forecasts", "DELETE FROM forecasts WHERE venue_id = %s", (D,)),
     ("timesheets", "DELETE FROM timesheets WHERE venue_id = %s", (D,)),
     ("timeclock pins", "DELETE FROM timeclock_pins WHERE venue_id = %s", (D,)),
+    ("kiosk devices", "DELETE FROM kiosk_devices WHERE venue_id = %s", (D,)),
+    ("timeclock settings", "DELETE FROM kv_store WHERE key = 'timeclock_settings:' || %s", (D,)),
     ("leave requests", "DELETE FROM leave_requests WHERE venue_id = %s", (D,)),
     ("checklist runs", "DELETE FROM checklist_runs WHERE venue_id = %s", (D,)),
     ("checklist templates", "DELETE FROM checklist_templates WHERE venue_id = %s", (D,)),
@@ -192,6 +194,7 @@ def _memory_reset(s) -> dict:
         "_xero_bill_pushes", "_myob_bill_pushes", "_waste_log", "_pos_item_maps", "_import_batches",
         "_timesheets", "_approval_requests", "_roster_templates", "_webhook_subscriptions",
         "_experiment_outcomes", "_analytics_snapshots", "_payroll_batches", "_open_shifts",
+        "_kiosk_devices",
     ]
     for name in by_venue_dicts:
         d = g(name)
@@ -221,8 +224,9 @@ def _memory_reset(s) -> dict:
     if isinstance(g("_payroll_exports"), list):
         n["_payroll_exports"] = _prune_list(s._payroll_exports, lambda x: _v(x, "batch_id") not in batches)
     if isinstance(g("_kv"), dict):
-        n["_kv"] = _prune_dict(s._kv, lambda k, v: not (str(k).startswith("handover")
-                                                        and isinstance(v, dict) and v.get("venue_id") == D))
+        n["_kv"] = _prune_dict(s._kv, lambda k, v: not (
+            (str(k).startswith("handover") and isinstance(v, dict) and v.get("venue_id") == D)
+            or k == f"timeclock_settings:{D}"))
     if isinstance(g("_shifts"), dict):
         n["_shifts"] = _prune_dict(s._shifts, lambda k, v: k not in rsh)
     if isinstance(g("_rosters"), dict):

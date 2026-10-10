@@ -11,56 +11,83 @@
   :root {
     --bg: #F5F3EF; --card: #FFFFFF; --border: #E8E4DC;
     --text: #111827; --muted: #55606E; --accent: #F59E0B;
-    --green: #16A34A; --red: #DC2626; --blue: #0284C7;
+    --green: #16A34A; --red: #DC2626; --blue: #0284C7; --amber-ink: #B45309;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { background: var(--bg); color: var(--text); font-family: 'Manrope', -apple-system, 'Segoe UI', Roboto, sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
   header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 24px; border-bottom: 1px solid var(--border); background: var(--card); }
   header .brand { font-size: 20px; font-weight: 700; }
   header .brand span { color: #D97706; } /* amber on white needs the deeper step */
+  .head-right { display: flex; align-items: center; gap: 14px; }
   #clock-now { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #exit-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
   @media (max-width: 480px) {
     header { padding: 14px 16px; }
     header .brand { font-size: 17px; }
     #clock-now { font-size: 21px; }
   }
   #venue-name { color: var(--muted); font-size: 14px; }
-  main { padding: 20px; max-width: 1100px; margin: 0 auto; }
-  .hint { color: var(--muted); text-align: center; margin: 10px 0 20px; font-size: 15px; }
+  #offline { display: none; background: #FEF2F2; color: var(--red); border-bottom: 1px solid #FECACA; text-align: center; padding: 10px 16px; font-weight: 600; font-size: 14px; }
+  main { padding: 20px 16px; max-width: 1100px; margin: 0 auto; }
+  .hint { color: var(--muted); text-align: center; margin: 4px 0 16px; font-size: 15px; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  #search { flex: 1 1 240px; font: inherit; font-size: 18px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); color: var(--text); }
+  #search:focus { outline: none; border-color: var(--accent); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { font: inherit; font-size: 15px; font-weight: 700; padding: 12px 16px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--muted); cursor: pointer; }
+  .chip.active { background: var(--text); border-color: var(--text); color: #FFFFFF; }
   #staff-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 40px 16px; font-size: 16px; }
   .staff-card {
     background: var(--card); border: 2px solid var(--border); border-radius: 12px;
     padding: 20px 16px; cursor: pointer; text-align: center; transition: transform .08s ease;
   }
   .staff-card:hover { border-color: var(--accent, #F59E0B); }
   .staff-card:active { transform: scale(.97); }
-  #pinpad button:hover { filter: brightness(0.96); }
+  #pinpad button:hover, #exit-pinpad button:hover { filter: brightness(0.96); }
   .btn:hover { filter: brightness(0.96); }
   .staff-card .name { font-size: 19px; font-weight: 700; margin-bottom: 6px; }
   .staff-card .roster { color: var(--muted); font-size: 15px; margin-bottom: 10px; font-variant-numeric: tabular-nums; } /* read from across the counter */
   .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .06em; }
   .badge.off  { background: rgba(139,148,158,.15); color: var(--muted); }
   .badge.on   { background: rgba(34,197,94,.15);  color: var(--green); }
+  .badge.break { background: rgba(245,158,11,.18); color: var(--amber-ink); }
   .badge.done { background: rgba(85,96,110,.12); color: var(--muted); }
+  .badge.stale { background: rgba(220,38,38,.12); color: var(--red); }
   .staff-card.on { border-color: var(--green); }
+  .staff-card.break { border-color: var(--accent); }
+  .staff-card.stale { border-color: var(--red); }
   /* modal */
-  #modal { position: fixed; inset: 0; background: rgba(2,6,23,0.45); display: none; align-items: center; justify-content: center; padding: 16px; }
-  #modal.open { display: flex; }
-  .sheet { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 26px; width: 100%; max-width: 420px; text-align: center; }
+  .overlay { position: fixed; inset: 0; background: rgba(2,6,23,0.45); display: none; align-items: center; justify-content: center; padding: 16px; }
+  .overlay.open { display: flex; }
+  .sheet { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 26px; width: 100%; max-width: 440px; text-align: center; }
+  .overlay .sheet { max-height: calc(100vh - 32px); overflow-y: auto; }
   .sheet h2 { font-size: 24px; margin-bottom: 4px; }
-  .sheet .sub { color: var(--muted); margin-bottom: 18px; font-size: 14px; }
-  #pin-display { font-size: 30px; letter-spacing: 12px; min-height: 44px; margin-bottom: 14px; font-variant-numeric: tabular-nums; }
+  .sheet .sub { color: var(--muted); margin-bottom: 14px; font-size: 14px; }
+  .shifts { margin: 0 0 14px; display: grid; gap: 6px; }
+  .shifts div { background: #F7F5F1; border-radius: 10px; padding: 8px 12px; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .err { color: var(--red); font-weight: 600; font-size: 15px; min-height: 0; margin-bottom: 10px; }
+  .pin-display { font-size: 30px; letter-spacing: 12px; min-height: 44px; margin-bottom: 14px; font-variant-numeric: tabular-nums; }
   .pinpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
   .pinpad button {
     font-size: 24px; font-weight: 700; padding: 16px 0; border-radius: 14px;
     border: 1px solid var(--border); background: #F1EFEA; color: var(--text); cursor: pointer;
   }
   .pinpad button:active { background: var(--border); }
-  .actions { display: grid; gap: 10px; }
-  .btn { font-size: 18px; font-weight: 700; padding: 16px; border-radius: 14px; border: none; cursor: pointer; }
+  .pinpad button.go { background: var(--accent); color: #111827; font-weight: 800; }
+  .actions { display: grid; gap: 10px; margin-bottom: 10px; }
+  .btn { font: inherit; font-size: 18px; font-weight: 700; padding: 16px; border-radius: 14px; border: none; cursor: pointer; width: 100%; }
   .btn.in  { background: var(--accent, #F59E0B); color: #111827; }   /* primary = house amber, ink text */
   .btn.out { background: #FFFFFF; color: var(--red); border: 1px solid var(--red); }
   .btn.ghost { background: #FFFFFF; color: #111827; border: 1px solid var(--border); }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .field { text-align: left; margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+  .field input, .field select { width: 100%; font: inherit; font-size: 17px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: #FFFFFF; color: var(--text); }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
+  .fine { color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 12px; }
+  .link { background: none; border: none; color: var(--muted); text-decoration: underline; font: inherit; font-size: 14px; cursor: pointer; margin-top: 8px; }
+  #setup .sheet { margin: 24px auto; }
   #toast {
     position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
     background: var(--card); border: 1px solid var(--border); border-radius: 14px;
@@ -68,6 +95,7 @@
   }
   #toast.ok { border-color: var(--green); }
   #toast.err { border-color: var(--red); }
+  #toast.warn { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -76,52 +104,144 @@
     <div class="brand">Roster<span>IQ</span> · Time Clock</div>
     <div id="venue-name"></div>
   </div>
-  <div id="clock-now">--:--</div>
+  <div class="head-right">
+    <div id="clock-now">--:--</div>
+    <button id="exit-btn" style="display:none;" onclick="openExit()">Exit</button>
+  </div>
 </header>
+<div id="offline"></div>
 <main>
-  <p class="hint">Tap your name to clock in or out</p>
-  <div id="staff-grid"></div>
+  <section id="setup" style="display:none;">
+    <div class="sheet">
+      <h2>Set up this time clock</h2>
+      <p class="sub" id="setup-msg"></p>
+      <div class="err" id="setup-err"></div>
+      <div id="setup-signin" style="display:none;">
+        <div class="field"><label for="setup-email">Manager email</label><input id="setup-email" type="email" autocomplete="off"></div>
+        <div class="field"><label for="setup-password">Password</label><input id="setup-password" type="password" autocomplete="off"></div>
+        <button class="btn in" id="setup-signin-btn" onclick="setupSignIn()">Sign in to set up</button>
+        <p class="fine">You stay signed in only while you set the clock up. Nothing about your login is kept on this tablet.</p>
+      </div>
+      <div id="setup-pick" style="display:none;">
+        <div class="field"><label for="setup-venue">Venue</label><select id="setup-venue" onchange="pickSetupVenue(this.value)"></select></div>
+        <div class="field"><label for="setup-name">Name this device (optional)</label><input id="setup-name" maxlength="80" placeholder="e.g. Front bar iPad"></div>
+        <button class="btn in" id="setup-go" onclick="setupDevice()">Set up this device as the time clock</button>
+        <p class="fine">From now on this browser only runs the venue's time clock. You'll be signed out of RosterIQ on it, so nobody at the counter can open the dashboard as you. Switch it off any time in Settings &rarr; Time clock.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="kiosk" style="display:none;">
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Type your name&hellip;" autocomplete="off" oninput="onSearch(this.value)">
+      <div class="chips">
+        <button class="chip active" data-filter="all" onclick="setFilter('all')">Everyone</button>
+        <button class="chip" data-filter="now" onclick="setFilter('now')">Rostered now</button>
+        <button class="chip" data-filter="on" onclick="setFilter('on')">On shift</button>
+      </div>
+    </div>
+    <p class="hint">Tap your name to clock in, take a break or clock out</p>
+    <div id="staff-grid"></div>
+  </section>
 </main>
 
-<div id="modal">
+<div id="modal" class="overlay">
   <div class="sheet">
     <h2 id="m-name"></h2>
     <div class="sub" id="m-sub"></div>
+    <div class="shifts" id="m-shifts"></div>
+    <div class="err" id="m-err"></div>
     <div id="pin-wrap" style="display:none;">
-      <div id="pin-display"></div>
+      <div class="pin-display" id="pin-display"></div>
       <div class="pinpad" id="pinpad"></div>
     </div>
-    <div class="actions">
-      <button class="btn in" id="m-action"></button>
-      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+    <div id="finish-wrap" class="field" style="display:none;">
+      <label for="finish-time">Did you finish last night? Enter your finish time</label>
+      <input type="time" id="finish-time">
     </div>
+    <div class="actions" id="m-actions"></div>
+    <button class="btn ghost" onclick="closeModal()">Cancel</button>
+  </div>
+</div>
+
+<div id="exit-modal" class="overlay">
+  <div class="sheet">
+    <h2>Exit the time clock</h2>
+    <div class="sub" id="exit-sub">A manager's kiosk PIN switches this device off.</div>
+    <div class="err" id="exit-err"></div>
+    <div id="exit-pin-wrap">
+      <div class="pin-display" id="exit-pin-display"></div>
+      <div class="pinpad" id="exit-pinpad"></div>
+    </div>
+    <div id="exit-signin" style="display:none;">
+      <div class="field"><label for="exit-email">Manager email</label><input id="exit-email" type="email" autocomplete="off"></div>
+      <div class="field"><label for="exit-password">Password</label><input id="exit-password" type="password" autocomplete="off"></div>
+      <div class="actions"><button class="btn out" onclick="exitWithSignIn()">Sign in and switch off</button></div>
+    </div>
+    <button class="btn ghost" onclick="closeExit()">Cancel</button>
+    <button class="link" id="exit-mode" onclick="toggleExitSignIn()">Sign in as a manager instead</button>
   </div>
 </div>
 <div id="toast"></div>
 
 <script>
-const token = localStorage.getItem('jwt_token') || localStorage.getItem('auth_token');
-if (!token) window.location.href = '/login';
+// The kiosk runs on a time clock DEVICE token (its own key below), never on a
+// person's login. A manager's sign-in is used only to set the device up.
+const KIOSK_KEY = 'riq_kiosk_token';
+const STALE_HOURS = 14;
+
+function storeGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+function storeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* this visit still works */ } }
+function storeDel(k) { try { localStorage.removeItem(k); } catch (e) { /* nothing stored */ } }
 
 const params = new URLSearchParams(window.location.search);
-let venueId = params.get('venue_id') || localStorage.getItem('clock_venue_id') || '';
-let staff = [], current = null, pin = '';
+let kioskToken = storeGet(KIOSK_KEY);
+let managerToken = '';
+let venueId = params.get('venue_id') || '';
+let venueName = '';
+let deviceId = '';
+let setupVenues = [];
+let staff = [], current = null, pin = '', exitPin = '';
+let filterMode = 'all', query = '';
+let boardTimer = null, modalTimer = null;
+const MODAL_IDLE_MS = 45000;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
 
 function fmtTime(d) { return d.toLocaleTimeString('en-AU', {hour: '2-digit', minute: '2-digit'}); }
 setInterval(() => { document.getElementById('clock-now').textContent = fmtTime(new Date()); }, 1000);
 document.getElementById('clock-now').textContent = fmtTime(new Date());
 
+// The app answers {error:{message}}; FastAPI validation answers {detail}.
+function errorMessage(body, status) {
+  if (body && body.error && body.error.message) return String(body.error.message);
+  if (body && body.detail) {
+    if (typeof body.detail === 'string') return body.detail;
+    if (Array.isArray(body.detail) && body.detail[0] && body.detail[0].msg) return String(body.detail[0].msg);
+    return JSON.stringify(body.detail);
+  }
+  return 'Something went wrong (' + status + '). Try again, or ask a manager.';
+}
+
 async function api(path, opts = {}) {
-  const r = await fetch(path, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, ...(opts.headers || {}) },
-  });
+  const tok = kioskToken || managerToken;
+  const headers = { 'Content-Type': 'application/json' };
+  if (tok) headers['Authorization'] = 'Bearer ' + tok;
+  const r = await fetch(path, { ...opts, headers: { ...headers, ...(opts.headers || {}) } });
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.detail && body.detail.length ? (typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)) : ('Error ' + r.status));
+  if (!r.ok) {
+    const e = new Error(errorMessage(body, r.status));
+    e.status = r.status;
+    throw e;
+  }
   return body;
 }
 
-let venueName = '';
+// ---------------------------------------------------------------- set-up --
 
 async function resolveVenue() {
   // Always fetch the list so the header can show the venue's NAME —
@@ -129,6 +249,7 @@ async function resolveVenue() {
   try {
     const v = await api('/venues');
     const items = v.items || v || [];
+    setupVenues = items;
     // ?venue_id wins when this login holds it; otherwise the kiosk's last venue, then the first.
     const stored = localStorage.getItem('clock_venue_id');
     const match = (venueId && items.find(x => x.id === venueId))
@@ -138,98 +259,485 @@ async function resolveVenue() {
       venueName = match.name || '';
       localStorage.setItem('clock_venue_id', venueId);
     }
-  } catch (e) { /* board load will surface the real error */ }
+    return null;
+  } catch (e) { return e; }
+}
+
+function showSection(which) {
+  document.getElementById('setup').style.display = which === 'setup' ? 'block' : 'none';
+  document.getElementById('kiosk').style.display = which === 'kiosk' ? 'block' : 'none';
+  document.getElementById('exit-btn').style.display = which === 'kiosk' ? 'inline-block' : 'none';
+}
+
+function setupError(msg) { document.getElementById('setup-err').textContent = msg || ''; }
+
+async function startSetup(msg) {
+  if (boardTimer) { clearInterval(boardTimer); boardTimer = null; }
+  showSection('setup');
+  hideOffline();
+  document.getElementById('venue-name').textContent = '';
+  document.getElementById('setup-msg').textContent = msg ||
+    'A manager sets this tablet up once. After that it only runs the time clock — nobody\'s login stays on it.';
+  setupError('');
+  if (!managerToken) {
+    const stored = storeGet('jwt_token') || storeGet('auth_token');
+    if (isManagerToken(stored)) managerToken = stored;
+  }
+  document.getElementById('setup-pick').style.display = 'none';
+  document.getElementById('setup-signin').style.display = managerToken ? 'none' : 'block';
+  if (managerToken) await loadSetupVenues();
+}
+
+// Only a manager's sign-in can set a clock up; a staff login left in this
+// browser is no use here, so the page asks for a manager instead.
+function isManagerToken(t) {
+  try {
+    const p = JSON.parse(atob(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return p.role === 'manager' || p.role === 'owner';
+  } catch (e) { return false; }
+}
+
+async function loadSetupVenues() {
+  const err = await resolveVenue();
+  if (err) {
+    if (err.status === 401) {
+      managerToken = '';
+      document.getElementById('setup-signin').style.display = 'block';
+      setupError('Sign in as a manager to set this time clock up.');
+    } else {
+      setupError(err.message);
+    }
+    return;
+  }
+  if (!setupVenues.length) { setupError('This login has no venue to set a time clock up for.'); return; }
+  const sel = document.getElementById('setup-venue');
+  sel.innerHTML = setupVenues.map(v =>
+    '<option value="' + esc(v.id) + '"' + (v.id === venueId ? ' selected' : '') + '>' + esc(v.name || v.id) + '</option>'
+  ).join('');
+  pickSetupVenue(venueId);
+  document.getElementById('setup-signin').style.display = 'none';
+  document.getElementById('setup-pick').style.display = 'block';
+}
+
+function pickSetupVenue(id) {
+  const v = setupVenues.find(x => x.id === id);
+  if (!v) return;
+  venueId = v.id;
+  venueName = v.name || v.id;
+  document.getElementById('setup-go').textContent = 'Set up this device as ' + venueName + ' time clock';
+}
+
+async function signIn(email, password) {
+  const r = await fetch('/api/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email, password: password }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || !body.access_token) {
+    const e = new Error(r.ok ? 'Sign-in failed' : errorMessage(body, r.status));
+    e.status = r.status;
+    throw e;
+  }
+  return body.access_token;
+}
+
+async function setupSignIn() {
+  const email = document.getElementById('setup-email').value.trim();
+  const password = document.getElementById('setup-password').value;
+  setupError('');
+  let tok = '';
+  try {
+    tok = await signIn(email, password);
+  } catch (e) { setupError(e.message); return; }
+  document.getElementById('setup-password').value = '';
+  if (!isManagerToken(tok)) { setupError('Only a manager can set up the time clock.'); return; }
+  managerToken = tok;
+  await loadSetupVenues();
+}
+
+// Sign the manager out of RosterIQ in this browser: the tablet is a time
+// clock now, and a dashboard session left on it is anyone's at the counter.
+async function signOutHere() {
+  const access = storeGet('jwt_token') || storeGet('auth_token');
+  const rt = storeGet('jwt_refresh_token');
+  if (access && rt) {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + access },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+    } catch (e) { /* the local sign-out below still happens */ }
+  }
+  ['jwt_token', 'auth_token', 'jwt_refresh_token'].forEach(storeDel);
+}
+
+async function setupDevice() {
+  if (!venueId) { setupError('Pick the venue first.'); return; }
+  const btn = document.getElementById('setup-go');
+  btn.disabled = true;
+  setupError('');
+  try {
+    const r = await api('/api/kiosk/devices', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: venueId, name: document.getElementById('setup-name').value.trim() }),
+    });
+    kioskToken = r.token;
+    storeSet(KIOSK_KEY, r.token);
+    storeSet('clock_venue_id', venueId);
+    await signOutHere();
+    managerToken = '';
+    toast('This device is now ' + (r.venue_name || venueName) + '\'s time clock', 'ok');
+    await startKiosk();
+  } catch (e) {
+    setupError(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function switchedOff(msg) {
+  kioskToken = '';
+  storeDel(KIOSK_KEY);
+  closeModal();
+  closeExit();
+  startSetup(msg || 'This time clock was switched off. A manager needs to set it up again.');
+}
+
+// ---------------------------------------------------------------- kiosk --
+
+function showOffline(msg) {
+  const o = document.getElementById('offline');
+  o.textContent = msg;
+  o.style.display = 'block';
+}
+function hideOffline() { document.getElementById('offline').style.display = 'none'; }
+
+async function startKiosk() {
+  managerToken = '';
+  try {
+    const me = await api('/api/clock/kiosk');
+    venueId = me.venue_id;
+    venueName = me.venue_name || '';
+    deviceId = me.device_id || '';
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) { switchedOff(e.message); return; }
+    showOffline('Can\'t reach RosterIQ — retrying…');
+    setTimeout(startKiosk, 15000);
+    return;
+  }
+  document.getElementById('venue-name').textContent = venueName;
+  showSection('kiosk');
+  await loadBoard();
+  if (!boardTimer) boardTimer = setInterval(loadBoard, 60000);
 }
 
 async function loadBoard() {
-  await resolveVenue();
-  if (!venueId) { toast('No venue found — log into the dashboard first.', false); return; }
-  const b = await api('/api/clock/board?venue_id=' + encodeURIComponent(venueId));
-  document.getElementById('venue-name').textContent = venueName || '';
-  staff = b.staff || [];
+  if (!kioskToken) return;
+  try {
+    const b = await api('/api/clock/board?venue_id=' + encodeURIComponent(venueId));
+    staff = b.staff || [];
+    hideOffline();
+    renderBoard();
+  } catch (e) {
+    if (e.status === 401) { switchedOff(e.message); return; }
+    showOffline('Can\'t reach RosterIQ — the board may be out of date. Retrying every minute.');
+  }
+}
+
+function shiftsLabel(s) {
+  const shifts = s.shifts || [];
+  if (!shifts.length) return 'Not rostered today';
+  return 'Rostered ' + shifts.map(x => x.start + '–' + x.end).join(' · ');
+}
+
+function isOnShift(s) { return s.state === 'on' || s.state === 'break'; }
+
+// Type-to-search matches any part of the name; "Rostered now" keeps whoever
+// is due on around now plus anyone still clocked in, so the shift change is one tap.
+function filterStaff(list, q, mode) {
+  q = String(q || '').trim().toLowerCase();
+  return (list || []).filter(s => {
+    if (q && String(s.name || '').toLowerCase().indexOf(q) < 0) return false;
+    if (mode === 'now' && !s.rostered_now && !isOnShift(s)) return false;
+    if (mode === 'on' && !isOnShift(s)) return false;
+    return true;
+  });
+}
+
+function stateBadge(s) {
+  if (s.stale) return { cls: 'stale', label: 'STILL CLOCKED IN' };
+  return {
+    on: { cls: 'on', label: 'ON SHIFT' }, break: { cls: 'break', label: 'ON BREAK' },
+    done: { cls: 'done', label: 'DONE TODAY' },
+  }[s.state] || { cls: 'off', label: 'OFF' };
+}
+
+function renderBoard() {
   const grid = document.getElementById('staff-grid');
+  const shown = filterStaff(staff, query, filterMode);
+  if (!shown.length) {
+    grid.innerHTML = '<div class="empty">' + (staff.length
+      ? 'Nobody matches — clear the search or pick Everyone.'
+      : 'No staff at this venue yet.') + '</div>';
+    return;
+  }
   grid.innerHTML = '';
-  staff.forEach(s => {
+  shown.forEach(s => {
+    const badge = stateBadge(s);
     const card = document.createElement('div');
-    card.className = 'staff-card ' + s.state;
-    const label = s.state === 'on' ? 'ON SHIFT' : (s.state === 'done' ? 'DONE TODAY' : 'OFF');
-    card.innerHTML = '<div class="name">' + s.name + '</div>' +
-      '<div class="roster">' + (s.rostered ? ('Rostered ' + s.rostered.start + '–' + s.rostered.end + ' · ' + s.rostered.role) : 'Not rostered today') + '</div>' +
-      '<span class="badge ' + s.state + '">' + label + '</span>';
-    card.onclick = () => openModal(s);
+    card.className = 'staff-card ' + badge.cls;
+    card.innerHTML = '<div class="name">' + esc(s.name) + '</div>' +
+      '<div class="roster">' + esc(shiftsLabel(s)) + '</div>' +
+      '<span class="badge ' + badge.cls + '">' + badge.label + '</span>';
+    card.onclick = () => openCard(s);
     grid.appendChild(card);
   });
 }
 
-function openModal(s) {
-  current = s; pin = '';
-  document.getElementById('m-name').textContent = s.name;
-  const acting = s.state === 'on' ? 'out' : 'in';
-  document.getElementById('m-sub').textContent = s.state === 'on'
-    ? ('Clocked in at ' + (s.clock_in ? new Date(s.clock_in + 'Z').toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'}) : ''))
-    : (s.rostered ? ('Rostered ' + s.rostered.start + '–' + s.rostered.end) : 'Not rostered today');
-  const btn = document.getElementById('m-action');
-  btn.textContent = acting === 'in' ? 'Clock In' : 'Clock Out';
-  btn.className = 'btn ' + acting;
-  btn.onclick = () => punch(acting);
-  const wrap = document.getElementById('pin-wrap');
-  wrap.style.display = s.has_pin ? 'block' : 'none';
-  if (s.has_pin) buildPinpad();
-  document.getElementById('modal').classList.add('open');
+function onSearch(v) { query = v; renderBoard(); }
+
+function setFilter(mode) {
+  filterMode = mode;
+  document.querySelectorAll('.chip').forEach(b => b.classList.toggle('active', b.getAttribute('data-filter') === mode));
+  renderBoard();
 }
 
-function buildPinpad() {
-  const pad = document.getElementById('pinpad');
+function modalError(msg) { document.getElementById('m-err').textContent = msg || ''; }
+
+function cardSub(s) {
+  if (s.stale) return 'Still clocked in from ' + (s.clock_in_label || 'an earlier shift');
+  if (s.state === 'break') return 'On break — clocked in ' + (s.clock_in_label || '');
+  if (s.state === 'on') return 'Clocked in ' + (s.clock_in_label || '');
+  if (s.state === 'done') return 'Already clocked out today';
+  return s.shifts && s.shifts.length ? 'Not clocked in yet' : 'Not rostered today';
+}
+
+// A card left open with a checked PIN is someone else's punch waiting to
+// happen; it closes itself when nobody touches it.
+function holdModal() {
+  clearTimeout(modalTimer);
+  modalTimer = setTimeout(closeModal, MODAL_IDLE_MS);
+}
+
+function openCard(s) {
+  current = s; pin = '';
+  holdModal();
+  modalError('');
+  document.getElementById('m-name').textContent = s.name;
+  document.getElementById('m-sub').textContent = cardSub(s);
+  document.getElementById('m-shifts').innerHTML = (s.shifts || []).map(x =>
+    '<div>' + esc(x.start + '–' + x.end + (x.role ? ' · ' + x.role : '')) + '</div>').join('');
+  document.getElementById('finish-wrap').style.display = 'none';
+  const actions = document.getElementById('m-actions');
+  actions.innerHTML = '';
+  document.getElementById('modal').classList.add('open');
+  if (s.has_pin) {
+    document.getElementById('pin-wrap').style.display = 'block';
+    buildPinpad('pinpad', 'pin-display', () => pin, v => { pin = v; }, checkPin);
+    addAction('Next', 'in', checkPin);
+  } else {
+    document.getElementById('pin-wrap').style.display = 'none';
+    checkPin();
+  }
+}
+
+function buildPinpad(padId, displayId, get, set, submit) {
+  const pad = document.getElementById(padId);
   pad.innerHTML = '';
   ['1','2','3','4','5','6','7','8','9','⌫','0','✓'].forEach(k => {
     const b = document.createElement('button');
     b.textContent = k;
-    if (k === '✓') { b.style.background = 'var(--accent, #F59E0B)'; b.style.color = '#111827'; b.style.fontWeight = '800'; }
+    if (k === '✓') b.className = 'go';
     b.onclick = () => {
-      if (k === '⌫') pin = pin.slice(0, -1);
-      else if (k === '✓') { document.getElementById('m-action').click(); return; }
-      else if (pin.length < 6) pin += k;
-      document.getElementById('pin-display').textContent = '•'.repeat(pin.length);
+      if (padId === 'pinpad') holdModal();
+      let v = get();
+      if (k === '⌫') v = v.slice(0, -1);
+      else if (k === '✓') { submit(); return; }
+      else if (v.length < 6) v += k;
+      set(v);
+      document.getElementById(displayId).textContent = '•'.repeat(v.length);
     };
     pad.appendChild(b);
   });
-  document.getElementById('pin-display').textContent = '';
+  document.getElementById(displayId).textContent = '';
 }
 
-function closeModal() { document.getElementById('modal').classList.remove('open'); current = null; }
+function addAction(label, kind, fn) {
+  const b = document.createElement('button');
+  b.className = 'btn ' + kind;
+  b.textContent = label;
+  b.onclick = fn;
+  document.getElementById('m-actions').appendChild(b);
+  return b;
+}
 
-async function punch(direction) {
+async function checkPin() {
   if (!current) return;
+  modalError('');
   try {
-    const res = await api('/api/clock/' + direction, {
+    const r = await api('/api/clock/pin/check', {
       method: 'POST',
-      body: JSON.stringify({ venue_id: venueId, employee_id: current.employee_id, pin: pin, break_minutes: 0 }),
+      body: JSON.stringify({ venue_id: venueId, employee_id: current.employee_id, pin: pin }),
     });
-    closeModal();
-    if (direction === 'in') {
-      toast(res.employee + ' clocked IN ✓', true);
-    } else {
-      const h = Math.floor((res.worked_minutes || 0) / 60), m = (res.worked_minutes || 0) % 60;
-      toast(res.employee + ' clocked OUT ✓ — ' + h + 'h ' + m + 'm worked', true);
-    }
-    loadBoard();
+    current = Object.assign({}, current, r.card || {});
+    showActions(current);
   } catch (e) {
-    toast(e.message, false);
+    if (e.status === 401) { switchedOff(e.message); return; }
+    pin = '';
+    document.getElementById('pin-display').textContent = '';
+    modalError(e.message);
   }
 }
 
-let toastTimer = null;
-function toast(msg, ok) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = ok ? 'ok' : 'err';
-  t.style.display = 'block';
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 3500);
+function localHHMM(d) {
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 }
 
-loadBoard();
-setInterval(loadBoard, 60000);
+function showActions(s) {
+  holdModal();
+  document.getElementById('pin-wrap').style.display = 'none';
+  document.getElementById('m-sub').textContent = cardSub(s);
+  document.getElementById('m-actions').innerHTML = '';
+  if (s.stale) {
+    const input = document.getElementById('finish-time');
+    input.value = '';
+    document.getElementById('finish-wrap').style.display = 'block';
+    addAction('Save my finish time', 'in', () => {
+      const v = input.value;
+      if (!/^\d{1,2}:\d{2}$/.test(v)) { modalError('Enter the time you finished, e.g. 23:30'); return; }
+      punch('out', { finished_at: v });
+    });
+    addAction('I finished just now', 'ghost', () => punch('out', { finished_at: localHHMM(new Date()) }));
+    return;
+  }
+  if (s.state === 'on') {
+    addAction('Start break', 'ghost', () => punch('break/start'));
+    addAction('Clock out', 'out', () => punch('out'));
+  } else if (s.state === 'break') {
+    addAction('End break', 'in', () => punch('break/end'));
+    addAction('Clock out', 'out', () => punch('out'));
+  } else {
+    addAction('Clock in', 'in', () => punch('in'));
+  }
+}
+
+function minutesLabel(m) { m = m || 0; return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; }
+
+function punchMessage(action, res) {
+  const who = res.employee || (current && current.name) || '';
+  if (action === 'in') {
+    return who + ' clocked IN ✓' + (res.shift ? ' — rostered ' + res.shift.start + '–' + res.shift.end : '');
+  }
+  if (action === 'break/start') return who + ' is on break ✓ — tap End break when you\'re back';
+  if (action === 'break/end') return who + ' is back from a ' + (res.break_minutes || 0) + 'm break ✓';
+  let msg = who + ' clocked OUT ✓ — ' + minutesLabel(res.worked_minutes) + ' worked';
+  if (res.break_source === 'auto') msg += ' (' + res.break_minutes + 'm meal break taken off, as rostered)';
+  else if (res.break_minutes) msg += ' (' + res.break_minutes + 'm break)';
+  if (res.note) msg += '. ' + res.note;
+  if (res.warning) msg += ' ' + res.warning;
+  return msg;
+}
+
+async function punch(action, extra) {
+  if (!current) return;
+  modalError('');
+  const body = Object.assign({ venue_id: venueId, employee_id: current.employee_id, pin: pin }, extra || {});
+  try {
+    const res = await api('/api/clock/' + action, { method: 'POST', body: JSON.stringify(body) });
+    const said = punchMessage(action, res);
+    closeModal();
+    query = '';
+    document.getElementById('search').value = '';
+    toast(said, res.warning ? 'warn' : 'ok');
+    loadBoard();
+  } catch (e) {
+    if (e.status === 401) { switchedOff(e.message); return; }
+    modalError(e.message);
+  }
+}
+
+function closeModal() {
+  clearTimeout(modalTimer);
+  document.getElementById('modal').classList.remove('open');
+  current = null;
+  pin = '';
+}
+
+// ----------------------------------------------------------------- exit --
+
+function exitError(msg) { document.getElementById('exit-err').textContent = msg || ''; }
+
+function openExit() {
+  exitPin = '';
+  exitError('');
+  document.getElementById('exit-pin-wrap').style.display = 'block';
+  document.getElementById('exit-signin').style.display = 'none';
+  document.getElementById('exit-mode').textContent = 'Sign in as a manager instead';
+  buildPinpad('exit-pinpad', 'exit-pin-display', () => exitPin, v => { exitPin = v; }, exitWithPin);
+  document.getElementById('exit-modal').classList.add('open');
+}
+
+function closeExit() {
+  document.getElementById('exit-modal').classList.remove('open');
+  exitPin = '';
+  const pw = document.getElementById('exit-password');
+  if (pw) pw.value = '';
+}
+
+function toggleExitSignIn() {
+  const signin = document.getElementById('exit-signin');
+  const showSignIn = signin.style.display === 'none';
+  signin.style.display = showSignIn ? 'block' : 'none';
+  document.getElementById('exit-pin-wrap').style.display = showSignIn ? 'none' : 'block';
+  document.getElementById('exit-mode').textContent = showSignIn ? 'Use a manager PIN instead' : 'Sign in as a manager instead';
+  exitError('');
+}
+
+async function exitWithPin() {
+  exitError('');
+  try {
+    await api('/api/clock/kiosk/exit', { method: 'POST', body: JSON.stringify({ pin: exitPin }) });
+    switchedOff('Time clock switched off.');
+  } catch (e) {
+    if (e.status === 401) { switchedOff(e.message); return; }
+    exitPin = '';
+    document.getElementById('exit-pin-display').textContent = '';
+    exitError(e.message);
+  }
+}
+
+async function exitWithSignIn() {
+  exitError('');
+  const email = document.getElementById('exit-email').value.trim();
+  const password = document.getElementById('exit-password').value;
+  let tok = '';
+  try { tok = await signIn(email, password); } catch (e) { exitError(e.message); return; }
+  document.getElementById('exit-password').value = '';
+  try {
+    const r = await fetch('/api/kiosk/devices/' + encodeURIComponent(deviceId) + '/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+      body: JSON.stringify({ venue_id: venueId }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) { exitError(errorMessage(body, r.status)); return; }
+  } catch (e) { exitError('Can\'t reach RosterIQ — try again.'); return; }
+  managerToken = tok;  // in memory only, for setting the clock up again
+  switchedOff('Time clock switched off.');
+}
+
+let toastTimer = null;
+function toast(msg, kind) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = kind || 'ok';
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = 'none'; }, kind === 'warn' ? 9000 : 4500);
+}
+
+if (kioskToken) startKiosk(); else startSetup();
 </script>
 </body>
 </html>

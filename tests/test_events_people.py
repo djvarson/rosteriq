@@ -375,9 +375,11 @@ def test_cover_decline_is_audited_and_names_the_declined_claimant():
 # ----------------------------------------------------------------------------
 
 def _punch(c, h, vid, emp_id):
+    from rosteriq.tests.kiosk_support import kiosk_headers
+    k = kiosk_headers(c, h, vid)
     assert c.post("/api/clock/in", json={"venue_id": vid, "employee_id": emp_id},
-                  headers=h).status_code == 200
-    out = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": emp_id}, headers=h)
+                  headers=k).status_code == 200
+    out = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": emp_id}, headers=k)
     assert out.status_code == 200, out.text
     return out.json()["timesheet_id"]
 

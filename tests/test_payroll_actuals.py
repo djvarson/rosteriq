@@ -10,6 +10,7 @@ from datetime import date, datetime, time as dtime
 from fastapi.testclient import TestClient
 
 from rosteriq.api import app
+from rosteriq.tests.kiosk_support import kiosk_headers
 
 
 def _owner(c):
@@ -35,9 +36,10 @@ def _setup(c, h, vid):
 def _punch_and_approve(c, h, vid, approve=True):
     """Clock in/out, then (optionally) approve corrected to a clean 9:00-17:30
     with a 30m break = 8.0 paid hours."""
-    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": f"{vid}-emp"}, headers=h)
+    k = kiosk_headers(c, h, vid)
+    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": f"{vid}-emp"}, headers=k)
     ts_id = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": f"{vid}-emp"},
-                   headers=h).json()["timesheet_id"]
+                   headers=k).json()["timesheet_id"]
     if approve:
         today = date.today()
         r = c.post(f"/api/clock/timesheets/{ts_id}/review", json={

@@ -60,7 +60,8 @@ class TenantContext:
     """Holds the current request's tenant (venue) context."""
 
     def __init__(self, user_id: str, venue_ids: List[str], is_owner: bool = False,
-                 role: Optional[str] = None, section_grants: Optional[dict] = None):
+                 role: Optional[str] = None, section_grants: Optional[dict] = None,
+                 kiosk_device_id: Optional[str] = None):
         """
         Initialize tenant context.
 
@@ -79,6 +80,8 @@ class TenantContext:
         self.is_owner = is_owner
         self.role = role
         self.section_grants = section_grants or {}
+        # Set when the caller is a time clock device, not a person.
+        self.kiosk_device_id = kiosk_device_id
 
     def is_manager_or_owner(self) -> bool:
         """True if the user may perform manager-level actions (role manager or
@@ -208,6 +211,13 @@ class TenantMiddleware(BaseHTTPMiddleware):
         # on the way out, rather than blindly clearing shared state.
         ctx_token = None
         try:
+            kiosk = self._kiosk_context(request)
+            if isinstance(kiosk, JSONResponse):
+                return kiosk
+            if kiosk is not None:
+                ctx_token = _tenant_context_var.set(kiosk)
+                return await call_next(request)
+
             # Try to get current user from request. Pass a real db store —
             # called outside FastAPI dependency injection, the Depends default
             # would otherwise be unresolved.
@@ -269,6 +279,33 @@ class TenantMiddleware(BaseHTTPMiddleware):
             # Reset the ContextVar for this task so the context never leaks.
             if ctx_token is not None:
                 _tenant_context_var.reset(ctx_token)
+
+    @staticmethod
+    def _kiosk_context(request: Request):
+        """A time clock device token is good for its venue's clock routes and
+        nothing else (services/kiosk.KIOSK_ROUTES). Returns None when the
+        request does not carry one, a refusal, or the device's context."""
+        from rosteriq.services import kiosk
+        token = kiosk.bearer_token(request)
+        if kiosk.token_claims(token) is None:
+            return None
+        db = get_db()
+        device = kiosk.authenticate(db, token)
+        if device is None:
+            return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content={
+                "detail": "This time clock has been switched off. A manager needs to set it up again."})
+        try:
+            request.state.user_id = f"kiosk:{device['id']}"
+            request.state.user_role = "kiosk"
+        except Exception:
+            pass
+        if not kiosk.route_allowed(request.method, request.url.path):
+            audit_cross_tenant_attempt(device["venue_id"], "kiosk", "route_denied")
+            return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={
+                "detail": "A time clock device can only use the time clock."})
+        kiosk.touch(db, device)
+        return TenantContext(user_id=f"kiosk:{device['id']}", venue_ids=[device["venue_id"]],
+                             role="kiosk", kiosk_device_id=device["id"])
 
     @staticmethod
     async def _note_demo_activity(request: Request, user) -> None:
@@ -519,6 +556,21 @@ def enforce_venue_manager_any(venue_id: Optional[str]) -> None:
         status_code=status.HTTP_403_FORBIDDEN,
         detail="This action requires one of these roles: manager, owner",
     )
+
+
+def kiosk_device_id() -> Optional[str]:
+    """The time clock device making this request, or None for a person."""
+    tenant = get_tenant_context_optional()
+    return getattr(tenant, "kiosk_device_id", None) if tenant is not None else None
+
+
+def enforce_kiosk_or_venue_manager(venue_id: Optional[str]) -> None:
+    """The venue's own time clock device, or a manager (full or department)
+    of the venue. Staff are refused."""
+    if kiosk_device_id():
+        enforce_venue_access(venue_id)
+        return
+    enforce_venue_manager_any(venue_id)
 
 
 def enforce_owner() -> None:
