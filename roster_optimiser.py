@@ -5,16 +5,29 @@ Takes demand forecasts, employee pool, venue config, and award rules to generate
 cost-optimised rosters that meet staffing requirements while respecting all
 Fair Work compliance constraints.
 
-The optimiser uses a greedy constraint-satisfaction approach:
-1. Determine required staff per hour from demand forecasts (covers-to-staff ratio)
-2. For each day, assign shifts to meet demand while minimising cost
-3. Respect all constraints: max hours, consecutive days, break rules, min engagement
-4. Prefer full-time/part-time employees before casuals (lower total cost)
-5. Spread hours fairly across the team
+How a week is built:
+1. Each day trades over the venue's recorded hours (else the hours its own
+   forecasts cover, else 10:00 to midnight).
+2. Every area gets its weekday minimum for every trading hour; covers above
+   what the minimums handle become extra staff, shared across the areas that
+   follow demand in proportion to their minimums (supervisory areas and the
+   bottle shop hold their minimum unless the venue says otherwise).
+3. Each area's hourly need is shaped into whole shifts: opener and closer
+   blocks carry the minimum from open to close, then lunch and dinner blocks
+   carry the peaks. A gap next to an existing block extends that block rather
+   than adding a person.
+4. Minimum blocks across the whole week are filled first (busiest day first),
+   then the peak blocks. Each block goes to the cheapest eligible person:
+   recorded rate times the day's multiplier (casual loading included), priced
+   by the cost calculator. Salaried staff are already paid, so they are used
+   first up to their contracted hours.
+5. A repair pass extends or adds shifts wherever an area is still below its
+   minimum.
 
-This is a heuristic solver — not globally optimal, but fast and practical.
-A future version could use mixed-integer linear programming (PuLP/OR-Tools)
-for true optimal solutions.
+Hard limits on every shift: the area's skill rule, approved leave,
+availability, weekly hours, a recorded visa fortnight cap, rest between
+shifts, consecutive days, minimum engagement, maximum shift length, one shift
+a day. Inactive staff are never rostered.
 """
 
 from datetime import date, time, datetime, timedelta
@@ -29,16 +42,20 @@ logger = logging.getLogger(__name__)
 from rosteriq.models import (
     Employee, Shift, Roster, DemandForecast, VenueConfig,
     EmploymentType, ShiftStatus, AwardLevel, State,
-    CostBreakdown, holds_skill, normalise_area,
+    CostBreakdown, holds_skill, normalise_area, normalise_skills,
 )
 from rosteriq.award_rules import (
     get_penalty_multiplier, get_day_type, get_minimum_break_minutes,
     get_minimum_engagement_hours, validate_shift_compliance,
     check_consecutive_days, calculate_overtime_hours,
-    MAX_SHIFT_LENGTH_HOURS,
+    MAX_SHIFT_LENGTH_HOURS, MAX_CONSECUTIVE_DAYS, MINIMUM_HOURS_BETWEEN_SHIFTS,
+    OVERTIME_MULTIPLIERS,
 )
-from rosteriq.cost_calculator import calculate_shift_cost_breakdown, calculate_roster_cost
+from rosteriq.cost_calculator import (
+    calculate_shift_cost_breakdown, calculate_roster_cost, WEEKLY_OVERTIME_THRESHOLD,
+)
 from rosteriq.services.availability_rules import is_available
+from rosteriq.services import venue_areas as _areas
 
 
 # ============================================================================
@@ -59,6 +76,18 @@ SHIFT_TEMPLATES = {
     "full_day":  (9, 18, 30),    # 9h with 30min unpaid meal break (paid rest is worked time)
     "split_eve": (18, 23, 0),    # 5h evening
 }
+
+# Shift shapes the generator builds, in hours. Rostering preferences, not
+# award values: minimum engagement and MAX_SHIFT_LENGTH_HOURS apply on top.
+PREFERRED_MIN_SHIFT_HOURS = 4
+PREFERRED_MAX_SHIFT_HOURS = 10
+# Two peaks this close together are one shift, not two people.
+MERGE_GAP_HOURS = 1
+# The trading day when neither the venue's hours nor real forecasts say.
+DEFAULT_OPEN_HOUR = 10
+DEFAULT_TRADING_HOURS = 14
+# Ranking nudge ($/h at a full week) so equally priced people share the hours.
+FAIRNESS_PER_HOUR = 0.5
 
 
 # ============================================================================
@@ -154,6 +183,35 @@ def identify_peak_periods(
 # Employee scoring and selection
 # ============================================================================
 
+def _is_salaried(employee) -> bool:
+    basis = getattr(employee, "pay_basis", None)
+    return str(getattr(basis, "value", basis) or "hourly").strip().lower() == "salaried"
+
+
+def _hourly_cost(employee: Employee, target_date: date, state: State) -> float:
+    """Dollars an hour of this person costs that day: the recorded rate times
+    the day's multiplier (which carries the casual loading)."""
+    day_type = get_day_type(target_date, state)
+    return float(employee.hourly_base_rate) * float(
+        get_penalty_multiplier(employee.employment_type, day_type))
+
+
+def _ranking_surcharge(employee: Employee, weekly_hours_so_far: float) -> float:
+    """Per-hour amount added to pay when ranking (never charged): weekly
+    overtime for permanents past the ordinary-hours threshold, a heavy
+    penalty at the weekly cap, and a small nudge toward whoever has worked
+    less so equally priced people share the hours."""
+    rate = float(employee.hourly_base_rate)
+    extra = 0.0
+    if (employee.employment_type != EmploymentType.casual
+            and weekly_hours_so_far >= float(WEEKLY_OVERTIME_THRESHOLD)):
+        extra += rate * float(OVERTIME_MULTIPLIERS["first_2_hours"] - 1)
+    if employee.max_hours_per_week - weekly_hours_so_far <= 0:
+        extra += rate
+    extra += FAIRNESS_PER_HOUR * weekly_hours_so_far / max(employee.max_hours_per_week, 1)
+    return extra
+
+
 def _employee_cost_score(
     employee: Employee,
     target_date: date,
@@ -161,36 +219,16 @@ def _employee_cost_score(
     weekly_hours_so_far: float,
 ) -> float:
     """
-    Score an employee for assignment — lower is better (cheaper).
+    Score an employee for assignment, in dollars per hour — lower is cheaper.
 
-    Factors:
-    - Employment type cost: FT=1.0, PT=1.1, Casual=1.3 (loading makes casuals pricier)
-    - Penalty multiplier for the day
-    - Overtime risk (if close to 38h, they'll trigger overtime)
-    - Hours fairness (prefer employees who've worked fewer hours)
+    The recorded rate times the day multiplier (casual loading included),
+    plus the ranking surcharge. Salaried staff inside their contracted hours
+    are already paid for, so they score zero.
     """
-    day_type = get_day_type(target_date, state)
-    multiplier = float(get_penalty_multiplier(employee.employment_type, day_type))
-
-    # Base type cost
-    type_cost = {
-        EmploymentType.full_time: 1.0,
-        EmploymentType.part_time: 1.1,
-        EmploymentType.casual: 1.25,
-    }.get(employee.employment_type, 1.2)
-
-    # Overtime risk — penalise if close to weekly limit
-    hours_headroom = employee.max_hours_per_week - weekly_hours_so_far
-    overtime_penalty = 0.0
-    if hours_headroom <= 0:
-        overtime_penalty = 2.0  # Very expensive — avoid
-    elif hours_headroom < 8:
-        overtime_penalty = 0.5  # Getting close
-
-    # Fairness — prefer less-worked employees
-    fairness = weekly_hours_so_far / max(employee.max_hours_per_week, 1)
-
-    return (type_cost * multiplier) + overtime_penalty + (fairness * 0.3)
+    if _is_salaried(employee) and weekly_hours_so_far < employee.max_hours_per_week:
+        return 0.0
+    return (_hourly_cost(employee, target_date, state)
+            + _ranking_surcharge(employee, weekly_hours_so_far))
 
 
 def _is_employee_available(
@@ -296,13 +334,13 @@ def _create_shift(
     break_minutes: int,
     role: str = "general",
 ) -> Shift:
-    """Create a Shift object."""
+    """Create a Shift object (end_hour past 24 runs into the next morning)."""
     return Shift(
-        id=str(uuid.uuid4())[:8],
+        id=uuid.uuid4().hex,
         employee_id=employee.id,
         date=target_date,
         start_time=time(start_hour, 0),
-        end_time=time(min(end_hour, 23), 0) if end_hour < 24 else time(0, 0),
+        end_time=time(end_hour % 24, 0),
         break_minutes=break_minutes,
         status=ShiftStatus.scheduled,
         role=role,
@@ -331,53 +369,557 @@ def _roles_for_venue(min_staff_by_role: Optional[dict[str, int]]) -> list[str]:
     return list(min_staff_by_role.keys())
 
 
+def _apportion(total: int, weights: dict) -> dict:
+    """Split `total` whole people across weights (largest remainder; ties go
+    to the heavier weight, then the earlier key)."""
+    out = {k: 0 for k in weights}
+    weight_sum = sum(weights.values())
+    if total <= 0 or weight_sum <= 0:
+        return out
+    exact = {k: total * w / weight_sum for k, w in weights.items()}
+    for k in out:
+        out[k] = int(exact[k])
+    order = list(weights)
+    left = total - sum(out.values())
+    for k in sorted(order, key=lambda k: (-(exact[k] - out[k]), -weights[k], order.index(k)))[:left]:
+        out[k] += 1
+    return out
+
+
 def _allocate_headcount_to_roles(
     staff_needed: int,
     roles: list[str],
     min_staff_by_role: Optional[dict[str, int]],
+    weights: Optional[dict[str, float]] = None,
 ) -> dict[str, int]:
     """
     Split a period's required headcount across roles.
 
-    Each role starts at its configured minimum; any remaining demand-driven
-    slots are distributed round-robin across roles so the TOTAL equals
-    staff_needed exactly.
-
-    `staff_needed` is already floored at sum(min_staff) upstream in
-    calculate_required_staff, so the minimums always fit.
+    Each role starts at its configured minimum; headcount above the minimums
+    is shared by weight (default: in proportion to the minimums, evenly when
+    there are none) so the TOTAL equals staff_needed whenever it is at least
+    the sum of the minimums.
     """
     if not roles:
         return {}
 
     min_staff_by_role = min_staff_by_role or {}
     allocation = {role: min_staff_by_role.get(role, 0) for role in roles}
-
-    remaining = staff_needed - sum(allocation.values())
-
-    # Distribute any extra demand-driven slots round-robin across roles.
-    i = 0
-    while remaining > 0:
-        allocation[roles[i % len(roles)]] += 1
-        remaining -= 1
-        i += 1
-
+    if weights is None:
+        weights = {role: allocation[role] for role in roles}
+    weights = {role: weights.get(role, 0) for role in roles}
+    if sum(weights.values()) <= 0:
+        weights = {role: 1 for role in roles}
+    for role, extra in _apportion(staff_needed - sum(allocation.values()), weights).items():
+        allocation[role] += extra
     return allocation
 
 
-def _employee_can_fill_role(employee: Employee, role: str) -> bool:
+def _employee_can_fill_role(employee: Employee, role: str, venue=None) -> bool:
     """
     Skill-matching rule.
 
     An employee may work a role if:
     - the role is a generic/catch-all role (no specialised skill required), OR
-    - the employee lists no skills at all (treated as a generalist), OR
-    - the role is one of the employee's listed skills (ignoring case).
+    - the role is one of the employee's listed skills (ignoring case), OR
+    - the employee lists no skills at all and the area is a general one: an
+      area that requires its skill (duty manager, supervisor) never takes
+      someone without it.
     """
-    if role.lower() in GENERIC_ROLES:
+    if normalise_area(role) in GENERIC_ROLES:
         return True
-    if not employee.skills:
+    skills = getattr(employee, "skills", None)
+    if holds_skill(skills, role):
         return True
-    return holds_skill(employee.skills, role)
+    if normalise_skills(skills):
+        return False
+    return _areas.can_fill(employee, role, venue)
+
+
+# ============================================================================
+# Shaping an area's day into shifts
+# ============================================================================
+
+def _positive_runs(values: list) -> list:
+    """[start, end) index runs where values are positive."""
+    runs, start = [], None
+    for i, v in enumerate(values):
+        if v > 0 and start is None:
+            start = i
+        elif v <= 0 and start is not None:
+            runs.append((start, i))
+            start = None
+    if start is not None:
+        runs.append((start, len(values)))
+    return runs
+
+
+def _merge_runs(runs: list) -> list:
+    out = []
+    for s, e in runs:
+        if out and s - out[-1][1] <= MERGE_GAP_HOURS and e - out[-1][0] <= PREFERRED_MAX_SHIFT_HOURS:
+            out[-1] = (out[-1][0], e)
+        else:
+            out.append((s, e))
+    return out
+
+
+def _split_run(s: int, e: int) -> list:
+    """A run longer than a shift becomes near-equal shifts (a 10:00-24:00
+    day is an opener to 17:00 and a closer from 17:00)."""
+    length = e - s
+    if length <= PREFERRED_MAX_SHIFT_HOURS:
+        return [(s, e)]
+    count = -(-length // PREFERRED_MAX_SHIFT_HOURS)
+    pieces, cur = [], s
+    for i in range(count):
+        size = (e - cur) // (count - i)
+        pieces.append((cur, cur + size))
+        cur += size
+    return pieces
+
+
+def _grow(s: int, e: int, need: list) -> tuple:
+    """Stretch a short block to the preferred minimum inside the trading day,
+    toward the busier neighbour (the earlier one on a tie)."""
+    n = len(need)
+    target = min(PREFERRED_MIN_SHIFT_HOURS, n)
+    while e - s < target:
+        before = need[s - 1] if s > 0 else -1
+        after = need[e] if e < n else -1
+        if after > before:
+            e += 1
+        else:
+            s -= 1
+    return s, e
+
+
+def _adjacent_block(blocks: list, s: int, e: int):
+    """The earlier block that can stretch over [s, e) within a shift's length,
+    preferring the one that stays shortest."""
+    best = None
+    for block in blocks:
+        if s - MERGE_GAP_HOURS <= block[1] <= s:
+            length = e - block[0]
+        elif e <= block[0] <= e + MERGE_GAP_HOURS:
+            length = block[1] - s
+        else:
+            continue
+        if length <= PREFERRED_MAX_SHIFT_HOURS and (best is None or length < best[0]):
+            best = (length, block)
+    return best[1] if best else None
+
+
+def _shape_blocks(need: list, minimum: int) -> list:
+    """Cover an area's hourly need with [start, end, is_minimum] slot blocks.
+
+    Layer by layer: the first `minimum` layers span open to close (split into
+    opener and closer when the day is longer than a shift); later layers are
+    the peaks, each stretched to a realistic length, and a peak that touches
+    an earlier block extends it instead of adding a person.
+    """
+    n = len(need)
+    blocks: list = []
+    cover = [0] * n
+    layer = 0
+    while layer < 500:
+        runs = _positive_runs([need[i] - cover[i] for i in range(n)])
+        if not runs:
+            break
+        layer += 1
+        is_minimum = layer <= minimum
+        earlier = list(blocks)
+        for s, e in _merge_runs(runs):
+            if not is_minimum:
+                block = _adjacent_block(earlier, s, e)
+                if block is not None:
+                    block[0], block[1] = min(block[0], s), max(block[1], e)
+                    continue
+            for ps, pe in _split_run(s, e):
+                ps, pe = _grow(ps, pe, need)
+                blocks.append([ps, pe, is_minimum])
+        cover = [0] * n
+        for bs, be, _ in blocks:
+            for i in range(bs, be):
+                cover[i] += 1
+    return blocks
+
+
+def _is_cold_start(fc) -> bool:
+    return str(getattr(fc, "model_version", "") or "").startswith("cold_start")
+
+
+def _forecast_window(day: date, forecasts: list):
+    """(open, close) spanned by the day's own forecast hours, or None. The
+    day starts after its longest quiet stretch, so early-morning hours read
+    as the tail of a late night. Cold-start guesses don't count: their hours
+    are a default, not the venue's."""
+    hours = sorted({fc.hour for fc in forecasts if fc.date == day and not _is_cold_start(fc)})
+    if not hours:
+        return None
+    if len(hours) == 24:
+        start, quiet = 0, 0
+    else:
+        start, quiet = hours[0], -1
+        for i, h in enumerate(hours):
+            nxt = hours[(i + 1) % len(hours)]
+            gap = (nxt - h - 1) % 24
+            if gap > quiet:
+                start, quiet = nxt, gap
+    opens = datetime.combine(day, time(start))
+    return opens, opens + timedelta(hours=24 - quiet)
+
+
+# ============================================================================
+# The builder
+# ============================================================================
+
+class _DayPlan:
+    """One trading day: its clock-hour slots, each area's hourly need, and
+    the blocks shaped from it (slot indices, end exclusive)."""
+
+    def __init__(self, day, opens, closes, areas):
+        self.day = day
+        self.opens = opens
+        self.closes = closes
+        self.areas = areas
+        self.need = {}
+        self.blocks = []
+        self.load = 0
+        self.slots = []
+        cur = opens
+        while cur < closes and len(self.slots) < 24:
+            self.slots.append(cur)
+            cur += timedelta(hours=1)
+
+    def slot_start(self, i):
+        return self.slots[i]
+
+    def slot_end(self, i):
+        """End of the block whose last slot is i - 1."""
+        return min(self.slots[i - 1] + timedelta(hours=1), self.closes)
+
+
+class _RosterBuilder:
+    """Shapes and staffs days against everything already booked: this run's
+    shifts, the caller's existing shifts (earlier days, other venues) and the
+    previous week."""
+
+    def __init__(self, employees, venue, state, covers_per_staff, forecasts,
+                 week_start, existing_shifts=None, approved_leave=None,
+                 prior_week_shifts=None):
+        self.venue = venue
+        self.state = state
+        self.cps = covers_per_staff if covers_per_staff and covers_per_staff > 0 \
+            else DEFAULT_COVERS_PER_STAFF
+        self.week_start = week_start
+        self.pool = [e for e in employees if getattr(e, "active", True)]
+        self.forecasts = list(forecasts or [])
+        self.covers = {}
+        for fc in self.forecasts:
+            key = (fc.date, fc.hour)
+            self.covers[key] = max(self.covers.get(key, 0.0), float(fc.predicted_covers))
+        self.leave = {str(k): list(v or []) for k, v in (approved_leave or {}).items()}
+        self.prior_known = prior_week_shifts is not None
+        self.booked = defaultdict(list)      # employee id -> [(start, end, date, net, gross, shift)]
+        seen = set()
+        for s in list(existing_shifts or []) + list(prior_week_shifts or []):
+            if s.status in (ShiftStatus.cancelled, ShiftStatus.no_show) or s.id in seen:
+                continue
+            seen.add(s.id)
+            self._book(s)
+        self.generated: list = []
+        self._by_id = {str(e.id): e for e in self.pool}
+        self._eligible = {}
+        self._costs = {}
+
+    # --- bookings -----------------------------------------------------------
+
+    @staticmethod
+    def _span(shift):
+        start = datetime.combine(shift.date, shift.start_time)
+        return start, start + timedelta(hours=shift.duration_hours)
+
+    def _book(self, shift):
+        start, end = self._span(shift)
+        self.booked[str(shift.employee_id)].append(
+            (start, end, shift.date, shift.net_hours, shift.duration_hours, shift))
+
+    def _unbook(self, shift):
+        eid = str(shift.employee_id)
+        self.booked[eid] = [b for b in self.booked[eid] if b[5] is not shift]
+
+    def _week_hours(self, eid, gross=False, offset_days=0):
+        lo = self.week_start + timedelta(days=offset_days)
+        hi = lo + timedelta(days=7)
+        return sum(b[4] if gross else b[3] for b in self.booked[eid] if lo <= b[2] < hi)
+
+    def _visa_allows(self, emp, gross_hours):
+        """The recorded fortnight cap over this week and the one before. With
+        no record of the previous week, plan half the cap per week so no
+        fortnight can go over."""
+        cap = getattr(emp, "visa_work_limit_fortnight", None)
+        if not cap:
+            return True
+        eid = str(emp.id)
+        prior = self._week_hours(eid, gross=True, offset_days=-7)
+        limit = float(cap) - prior if (self.prior_known or prior > 0) else float(cap) / 2
+        return self._week_hours(eid, gross=True) + gross_hours <= limit + 1e-9
+
+    def _run_of_days(self, eid, day):
+        days = {b[2] for b in self.booked[eid]}
+        run, cur = 1, day - timedelta(days=1)
+        while cur in days:
+            run, cur = run + 1, cur - timedelta(days=1)
+        cur = day + timedelta(days=1)
+        while cur in days:
+            run, cur = run + 1, cur + timedelta(days=1)
+        return run
+
+    def _can_work(self, emp, day, start, end, net, gross):
+        eid = str(emp.id)
+        rest = timedelta(hours=MINIMUM_HOURS_BETWEEN_SHIFTS)
+        for b_start, b_end, b_day, _, _, _ in self.booked[eid]:
+            if b_day == day or (b_start < end and start < b_end):
+                return False
+            if (start - b_end if b_end <= start else b_start - end) < rest:
+                return False
+        for lo, hi in self.leave.get(eid, ()):
+            if lo <= day <= hi:
+                return False
+        if self._week_hours(eid) + net > emp.max_hours_per_week + 1e-9:
+            return False
+        if not self._visa_allows(emp, gross):
+            return False
+        if self._run_of_days(eid, day) > min(emp.consecutive_days_limit, MAX_CONSECUTIVE_DAYS):
+            return False
+        return is_available(emp.availability, day, start.strftime("%H:%M"), end.strftime("%H:%M"))
+
+    # --- planning -----------------------------------------------------------
+
+    def _window(self, day):
+        if self.venue is not None:
+            window = _areas.trading_window(self.venue, day)
+            if window:
+                return window
+        window = _forecast_window(day, self.forecasts)
+        if window:
+            return window
+        if any(fc.date == day for fc in self.forecasts):
+            opens = datetime.combine(day, time(DEFAULT_OPEN_HOUR))
+            return opens, opens + timedelta(hours=DEFAULT_TRADING_HOURS)
+        return None
+
+    def _areas_for(self, day):
+        areas = _areas.venue_areas(self.venue) if self.venue is not None else []
+        if not areas:
+            return [{"name": "general", "min": 1, "requires_skill": False, "follows_demand": True}]
+        key = _areas.day_key(day)
+        return [{"name": a["name"], "min": a["min_by_day"].get(key, 0),
+                 "requires_skill": a["requires_skill"],
+                 "follows_demand": a.get("follows_demand", not a["requires_skill"])}
+                for a in areas]
+
+    def plan_day(self, day):
+        window = self._window(day)
+        if window is None:
+            return None
+        opens, closes = window
+        areas = self._areas_for(day)
+        plan = _DayPlan(day, opens, closes, areas)
+        minimums = {a["name"]: a["min"] for a in areas}
+        flexible = [a for a in areas if a["follows_demand"]] or areas
+        weights = {a["name"]: a["min"] for a in flexible}
+        if sum(weights.values()) <= 0:
+            weights = {name: 1 for name in weights}
+        floor = sum(minimums.values())
+        need = {name: [m] * len(plan.slots) for name, m in minimums.items()}
+        for i, slot in enumerate(plan.slots):
+            covers = self.covers.get((slot.date(), slot.hour))
+            if covers is None:
+                continue
+            extra = int(covers / self.cps + 0.5) - floor
+            for name, n in _apportion(extra, weights).items():
+                need[name][i] += n
+        plan.need = need
+        plan.load = sum(sum(v) for v in need.values())
+        for a in areas:
+            for s, e, is_minimum in _shape_blocks(need[a["name"]], a["min"]):
+                plan.blocks.append({"area": a["name"], "s": s, "e": e, "minimum": is_minimum,
+                                    "peak": max(need[a["name"]][s:e])})
+        return plan
+
+    # --- staffing -----------------------------------------------------------
+
+    def _eligible_for(self, area):
+        if area not in self._eligible:
+            self._eligible[area] = [e for e in self.pool
+                                    if _employee_can_fill_role(e, area, self.venue)]
+        return self._eligible[area]
+
+    def _area_order(self, plan):
+        """Supervisory areas first, then the scarcest people per shift."""
+        counts = defaultdict(int)
+        for b in plan.blocks:
+            counts[b["area"]] += 1
+        order = sorted(plan.areas, key=lambda a: (
+            not a["requires_skill"],
+            len(self._eligible_for(a["name"])) / max(counts[a["name"]], 1),
+            a["name"]))
+        return {a["name"]: i for i, a in enumerate(order)}
+
+    def _block_cost(self, emp, day, start, end, brk):
+        key = (emp.employment_type, emp.hourly_base_rate, day, start, end, brk)
+        if key not in self._costs:
+            probe = Shift(id="probe", employee_id=str(emp.id), date=day,
+                          start_time=start.time(), end_time=end.time(), break_minutes=brk,
+                          status=ShiftStatus.scheduled, role="probe")
+            self._costs[key] = float(
+                calculate_shift_cost_breakdown(emp, probe, self.state).total_cost)
+        return self._costs[key]
+
+    def _shape_for(self, emp, plan, start, end):
+        """The block as this person would work it: stretched to their minimum
+        engagement (inside the trading day where it fits), with the meal break."""
+        short = get_minimum_engagement_hours(emp.employment_type) - (end - start).total_seconds() / 3600
+        if short > 0:
+            short = timedelta(hours=short)
+            later = min(short, max(plan.closes - end, timedelta(0)))
+            end, short = end + later, short - later
+            earlier = min(short, max(start - plan.opens, timedelta(0)))
+            start, short = start - earlier, short - earlier
+            end += short
+        gross = (end - start).total_seconds() / 3600
+        brk = get_minimum_break_minutes(gross)
+        return start, end, gross, brk, gross - brk / 60
+
+    def _candidates(self, plan, area, start, end):
+        """Who could work this block, best first: people who hold the area's
+        skill before people with no skills recorded (a fresh hire is not a
+        cook); then salaried staff, already paid; then the cheapest."""
+        generic = normalise_area(area) in GENERIC_ROLES
+        ranked = []
+        for emp in self._eligible_for(area):
+            st, en, gross, brk, net = self._shape_for(emp, plan, start, end)
+            if gross > MAX_SHIFT_LENGTH_HOURS or not self._can_work(emp, plan.day, st, en, net, gross):
+                continue
+            eid = str(emp.id)
+            worked = self._week_hours(eid)
+            untrained = not generic and not holds_skill(emp.skills, area)
+            if _is_salaried(emp):
+                key = (untrained, 0, 0.0, worked, eid)
+            else:
+                cost = self._block_cost(emp, plan.day, st, en, brk) \
+                    + net * _ranking_surcharge(emp, worked)
+                key = (untrained, 1, round(cost, 2), worked, eid)
+            ranked.append((key, emp, st, en, brk))
+        ranked.sort(key=lambda r: r[0])
+        return ranked
+
+    def _place(self, plan, area, start, end):
+        for _, emp, st, en, brk in self._candidates(plan, area, start, end):
+            shift = Shift(id=uuid.uuid4().hex, employee_id=emp.id, date=plan.day,
+                          start_time=st.time(), end_time=en.time(), break_minutes=brk,
+                          status=ShiftStatus.scheduled, role=area)
+            if validate_shift_compliance(emp, shift, [b[5] for b in self.booked[str(emp.id)]]):
+                continue
+            self._book(shift)
+            self.generated.append(shift)
+            return shift
+        return None
+
+    def _fill(self, plan, area, s, e):
+        """Staff slots [s, e); if nobody can take the whole block, its halves."""
+        if self._place(plan, area, plan.slot_start(s), plan.slot_end(e)):
+            return True
+        if e - s >= 6:
+            mid = s + (e - s) // 2
+            first = self._fill(plan, area, s, mid)
+            second = self._fill(plan, area, mid, e)
+            return first or second
+        return False
+
+    def _area_shifts(self, plan, area):
+        return [s for s in self.generated if s.date == plan.day and s.role == area]
+
+    def _stretch(self, plan, area, s, e):
+        """Extend an area's shift that ends at, or starts right after, the
+        uncovered slots [s, e) — the person already on beats a new one."""
+        start, end = plan.slot_start(s), plan.slot_end(e)
+        gap = timedelta(hours=MERGE_GAP_HOURS)
+        for shift in sorted(self._area_shifts(plan, area), key=lambda x: x.duration_hours):
+            cur_start, cur_end = self._span(shift)
+            if start - gap <= cur_end <= start:
+                new_start, new_end = cur_start, end
+            elif end <= cur_start <= end + gap:
+                new_start, new_end = start, cur_end
+            else:
+                continue
+            gross = (new_end - new_start).total_seconds() / 3600
+            if gross > MAX_SHIFT_LENGTH_HOURS:
+                continue
+            emp = self._by_id.get(str(shift.employee_id))
+            if emp is None:
+                continue
+            brk = get_minimum_break_minutes(gross)
+            self._unbook(shift)
+            if self._can_work(emp, plan.day, new_start, new_end, gross - brk / 60, gross):
+                shift.start_time, shift.end_time = new_start.time(), new_end.time()
+                shift.break_minutes = brk
+                self._book(shift)
+                return True
+            self._book(shift)
+        return False
+
+    def _repair(self, plan):
+        """Wherever an area is still below its minimum, extend a shift or add
+        a person, until it holds or nobody can."""
+        for area in plan.areas:
+            if area["min"] <= 0:
+                continue
+            name = area["name"]
+            for _ in range(len(plan.slots) + 1):
+                cover = [0] * len(plan.slots)
+                for shift in self._area_shifts(plan, name):
+                    start, end = self._span(shift)
+                    for i, slot in enumerate(plan.slots):
+                        if start < plan.slot_end(i + 1) and end > slot:
+                            cover[i] += 1
+                runs = _positive_runs([area["min"] - c for c in cover])
+                if not runs:
+                    break
+                progress = False
+                for s, e in runs:
+                    if self._stretch(plan, name, s, e):
+                        progress = True
+                        continue
+                    gs, ge = _grow(s, e, plan.need[name])
+                    if self._fill(plan, name, gs, ge):
+                        progress = True
+                if not progress:
+                    break
+
+    def staff(self, plans):
+        """Minimum blocks for every day first (busiest day first), then the
+        peaks, then the repair pass."""
+        plans = sorted(plans, key=lambda p: (-p.load, p.day))
+        ranks = {p.day: self._area_order(p) for p in plans}
+        for plan in plans:
+            rank = ranks[plan.day]
+            base = [b for b in plan.blocks if b["minimum"]]
+            for b in sorted(base, key=lambda b: (rank[b["area"]], -b["s"], -b["e"])):
+                self._fill(plan, b["area"], b["s"], b["e"])
+        for plan in plans:
+            rank = ranks[plan.day]
+            peaks = [b for b in plan.blocks if not b["minimum"]]
+            for b in sorted(peaks, key=lambda b: (-b["peak"], rank[b["area"]], b["s"], -b["e"])):
+                self._fill(plan, b["area"], b["s"], b["e"])
+        for plan in plans:
+            self._repair(plan)
+
+
+def _shift_order(shift):
+    return (shift.date, shift.start_time, normalise_area(shift.role), str(shift.employee_id))
 
 
 # ============================================================================
@@ -394,119 +936,29 @@ def generate_daily_roster(
     covers_per_staff: float = DEFAULT_COVERS_PER_STAFF,
 ) -> list[Shift]:
     """
-    Generate an optimised roster for a single day.
-
-    Algorithm:
-    1. Convert forecasts to required staff per hour
-    2. Identify peak periods and align to shift templates
-    3. For each period, assign cheapest available employees
-    4. Validate all shifts for compliance
+    Generate a roster for a single day (see the module docstring).
 
     Args:
         target_date: Date to roster.
         forecasts: Demand forecasts for this day.
         employees: Available employee pool.
         state: Australian state for award rules.
-        existing_shifts: Shifts already assigned this week (for hours tracking).
-        venue_config: Venue configuration (for min staff, etc.)
+        existing_shifts: Shifts the people already have (earlier days this
+            week, other venues): they count toward hours, rest and days.
+        venue_config: Venue configuration (areas, minimums, trading hours).
         covers_per_staff: Covers-to-staff ratio.
 
     Returns:
         List of Shift objects for the day.
     """
-    existing_shifts = existing_shifts or []
-    min_staff_by_role = venue_config.min_staff if venue_config else None
-
-    # Step 1: Calculate required staff per hour
-    required = calculate_required_staff(forecasts, covers_per_staff, min_staff_by_role)
-    if not required:
+    week_start = target_date - timedelta(days=target_date.weekday())
+    builder = _RosterBuilder(employees, venue_config, state, covers_per_staff, forecasts,
+                             week_start, existing_shifts=existing_shifts)
+    plan = builder.plan_day(target_date)
+    if plan is None:
         return []
-
-    # Step 2: Identify peak periods
-    periods = identify_peak_periods(required)
-
-    # Determine which roles this venue staffs (falls back to ["general"]).
-    roles = _roles_for_venue(min_staff_by_role)
-
-    # Track weekly hours for each employee
-    weekly_hours = defaultdict(float)
-    for shift in existing_shifts:
-        if shift.status not in (ShiftStatus.cancelled, ShiftStatus.no_show):
-            weekly_hours[shift.employee_id] += shift.net_hours
-
-    # Step 3: For each period, allocate headcount across roles, then assign
-    # skill-matched, cheapest-first employees per role.
-    #
-    # Process periods HIGHEST-DEMAND FIRST (not clock order). Each employee takes
-    # one shift/day, so iterating in clock order let the quiet morning claim every
-    # employee before the loop reached the busy dinner peak — leaving the peak with
-    # ZERO staff. Staffing the peak first guarantees the busiest service is covered;
-    # whatever's left covers the quieter periods.
-    day_shifts = []
-    assigned_today = set()  # employee IDs already assigned today
-
-    for period in sorted(periods, key=lambda p: (-int(p["peak_staff"]), p["start_hour"])):
-        staff_needed = int(period["peak_staff"])
-        start_h = period["start_hour"]
-        end_h = period["end_hour"]
-
-        # Split the period's required headcount across roles.
-        role_targets = _allocate_headcount_to_roles(
-            staff_needed, roles, min_staff_by_role
-        )
-
-        for role, role_count in role_targets.items():
-            if role_count <= 0:
-                continue
-
-            # Score and sort skill-matched, available employees (cheapest first).
-            candidates = []
-            for emp in employees:
-                if emp.id in assigned_today:
-                    continue
-
-                if not _employee_can_fill_role(emp, role):
-                    continue
-
-                # Check the shift they'd actually work (stretched to minimum
-                # engagement / clamped to max length), not the demand period.
-                template = _best_shift_template(start_h, end_h, emp.employment_type)
-                available, reason = _is_employee_available(
-                    emp, target_date, template[0], template[1],
-                    existing_shifts + day_shifts,
-                    weekly_hours[emp.id],
-                )
-                if not available:
-                    continue
-
-                score = _employee_cost_score(emp, target_date, state, weekly_hours[emp.id])
-                candidates.append((score, emp, template))
-
-            # Sort by score (lowest = cheapest)
-            candidates.sort(key=lambda x: x[0])
-
-            # Assign up to role_count employees to this role.
-            assigned_for_role = 0
-            for _, emp, (shift_start, shift_end, break_mins) in candidates:
-                if assigned_for_role >= role_count:
-                    break
-
-                shift = _create_shift(
-                    emp, target_date, shift_start, shift_end, break_mins, role=role
-                )
-
-                # Validate compliance before committing
-                emp_existing = [s for s in existing_shifts + day_shifts if s.employee_id == emp.id]
-                violations = validate_shift_compliance(emp, shift, emp_existing)
-                if violations:
-                    continue  # Skip this assignment, try next candidate
-
-                day_shifts.append(shift)
-                assigned_today.add(emp.id)
-                weekly_hours[emp.id] += shift.net_hours
-                assigned_for_role += 1
-
-    return day_shifts
+    builder.staff([plan])
+    return sorted(builder.generated, key=_shift_order)
 
 
 def _rostered_coverage_by_cell(roster: Roster) -> dict:
@@ -601,12 +1053,12 @@ def generate_weekly_roster(
     employees: list[Employee],
     venue_config: VenueConfig,
     covers_per_staff: float = DEFAULT_COVERS_PER_STAFF,
+    existing_shifts: Optional[list[Shift]] = None,
+    approved_leave: Optional[dict] = None,
+    prior_week_shifts: Optional[list[Shift]] = None,
 ) -> Roster:
     """
-    Generate a full weekly roster.
-
-    Processes each day sequentially so that earlier days' assignments
-    influence later days (weekly hours tracking, consecutive days).
+    Generate a full weekly roster (see the module docstring).
 
     Args:
         week_start: Monday of the roster week.
@@ -614,42 +1066,39 @@ def generate_weekly_roster(
         employees: Full employee pool.
         venue_config: Venue configuration.
         covers_per_staff: Covers-to-staff ratio.
+        existing_shifts: Shifts the people already have elsewhere (other
+            venues), under this venue's employee ids: never double-booked,
+            and they count toward hours, rest, days and visa caps.
+        approved_leave: {employee_id: [(first_day, last_day)]} of approved
+            leave; nobody is rostered inside it.
+        prior_week_shifts: The previous week's roster, for rest across the
+            week boundary and recorded visa fortnight caps. None = unknown.
 
     Returns:
         Complete Roster object with all shifts and total cost.
     """
     state = venue_config.state
-    all_shifts = []
     week_end = week_start + timedelta(days=6)
+    builder = _RosterBuilder(employees, venue_config, state, covers_per_staff,
+                             weekly_forecasts, week_start,
+                             existing_shifts=existing_shifts,
+                             approved_leave=approved_leave,
+                             prior_week_shifts=prior_week_shifts)
+    plans = [p for p in (builder.plan_day(week_start + timedelta(days=i)) for i in range(7)) if p]
+    builder.staff(plans)
+    all_shifts = sorted(builder.generated, key=_shift_order)
 
-    for day_offset in range(7):
-        target_date = week_start + timedelta(days=day_offset)
-
-        # Filter forecasts for this day
-        day_forecasts = [f for f in weekly_forecasts if f.date == target_date]
-        if not day_forecasts:
-            continue
-
-        # Generate this day's shifts, passing in all shifts so far this week
-        day_shifts = generate_daily_roster(
-            target_date=target_date,
-            forecasts=day_forecasts,
-            employees=employees,
-            state=state,
-            existing_shifts=all_shifts,
-            venue_config=venue_config,
-            covers_per_staff=covers_per_staff,
-        )
-        # Surface a day that has demand but produced no shifts (e.g. everyone hit
-        # the consecutive-days cap) — otherwise a manager publishes an empty day
-        # unaware. The conflict detector also flags the resulting understaffing.
-        if not day_shifts and any(f.predicted_covers > 0 for f in day_forecasts):
+    # Surface a trading day that produced no shifts (e.g. everyone hit the
+    # consecutive-days cap) — otherwise a manager publishes an empty day
+    # unaware. The conflict detector also flags the resulting understaffing.
+    rostered_days = {s.date for s in all_shifts}
+    for plan in plans:
+        if plan.day not in rostered_days and plan.load > 0:
             logger.warning(
-                "Roster: %s has demand but no staff could be assigned "
+                "Roster: %s trades but no staff could be assigned "
                 "(likely consecutive-days/hours limits with a thin pool).",
-                target_date.isoformat(),
+                plan.day.isoformat(),
             )
-        all_shifts.extend(day_shifts)
 
     # Per-shift display costs (the per-shift breakdown is overtime-unaware).
     emp_dict = {e.id: e for e in employees}
@@ -667,7 +1116,7 @@ def generate_weekly_roster(
             )
 
     roster = Roster(
-        id=str(uuid.uuid4())[:8],
+        id=uuid.uuid4().hex,
         venue_id=venue_config.id,
         week_start=week_start,
         week_end=week_end,
@@ -845,6 +1294,7 @@ def apply_budget_cap(
     state: State,
     weekly_budget: Decimal,
     min_staff_by_role: dict = None,
+    venue=None,
 ) -> dict:
     """Trim a generated roster to a weekly labour budget — Tanda-style
     "auto-adjust to budget", with one integrity rule theirs doesn't state:
@@ -855,8 +1305,9 @@ def apply_budget_cap(
     Cuts remove whole shifts, most expensive first (biggest savings, fewest
     people affected). A shift is removable only if, for every hour it spans
     through to close (past midnight included), the remaining same-role shifts
-    still meet the venue's min_staff for that role. Mutates roster.shifts /
-    roster.total_cost in place.
+    still meet the venue's minimum for that role — the weekday minimums of
+    the shift's own trading day when `venue` is given, else min_staff_by_role.
+    Mutates roster.shifts / roster.total_cost in place.
 
     Returns a report dict:
         {"cap", "initial_cost", "final_cost", "met", "removed": [...], "note"}
@@ -892,7 +1343,10 @@ def apply_budget_cap(
 
     def _removable(shift, cover):
         area = normalise_area(shift.role)
-        floor = floors.get(area, 0)
+        if venue is not None:
+            floor = _areas.min_staff_for(venue, shift.date).get(area, 0)
+        else:
+            floor = floors.get(area, 0)
         if floor <= 0:
             return True
         return all(cover[(area, day, hour)] - 1 >= floor

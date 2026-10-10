@@ -77,8 +77,8 @@ COLD_START_HOUR_MULTIPLIERS = {
     range(22, 24): 0.4,   # late night
 }
 
-# Default trading hours
-DEFAULT_TRADING_HOURS = list(range(6, 24))  # 6am to midnight
+# Trading hours when the venue hasn't recorded its own: 10am to midnight
+DEFAULT_TRADING_HOURS = list(range(10, 24))
 
 
 def _get_hour_multiplier(hour: int) -> float:
@@ -250,7 +250,7 @@ class EnsembleForecaster:
             List of DemandForecast objects, one per hour.
         """
         if hours is None:
-            hours = DEFAULT_TRADING_HOURS
+            hours = self._trading_hours(target_date)
 
         forecasts = []
         for hour in hours:
@@ -278,6 +278,25 @@ class EnsembleForecaster:
             )
 
         return forecasts
+
+    def _trading_hours(self, target_date: date) -> list[int]:
+        """Clock hours on target_date the venue trades by its recorded hours:
+        the tail of the previous night's late close, then the day's own
+        trade up to midnight. The default when none are recorded."""
+        from rosteriq.services.venue_areas import trading_window
+        hours = []
+        for day in (target_date - timedelta(days=1), target_date):
+            window = trading_window(self.venue_config, day)
+            if not window:
+                continue
+            cur, end = window[0].replace(minute=0), window[1]
+            while cur < end:
+                if cur.date() == target_date and cur.hour not in hours:
+                    hours.append(cur.hour)
+                cur += timedelta(hours=1)
+        if trading_window(self.venue_config, target_date) is None:
+            return sorted(set(hours) | set(DEFAULT_TRADING_HOURS))
+        return hours
 
     def predict_week(self, week_start: date) -> list[DemandForecast]:
         """

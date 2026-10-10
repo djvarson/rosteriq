@@ -64,7 +64,9 @@ class TestConstants:
         assert COLD_START_DAY_DEFAULTS[5] > COLD_START_DAY_DEFAULTS[4]  # Sat > Fri
 
     def test_trading_hours(self):
-        assert DEFAULT_TRADING_HOURS == list(range(6, 24))
+        # 10:00 to midnight when the venue hasn't recorded its hours. Was
+        # 06:00, which rostered a cold-start pub from 6am (Wembley audit).
+        assert DEFAULT_TRADING_HOURS == list(range(10, 24))
 
 
 # ============================================================================

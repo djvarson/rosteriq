@@ -34,6 +34,7 @@ from rosteriq.award_rules import (
     get_day_type, DayType,
 )
 from rosteriq.services.availability_rules import is_available
+from rosteriq.services.venue_areas import can_fill
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +211,10 @@ class ConflictDetector:
 
     def _check_skill_mismatch(self, shift: Shift, employee: Employee) -> None:
         """Check if employee has the required skill for the shift role."""
-        if not employee.skills or not shift.role:
+        if not shift.role:
+            return
+        # No skills recorded: general areas only, never a supervisory one.
+        if not employee.skills and can_fill(employee, shift.role):
             return
 
         # A generic/catch-all role isn't a specialised skill, so don't flag it.
@@ -223,7 +227,7 @@ class ConflictDetector:
                 severity=ConflictSeverity.WARNING,
                 message=(
                     f"Employee {employee.id} lacks required skill '{shift.role}'. "
-                    f"Has skills: {', '.join(employee.skills)}"
+                    f"Has skills: {', '.join(employee.skills) or 'none recorded'}"
                 ),
                 employee_ids=[employee.id],
                 shift_ids=[shift.id],

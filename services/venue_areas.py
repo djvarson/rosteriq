@@ -11,6 +11,8 @@ VenueConfig.areas (set in Settings → Areas & minimums):
   * requires_skill: only people with this area in their skills may work it
     (duty manager, supervisor). Otherwise people with the skill — or with no
     skills recorded at all — may.
+  * follows_demand: whether busy hours add staff here beyond the minimum.
+    Supervisory areas and the bottle shop hold their minimum unless set True.
   * a venue with no areas falls back to min_staff ({area: count}, every day)
 
 VenueConfig.trading_hours:
@@ -25,6 +27,7 @@ from typing import Optional
 
 DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _SUPERVISORY = ("duty manager", "manager", "supervisor")
+_OWN_TRADE = ("bottle", "liquor")   # a counter with its own trade, not dining covers
 
 
 def day_key(day) -> str:
@@ -48,24 +51,33 @@ def venue_areas(venue) -> list:
             if not name:
                 continue
             by_day = a.get("min_by_day") or {}
+            requires = bool(a.get("requires_skill", any(s in name for s in _SUPERVISORY)))
             out.append({
                 "name": name,
                 "label": a.get("label") or name.title(),
                 "min_by_day": {d: int(by_day.get(d, 0) or 0) for d in DAY_KEYS},
-                "requires_skill": bool(a.get("requires_skill",
-                                             any(s in name for s in _SUPERVISORY))),
+                "requires_skill": requires,
+                "follows_demand": _follows_demand(a, name, requires),
             })
         return out
     for name, count in (getattr(venue, "min_staff", None) or {}).items():
         name = _norm(name)
         if name:
+            requires = any(s in name for s in _SUPERVISORY)
             out.append({
                 "name": name,
                 "label": name.title(),
                 "min_by_day": {d: int(count or 0) for d in DAY_KEYS},
-                "requires_skill": any(s in name for s in _SUPERVISORY),
+                "requires_skill": requires,
+                "follows_demand": _follows_demand({}, name, requires),
             })
     return out
+
+
+def _follows_demand(area: dict, name: str, requires_skill: bool) -> bool:
+    if area.get("follows_demand") is not None:
+        return bool(area["follows_demand"])
+    return not requires_skill and not any(w in name for w in _OWN_TRADE)
 
 
 def area_names(venue) -> list:

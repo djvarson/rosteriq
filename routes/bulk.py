@@ -318,10 +318,9 @@ async def _generate_roster_for_venue(
 
         # Generate roster
         roster = generate_weekly_roster(
-            venue_id=venue_id,
             week_start=week_start,
+            weekly_forecasts=forecasts,
             employees=employees,
-            forecasts=forecasts,
             venue_config=venue,
         )
 
