@@ -540,7 +540,7 @@ class VenueConfig(BaseModel):
     # Areas with per-weekday minimums, and trading hours — read through
     # services/venue_areas.py, never directly.
     areas: List[Dict[str, Any]] = []
-    trading_hours: Dict[str, Dict[str, str]] = {}
+    trading_hours: Dict[str, Dict[str, Any]] = {}
     max_labour_pct: float
     pos_system: Optional[str] = None
     created_at: datetime
@@ -578,12 +578,19 @@ class VenueConfig(BaseModel):
 
     @field_validator("trading_hours")
     @classmethod
-    def validate_trading_hours(cls, v: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]:
+    def validate_trading_hours(cls, v: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """{day: {"open": "HH:MM", "close": "HH:MM"}}, or {day: {"closed": True}}
+        for a weekday the venue doesn't trade."""
         import re
         cleaned = {}
         for day, hours in (v or {}).items():
             day = str(day).strip().lower()[:3]
             if day not in ("mon", "tue", "wed", "thu", "fri", "sat", "sun") or not hours:
+                continue
+            if str(hours.get("closed")).strip().lower() == "true":
+                cleaned[day] = {"closed": True}
+                continue
+            if set(hours) == {"closed"}:
                 continue
             opens, closes = str(hours.get("open", "")).strip(), str(hours.get("close", "")).strip()
             for t in (opens, closes):

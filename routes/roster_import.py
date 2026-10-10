@@ -48,6 +48,7 @@ from rosteriq.cost_calculator import calculate_roster_cost, calculate_shift_cost
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.models import Roster, Shift, ShiftStatus, State
+from rosteriq.services import roster_edit as edit
 from rosteriq.services.current_roster import (
     ARCHIVED, PUBLISHED, roster_state, supersede_for_import, week_monday,
 )
@@ -365,82 +366,125 @@ def _paste_weeks(paste: dict) -> list:
     return sorted(set(paste["covered"]) | {week_monday(d) for _, d in paste["pasted"]})
 
 
-def _reconcile(paste: dict, existing: dict, emp_map: dict, state, venue_id: str) -> dict:
+def _held(roster) -> dict:
+    """What a stored week holds, to tell whether it changed since it was read."""
+    return {s.id: s.model_dump() for s in (roster.shifts if roster else [])}
+
+
+def _reconcile_week(paste: dict, week_start, roster, published: bool, emp_map: dict, state,
+                    venue_id: str) -> dict:
+    """One week of the paste against the imported roster stored for it (None
+    when there is none): the roster to save (None when nothing changes) and
+    what became of each row. Notes go in the result rather than the paste, so
+    a week that changed before it could be saved can be redone."""
+    out = {"week_start": week_start, "read": _held(roster), "roster": None, "imported": 0,
+           "replaced": 0, "removed": [], "duplicates": 0, "skipped": [], "report": []}
+    pasted, held, covered = paste["pasted"], paste["held"], paste["covered"]
+    week_items = sorted(((pair, line, name, sh) for pair, items in pasted.items()
+                         if week_monday(pair[1]) == week_start for line, name, sh in items),
+                        key=lambda x: x[1])
+    if published:
+        for (_, d), line, name, _ in week_items:
+            _note_row(out, line, name, d, "skipped",
+                      f"the week of {week_start:%d/%m/%Y} is published in RosterIQ — an "
+                      "import doesn't change a published week")
+        return out
+    old = list(roster.shifts) if roster else []
+    by_key = {}
+    for s in old:
+        by_key.setdefault((s.employee_id, s.date, s.start_time, s.end_time), s)
+    kept_ids, updates, added = set(), {}, []
+    for (emp_id, d), line, name, sh in week_items:
+        prev = by_key.get((emp_id, d, sh.start_time, sh.end_time))
+        if prev is None or prev.id in kept_ids:
+            added.append((line, name, sh))
+            continue
+        kept_ids.add(prev.id)
+        if (prev.break_minutes, prev.role) != (sh.break_minutes, sh.role):
+            updates[prev.id] = prev.model_copy(
+                update={"break_minutes": sh.break_minutes, "role": sh.role})
+            out["replaced"] += 1
+            _note_row(out, line, name, d, "replaced",
+                      f"meal break or area changed (was {prev.break_minutes} min, "
+                      f"{prev.role or 'no area'})")
+        else:
+            out["duplicates"] += 1
+            _note_row(out, line, name, d, "skipped", "already imported")
+    gone = [s for s in old
+            if s.id not in kept_ids and not paste["swallowed"]
+            and s.employee_id in covered.get(week_start, ())
+            and s.date in paste["paste_dates"] and (s.employee_id, s.date) not in held]
+    replaced_ids = set()
+    for line, name, sh in added:
+        moved = [g for g in gone if g.employee_id == sh.employee_id and g.date == sh.date
+                 and _overlaps(g, sh)]
+        if moved:
+            out["replaced"] += 1
+            replaced_ids.update(g.id for g in moved)
+            _note_row(out, line, name, sh.date, "replaced",
+                      "replaced " + ", ".join(_hhmm(g) for g in moved))
+    out["imported"] += len(added)
+    for g in gone:
+        if g.id not in replaced_ids:
+            out["removed"].append({
+                "name": getattr(emp_map.get(g.employee_id), "name", g.employee_id),
+                "date": g.date.isoformat(), "start": f"{g.start_time:%H:%M}",
+                "end": f"{g.end_time:%H:%M}"})
+    if not (added or updates or gone):
+        return out
+    gone_ids = {g.id for g in gone}
+    # Copies: costing must not touch the stored week, which may be redone.
+    shifts = ([updates[s.id] if s.id in updates else s.model_copy() for s in old if s.id not in gone_ids]
+              + [sh for _, _, sh in added])
+    for s in shifts:
+        if s.employee_id in emp_map:
+            s.cost = calculate_shift_cost_breakdown(emp_map[s.employee_id], s, state).total_cost
+    rebuilt = Roster(
+        id=f"imported-{venue_id}-{week_start.isoformat()}", venue_id=venue_id,
+        week_start=week_start, week_end=week_start + timedelta(days=6),
+        shifts=shifts, total_cost=None,
+        created_at=roster.created_at if roster else datetime.utcnow(),
+    )
+    # Saved as the stored week it replaces: Postgres deletes only ids the
+    # copy held when read, so the gone shifts go and one added since stays.
+    rebuilt._saved_shift_ids = frozenset(s.id for s in old)
+    costable = [s for s in shifts if s.employee_id in emp_map]
+    rebuilt.total_cost = calculate_roster_cost(
+        rebuilt.model_copy(update={"shifts": costable}), emp_map, state)
+    out["roster"] = rebuilt
+    return out
+
+
+def _reconcile(paste: dict, existing: dict, emp_map: dict, state, venue_id: str) -> list:
     """Each week's imported roster rebuilt from the paste and costed from the
     rates the venue recorded. Pure CPU, run off the event loop. existing:
     {monday: (imported roster | None, published in RosterIQ)}."""
-    out = {"rosters": [], "imported": 0, "replaced": 0, "removed": []}
-    pasted, held, covered = paste["pasted"], paste["held"], paste["covered"]
-    for week_start in _paste_weeks(paste):
-        roster, published = existing[week_start]
-        week_items = sorted(((pair, line, name, sh) for pair, items in pasted.items()
-                             if week_monday(pair[1]) == week_start for line, name, sh in items),
-                            key=lambda x: x[1])
-        if published:
-            for (_, d), line, name, _ in week_items:
-                _note_row(paste, line, name, d, "skipped",
-                          f"the week of {week_start:%d/%m/%Y} is published in RosterIQ — an "
-                          "import doesn't change a published week")
-            continue
-        old = list(roster.shifts) if roster else []
-        by_key = {}
-        for s in old:
-            by_key.setdefault((s.employee_id, s.date, s.start_time, s.end_time), s)
-        kept_ids, updates, added = set(), {}, []
-        for (emp_id, d), line, name, sh in week_items:
-            prev = by_key.get((emp_id, d, sh.start_time, sh.end_time))
-            if prev is None or prev.id in kept_ids:
-                added.append((line, name, sh))
-                continue
-            kept_ids.add(prev.id)
-            if (prev.break_minutes, prev.role) != (sh.break_minutes, sh.role):
-                updates[prev.id] = prev.model_copy(
-                    update={"break_minutes": sh.break_minutes, "role": sh.role})
-                out["replaced"] += 1
-                _note_row(paste, line, name, d, "replaced",
-                          f"meal break or area changed (was {prev.break_minutes} min, "
-                          f"{prev.role or 'no area'})")
-            else:
-                paste["duplicates"] += 1
-                _note_row(paste, line, name, d, "skipped", "already imported")
-        gone = [s for s in old
-                if s.id not in kept_ids and not paste["swallowed"]
-                and s.employee_id in covered.get(week_start, ())
-                and s.date in paste["paste_dates"] and (s.employee_id, s.date) not in held]
-        replaced_ids = set()
-        for line, name, sh in added:
-            moved = [g for g in gone if g.employee_id == sh.employee_id and g.date == sh.date
-                     and _overlaps(g, sh)]
-            if moved:
-                out["replaced"] += 1
-                replaced_ids.update(g.id for g in moved)
-                _note_row(paste, line, name, sh.date, "replaced",
-                          "replaced " + ", ".join(_hhmm(g) for g in moved))
-        out["imported"] += len(added)
-        for g in gone:
-            if g.id not in replaced_ids:
-                out["removed"].append({
-                    "name": getattr(emp_map.get(g.employee_id), "name", g.employee_id),
-                    "date": g.date.isoformat(), "start": f"{g.start_time:%H:%M}",
-                    "end": f"{g.end_time:%H:%M}"})
-        if not (added or updates or gone):
-            continue
-        gone_ids = {g.id for g in gone}
-        shifts = [updates.get(s.id, s) for s in old if s.id not in gone_ids] + [sh for _, _, sh in added]
-        for s in shifts:
-            if s.employee_id in emp_map:
-                s.cost = calculate_shift_cost_breakdown(emp_map[s.employee_id], s, state).total_cost
-        rebuilt = Roster(
-            id=f"imported-{venue_id}-{week_start.isoformat()}", venue_id=venue_id,
-            week_start=week_start, week_end=week_start + timedelta(days=6),
-            shifts=shifts, total_cost=None,
-            created_at=roster.created_at if roster else datetime.utcnow(),
-        )
-        costable = [s for s in shifts if s.employee_id in emp_map]
-        rebuilt.total_cost = calculate_roster_cost(
-            rebuilt.model_copy(update={"shifts": costable}), emp_map, state)
-        out["rosters"].append(rebuilt)
-    return out
+    return [_reconcile_week(paste, week_start, *existing[week_start], emp_map, state, venue_id)
+            for week_start in _paste_weeks(paste)]
+
+
+def _save_week(db, paste: dict, week: dict, emp_map: dict, state, venue_id: str) -> dict:
+    """Saves the week's roster under the roster lock. If another import (a
+    double click) or an edit saved the week after it was read, the week is
+    redone against what is stored now. This runs on the event loop: the lock
+    is a threading lock, so it can't be held across an await."""
+    rid = week["roster"].id
+    with edit.roster_lock(db, rid):
+        fresh = db.get_roster(rid)
+        if _held(fresh) != week["read"]:
+            published = fresh is not None and roster_state(db, rid) in (PUBLISHED, ARCHIVED)
+            week = _reconcile_week(paste, week["week_start"], fresh, published, emp_map, state,
+                                   venue_id)
+        if week["roster"] is not None:
+            db.save_roster(week["roster"])
+    return week
+
+
+def _skip_week(paste: dict, week_start, reason: str) -> None:
+    for (_, d), items in paste["pasted"].items():
+        if week_monday(d) == week_start:
+            for line, name, _ in items:
+                _note_row(paste, line, name, d, "skipped", reason)
 
 
 @router.post("/import-roster")
@@ -477,35 +521,55 @@ async def import_roster(body: RosterImportBody) -> dict:
         roster = db.get_roster(f"imported-{body.venue_id}-{week_start.isoformat()}")
         existing[week_start] = (roster, roster is not None
                                 and roster_state(db, roster.id) in (PUBLISHED, ARCHIVED))
-    plan = await asyncio.to_thread(_reconcile, paste, existing, emp_map, state, body.venue_id)
+    weeks = await asyncio.to_thread(_reconcile, paste, existing, emp_map, state, body.venue_id)
 
-    skipped, week_costs, written = paste["skipped"], [], []
-    for roster in plan["rosters"]:
-        try:
-            db.save_roster(roster)
-        except Exception as e:
-            skipped.append({"week_of": roster.week_start.isoformat(), "reason": f"roster save failed: {e}"})
-            continue
-        written.append(roster.week_start)
-        week_costs.append({"week_start": roster.week_start.isoformat(), "roster_id": roster.id,
-                           "shifts": len(roster.shifts), "total_cost": str(roster.total_cost)})
+    skipped, week_costs, written, done, busy = paste["skipped"], [], [], [], False
+    for week in weeks:
+        if week["roster"] is not None:
+            when = f"{week['week_start']:%d/%m/%Y}"
+            try:
+                week = _save_week(db, paste, week, emp_map, state, body.venue_id)
+            except edit.RosterBusy:
+                busy = True
+                _skip_week(paste, week["week_start"], f"someone else was saving the week of {when} "
+                           "— paste again in a moment")
+                continue
+            except Exception as e:
+                _skip_week(paste, week["week_start"], f"the week of {when} couldn't be saved: {e}")
+                continue
+        done.append(week)
+        roster = week["roster"]
+        if roster is not None:
+            written.append(roster.week_start)
+            week_costs.append({"week_start": roster.week_start.isoformat(), "roster_id": roster.id,
+                               "shifts": len(roster.shifts), "total_cost": str(roster.total_cost)})
+    if busy and not written:
+        raise HTTPException(status_code=409,
+                            detail="Someone else is saving this roster right now — try again.")
     supersede_for_import(db, body.venue_id, written)
+    for week in done:
+        skipped.extend(week["skipped"])
+        paste["report"].extend(week["report"])
+        paste["duplicates"] += week["duplicates"]
+    imported = sum(w["imported"] for w in done)
+    replaced = sum(w["replaced"] for w in done)
+    removed = [r for w in done for r in w["removed"]]
     report = sorted(paste["report"], key=lambda r: r["line"])
     flagged = paste["flagged"]
 
-    logger.info(f"Roster import at {body.venue_id}: {plan['imported']} shifts across "
-                f"{len(written)} week(s), {plan['replaced']} replaced, {len(plan['removed'])} removed, "
+    logger.info(f"Roster import at {body.venue_id}: {imported} shifts across "
+                f"{len(written)} week(s), {replaced} replaced, {len(removed)} removed, "
                 f"{len(skipped)} skipped ({paste['duplicates']} already imported)")
     return {
         "status": "imported",
-        "shifts_imported": plan["imported"],
+        "shifts_imported": imported,
         "weeks": len(written),
         "skipped_count": len(skipped),
         "skipped": skipped[:50],
         "duplicates_skipped": paste["duplicates"],
-        "shifts_replaced": plan["replaced"],
-        "shifts_removed": len(plan["removed"]),
-        "removed": plan["removed"],
+        "shifts_replaced": replaced,
+        "shifts_removed": len(removed),
+        "removed": removed,
         "rows": report,
         "flagged": flagged,
         "flags_summary": dict(Counter(f["flag"] for f in flagged)),

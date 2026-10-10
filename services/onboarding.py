@@ -310,7 +310,16 @@ class OnboardingService:
                 roster = await tanda.get_roster(week_date)
 
                 if roster:
+                    stored = self.db.get_roster(roster.id)
+                    if stored is not None and stored.venue_id != venue_id:
+                        logger.warning(f"Tanda roster {roster.id} is already another venue's roster; "
+                                       f"not imported for {venue_id}")
+                        continue
                     roster.venue_id = venue_id
+                    if stored is not None:
+                        # A re-sync replaces the stored week: shifts Tanda no
+                        # longer has are deleted on Postgres too.
+                        roster._saved_shift_ids = frozenset(s.id for s in stored.shifts)
                     rosters.append(roster)
                     shifts.extend(roster.shifts)
                     self.db.save_roster(roster)

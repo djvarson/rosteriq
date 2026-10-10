@@ -438,7 +438,8 @@ class BackupService:
                 else:
                     if conflict_strategy == "generate_new" and existing:
                         roster_dict["id"] = f"{roster_id}_import_{datetime.now().timestamp()}"
-                    self._save_entity(Roster, roster_dict)
+                    self._save_entity(Roster, roster_dict,
+                                      replacing=existing if conflict_strategy == "overwrite" else None)
                     entities_imported["rosters"] += 1
 
             # Import forecasts
@@ -678,8 +679,9 @@ class BackupService:
                 logger.info(f"Deleting old backup per retention policy: {old_backup.id}")
                 self.delete_backup(old_backup.id)
 
-    def _save_entity(self, entity_class, data_dict):
-        """Save an entity to the database."""
+    def _save_entity(self, entity_class, data_dict, replacing=None):
+        """Save an entity to the database. replacing: the stored roster this
+        one overwrites, whose shifts it leaves out are deleted."""
         try:
             entity = entity_class(**data_dict)
 
@@ -688,6 +690,8 @@ class BackupService:
             elif entity_class == Employee:
                 self.db.save_employee(entity)
             elif entity_class == Roster:
+                if replacing is not None:
+                    entity._saved_shift_ids = frozenset(s.id for s in replacing.shifts)
                 self.db.save_roster(entity)
             elif entity_class == Shift:
                 self.db.save_shift(entity)
