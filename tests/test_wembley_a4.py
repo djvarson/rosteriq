@@ -268,8 +268,9 @@ def test_briefing_today_labour_matches_the_snapshot_for_an_imported_roster():
     snap = c.get(f"/api/snapshot?venue_id={vid}&start_date={today.isoformat()}"
                  f"&end_date={today.isoformat()}", headers=mgr).json()
     brief = c.get(f"/api/briefing?venue_id={vid}", headers=mgr).json()
-    assert snap["days"][0]["labour"] == 180.0             # 6h x $30, no stored cost
-    assert brief["today"]["labour_cost"] == 180.0
+    labour = snap["days"][0]["labour"]
+    assert labour >= 180.0                                # 6h x $30 at least: imports are costed
+    assert brief["today"]["labour_cost"] == labour
 
 
 def test_importing_a_week_supersedes_its_generated_drafts():

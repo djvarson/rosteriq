@@ -478,6 +478,7 @@ def test_second_cover_claimant_gets_409_even_from_a_stale_read(monkeypatch):
                           shifts=[Shift(id=f"{vid}-s", employee_id=a_id, date=day,
                                         start_time=time(17), end_time=time(23),
                                         status=ShiftStatus.scheduled, role="bar")]))
+    db.update_roster_state(f"{vid}-r", "published", "test", "test")   # staff see published rosters only
     r = c.post(f"/api/me/shifts/{vid}-s/cover", json={"reason": "sick"}, headers=a_h)
     assert r.status_code == 200, r.text
     cover_id = r.json()["cover_id"]

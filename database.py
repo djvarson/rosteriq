@@ -3537,6 +3537,8 @@ class PostgresStore(BaseStore):
                 state TEXT NOT NULL,
                 timezone TEXT NOT NULL DEFAULT 'Australia/Melbourne',
                 min_staff JSONB DEFAULT '{}',
+                areas JSONB DEFAULT '[]',
+                trading_hours JSONB DEFAULT '{}',
                 max_labour_pct NUMERIC(5, 2) NOT NULL,
                 pos_system TEXT,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -3735,6 +3737,8 @@ class PostgresStore(BaseStore):
         # without it, staff users get [] and can't reach their own venue.
         for alter in (
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS venue_ids JSONB DEFAULT '[]'",
+            "ALTER TABLE venues ADD COLUMN IF NOT EXISTS areas JSONB DEFAULT '[]'::jsonb",
+            "ALTER TABLE venues ADD COLUMN IF NOT EXISTS trading_hours JSONB DEFAULT '{}'::jsonb",
             # section_grants: venue_id -> [section names] a department manager is
             # confined to. Absent/empty for a venue = full venue manager (the
             # default), so this is backward-compatible with every existing user.
@@ -3852,11 +3856,13 @@ class PostgresStore(BaseStore):
     def save_venue(self, venue):
         with self._cursor() as cur:
             cur.execute("""
-                INSERT INTO venues (id, name, tanda_org_id, state, timezone, min_staff, max_labour_pct, pos_system, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO venues (id, name, tanda_org_id, state, timezone, min_staff, areas,
+                                    trading_hours, max_labour_pct, pos_system, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, tanda_org_id=EXCLUDED.tanda_org_id,
                     state=EXCLUDED.state, timezone=EXCLUDED.timezone, min_staff=EXCLUDED.min_staff,
+                    areas=EXCLUDED.areas, trading_hours=EXCLUDED.trading_hours,
                     max_labour_pct=EXCLUDED.max_labour_pct, pos_system=EXCLUDED.pos_system,
                     updated_at=now()
             """, (
@@ -3864,7 +3870,7 @@ class PostgresStore(BaseStore):
                 # don't use Tanda, so "" would collide on the second venue ever
                 # created (the production onboarding 500 found in preflight).
                 venue.id, venue.name, venue.tanda_org_id or None, venue.state.value,
-                venue.timezone, _json(venue.min_staff),
+                venue.timezone, _json(venue.min_staff), _json(venue.areas), _json(venue.trading_hours),
                 float(venue.max_labour_pct), venue.pos_system, venue.created_at,
             ))
 
@@ -3884,6 +3890,8 @@ class PostgresStore(BaseStore):
             id=row["id"], name=row["name"], tanda_org_id=row["tanda_org_id"] or "",
             state=State(row["state"]), timezone=row["timezone"],
             min_staff=row["min_staff"] if isinstance(row["min_staff"], dict) else json.loads(row["min_staff"]),
+            areas=_jsonb(row.get("areas")) or [],
+            trading_hours=_jsonb(row.get("trading_hours")) or {},
             max_labour_pct=float(row["max_labour_pct"]),
             pos_system=row.get("pos_system"),
             created_at=row["created_at"],
