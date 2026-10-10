@@ -25,9 +25,10 @@ from pydantic import BaseModel
 
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_timezone
-from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
+from rosteriq.services.current_roster import live_shifts
+from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.models import Shift, ShiftStatus, State
-from rosteriq.cost_calculator import super_guarantee_rate, super_rate_label
+from rosteriq.cost_calculator import super_rate_label
 from rosteriq.services.payroll_export import (
     PayrollExporter, PayrollBatch, PayrollStatus
 )
@@ -162,22 +163,16 @@ async def prepare_payroll_batch(
                 detail=f"No employees found for venue {request.venue_id}",
             )
 
-        # Get rosters/shifts for the period
-        rosters = db.get_rosters_by_date_range(
-            request.venue_id,
-            request.period_start,
-            request.period_end,
-        )
-
-        # Flatten shifts from rosters
-        shifts = []
-        for roster in rosters:
-            shifts.extend(roster.shifts)
+        # The plan staff were given: each week's published roster, else its
+        # imported one. Never a draft, a superseded roster, or two at once.
+        shifts = live_shifts(db, request.venue_id, request.period_start,
+                             request.period_end, staff=True)
 
         if not shifts:
             raise HTTPException(
                 status_code=400,
-                detail=f"No shifts found for period {request.period_start} to {request.period_end}",
+                detail=(f"No published or imported roster shifts for period "
+                        f"{request.period_start} to {request.period_end}"),
             )
 
         # Prepare payroll batch
@@ -330,14 +325,15 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
     """The accountant's file: one row per employee with hours and gross
     broken down, plus a totals row. Opens straight into Excel or imports
     into Xero as a payroll worksheet."""
-    enforce_venue_access(venue_id)
+    enforce_venue_manager(venue_id)
     db = get_db()
     batch = db.get_payroll_batch(batch_id)
     if not batch or batch.get("venue_id") != venue_id:
         raise HTTPException(status_code=404, detail="Payroll batch not found")
 
-    super_rate = (Decimal(batch["super_rate"]) if batch.get("super_rate")
-                  else super_guarantee_rate(date.fromisoformat(batch["period_end"])))
+    # A batch saved before the rate was stored doesn't say what it used.
+    super_header = (f"Super ({super_rate_label(Decimal(batch['super_rate']))})"
+                    if batch.get("super_rate") else "Super")
 
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -349,7 +345,7 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
     w.writerow(["Employee", "Ordinary hours", "Ordinary rate", "Ordinary gross",
                 "Penalty hours detail", "Penalty gross", "Overtime hours",
                 "Overtime gross", "Allowance detail", "Allowances", "Total gross",
-                f"Super ({super_rate_label(super_rate)})", "Total incl super"])
+                super_header, "Total incl super"])
     for e in batch.get("employees", []):
         penalty_detail = "; ".join(
             f"{p['penalty_type']} {p['hours']}h x{p['multiplier']}"
@@ -391,7 +387,7 @@ async def get_payroll_batch(
         batch_dict = db.get_payroll_batch(batch_id)
         if not batch_dict:
             raise HTTPException(status_code=404, detail=f"Batch {batch_id} not found")
-        enforce_venue_access(batch_dict.get("venue_id"))
+        enforce_venue_manager(batch_dict.get("venue_id"))
 
         return PayrollBatchResponse(
             batch_id=batch_dict["batch_id"],
@@ -687,7 +683,7 @@ async def reconcile_payroll(
 ):
     """Get reconciliation report for a pay period."""
     try:
-        enforce_venue_access(venue_id)
+        enforce_venue_manager(venue_id)
         # Get payroll batches for the period
         batches = db.list_payroll_batches(venue_id)
         period_batches = [
@@ -735,7 +731,7 @@ async def get_payroll_export_history(
 ):
     """Get export history for venue. Venue-scoped like every other payroll
     route — payroll data is the last place a cross-tenant read is acceptable."""
-    enforce_venue_access(venue_id)
+    enforce_venue_manager(venue_id)
     try:
         # Mock implementation
         return []

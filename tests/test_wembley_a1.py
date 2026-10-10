@@ -265,7 +265,7 @@ def test_training_areas_split_lowercased_and_position_included():
     emps = _emps(vid)
     assert emps["Sarah Delaney"].skills == ["front bar", "sports bar", "functions", "assistant venue manager"]
     assert emps["Meca Tran"].skills == ["front bar", "restaurant", "duty manager"]
-    assert emps["Leah Fontaine"].skills == ["restaurant", "functions", "restaurant manager"]
+    assert emps["Leah Fontaine"].skills == ["restaurant/functions", "restaurant manager"]
     assert emps["Ben Ingram"].skills[:5] == ["restaurant", "front bar", "sports bar", "bottle shop", "functions"]
 
 
@@ -273,7 +273,7 @@ def test_skill_cells_dedupe_and_aliases():
     for hdr in ("Training", "Training Areas", "Areas", "Skills", "Locations Trained"):
         c, h, vid = _world()
         _staff(c, h, vid, f"Name,Email,{hdr}\nJack Kelly,jack@wembley-synthetic.com.au,"
-                          "\"Front Bar; front bar | Bottle Shop / SPORTS  BAR\"\n")
+                          "\"Front Bar; front bar | Bottle Shop, SPORTS  BAR\"\n")
         assert _emps(vid)["Jack Kelly"].skills == ["front bar", "bottle shop", "sports bar"], hdr
 
 

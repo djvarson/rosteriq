@@ -183,7 +183,7 @@ def test_publishing_supersedes_the_weeks_other_rosters_but_keeps_them():
 
     publisher.transition_state(f"{vid}-new", "published", "test", "test")
     assert db.get_roster_state(f"{vid}-old-pub") == "superseded"
-    assert db.get_roster_state(imported) == "draft"      # imported rosters stay as they were
+    assert db.get_roster_state(imported) == "superseded"  # recall never brings Deputy's week back
     assert db.get_roster(f"{vid}-old-pub") is not None    # history, not deleted
     assert [s["start"] for s in _my(c, staff_h)] == ["13:00"]
 

@@ -357,25 +357,27 @@ def _roster(shift_ids):
                           for sid in shift_ids])
 
 
-def test_pg_save_roster_deletes_removed_shifts_atomically():
+def test_pg_save_roster_deletes_removed_shifts_in_the_same_statement():
     pg = _PG()
-    PostgresStore.save_roster(pg, _roster(["s1", "s2"]))
-    sql = pg.sql()
-    assert sql[0] == "BEGIN" and sql[-1] == "COMMIT"
-    delete = [(s, p) for s, p in pg.log if s.startswith("DELETE FROM shifts")]
-    assert delete, sql
-    stmt, params = delete[0]
-    assert "roster_id = %s" in stmt and "NOT (id = ANY(" in stmt
-    assert params == ("r1", ["s1", "s2"])
+    roster = _roster(["s1", "s2"])
+    roster.shifts = roster.shifts[:1]
+    PostgresStore.save_roster(pg, roster)
+    (stmt, params), = pg.log
+    assert "BEGIN" not in stmt and "COMMIT" not in stmt
+    assert "DELETE FROM shifts WHERE roster_id = %s AND id = ANY(%s::text[])" in stmt
+    assert params[-2:] == ["r1", ["s2"]]
 
 
-def test_pg_save_roster_rolls_back_on_failure():
+def test_pg_failed_roster_save_still_owes_its_delete():
+    roster = _roster(["s1", "s2"])
+    roster.shifts = roster.shifts[:1]
     pg = _PG(fail_on="INSERT INTO shifts")
     with pytest.raises(RuntimeError):
-        PostgresStore.save_roster(pg, _roster(["s1"]))
-    sql = pg.sql()
-    assert sql[0] == "BEGIN" and "ROLLBACK" in sql and "COMMIT" not in sql
-    assert not any(s.startswith("DELETE") for s in sql)
+        PostgresStore.save_roster(pg, roster)
+    assert len(pg.log) == 1
+    pg = _PG()
+    PostgresStore.save_roster(pg, roster)
+    assert pg.log[0][1][-2:] == ["r1", ["s2"]]
 
 
 def test_pg_cover_claim_and_read_receipt_are_conditional_updates():

@@ -4,11 +4,13 @@ Rate limiting middleware for RosterIQ API.
 Implements per-client token bucket rate limiting with different tiers:
 - Unauthenticated: 60 req/min
 - Authenticated (JWT): 200 req/min
-- API key: 500 req/min
+- API key (verified): 500 req/min
 
 Clients are identified by the user id in a valid JWT (so a whole venue on one
-Wi-Fi IP doesn't share one bucket), otherwise by client IP (client.host).
-Time-clock kiosk calls (/api/clock/*) draw from their own bucket.
+Wi-Fi IP doesn't share one bucket), by the hash of a verified API key, otherwise
+by client IP (client.host). Signed-in traffic from one IP also shares a ~2000
+req/min ceiling, so minting accounts doesn't multiply one host's budget.
+Time-clock kiosk calls (/api/clock/*) draw from their own buckets.
 Exempt paths: /health, /ready, /metrics, and GETs of the HTML pages and static
 files (/login, /my, /register, /timeclock, /static/*, /sw.js, ...).
 
@@ -16,6 +18,7 @@ Uses Redis for atomic counter increments across workers, falls back to in-memory
 """
 
 import asyncio
+import hashlib
 import time
 import logging
 import os
@@ -117,10 +120,16 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         "authenticated": (200, 3.333),          # ~200 req/min
         "api_key": (500, 8.333),                # ~500 req/min
     }
+    # Per-IP ceiling on signed-in traffic, sized for a whole pub's staff on
+    # one Wi-Fi address.
+    IP_CEILING = (2000, 2000 / 60)              # 2000 req/min
+    API_KEY_REFRESH_S = 60
 
     def __init__(self, app):
         super().__init__(app)
         self.buckets: Dict[str, TokenBucket] = {}
+        self._api_key_hashes: frozenset = frozenset()
+        self._api_keys_loaded_at = 0.0
         self.lock = asyncio.Lock()
         self.last_cleanup = time.time()
         self.cleanup_interval = 600  # 10 minutes
@@ -151,23 +160,26 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
         # Get client identifier and tier
         client_id, tier = self._identify(request)
+        # An unauthenticated bucket is already the IP's own.
+        ceiling_id = None if tier == "unauthenticated" else f"ip:{self._get_client_id(request)}"
         if request.url.path.startswith(self.SEPARATE_BUCKET_PREFIXES):
             client_id = f"{client_id}:clock"
+            ceiling_id = ceiling_id and f"{ceiling_id}:clock"
         capacity, refill_rate = self.TIER_LIMITS[tier]
 
         # Use Redis atomic counter if available, otherwise use token bucket
         if self.using_redis and self.redis_store:
             return await self._dispatch_redis(
-                request, call_next, client_id, tier, capacity, refill_rate
+                request, call_next, client_id, tier, capacity, refill_rate, ceiling_id
             )
         else:
             return await self._dispatch_local(
-                request, call_next, client_id, tier
+                request, call_next, client_id, tier, ceiling_id
             )
 
     async def _dispatch_redis(
         self, request: Request, call_next, client_id: str, tier: str,
-        capacity: float, refill_rate: float
+        capacity: float, refill_rate: float, ceiling_id: Optional[str] = None
     ) -> Response:
         """Rate limiting using Redis atomic counters."""
         # Window of 60 seconds for rate limiting
@@ -175,10 +187,17 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         counter_key = f"{client_id}:{tier}"
 
         try:
-            # Atomic increment with Redis
-            count = await self.redis_store.increment_counter(counter_key, window_seconds)
+            limited_by, limit = tier, capacity
+            if ceiling_id is not None:
+                ip_count = await self.redis_store.increment_counter(
+                    f"{ceiling_id}:ip_ceiling", window_seconds)
+                if ip_count > self.IP_CEILING[0]:
+                    limited_by, limit, count = "ip_ceiling", self.IP_CEILING[0], ip_count
+            if limited_by == tier:
+                # Atomic increment with Redis
+                count = await self.redis_store.increment_counter(counter_key, window_seconds)
 
-            if count > capacity:
+            if count > limit:
                 # Rate limited
                 reset_time = time.time() + window_seconds
                 retry_after = window_seconds
@@ -186,14 +205,14 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
                 response = JSONResponse(
                     {
                         "detail": "Rate limit exceeded",
-                        "tier": tier,
-                        "limit": int(capacity),
+                        "tier": limited_by,
+                        "limit": int(limit),
                         "retry_after": retry_after,
                     },
                     status_code=429,
                     headers={
                         "Retry-After": str(retry_after),
-                        "X-RateLimit-Limit": str(int(capacity)),
+                        "X-RateLimit-Limit": str(int(limit)),
                         "X-RateLimit-Remaining": "0",
                         "X-RateLimit-Reset": str(int(reset_time)),
                     },
@@ -214,17 +233,21 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
             return response
         except Exception as e:
             logger.warning(f"Redis rate limiting failed: {e}. Falling back to local.")
-            return await self._dispatch_local(request, call_next, client_id, tier)
+            return await self._dispatch_local(request, call_next, client_id, tier, ceiling_id)
 
     async def _dispatch_local(
-        self, request: Request, call_next, client_id: str, tier: str
+        self, request: Request, call_next, client_id: str, tier: str,
+        ceiling_id: Optional[str] = None
     ) -> Response:
         """Rate limiting using in-memory token buckets."""
-        # Get or create bucket
         bucket = await self._get_bucket(client_id, tier)
+        if ceiling_id is not None:
+            ceiling = await self._get_bucket(ceiling_id, "ip_ceiling", self.IP_CEILING)
+            if not ceiling.consume():
+                bucket, tier = ceiling, "ip_ceiling"
 
         # Check rate limit
-        if not bucket.consume():
+        if tier == "ip_ceiling" or not bucket.consume():
             # Rate limited
             reset_time = bucket.get_reset_time()
             retry_after = max(1, int(reset_time - time.time()))
@@ -290,10 +313,14 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
     def _identify(self, request: Request) -> Tuple[str, str]:
         """(bucket identity, tier). A verified access token is keyed by its
-        user id; an unverifiable one is treated as unauthenticated so junk
-        bearer headers can't mint fresh buckets or buy the higher tier."""
-        if request.headers.get("X-API-Key"):
-            return self._get_client_id(request), "api_key"
+        user id and a verified API key by its hash; an unverifiable one is
+        treated as unauthenticated so junk headers can't mint fresh buckets or
+        buy the higher tier."""
+        api_key = request.headers.get("X-API-Key")
+        if api_key:
+            key_hash = self._verified_api_key_hash(api_key)
+            if key_hash:
+                return f"apikey:{key_hash}", "api_key"
         auth_header = request.headers.get("Authorization") or ""
         if auth_header.lower().startswith("bearer "):
             user_id = self._token_user_id(auth_header[7:].strip())
@@ -303,6 +330,29 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
                     return f"user:{user_id}@{self._get_client_id(request)}", "authenticated"
                 return f"user:{user_id}", "authenticated"
         return self._get_client_id(request), "unauthenticated"
+
+    def _verified_api_key_hash(self, api_key: str) -> Optional[str]:
+        """sha256 of the key when it belongs to an active user, else None. The
+        live hashes are re-read at most once a minute, so a junk key costs a
+        set lookup, never a scan of every user."""
+        try:
+            from rosteriq.services.auth import API_KEY_PREFIX
+        except Exception:
+            return None
+        if not api_key.startswith(API_KEY_PREFIX):
+            return None
+        now = time.time()
+        if now - self._api_keys_loaded_at > self.API_KEY_REFRESH_S:
+            try:
+                from rosteriq.database import get_db
+                self._api_key_hashes = frozenset(
+                    u.get("api_key_hash") for u in (get_db().list_users() or [])
+                    if u.get("api_key_hash") and u.get("is_active"))
+            except Exception:
+                self._api_key_hashes = frozenset()
+            self._api_keys_loaded_at = now
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        return key_hash if key_hash in self._api_key_hashes else None
 
     @staticmethod
     def _is_shared_login(user_id: str) -> bool:
@@ -338,7 +388,8 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         # Unauthenticated
         return "unauthenticated"
 
-    async def _get_bucket(self, client_id: str, tier: str) -> TokenBucket:
+    async def _get_bucket(self, client_id: str, tier: str,
+                          limits: Optional[Tuple[float, float]] = None) -> TokenBucket:
         """Get or create token bucket for a (client, tier) pair."""
         # Key by tier as well as client, so an IP gets the correct limit for its
         # current auth tier instead of being pinned to whatever tier first
@@ -347,7 +398,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         bucket_key = f"{client_id}:{tier}"
         async with self.lock:
             if bucket_key not in self.buckets:
-                capacity, refill_rate = self.TIER_LIMITS[tier]
+                capacity, refill_rate = limits or self.TIER_LIMITS[tier]
                 self.buckets[bucket_key] = TokenBucket(capacity, refill_rate)
 
             return self.buckets[bucket_key]

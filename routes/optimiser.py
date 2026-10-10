@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import (
-    load_roster_in_scope, enforce_venue_access, enforce_venue_manager,
+    load_roster_in_scope, enforce_venue_access, enforce_venue_manager, enforce_venue_manager_any,
 )
 from rosteriq.models import (
     VenueConfig, Employee, DemandForecast, Roster, State,
@@ -459,6 +459,7 @@ async def get_roster(
         HTTPException if roster not found
     """
     roster = load_roster_in_scope(db, roster_id)  # 404 if missing or another tenant's
+    enforce_venue_manager_any(roster.venue_id)  # carries the roster's labour cost
 
     return RosterResponse(
         id=roster.id,
@@ -499,6 +500,8 @@ async def compare_rosters(
     # Both rosters must be in the caller's venues (foreign == missing == 404)
     original = load_roster_in_scope(db, original_roster_id)
     optimised = load_roster_in_scope(db, optimised_roster_id)
+    enforce_venue_manager_any(original.venue_id)
+    enforce_venue_manager_any(optimised.venue_id)
 
     cost_savings = (original.total_cost or Decimal("0")) - \
                    (optimised.total_cost or Decimal("0"))

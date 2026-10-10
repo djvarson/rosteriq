@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Path
 from pydantic import BaseModel, Field
 
 from rosteriq.services.labour_tracker import LabourTracker
-from rosteriq.middleware.tenant import enforce_venue_manager
+from rosteriq.middleware.tenant import enforce_venue_manager, enforce_venue_manager_any
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +190,7 @@ def create_labour_router(labour_tracker: LabourTracker) -> APIRouter:
         - End-of-day projection
         - Alert message (if status warrants)
         """
+        enforce_venue_manager_any(venue_id)
         try:
             status = _labour_tracker.get_live_status(venue_id)
             return status.to_dict()
@@ -218,6 +219,7 @@ def create_labour_router(labour_tracker: LabourTracker) -> APIRouter:
         Shows revenue, labour cost, staff count, and labour % for each hour.
         Useful for identifying peak labour cost hours.
         """
+        enforce_venue_manager_any(venue_id)
         try:
             from datetime import date
             hourly_data = _labour_tracker.get_hourly_trend(venue_id)
@@ -264,6 +266,7 @@ def create_labour_router(labour_tracker: LabourTracker) -> APIRouter:
         - Final labour percentage
         - Confidence level (0.0-1.0)
         """
+        enforce_venue_manager_any(venue_id)
         try:
             prediction = _labour_tracker.predict_end_of_day(venue_id)
             result = prediction.to_dict()
@@ -299,6 +302,7 @@ def create_labour_router(labour_tracker: LabourTracker) -> APIRouter:
         - Trend (improving/stable/declining)
         - Weekly totals (revenue, cost)
         """
+        enforce_venue_manager_any(venue_id)
         try:
             summary = _labour_tracker.get_weekly_summary(venue_id)
             return summary.to_dict()
@@ -335,6 +339,7 @@ def create_labour_router(labour_tracker: LabourTracker) -> APIRouter:
         - Labour % variance (actual vs forecast)
         - Hours completed / remaining
         """
+        enforce_venue_manager_any(venue_id)
         try:
             comparison = _labour_tracker.compare_to_forecast(
                 venue_id,
@@ -372,6 +377,7 @@ def create_labour_router(labour_tracker: LabourTracker) -> APIRouter:
         - red_max: Maximum labour % for red (default: 38%)
         - Critical is anything above red_max
         """
+        enforce_venue_manager_any(venue_id)
         try:
             thresholds = _labour_tracker.get_threshold_config(venue_id)
             return {

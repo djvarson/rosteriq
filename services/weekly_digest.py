@@ -32,6 +32,7 @@ from rosteriq.services.analytics import AnalyticsService
 from rosteriq.services.notifications import NotificationService
 from rosteriq.award_rules import validate_shift_compliance
 from rosteriq.cost_calculator import calculate_shift_cost_breakdown
+from rosteriq.services.current_roster import live_shifts
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +201,8 @@ class WeeklyDigestGenerator:
         self, venue_id: str, week_start: date, week_end: date
     ) -> LabourCostSection:
         """Compile labour cost metrics for the week."""
-        rosters = self.db.get_rosters_by_date_range(venue_id, week_start, week_end)
-        if not rosters:
+        shifts = self._week_shifts(venue_id, week_start, week_end)
+        if not shifts:
             return LabourCostSection(total_cost=Decimal("0.00"))
 
         total_cost = Decimal("0.00")
@@ -212,20 +213,19 @@ class WeeklyDigestGenerator:
         total_hours = Decimal("0.00")
         venue = self.db.get_venue(venue_id)
 
-        for roster in rosters:
-            for shift in roster.shifts:
-                if shift.status in (ShiftStatus.scheduled, ShiftStatus.completed, ShiftStatus.in_progress):
-                    employee = self.db.get_employee(shift.employee_id)
-                    if employee:
-                        breakdown = calculate_shift_cost_breakdown(
-                            employee, shift, venue.state
-                        )
-                        total_cost += breakdown.total_cost
-                        base_cost += breakdown.base_cost
-                        penalty_cost += breakdown.penalty_cost
-                        casual_loading += breakdown.casual_loading
-                        super_cost += breakdown.super_contribution
-                        total_hours += Decimal(str(shift.net_hours))
+        for shift in shifts:
+            if shift.status in (ShiftStatus.scheduled, ShiftStatus.completed, ShiftStatus.in_progress):
+                employee = self.db.get_employee(shift.employee_id)
+                if employee:
+                    breakdown = calculate_shift_cost_breakdown(
+                        employee, shift, venue.state
+                    )
+                    total_cost += breakdown.total_cost
+                    base_cost += breakdown.base_cost
+                    penalty_cost += breakdown.penalty_cost
+                    casual_loading += breakdown.casual_loading
+                    super_cost += breakdown.super_contribution
+                    total_hours += Decimal(str(shift.net_hours))
 
         # Get covers for the week
         total_covers = self._get_total_covers(venue_id, week_start, week_end)
@@ -347,8 +347,8 @@ class WeeklyDigestGenerator:
         self, venue_id: str, week_start: date, week_end: date
     ) -> StaffingSection:
         """Compile staffing utilisation metrics."""
-        rosters = self.db.get_rosters_by_date_range(venue_id, week_start, week_end)
-        if not rosters:
+        shifts = self._week_shifts(venue_id, week_start, week_end)
+        if not shifts:
             return StaffingSection(
                 total_hours=Decimal("0.00"),
                 unique_headcount=0,
@@ -371,27 +371,26 @@ class WeeklyDigestGenerator:
         coverage_gaps = Decimal("0.00")
         venue = self.db.get_venue(venue_id)
 
-        for roster in rosters:
-            for shift in roster.shifts:
-                if shift.status in (ShiftStatus.scheduled, ShiftStatus.completed, ShiftStatus.in_progress):
-                    employee = self.db.get_employee(shift.employee_id)
-                    if employee:
-                        unique_employees.add(shift.employee_id)
-                        employment_types[employee.employment_type] += 1
+        for shift in shifts:
+            if shift.status in (ShiftStatus.scheduled, ShiftStatus.completed, ShiftStatus.in_progress):
+                employee = self.db.get_employee(shift.employee_id)
+                if employee:
+                    unique_employees.add(shift.employee_id)
+                    employment_types[employee.employment_type] += 1
 
-                        net_hours = Decimal(str(shift.net_hours))
-                        total_hours += net_hours
-                        shift_lengths.append(float(net_hours))
+                    net_hours = Decimal(str(shift.net_hours))
+                    total_hours += net_hours
+                    shift_lengths.append(float(net_hours))
 
-                        # Track overtime
-                        if hasattr(shift, 'overtime_hours') and shift.overtime_hours > 0:
-                            overtime_hours += Decimal(str(shift.overtime_hours))
-                            breakdown = calculate_shift_cost_breakdown(employee, shift, venue.state)
-                            overtime_cost += breakdown.penalty_cost
+                    # Track overtime
+                    if hasattr(shift, 'overtime_hours') and shift.overtime_hours > 0:
+                        overtime_hours += Decimal(str(shift.overtime_hours))
+                        breakdown = calculate_shift_cost_breakdown(employee, shift, venue.state)
+                        overtime_cost += breakdown.penalty_cost
 
-                elif shift.status == ShiftStatus.no_show:
-                    no_shows += 1
-                    coverage_gaps += Decimal(str(shift.net_hours))
+            elif shift.status == ShiftStatus.no_show:
+                no_shows += 1
+                coverage_gaps += Decimal(str(shift.net_hours))
 
         # Employment type ratios
         total_shifts = sum(employment_types.values())
@@ -416,31 +415,30 @@ class WeeklyDigestGenerator:
         self, venue_id: str, week_start: date, week_end: date
     ) -> ComplianceSection:
         """Compile compliance violations."""
-        rosters = self.db.get_rosters_by_date_range(venue_id, week_start, week_end)
-        if not rosters:
+        shifts = self._week_shifts(venue_id, week_start, week_end)
+        if not shifts:
             return ComplianceSection(violations_found=0)
 
         violations = []
         violation_types = defaultdict(int)
         venue = self.db.get_venue(venue_id)
 
-        for roster in rosters:
-            for shift in roster.shifts:
-                if shift.status in (ShiftStatus.scheduled, ShiftStatus.completed, ShiftStatus.in_progress):
-                    employee = self.db.get_employee(shift.employee_id)
-                    if employee:
-                        compliance_result = validate_shift_compliance(
-                            employee, shift, venue.state
-                        )
-                        if not compliance_result.get("compliant", True):
-                            violation_type = compliance_result.get("issue_type", "unknown")
-                            violation_types[violation_type] += 1
-                            violations.append({
-                                "date": str(shift.date),
-                                "employee": employee.name,
-                                "type": violation_type,
-                                "details": compliance_result.get("details", ""),
-                            })
+        for shift in shifts:
+            if shift.status in (ShiftStatus.scheduled, ShiftStatus.completed, ShiftStatus.in_progress):
+                employee = self.db.get_employee(shift.employee_id)
+                if employee:
+                    compliance_result = validate_shift_compliance(
+                        employee, shift, venue.state
+                    )
+                    if not compliance_result.get("compliant", True):
+                        violation_type = compliance_result.get("issue_type", "unknown")
+                        violation_types[violation_type] += 1
+                        violations.append({
+                            "date": str(shift.date),
+                            "employee": employee.name,
+                            "type": violation_type,
+                            "details": compliance_result.get("details", ""),
+                        })
 
         resolution_status = "resolved" if len(violations) == 0 else "pending"
 
@@ -580,6 +578,11 @@ class WeeklyDigestGenerator:
     # Helper Methods
     # ========================================================================
 
+    def _week_shifts(self, venue_id: str, start: date, end: date) -> list:
+        """The shifts staff were given: each week's published roster, else its
+        imported one. Never a draft, a superseded roster, or two at once."""
+        return live_shifts(self.db, venue_id, start, end, staff=True)
+
     def _get_total_covers(self, venue_id: str, start: date, end: date) -> int:
         """Get total covers for period."""
         forecasts = self.db.get_forecasts(venue_id, start, end)
@@ -587,19 +590,18 @@ class WeeklyDigestGenerator:
 
     def _get_total_labour_cost(self, venue_id: str, start: date, end: date) -> Decimal:
         """Get total labour cost for period."""
-        rosters = self.db.get_rosters_by_date_range(venue_id, start, end)
-        if not rosters:
+        shifts = self._week_shifts(venue_id, start, end)
+        if not shifts:
             return Decimal("0.00")
 
         total = Decimal("0.00")
         venue = self.db.get_venue(venue_id)
-        for roster in rosters:
-            for shift in roster.shifts:
-                if shift.status in (ShiftStatus.scheduled, ShiftStatus.completed, ShiftStatus.in_progress):
-                    employee = self.db.get_employee(shift.employee_id)
-                    if employee:
-                        breakdown = calculate_shift_cost_breakdown(employee, shift, venue.state)
-                        total += breakdown.total_cost
+        for shift in shifts:
+            if shift.status in (ShiftStatus.scheduled, ShiftStatus.completed, ShiftStatus.in_progress):
+                employee = self.db.get_employee(shift.employee_id)
+                if employee:
+                    breakdown = calculate_shift_cost_breakdown(employee, shift, venue.state)
+                    total += breakdown.total_cost
 
         return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 

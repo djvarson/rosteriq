@@ -17,9 +17,9 @@ here — never the sum of every roster saved for that week.
 An archived roster was published, so it ranks just below a published one.
 A superseded roster is kept as history and no reader sees it. Generating or
 importing a week supersedes that week's unpublished generated drafts;
-publishing a roster supersedes every other generated roster for its week.
-Imported rosters are never superseded automatically — readers already rank a
-published roster above them.
+publishing a roster supersedes every other roster for its week, the imported
+one included, so recalling it later never puts the old system's week back on
+staff phones.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -123,18 +123,22 @@ def current_per_week(db, rosters: Iterable) -> list:
 def supersede_week_drafts(db, venue_id: str, any_day: date, keep_id: str, *,
                           reason: str, actor_id: str = "system",
                           include_published: bool = False) -> list:
-    """Mark the week's other generated rosters superseded (kept as history).
+    """Mark the week's other rosters superseded (kept as history).
 
-    Unpublished drafts always; the week's other published roster too when
-    include_published (a newer roster is being published over it). Returns
-    the ids superseded."""
+    Unpublished generated drafts always; when include_published (a roster is being
+    published over the week) the week's other published roster and its
+    imported roster too. A roster whose state can't be read is left alone.
+    Returns the ids superseded."""
     monday = week_monday(any_day)
     rosters = db.get_rosters_by_date_range(venue_id, monday, monday + timedelta(days=6))
     done = []
     for r in _by_week(rosters, venue_id).get(monday, []):
-        if r.id == keep_id or is_imported(r):
+        if r.id == keep_id or (is_imported(r) and not include_published):
             continue
-        state = roster_state(db, r.id)
+        try:
+            state = db.get_roster_state(r.id) or "draft"
+        except Exception:
+            continue
         if state in _REPLACEABLE or (include_published and state == PUBLISHED):
             db.update_roster_state(r.id, SUPERSEDED, reason, actor_id)
             done.append(r.id)

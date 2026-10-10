@@ -14,7 +14,6 @@ Usage:
 import os
 import json
 import logging
-from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Optional
@@ -39,22 +38,6 @@ def _json(obj) -> str:
     these values through str()/Decimal() anyway.
     """
     return json.dumps(obj, default=str)
-
-
-@contextmanager
-def _explicit_transaction(cur):
-    """BEGIN/COMMIT on one cursor of PostgresStore's autocommit connection,
-    ROLLBACK if the block raises."""
-    cur.execute("BEGIN")
-    try:
-        yield
-    except BaseException:
-        try:
-            cur.execute("ROLLBACK")
-        except Exception:  # noqa: BLE001 — the original error is the one to raise
-            pass
-        raise
-    cur.execute("COMMIT")
 
 
 def _jsonb(value, default=None):
@@ -4449,50 +4432,40 @@ class PostgresStore(BaseStore):
                     if row else None)
 
     def toggle_feed_reaction(self, post_id, emoji, user_id):
-        """Atomic toggle: lock the row (SELECT ... FOR UPDATE) inside an
-        explicit transaction, flip the caller's membership under ``emoji``,
-        write it back, commit. The connection runs autocommit, so BEGIN /
-        COMMIT are issued explicitly on this one cursor."""
+        """Flip the caller's membership under ``emoji`` in ONE UPDATE: its row
+        lock queues concurrent toggles, and the SET is re-evaluated on the
+        latest row. No explicit transaction on the shared connection."""
         with self._cursor() as cur:
             self._ensure_table(cur, "feed_posts")
-            cur.execute("BEGIN")
-            try:
-                cur.execute("SELECT * FROM feed_posts WHERE id = %s FOR UPDATE", (post_id,))
-                row = cur.fetchone()
-                if not row:
-                    cur.execute("ROLLBACK")
-                    return None, None
-                post = self._row_to_plain(row, json_fields=("reactions", "comments"))
-                reactions = post.get("reactions")
-                if not isinstance(reactions, dict):
-                    reactions = {}
-                ids = list(reactions.get(emoji) or [])
-                if user_id in ids:
-                    ids = [i for i in ids if i != user_id]
-                    state = "removed"
-                else:
-                    ids.append(user_id)
-                    state = "added"
-                if ids:
-                    reactions[emoji] = ids
-                else:
-                    reactions.pop(emoji, None)
-                cur.execute("""
-                    UPDATE feed_posts
-                    SET reactions = %s::jsonb, updated_at = now()
-                    WHERE id = %s
-                    RETURNING *
-                """, (_json(reactions), post_id))
-                row = cur.fetchone()
-                cur.execute("COMMIT")
-            except Exception:
-                try:
-                    cur.execute("ROLLBACK")
-                except Exception:
-                    pass
-                raise
-            return (self._row_to_plain(row, json_fields=("reactions", "comments"))
-                    if row else None), state
+            cur.execute("""
+                UPDATE feed_posts SET reactions = CASE
+                    WHEN jsonb_typeof(reactions -> %(e)s::text) = 'array'
+                         AND (reactions -> %(e)s::text) ? %(u)s::text
+                    THEN CASE
+                        WHEN jsonb_array_length((reactions -> %(e)s::text) - %(u)s::text) = 0
+                        THEN reactions - %(e)s::text
+                        ELSE jsonb_set(reactions, ARRAY[%(e)s::text],
+                                       (reactions -> %(e)s::text) - %(u)s::text)
+                    END
+                    ELSE jsonb_set(
+                        CASE WHEN jsonb_typeof(reactions) = 'object'
+                             THEN reactions ELSE '{}'::jsonb END,
+                        ARRAY[%(e)s::text],
+                        CASE WHEN jsonb_typeof(reactions -> %(e)s::text) = 'array'
+                             THEN reactions -> %(e)s::text ELSE '[]'::jsonb END
+                            || to_jsonb(%(u)s::text))
+                    END,
+                    updated_at = now()
+                WHERE id = %(id)s
+                RETURNING *, COALESCE((reactions -> %(e)s::text) ? %(u)s::text, false)
+                    AS reaction_added
+            """, {"e": emoji, "u": user_id, "id": post_id})
+            row = cur.fetchone()
+        if not row:
+            return None, None
+        row = dict(row)
+        state = "added" if row.pop("reaction_added", False) else "removed"
+        return self._row_to_plain(row, json_fields=("reactions", "comments")), state
 
     def save_stocktake(self, st):
         with self._cursor() as cur:
@@ -4937,47 +4910,67 @@ class PostgresStore(BaseStore):
     # --- Rosters ---
 
     def save_roster(self, roster):
-        # The roster is the whole truth for its shifts: one removed from
-        # roster.shifts is deleted, atomically with the upserts.
-        with self._cursor() as cur, _explicit_transaction(cur):
-            # Saving an existing roster id must be a real update — including its
-            # week. (Previously only total_cost updated on conflict, so a
-            # re-saved roster kept its old week_start/week_end forever.)
-            cur.execute("""
-                INSERT INTO rosters (id, venue_id, week_start, week_end, total_cost, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
+        # ONE execute: the connection is shared by every request on the worker
+        # and runs autocommit, so a BEGIN here would pull other requests'
+        # statements into this transaction. Postgres runs a multi-statement
+        # string as one implicit transaction, and psycopg2 holds the
+        # connection for the whole call.
+        latest = {}
+        for shift in roster.shifts:
+            latest[shift.id] = shift      # ON CONFLICT can't touch a row twice
+        shifts = list(latest.values())
+        # Only the shifts this copy dropped since it was read or last saved:
+        # a shift another request added meanwhile is not in it and survives.
+        dropped = sorted(roster._saved_shift_ids - latest.keys())
+        # Saving an existing roster id must be a real update, week included.
+        statements = ["""
+            INSERT INTO rosters (id, venue_id, week_start, week_end, total_cost, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                venue_id=EXCLUDED.venue_id, week_start=EXCLUDED.week_start,
+                week_end=EXCLUDED.week_end, total_cost=EXCLUDED.total_cost
+        """]
+        params = [
+            roster.id, roster.venue_id, roster.week_start, roster.week_end,
+            float(roster.total_cost) if roster.total_cost else None,
+            roster.created_at,
+        ]
+        if shifts:
+            statements.append("""
+                INSERT INTO shifts (id, roster_id, employee_id, shift_date, start_time, end_time,
+                    break_minutes, status, role, cost, penalty_multiplier)
+                SELECT s.id, %s, s.employee_id, s.shift_date, s.start_time, s.end_time,
+                    s.break_minutes, s.status, s.role, s.cost, s.penalty_multiplier
+                FROM unnest(%s::text[], %s::text[], %s::date[], %s::time[], %s::time[],
+                            %s::integer[], %s::text[], %s::text[], %s::numeric[], %s::numeric[])
+                    AS s(id, employee_id, shift_date, start_time, end_time,
+                         break_minutes, status, role, cost, penalty_multiplier)
                 ON CONFLICT (id) DO UPDATE SET
-                    venue_id=EXCLUDED.venue_id, week_start=EXCLUDED.week_start,
-                    week_end=EXCLUDED.week_end, total_cost=EXCLUDED.total_cost
-            """, (
-                roster.id, roster.venue_id, roster.week_start, roster.week_end,
-                float(roster.total_cost) if roster.total_cost else None,
-                roster.created_at,
-            ))
-            # Save shifts — re-saving a shift id updates it (DO NOTHING silently
-            # kept stale dates/times whenever a roster was re-saved).
-            for shift in roster.shifts:
-                cur.execute("""
-                    INSERT INTO shifts (id, roster_id, employee_id, shift_date, start_time, end_time,
-                        break_minutes, status, role, cost, penalty_multiplier)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET
-                        roster_id=EXCLUDED.roster_id, employee_id=EXCLUDED.employee_id,
-                        shift_date=EXCLUDED.shift_date, start_time=EXCLUDED.start_time,
-                        end_time=EXCLUDED.end_time, break_minutes=EXCLUDED.break_minutes,
-                        status=EXCLUDED.status, role=EXCLUDED.role,
-                        cost=EXCLUDED.cost, penalty_multiplier=EXCLUDED.penalty_multiplier
-                """, (
-                    shift.id, roster.id, shift.employee_id, shift.date,
-                    shift.start_time, shift.end_time, shift.break_minutes,
-                    shift.status.value, shift.role,
-                    float(shift.cost) if shift.cost else None,
-                    shift.penalty_multiplier,
-                ))
-            cur.execute(
-                "DELETE FROM shifts WHERE roster_id = %s AND NOT (id = ANY(%s::text[]))",
-                (roster.id, [shift.id for shift in roster.shifts]),
-            )
+                    roster_id=EXCLUDED.roster_id, employee_id=EXCLUDED.employee_id,
+                    shift_date=EXCLUDED.shift_date, start_time=EXCLUDED.start_time,
+                    end_time=EXCLUDED.end_time, break_minutes=EXCLUDED.break_minutes,
+                    status=EXCLUDED.status, role=EXCLUDED.role,
+                    cost=EXCLUDED.cost, penalty_multiplier=EXCLUDED.penalty_multiplier
+            """)
+            params += [
+                roster.id,
+                [s.id for s in shifts],
+                [s.employee_id for s in shifts],
+                [s.date for s in shifts],
+                [s.start_time for s in shifts],
+                [s.end_time for s in shifts],
+                [s.break_minutes for s in shifts],
+                [s.status.value for s in shifts],
+                [s.role for s in shifts],
+                [float(s.cost) if s.cost else None for s in shifts],
+                [s.penalty_multiplier for s in shifts],
+            ]
+        if dropped:
+            statements.append("DELETE FROM shifts WHERE roster_id = %s AND id = ANY(%s::text[])")
+            params += [roster.id, dropped]
+        with self._cursor() as cur:
+            cur.execute(";".join(statements), params)
+        roster._saved_shift_ids = frozenset(latest)
 
     def list_rosters(self):
         with self._cursor() as cur:

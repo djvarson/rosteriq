@@ -133,7 +133,7 @@ def test_employee_skills_are_normalised():
 
     single = Employee(
         id="b", name="B", employment_type="casual", award_level="level_2", state="wa",
-        hourly_base_rate=Decimal("30"), skills="Bar; Cellar | Bottle shop / Floor",
+        hourly_base_rate=Decimal("30"), skills="Bar; Cellar | Bottle shop\nFloor",
         created_at=datetime(2026, 10, 1), updated_at=datetime(2026, 10, 1))
     assert single.skills == ["bar", "cellar", "bottle shop", "floor"]
 
