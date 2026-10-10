@@ -11,8 +11,9 @@ For a window on one day (default: now until the venue closes):
   on_leave, never with their contact details)
 * "already on" means a shift HERE that overlaps the window (with its times);
   someone who finished at 5pm is still callable at 7pm
-* "on elsewhere" means a shift at another venue the caller holds that
-  overlaps the window (services/person_identity, when present)
+* "on elsewhere" means a shift at another venue of the same person that
+  overlaps the window (services/person_identity, when present): named when
+  the caller holds it, "another venue" when it only shares an owner
 * availability is read through services/availability_rules; people marked
   unavailable are returned only when include_unavailable is set, flagged
 * each person carries their rostered hours this week and, when a fortnightly
@@ -176,13 +177,21 @@ def _person_identity():
 
 def _shared_emails(db, venue_id: str) -> set:
     """Emails that also appear on a staff record at another venue the caller
-    holds — only those people can be on somewhere else."""
-    if _person_identity() is None:
+    holds, or one the same owner runs — only those people can be on
+    somewhere else."""
+    module = _person_identity()
+    if module is None:
         return set()
     from rosteriq.middleware.tenant import scoped_venue_ids
     venue_ids = scoped_venue_ids()
     if venue_ids is None:
         venue_ids = [v.id for v in (db.list_venues() or [])]
+    unseen = getattr(module, "unseen_venue_ids", None)
+    if unseen is not None:
+        try:
+            venue_ids = list(venue_ids) + [v for v in unseen(db, venue_id) or [] if v not in venue_ids]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("unseen_venue_ids failed for %s: %s", venue_id, e)
     emails = set()
     for vid in venue_ids:
         if vid == venue_id:
@@ -215,6 +224,19 @@ def _other_records(db, emp) -> list:
         return list(same(db, emp) or [])
     except Exception as e:  # noqa: BLE001
         logger.warning("same_person_records failed for %s: %s", getattr(emp, "id", "?"), e)
+        return []
+
+
+def _unseen_shifts(db, emp, start: date, end: date) -> list:
+    """The person's shifts at the owner's venues the caller can't open."""
+    module = _person_identity()
+    unseen = getattr(module, "unseen_shifts", None) if module else None
+    if unseen is None:
+        return []
+    try:
+        return [s for s in unseen(db, emp, start, end) or [] if _working(s)]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("unseen_shifts failed for %s: %s", getattr(emp, "id", "?"), e)
         return []
 
 
@@ -349,6 +371,9 @@ def find_cover(db, venue_id: str, *, day: Optional[date] = None,
                     theirs = []
                 week_hours += sum(s.net_hours for s in theirs if s.date >= monday)
                 fortnight_hours += sum(s.duration_hours for s in theirs)
+            theirs = _unseen_shifts(db, emp, fortnight_start, sunday)
+            week_hours += sum(s.net_hours for s in theirs if s.date >= monday)
+            fortnight_hours += sum(s.duration_hours for s in theirs)
 
         skills = [str(s) for s in (getattr(emp, "skills", None) or []) if s]
         entry = {

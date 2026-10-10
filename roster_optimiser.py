@@ -665,14 +665,15 @@ class _RosterBuilder:
 
     def _visa_allows(self, emp, gross_hours):
         """The recorded fortnight cap over this week and the one before. With
-        no record of the previous week, plan half the cap per week so no
-        fortnight can go over."""
+        no record of this venue's previous week, plan half the cap per week so
+        no fortnight can go over, and less when what is known of that week
+        (another venue's shifts) already leaves less."""
         cap = getattr(emp, "visa_work_limit_fortnight", None)
         if not cap:
             return True
         eid = str(emp.id)
         prior = self._week_hours(eid, gross=True, offset_days=-7)
-        limit = float(cap) - prior if (self.prior_known or prior > 0) else float(cap) / 2
+        limit = float(cap) - prior if self.prior_known else min(float(cap) / 2, float(cap) - prior)
         return self._week_hours(eid, gross=True) + gross_hours <= limit + 1e-9
 
     def _run_of_days(self, eid, day):
@@ -1104,8 +1105,10 @@ def generate_weekly_roster(
         venue_config: Venue configuration.
         covers_per_staff: Covers-to-staff ratio.
         existing_shifts: Shifts the people already have elsewhere (other
-            venues), under this venue's employee ids: never double-booked,
-            and they count toward hours, rest, days and visa caps.
+            venues, or this venue's next week), under this venue's employee
+            ids, dated either side of the week too: never double-booked; they
+            count toward rest and runs of days, those this week toward
+            weekly hours, and this week's and last week's toward visa caps.
         approved_leave: {employee_id: [(first_day, last_day)]} of approved
             leave; nobody is rostered inside it.
         prior_week_shifts: The previous week's roster, for rest across the

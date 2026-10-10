@@ -2986,18 +2986,25 @@ async def generate_roster(req: GenerateRosterRequest):
     from rosteriq.services.person_identity import booked_elsewhere, describe_bookings
     leave_map = _approved_leave_map(req.venue_id)
     prev_week_start = req.week_start - timedelta(days=7)
+    week_end = req.week_start + timedelta(days=6)
     prev_roster = current_roster(_db, req.venue_id, prev_week_start)
+    next_roster = current_roster(_db, req.venue_id, req.week_start + timedelta(days=7))
+    # The other venue's shifts from last week (visa fortnight) through next
+    # week (rest gap and run of days across the boundary). The generator
+    # counts weekly hours inside the week only.
     try:
-        booked = booked_elsewhere(_db, req.venue_id, employees, req.week_start,
-                                  req.week_start + timedelta(days=6))
+        around = booked_elsewhere(_db, req.venue_id, employees, prev_week_start,
+                                  week_end + timedelta(days=7))
     except Exception as e:
         logger.warning(f"Cross-venue bookings lookup failed for {req.venue_id}: {e}")
-        booked = []
+        around = []
+    booked = [(s, v) for s, v in around if req.week_start <= s.date <= week_end]
+    prev_booked = [s for s, _ in around if s.date < req.week_start]
     roster = generate_weekly_roster(
         req.week_start, forecasts, employees, venue, req.covers_per_staff,
         approved_leave=leave_map,
         prior_week_shifts=list(prev_roster.shifts) if prev_roster else None,
-        existing_shifts=[s for s, _ in booked],
+        existing_shifts=[s for s, _ in around] + (list(next_roster.shifts) if next_roster else []),
     )
 
     # Approved leave wins over the generator: drop any shift that lands on a
@@ -3029,20 +3036,12 @@ async def generate_roster(req: GenerateRosterRequest):
     # Work-rights check against what the venue RECORDED from VEVO: this
     # week's roster plus the stored previous week vs each employee's
     # fortnight cap, and any expired/expiring visas among rostered staff.
+    # A recorded visa cap covers every job, so the other venue's hours count.
+    from types import SimpleNamespace
     from rosteriq.services.visa import fortnight_cap_flags, visa_alerts
-    if booked:
-        # A recorded visa cap covers every job, so the other venue's hours count.
-        from types import SimpleNamespace
-        try:
-            prev_booked = [s for s, _ in booked_elsewhere(_db, req.venue_id, employees, prev_week_start,
-                                                          req.week_start - timedelta(days=1))]
-        except Exception:
-            prev_booked = []
-        visa_flags = fortnight_cap_flags(
-            SimpleNamespace(shifts=list(roster.shifts) + [s for s, _ in booked]), employees,
-            SimpleNamespace(shifts=list(getattr(prev_roster, "shifts", None) or []) + prev_booked))
-    else:
-        visa_flags = fortnight_cap_flags(roster, employees, prev_roster)
+    visa_flags = fortnight_cap_flags(
+        SimpleNamespace(shifts=list(roster.shifts) + [s for s, _ in booked]), employees,
+        SimpleNamespace(shifts=list(getattr(prev_roster, "shifts", None) or []) + prev_booked))
     rostered_ids = {str(sh.employee_id) for sh in roster.shifts}
     visa_expiry_alerts = [a for a in visa_alerts(employees)
                           if a["employee_id"] in rostered_ids]

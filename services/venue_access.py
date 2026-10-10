@@ -156,6 +156,24 @@ def same_owner_runs(db, venue_ids: Iterable[str], exclude_user_id: Optional[str]
     return False
 
 
+def same_owner_venue_ids(db, venue_id: str) -> List[str]:
+    """The other venues for which same_owner_runs(db, [venue_id, v]) holds:
+    those a venue-owning login fully manages together with ``venue_id``."""
+    out: List[str] = []
+    if not venue_id:
+        return out
+    try:
+        users = db.list_users() or []
+    except Exception:
+        users = []
+    for u in users:
+        if not u or not u.get("is_active", True) or is_platform_owner(u) or _role(u) != "manager":
+            continue
+        if fully_manages(u, venue_id):
+            out += [v for v in u.get("venue_ids") or [] if v != venue_id and fully_manages(u, v)]
+    return list(dict.fromkeys(out))
+
+
 def fully_managed_group(db, user, venue_id: str) -> List[str]:
     """``venue_id`` plus the other venues ``user`` fully manages alongside it,
     i.e. one owner's business as this caller sees it. For the platform owner
@@ -167,16 +185,7 @@ def fully_managed_group(db, user, venue_id: str) -> List[str]:
             out += [v for v in _get(user, "venue_ids", []) or []
                     if v != venue_id and fully_manages(user, v)]
         return list(dict.fromkeys(out))
-    try:
-        users = db.list_users() or []
-    except Exception:
-        users = []
-    for u in users:
-        if not u or not u.get("is_active", True) or is_platform_owner(u) or _role(u) != "manager":
-            continue
-        if fully_manages(u, venue_id):
-            out += [v for v in u.get("venue_ids") or [] if fully_manages(u, v)]
-    return list(dict.fromkeys(out))
+    return out + same_owner_venue_ids(db, venue_id)
 
 
 def created_venue_ids(db, user_id: str, venue_ids: Iterable[str]) -> List[str]:

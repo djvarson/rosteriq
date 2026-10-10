@@ -15,7 +15,8 @@ the manager's confirm dialog can say exactly what was found:
                 minimum rest (warning; advisor to confirm).
   * clash     — another shift of theirs here overlapping this one (block).
   * elsewhere — rostered at another venue at the same time (block), through
-                services/person_identity when it is present.
+                services/person_identity when it is present; a warning when
+                one of their venues couldn't be checked.
 
 Hours at the person's other venues count towards hours, visa and rest when
 services/person_identity can find their other records; without it the person
@@ -90,10 +91,12 @@ def can_take(employee, role, venue) -> bool:
     return getattr(employee, "active", True) and trained_for(employee, role, venue)
 
 
-def _their_shifts(db, venue_id: str, employee, start: date, end: date, skip_id=None) -> list:
-    """[(shift, venue_name or None)] of this person's live shifts dated
-    start..end here and, when person_identity is present, at their other
-    venues the caller may see."""
+def _their_shifts(db, venue_id: str, employee, start: date, end: date, skip_id=None) -> tuple:
+    """([(shift, venue_name or None)], checked) of this person's live shifts
+    dated start..end here and, when person_identity is present, at their
+    other venues: by name where the caller may see the venue, as "another
+    venue" where it only shares an owner with this one. ``checked`` is
+    False when any of those venues couldn't be read."""
     out = []
     for s in live_shifts(db, venue_id, start, end):
         if str(s.employee_id) == str(employee.id) and s.id != skip_id and _live(s):
@@ -101,22 +104,34 @@ def _their_shifts(db, venue_id: str, employee, start: date, end: date, skip_id=N
     identity = _person_identity()
     finder = getattr(identity, "same_person_records", None) if identity else None
     if finder is None:
-        return out
+        return out, False
     try:
         others = finder(db, employee) or []
     except Exception:
-        return out
+        return out, False
     by_venue: dict = {}
     for other, vid in others:
         if vid and vid != venue_id:
             by_venue.setdefault(vid, set()).add(str(other.id))
+    checked = True
     for vid, ids in by_venue.items():
         venue = db.get_venue(vid)
         name = getattr(venue, "name", None) or vid
-        for s in live_shifts(db, vid, start, end):
+        try:
+            theirs = live_shifts(db, vid, start, end)
+        except Exception:
+            checked = False
+            continue
+        for s in theirs:
             if str(s.employee_id) in ids and _live(s):
                 out.append((s, name))
-    return out
+    unseen = getattr(identity, "unseen_shifts", None)
+    if unseen is not None:
+        try:
+            out += [(s, "another venue") for s in unseen(db, employee, start, end) or []]
+        except Exception:
+            checked = False
+    return out, checked
 
 
 def cover_checks(db, venue_id: str, cover: dict, claimant, cover_shift=None) -> dict:
@@ -153,8 +168,8 @@ def cover_checks(db, venue_id: str, cover: dict, claimant, cover_shift=None) -> 
 
     monday = week_monday(day)
     fortnight_start = monday - timedelta(days=7)
-    theirs = _their_shifts(db, venue_id, claimant, fortnight_start - timedelta(days=1),
-                           monday + timedelta(days=7), skip_id=cover.get("shift_id"))
+    theirs, checked = _their_shifts(db, venue_id, claimant, fortnight_start - timedelta(days=1),
+                                    monday + timedelta(days=7), skip_id=cover.get("shift_id"))
 
     # Same venue double-booking and other-venue overlap
     for s, where in theirs:
@@ -168,7 +183,10 @@ def cover_checks(db, venue_id: str, cover: dict, claimant, cover_shift=None) -> 
     if not any(c["check"] == "clash" for c in checks):
         add("clash", OK, f"{name} has no overlapping shift here")
     if _person_identity() is not None and not any(c["check"] == "elsewhere" for c in checks):
-        add("elsewhere", OK, f"{name} isn't rostered at another venue then")
+        if checked:
+            add("elsewhere", OK, f"{name} isn't rostered at another venue then")
+        else:
+            add("elsewhere", WARN, f"Couldn't check {name}'s other venues for a shift then")
 
     week_hours = sum(float(s.net_hours) for s, _ in theirs if monday <= s.date <= monday + timedelta(days=6))
     total_week = round(week_hours + hours, 2)

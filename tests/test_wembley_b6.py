@@ -179,8 +179,10 @@ def test_same_person_is_the_same_email_inside_the_callers_venues_only():
         many = busy_elsewhere_many(db, w.vw, db.get_employees(w.vw), fri + timedelta(days=1),
                                    "01:00", "05:00")
         assert list(many) == [w.mw] and many[w.mw][0]["venue_name"] == "Apothecary"
-    with _As([w.vw]):
-        assert busy_elsewhere(db, meca_w, fri + timedelta(days=1), "01:00", "05:00") == []
+    with _As([w.vw]):                         # still caught for Wembley's AVM, never named
+        hits = busy_elsewhere(db, meca_w, fri + timedelta(days=1), "01:00", "05:00")
+        assert [(h["venue_id"], h["venue_name"], h["shift_id"]) for h in hits] == \
+            [(None, "another venue", None)]
 
 
 # --- logins across two venues ----------------------------------------------------

@@ -1,10 +1,11 @@
 """
 Bulk roster generation routes for RosterIQ.
 
-REST API endpoints for generating rosters across multiple venues in parallel.
+REST API endpoints for generating rosters across multiple venues.
 
 Endpoints:
-- POST /api/bulk/generate-rosters — generate rosters for multiple venues
+- POST /api/bulk/generate-rosters — generate rosters for multiple venues, one
+  after another through POST /rosters/generate
 - POST /api/bulk/apply-templates — apply different templates to multiple venues
 """
 
@@ -19,7 +20,6 @@ from pydantic import BaseModel
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import enforce_venue_manager
 from rosteriq.services.roster_templates import RosterTemplateService
-from rosteriq.roster_optimiser import generate_weekly_roster
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["bulk"])
@@ -46,6 +46,9 @@ class GenerateRosterResult(BaseModel):
     status: str  # "success", "error", "skipped"
     error: Optional[str] = None
     shift_count: Optional[int] = None
+    # Recorded visa caps the generated week goes over, as POST /rosters/generate
+    # reports them.
+    warnings: List[str] = []
 
 
 class BulkGenerateRostersResponse(BaseModel):
@@ -104,7 +107,12 @@ class BulkApplyTemplatesResponse(BaseModel):
 @router.post("/api/bulk/generate-rosters", response_model=BulkGenerateRostersResponse)
 async def bulk_generate_rosters(req: BulkGenerateRostersRequest):
     """
-    Generate rosters for multiple venues in parallel.
+    Generate rosters for multiple venues.
+
+    Each venue goes through POST /rosters/generate (approved leave, shared
+    staff's bookings at the other venues, last week, older drafts
+    superseded), one after another so a later venue sees the drafts made
+    for the earlier ones.
 
     Caps at 10 venues per request to avoid resource exhaustion.
     Returns results per venue including status and any errors.
@@ -142,15 +150,12 @@ async def bulk_generate_rosters(req: BulkGenerateRostersRequest):
                 detail="Invalid week_start format. Use ISO date: YYYY-MM-DD",
             )
 
-        # Prepare tasks
-        db = get_db()
-        tasks = [
-            _generate_roster_for_venue(venue_id, week_start, db)
-            for venue_id in req.venue_ids
-        ]
-
-        # Execute in parallel
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = []
+        for venue_id in req.venue_ids:
+            try:
+                results.append(await _generate_roster_for_venue(venue_id, week_start))
+            except Exception as e:
+                results.append(e)
 
         # Process results
         final_results = []
@@ -276,64 +281,23 @@ async def bulk_apply_templates(req: BulkApplyTemplatesRequest):
 # ============================================================================
 
 
-async def _generate_roster_for_venue(
-    venue_id: str, week_start: date, db
-) -> GenerateRosterResult:
-    """Generate roster for a single venue in an async context."""
+async def _generate_roster_for_venue(venue_id: str, week_start: date) -> GenerateRosterResult:
+    """Generate one venue's roster through POST /rosters/generate."""
+    from rosteriq.api import GenerateRosterRequest, generate_roster
     try:
-        # Validate venue exists
-        venue = db.get_venue(venue_id)
-        if not venue:
-            return GenerateRosterResult(
-                venue_id=venue_id,
-                status="error",
-                error=f"Venue {venue_id} not found",
-            )
-
-        # Get employees for venue
-        all_employees = db.list_employees()
-        employees = [e for e in all_employees if getattr(e, 'venue_id', None) == venue_id]
-
-        if not employees:
-            return GenerateRosterResult(
-                venue_id=venue_id,
-                status="error",
-                error=f"No employees found for venue {venue_id}",
-            )
-
-        # Get forecasts for week
-        week_end = week_start + __import__("datetime").timedelta(days=6)
-        forecasts = db.get_forecasts(
-            venue_id=venue_id,
-            start_date=week_start,
-            end_date=week_end,
-        )
-
-        if not forecasts:
-            return GenerateRosterResult(
-                venue_id=venue_id,
-                status="error",
-                error=f"No forecasts found for venue {venue_id} week starting {week_start}",
-            )
-
-        # Generate roster
-        roster = generate_weekly_roster(
-            week_start=week_start,
-            weekly_forecasts=forecasts,
-            employees=employees,
-            venue_config=venue,
-        )
-
-        # Save roster
-        db.save_roster(roster)
-
+        out = await generate_roster(GenerateRosterRequest(venue_id=venue_id, week_start=week_start))
+        if not isinstance(out, dict):
+            out = {"id": out.id, "shifts": out.shifts}
         return GenerateRosterResult(
             venue_id=venue_id,
-            roster_id=roster.id,
+            roster_id=out["id"],
             status="success",
-            shift_count=len(roster.shifts),
+            shift_count=len(out["shifts"]),
+            warnings=[f["message"] for f in out.get("visa_flags") or []],
         )
 
+    except HTTPException as e:
+        return GenerateRosterResult(venue_id=venue_id, status="error", error=str(e.detail))
     except Exception as e:
         logger.exception(f"Error generating roster for venue {venue_id}")
         return GenerateRosterResult(
