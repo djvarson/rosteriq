@@ -11,10 +11,11 @@ KIOSK_ROUTES and nothing else.
 Staff PINs are 4-6 digits, stored as salted PBKDF2 hashes, and lock for
 PIN_LOCK_MINUTES after MAX_PIN_FAILURES wrong tries (counted in the database,
 so both workers see the same count). A device that sees DEVICE_PIN_FAILURES
-wrong PINs on more than one card inside DEVICE_PIN_WINDOW_MINUTES pauses PIN
-entry briefly (DEVICE_PAUSE_SECONDS, doubling while it keeps happening), so
-nobody can work through the staff cards trying common PINs. The pause is
-short on purpose: a long one would let a prankster stop every clock-in.
+wrong PINs on more than one card in quick succession, or about that many in a
+rolling DEVICE_PIN_WINDOW_MINUTES, pauses PIN entry briefly
+(DEVICE_PAUSE_SECONDS, doubling while it keeps happening), so nobody can work
+through the staff cards trying common PINs. The pause is short on purpose: a
+long one would let a prankster stop every clock-in.
 """
 
 from __future__ import annotations

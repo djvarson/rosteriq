@@ -2,11 +2,13 @@
 Kiosk PINs and whose record a login is (review F 0, 4, 43).
 
 * Nobody sets a PIN anyone would try first (1234, 0000, 2580, 7890...),
-  themselves or through a manager. A time clock that sees eight wrong PINs on
-  more than one card inside ten minutes pauses PIN entry for a minute,
-  doubling while it keeps happening (429 + Retry-After), records a security
-  event and tells the venue's managers once. One person fumbling their own
-  PIN never pauses the device: that is the card's own lock.
+  themselves or through a manager, and the dashboard never makes one up. A
+  time clock that sees eight wrong PINs on more than one card in quick
+  succession, or about that many in a rolling ten minutes, pauses PIN entry
+  for a minute, doubling while it keeps happening (429 + Retry-After),
+  records a security event and tells the venue's managers once. One person
+  fumbling their own PIN never pauses the device: that is the card's own
+  lock.
 * A login's own record at a venue is the ONE record there carrying its
   email. /employees/bulk refuses an email another record (or another row of
   the batch) already uses, as POST /employees does.
@@ -16,7 +18,11 @@ Kiosk PINs and whose record a login is (review F 0, 4, 43).
   shows one clock card per venue.
 """
 
+import json
+import math
+import random
 import re
+import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -48,6 +54,14 @@ def _staff_with_pins(w, n=6):
         assert r.status_code == 200, r.text
         ids.append(eid)
     return ids
+
+
+def _wait(db, device_id, seconds):
+    """As if `seconds` had passed for a MemoryStore time clock's PIN count."""
+    device = db._kiosk_devices[device_id]
+    for col in ("pin_window_started", "pin_cooldown_until"):
+        if device.get(col):
+            device[col] -= timedelta(seconds=seconds)
 
 
 def _events(vid, action, category):
@@ -88,6 +102,26 @@ def test_staff_and_managers_cannot_set_a_pin_anyone_would_guess():
     assert c.post("/api/me/clock-pin", json={"pin": "4826"}, headers=w.meca).status_code == 200
     assert c.post("/api/clock/pin", json={"venue_id": w.vw, "employee_id": w.mw, "pin": "5937"},
                   headers=w.ben).status_code == 200
+
+
+@needs_node
+def test_the_dashboard_never_makes_up_a_pin_the_server_refuses():
+    src = _main("dashboard.html")
+    pins = [f"{i:04d}" for i in range(10000)] + ["12345", "56789", "98765", "123456", "654321",
+                                                   "999999", "567890", "102938", "97531"]
+    data = _run(_fns(src, "weakKioskPin", "suggestKioskPin") + r"""
+async function main() {
+  const made = [];
+  for (let i = 0; i < 20000; i++) { suggestKioskPin(); made.push(el('kp-pin').value); }
+  const pins = JSON.parse(process.env.PINS);
+  console.log(JSON.stringify({ weak: pins.filter(weakKioskPin), made: made }));
+}
+""", env={"PINS": json.dumps(pins)})
+    assert data["weak"] == [p for p in pins if kiosk.weak_pin(p)]
+    made = data["made"]
+    assert all(re.fullmatch(r"\d{4}", p) for p in made)
+    assert [p for p in made if kiosk.weak_pin(p)] == []
+    assert len(set(made)) > 5000
 
 
 def test_a_time_clock_pauses_pin_entry_when_someone_works_through_the_cards():
@@ -146,6 +180,33 @@ def test_a_time_clock_pauses_pin_entry_when_someone_works_through_the_cards():
     assert len(_events(w.vw, "timeclock.kiosk_pin_paused", "audit")) == 1
 
 
+def test_wrong_pins_just_before_the_ten_minute_mark_still_count_after_it():
+    w = _world()
+    c, db = w.c, get_db()
+    s = _staff_with_pins(w)
+    k = kiosk_headers(c, w.ben, w.vw, "Bar iPad")
+    device_id = db.list_kiosk_devices(w.vw)[0]["id"]
+    guesses = ["0000", "1111", "1212", "2580"]
+    tries = [(s[i // 4], guesses[i % 4]) for i in range(24)]      # four a card: under its own lock
+
+    def go(n):
+        codes = [c.post("/api/clock/pin/check", json={"venue_id": w.vw, "employee_id": emp, "pin": pin},
+                        headers=k).status_code for emp, pin in tries[:n]]
+        del tries[:n]
+        return codes
+
+    assert go(1) == [403]
+    _wait(db, device_id, 9 * 60 + 55)
+    assert go(6) == [403] * 6
+    _wait(db, device_id, 10)
+    # Six wrong PINs went in ten seconds ago: by the eighth in quick
+    # succession PIN entry is paused, and nothing after that is checked.
+    codes = go(7)
+    assert codes[1:] == [429] * 6, codes
+    assert len(_events(w.vw, "timeclock.kiosk_pin_paused", "security")) == 1
+    assert len(_events(w.vw, "timeclock.kiosk_pin_paused", "audit")) == 1
+
+
 def test_one_person_fumbling_their_own_pin_never_pauses_the_time_clock():
     w = _world()
     c, db = w.c, get_db()
@@ -183,45 +244,110 @@ def test_a_broken_device_counter_leaves_the_cards_own_lock(monkeypatch):
     assert check(PINS[0]).status_code == 200
 
 
-def test_memory_store_pin_pause_counts_windows_cards_and_doubles():
+class _Clock(datetime):
+    """database.datetime with a hand-turned utcnow."""
+    now = datetime(2026, 10, 10, 17, 0)
+
+    @classmethod
+    def utcnow(cls):
+        return cls.now
+
+
+EPOCH = datetime(2026, 1, 1)
+
+
+@pytest.fixture
+def tick(monkeypatch):
+    """Freeze the stores' clock; tick(seconds) moves it on."""
+    import rosteriq.database as database
+    monkeypatch.setattr(database, "datetime", _Clock)
+    monkeypatch.setattr(_Clock, "now", datetime(2026, 10, 10, 17, 0))
+
+    def advance(seconds):
+        _Clock.now += timedelta(seconds=seconds)
+    return advance
+
+
+def _device_store():
     s = MemoryStore()
     s.save_kiosk_device({"id": "kd", "venue_id": "v", "name": "Bar iPad", "token_hash": "h"})
-    note = lambda emp: s.note_kiosk_pin_failure("kd", emp, 8, 10, 60, 600)  # noqa: E731
-    now = datetime.utcnow
+    return s, lambda emp: s.note_kiosk_pin_failure("kd", emp, 8, 10, 60, 600)
 
+
+def _pause_left(row):
+    until = row.get("pin_cooldown_until")
+    return (until - _Clock.now).total_seconds() if until and until > _Clock.now else 0
+
+
+def test_memory_store_counts_wrong_pins_over_a_rolling_ten_minutes(tick):
+    s, note = _device_store()
+    note("a")
+    tick(9 * 60 + 55)
+    for emp in "bcbcbc":
+        row = note(emp)
+    assert row["pin_failures"] == 7 and row["pin_window_card"] is None and not _pause_left(row)
+    tick(10)
+    # A new window, but the last one's seven count pro rata: this wrong PIN
+    # brings the recent count past seven.
+    row = note("d")
+    assert _pause_left(row) == 60 and row["pin_cooldowns"] == 1
+    assert (row["pin_failures"], row["pin_failures_before"], row["pin_window_started"]) == (0, 0, None)
+
+    # After the pause the count starts again.
+    tick(61)
+    row = note("a")
+    assert (row["pin_failures"], row["pin_failures_before"], row["pin_window_card"]) == (1, 0, "a")
+
+
+@pytest.mark.parametrize("gap,pauses_at", [(0, 8), (30, 8), (60, 8), (85, 8), (100, None)])
+def test_memory_store_pauses_a_steady_trickle_as_well_as_a_burst(tick, gap, pauses_at):
+    """Eight wrong PINs inside ten minutes pause PIN entry, in a burst or a
+    steady trickle; one every 100 seconds never does."""
+    s, note = _device_store()
+    paused = None
+    for i in range(1, 61):
+        if _pause_left(note("ab"[i % 2])):
+            paused = i
+            break
+        tick(gap)
+    assert paused == pauses_at
+
+
+def test_memory_store_counts_cards_and_forgets_after_two_quiet_windows(tick):
+    s, note = _device_store()
     for _ in range(20):                                   # one card: its own lock's job
         row = note("a")
-    assert not row.get("pin_cooldown_until") and row["pin_window_card"] == "a"
-    s._kiosk_devices["kd"]["pin_window_started"] = now() - timedelta(minutes=11)
-    row = note("a")
-    assert row["pin_failures"] == 1                       # the window ran out: a new count
-
-    for _ in range(6):
-        row = note("b")
-    assert row["pin_failures"] == 7 and row["pin_window_card"] is None
-    assert not row.get("pin_cooldown_until")
+    assert not _pause_left(row) and row["pin_window_card"] == "a" and row["pin_failures"] == 20
+    tick(20 * 60)
+    row = note("b")
+    assert (row["pin_failures"], row["pin_failures_before"], row["pin_window_card"]) == (1, 0, "b")
+    tick(11 * 60)                                         # b's one now counts for 0.9
     row = note("c")
-    secs = (row["pin_cooldown_until"] - now()).total_seconds()
-    assert 55 <= secs <= 60 and row["pin_cooldowns"] == 1
-    assert row["pin_failures"] == 0 and row["pin_window_started"] is None
-
-    def pause_again():
-        s._kiosk_devices["kd"]["pin_cooldown_until"] = now() - timedelta(minutes=1)
-        for emp in "abababab":
-            r = note(emp)
-        return r
-
-    row = pause_again()
-    assert row["pin_cooldowns"] == 2 and 115 <= (row["pin_cooldown_until"] - now()).total_seconds() <= 120
-    s._kiosk_devices["kd"]["pin_cooldowns"] = 9
-    row = pause_again()
-    assert row["pin_cooldowns"] == 10 and 595 <= (row["pin_cooldown_until"] - now()).total_seconds() <= 600
-    # A quiet spell longer than the window starts the doubling over.
-    s._kiosk_devices["kd"]["pin_cooldown_until"] = now() - timedelta(minutes=11)
-    for emp in "abababab":
-        row = note(emp)
-    assert row["pin_cooldowns"] == 1 and (row["pin_cooldown_until"] - now()).total_seconds() <= 60
+    assert (row["pin_failures"], row["pin_failures_before"], row["pin_window_card"]) == (1, 1, "c")
+    row = note("b")
+    assert row["pin_window_card"] is None and not _pause_left(row)
     assert s.note_kiosk_pin_failure("ghost", "a", 8, 10, 60, 600) is None
+
+
+def test_memory_store_pauses_double_while_it_keeps_happening(tick):
+    s, note = _device_store()
+
+    def burst():
+        for emp in "abababab":
+            row = note(emp)
+        return row
+
+    assert _pause_left(burst()) == 60
+    tick(61)
+    row = burst()
+    assert _pause_left(row) == 120 and row["pin_cooldowns"] == 2
+    s._kiosk_devices["kd"]["pin_cooldowns"] = 9
+    tick(121)
+    row = burst()
+    assert _pause_left(row) == 600 and row["pin_cooldowns"] == 10
+    tick(600 + 10 * 60 + 1)                               # a quiet window after the pause
+    row = burst()
+    assert _pause_left(row) == 60 and row["pin_cooldowns"] == 1
 
 
 class _Cur:
@@ -250,6 +376,10 @@ class _PG:
         yield _Cur(self.log, self.row)
 
 
+PIN_COUNT_COLUMNS = ("pin_failures", "pin_failures_before", "pin_window_started", "pin_window_card",
+                     "pin_cooldowns", "pin_cooldown_until")
+
+
 def test_postgres_pin_pause_is_one_update_on_the_shared_connection():
     row = {"id": "kd-1", "name": "Bar iPad", "pin_failures": 0, "pin_cooldowns": 1,
            "pin_cooldown_until": datetime(2026, 10, 10, 9, 1)}
@@ -265,12 +395,79 @@ def test_postgres_pin_pause_is_one_update_on_the_shared_connection():
     assert "%s" not in sql
     assert set(re.findall(r"%\((\w+)\)s", sql)) == set(params)
     assert params == {"window": 10, "emp": "e1", "max": 8, "pause": 60, "cap": 600, "id": "kd-1"}
-    for col in ("pin_failures", "pin_window_started", "pin_window_card", "pin_cooldowns",
-                "pin_cooldown_until"):
+    for col in PIN_COUNT_COLUMNS:
         assert f" {col} = CASE WHEN" in sql, col
     assert sql.count("(") == sql.count(")")
     assert "make_interval(secs => LEAST(%(cap)s, %(pause)s * power(2," in sql
     assert PostgresStore.note_kiosk_pin_failure(_PG(), "ghost", "e1", 8, 10, 60, 600) is None
+
+
+def _as_sqlite(sql):
+    """The counter's Postgres UPDATE in SQLite terms, with times as epoch seconds."""
+    for pg, lite in (("EXTRACT(EPOCH FROM now() - pin_window_started)::float8",
+                      "(now() - pin_window_started)"),
+                     ("make_interval(mins => %(window)s)", "(%(window)s * 60)"),
+                     ("make_interval(secs => ", "("), ("LEAST(", "min("), ("::text", "")):
+        assert pg in sql, pg
+        sql = sql.replace(pg, lite)
+    assert "::" not in sql and "make_interval" not in sql and "EXTRACT" not in sql, sql
+    return re.sub(r"%\((\w+)\)s", r":\1", sql)
+
+
+class _LiteCur:
+    def __init__(self, con):
+        self.con, self.row = con, None
+
+    def execute(self, sql, params=None):
+        if not sql.lstrip().startswith("CREATE"):
+            self.row = self.con.execute(_as_sqlite(" ".join(sql.split())), params).fetchone()
+
+    def fetchone(self):
+        return dict(self.row) if self.row else None
+
+
+class _PGLite(_PG):
+    """PostgresStore's counter run on SQLite, whose UPDATE also reads the old row."""
+    def __init__(self):
+        self.con = sqlite3.connect(":memory:")
+        self.con.row_factory = sqlite3.Row
+        self.con.create_function("now", 0, lambda: (_Clock.now - EPOCH).total_seconds())
+        self.con.create_function("power", 2, math.pow)
+        self.con.execute(PostgresStore._TABLE_DDL["kiosk_devices"])
+        self.con.execute("INSERT INTO kiosk_devices (id, venue_id, name, token_hash) "
+                         "VALUES ('kd', 'v', 'Bar iPad', 'h')")
+
+    @contextmanager
+    def _cursor(self):
+        yield _LiteCur(self.con)
+
+
+@pytest.mark.skipif(sqlite3.sqlite_version_info < (3, 35), reason="needs UPDATE ... RETURNING")
+def test_postgres_pin_count_matches_the_memory_store_step_for_step(tick):
+    pg = _PGLite()
+    mem, note = _device_store()
+    rnd = random.Random(20261010)
+    gaps = [0, 0, 1, 5, 30, 60, 75, 86, 90, 120, 300, 595, 600, 605, 1199, 1200, 1300]
+    seen = {"rolled": 0, "paused": 0, "doubled": 0, "one card": 0}
+    for step in range(800):
+        tick(rnd.choice(gaps if step % 100 < 70 else [0, 1, 5, 61, 121]))     # then a spree
+        emp = rnd.choice("aab" if step % 60 < 20 else "abcd")
+        m = note(emp)
+        p = PostgresStore.note_kiosk_pin_failure(pg, "kd", emp, 8, 10, 60, 600)
+        now = (_Clock.now - EPOCH).total_seconds()
+        mine = lambda v: None if v is None else (v - EPOCH).total_seconds() - now  # noqa: E731
+        theirs = lambda v: None if v is None else v - now  # noqa: E731
+        assert (p["pin_failures"], p["pin_failures_before"], p["pin_window_card"], p["pin_cooldowns"]) \
+            == (m["pin_failures"], m["pin_failures_before"], m["pin_window_card"],
+                int(m.get("pin_cooldowns") or 0)), step
+        for col in ("pin_window_started", "pin_cooldown_until"):
+            a, b = theirs(p[col]), mine(m.get(col))
+            assert (a is None and b is None) or abs(a - b) < 1e-6, (step, col, a, b)
+        seen["rolled"] += bool(m["pin_failures_before"])
+        seen["paused"] += _pause_left(m) > 0 and not m["pin_failures"]
+        seen["doubled"] += m.get("pin_cooldowns", 0) > 1 and not m["pin_failures"]
+        seen["one card"] += m["pin_failures"] > 1 and m["pin_window_card"] is not None
+    assert min(seen.values()) >= 3, seen
 
 
 def test_postgres_kiosk_devices_carry_the_pause_columns_on_new_and_existing_tables():
@@ -281,8 +478,7 @@ def test_postgres_kiosk_devices_carry_the_pause_columns_on_new_and_existing_tabl
     PostgresStore.save_kiosk_device(pg, {"id": "kd-1", "venue_id": "v", "name": "x", "token_hash": "h"})
     insert, params = [(s, p) for s, p in pg.log if s.startswith("INSERT INTO kiosk_devices")][0]
     assert insert.count("%s") == len(params)
-    for col in ("pin_failures", "pin_window_started", "pin_window_card", "pin_cooldowns",
-                "pin_cooldown_until"):
+    for col in PIN_COUNT_COLUMNS:
         assert col in ddl, col
         assert f"ALTER TABLE IF EXISTS kiosk_devices ADD COLUMN IF NOT EXISTS {col} " in ensure, col
         assert col in insert.split("VALUES")[0], col

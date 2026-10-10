@@ -512,12 +512,17 @@ class BaseStore:
 
     def note_kiosk_pin_failure(self, device_id: str, employee_id: str, max_failures: int,
                                window_minutes: int, pause_seconds: int, max_pause_seconds: int):
-        """Count a wrong staff PIN on this device. Failures are counted from the
-        first one in a window_minutes window; the max_failures-th, once they
-        span more than one card, pauses PIN entry (pin_cooldown_until) for
-        pause_seconds, doubled for each pause that follows within a window of
-        the last (capped at max_pause_seconds), and restarts the count.
-        Returns the device row after the update."""
+        """Count a wrong staff PIN on this device over a rolling window_minutes.
+        Failures are counted per window (pin_failures since pin_window_started,
+        pin_failures_before in the window before it); the recent count adds the
+        previous window's failures pro rata to how much of that window is still
+        within the last window_minutes. The wrong PIN that takes the recent
+        count past max_failures - 1 (the max_failures-th in quick succession),
+        once more than one card is on it (pin_window_card is NULL), pauses PIN
+        entry (pin_cooldown_until) for pause_seconds, doubled for each pause
+        that follows within a window of the last (capped at
+        max_pause_seconds), and restarts the count. Returns the device row
+        after the update."""
         raise NotImplementedError
 
     def clear_kiosk_exit_failures(self, device_id: str) -> None:
@@ -1390,19 +1395,23 @@ class MemoryStore(BaseStore):
         now = datetime.utcnow()
         window = timedelta(minutes=window_minutes)
         started = d.get("pin_window_started")
-        if started is None or started <= now - window:
-            count, card, started = 1, employee_id, now
-        else:
-            count = int(d.get("pin_failures") or 0) + 1
-            card = employee_id if d.get("pin_window_card") == employee_id else None
-        if count >= max_failures and card is None:
+        before, count = int(d.get("pin_failures_before") or 0), int(d.get("pin_failures") or 0)
+        if started is None or now - started >= 2 * window:
+            before, count, started = 0, 0, now
+        elif now - started >= window:
+            before, count, started = count, 0, started + window
+        recent = before * (1 - (now - started) / window) + count
+        card = employee_id if recent < 1 or d.get("pin_window_card") == employee_id else None
+        count += 1
+        if recent > max_failures - 2 and card is None:
             last = d.get("pin_cooldown_until")
             streak = int(d.get("pin_cooldowns") or 0) + 1 if last and last > now - window else 1
             d["pin_cooldowns"] = streak
             d["pin_cooldown_until"] = now + timedelta(
                 seconds=min(max_pause_seconds, pause_seconds * 2 ** (streak - 1)))
-            count, card, started = 0, None, None
-        d["pin_failures"], d["pin_window_card"], d["pin_window_started"] = count, card, started
+            before, count, card, started = 0, 0, None, None
+        d["pin_failures_before"], d["pin_failures"] = before, count
+        d["pin_window_card"], d["pin_window_started"] = card, started
         return dict(d)
 
     # --- Compliance checklists ---
@@ -3394,6 +3403,7 @@ class PostgresStore(BaseStore):
                 exit_failures INTEGER DEFAULT 0,
                 exit_locked_until TIMESTAMP WITH TIME ZONE,
                 pin_failures INTEGER DEFAULT 0,
+                pin_failures_before INTEGER DEFAULT 0,
                 pin_window_started TIMESTAMP WITH TIME ZONE,
                 pin_window_card TEXT,
                 pin_cooldowns INTEGER DEFAULT 0,
@@ -3944,6 +3954,7 @@ class PostgresStore(BaseStore):
             "ALTER TABLE timeclock_pins ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE",
             # kiosk_devices is created lazily, so on a fresh database it may not exist yet
             "ALTER TABLE IF EXISTS kiosk_devices ADD COLUMN IF NOT EXISTS pin_failures INTEGER DEFAULT 0",
+            "ALTER TABLE IF EXISTS kiosk_devices ADD COLUMN IF NOT EXISTS pin_failures_before INTEGER DEFAULT 0",
             "ALTER TABLE IF EXISTS kiosk_devices ADD COLUMN IF NOT EXISTS pin_window_started TIMESTAMP WITH TIME ZONE",
             "ALTER TABLE IF EXISTS kiosk_devices ADD COLUMN IF NOT EXISTS pin_window_card TEXT",
             "ALTER TABLE IF EXISTS kiosk_devices ADD COLUMN IF NOT EXISTS pin_cooldowns INTEGER DEFAULT 0",
@@ -4301,9 +4312,9 @@ class PostgresStore(BaseStore):
             cur.execute("""
                 INSERT INTO kiosk_devices (id, venue_id, name, token_hash, created_by,
                     created_at, last_used_at, revoked_at, revoked_by,
-                    pin_failures, pin_window_started, pin_window_card, pin_cooldowns,
-                    pin_cooldown_until)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    pin_failures, pin_failures_before, pin_window_started, pin_window_card,
+                    pin_cooldowns, pin_cooldown_until)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, last_used_at=EXCLUDED.last_used_at,
                     revoked_at=EXCLUDED.revoked_at, revoked_by=EXCLUDED.revoked_by
@@ -4311,9 +4322,9 @@ class PostgresStore(BaseStore):
                 device["id"], device["venue_id"], device["name"], device["token_hash"],
                 device.get("created_by"), device.get("created_at") or datetime.utcnow(),
                 device.get("last_used_at"), device.get("revoked_at"), device.get("revoked_by"),
-                int(device.get("pin_failures") or 0), device.get("pin_window_started"),
-                device.get("pin_window_card"), int(device.get("pin_cooldowns") or 0),
-                device.get("pin_cooldown_until"),
+                int(device.get("pin_failures") or 0), int(device.get("pin_failures_before") or 0),
+                device.get("pin_window_started"), device.get("pin_window_card"),
+                int(device.get("pin_cooldowns") or 0), device.get("pin_cooldown_until"),
             ))
 
     def get_kiosk_device(self, device_id):
@@ -4360,24 +4371,30 @@ class PostgresStore(BaseStore):
     def note_kiosk_pin_failure(self, device_id, employee_id, max_failures, window_minutes,
                                pause_seconds, max_pause_seconds):
         # One statement, like note_kiosk_exit_failure: every SET expression
-        # reads the row as it was, so two workers can't lose a count.
-        # pin_window_card is the card while every failure in the window was on
-        # it, NULL once a second card has failed.
-        fresh = ("(pin_window_started IS NULL "
-                 "OR pin_window_started <= now() - make_interval(mins => %(window)s))")
-        count = f"(CASE WHEN {fresh} THEN 1 ELSE COALESCE(pin_failures, 0) + 1 END)"
-        card = f"(CASE WHEN {fresh} OR pin_window_card = %(emp)s::text THEN %(emp)s::text END)"
-        hit = f"({count} >= %(max)s AND {card} IS NULL)"
+        # reads the row as it was, so two workers can't lose a count. Each
+        # fragment is the same-named variable in MemoryStore's version.
+        span = "(%(window)s * 60.0)"
+        age = "EXTRACT(EPOCH FROM now() - pin_window_started)::float8"
+        stale = f"(pin_window_started IS NULL OR {age} >= 2 * {span})"
+        rolls = f"({age} >= {span})"
+        before = (f"(CASE WHEN {stale} THEN 0 WHEN {rolls} THEN COALESCE(pin_failures, 0) "
+                  "ELSE COALESCE(pin_failures_before, 0) END)")
+        count = f"(CASE WHEN {stale} OR {rolls} THEN 0 ELSE COALESCE(pin_failures, 0) END)"
+        into = f"(CASE WHEN {stale} THEN 0 WHEN {rolls} THEN {age} - {span} ELSE {age} END)"
+        started = (f"(CASE WHEN {stale} THEN now() WHEN {rolls} THEN pin_window_started "
+                   "+ make_interval(mins => %(window)s) ELSE pin_window_started END)")
+        recent = f"({before} * (1 - {into} / {span}) + {count})"
+        card = f"(CASE WHEN {recent} < 1 OR pin_window_card = %(emp)s::text THEN %(emp)s::text END)"
+        hit = f"({recent} > %(max)s - 2 AND {card} IS NULL)"
         streak = ("(CASE WHEN pin_cooldown_until > now() - make_interval(mins => %(window)s) "
                   "THEN COALESCE(pin_cooldowns, 0) + 1 ELSE 1 END)")
         with self._cursor() as cur:
             self._ensure_table(cur, "kiosk_devices")
             cur.execute(f"""
                 UPDATE kiosk_devices SET
-                    pin_failures = CASE WHEN {hit} THEN 0 ELSE {count} END,
-                    pin_window_started = CASE WHEN {hit} THEN NULL
-                                              WHEN {fresh} THEN now()
-                                              ELSE pin_window_started END,
+                    pin_failures = CASE WHEN {hit} THEN 0 ELSE {count} + 1 END,
+                    pin_failures_before = CASE WHEN {hit} THEN 0 ELSE {before} END,
+                    pin_window_started = CASE WHEN {hit} THEN NULL ELSE {started} END,
                     pin_window_card = CASE WHEN {hit} THEN NULL ELSE {card} END,
                     pin_cooldowns = CASE WHEN {hit} THEN {streak} ELSE pin_cooldowns END,
                     pin_cooldown_until = CASE WHEN {hit}
