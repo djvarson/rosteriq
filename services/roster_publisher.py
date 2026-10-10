@@ -275,9 +275,11 @@ class RosterPublisher:
                 )
                 if leave_conflicts:
                     result.message += (
-                        ". For anyone on approved leave: take them off the shift, or if their "
-                        "plans changed, cancel the leave or change its dates on the Leave page "
-                        "(Approved), then publish again"
+                        ". For anyone on approved leave: take them off the shift; if they're "
+                        "working part of a leave day, mark that day on the Leave page (Approved, "
+                        "Working part of a day) and the leave keeps its paid hours; if they're "
+                        "not taking the leave, cancel it or change its dates there. Then publish "
+                        "again"
                     )
                 logger.warning(result.message)
 
@@ -485,8 +487,9 @@ class RosterPublisher:
                     employee_ids=[s.employee_id],
                     shift_ids=[s.id],
                     date=s.date,
-                    suggestion="Leave the shift open or give it to someone else, or cancel the "
-                               "leave or change its dates on the Leave page",
+                    suggestion="Leave the shift open or give it to someone else; if they're "
+                               "working part of that day, mark it on the Leave page; if they're "
+                               "not taking the leave, cancel it or change its dates there",
                 ))
             return out
         except Exception as e:

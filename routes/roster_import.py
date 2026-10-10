@@ -28,8 +28,9 @@ a recalled week stays RosterIQ's too); the response names those weeks.
 
 Approved leave wins, as everywhere else: a row for someone on approved leave
 that day, whose shift hasn't started, comes in as an open shift posted for
-cover (or, on a re-paste, finds the shift their leave left open), and is
-flagged. A row for anyone else in the slot of a stored open shift fills it.
+cover (or, on a re-paste, finds the shift their leave left open, moving it
+when the export moved its times), and is flagged. A row for anyone else in the
+slot of a stored open shift, or overlapping it in its area, fills it.
 
 Spans of zero or over 16 hours are skipped. In a file with no am/pm
 anywhere, an end before its start that would make sense 12 hours later is
@@ -65,7 +66,9 @@ from rosteriq.services.import_parsing import (
     clean_header, date_order, header_matches, location_choice_response, location_matches,
     map_columns, norm_header, norm_name, read_rows, resolve_location, split_when, unclosed_quote,
 )
-from rosteriq.services.leave_shifts import OPEN, _new_cover, is_open, shift_label
+from rosteriq.services.leave_shifts import (
+    LIVE_COVER, OPEN, _new_cover, cover_day, is_open, shift_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -389,6 +392,35 @@ def _open_slot(old: list, sh: Shift, kept_ids: set):
                 None)
 
 
+def _left_open(old: list, sh: Shift, ids) -> Optional[Shift]:
+    """The stored shift in the row's slot that the person's approved leave
+    left open (it may have been covered since)."""
+    return next((s for s in old if s.id in ids and _slot(s) == _slot(sh)), None)
+
+
+def _open_overlap(old: list, sh: Shift, kept_ids: set, ids=None) -> Optional[Shift]:
+    """The open shift (among ids, when given) not yet matched, on the row's
+    day and in its area, whose times overlap the row's most."""
+    best, most = None, timedelta(0)
+    b0, b1 = _interval(sh)
+    for s in old:
+        if (not is_open(s) or s.id in kept_ids or (ids is not None and s.id not in ids)
+                or s.date != sh.date or normalise_area(s.role) != normalise_area(sh.role)):
+            continue
+        a0, a1 = _interval(s)
+        shared = min(a1, b1) - max(a0, b0)
+        if shared > most:
+            best, most = s, shared
+    return best
+
+
+def _fill(out: dict, updates: dict, kept_ids: set, hole: Shift, change: dict) -> None:
+    kept_ids.add(hole.id)
+    updates[hole.id] = hole.model_copy(update=change)
+    out["filled"].append((hole, updates[hole.id]))
+    out["replaced"] += 1
+
+
 def _leave_flag(line, name, d, detail: str) -> dict:
     return {"line": line, "name": name, "date": d.isoformat(), "flag": "on_leave", "detail": detail}
 
@@ -420,22 +452,22 @@ def _reconcile_week(paste: dict, week_start, roster, published: bool, emp_map: d
     by_key = {}
     for s in old:
         by_key.setdefault((s.employee_id, s.date, s.start_time, s.end_time), s)
-    kept_ids, updates, added, off = set(), {}, [], []
+    kept_ids, updates, added, off, loose = set(), {}, [], [], []
     for (emp_id, d), line, name, sh in week_items:
         prev = by_key.get((emp_id, d, sh.start_time, sh.end_time))
         if prev is None or prev.id in kept_ids:
-            if edit.on_leave(leave["days"], emp_id, d) and datetime.combine(d, sh.start_time) > now:
+            # A day they work part of still leaves open the shifts the leave opened.
+            if datetime.combine(d, sh.start_time) > now and (
+                    edit.on_leave(leave["days"], emp_id, d)
+                    or _left_open(old, sh, leave["opened"].get((emp_id, d), ())) is not None):
                 off.append((line, name, sh))
                 continue
             hole = _open_slot(old, sh, kept_ids)
             if hole is None:
-                added.append((line, name, sh))
+                loose.append((line, name, sh))
                 continue
-            kept_ids.add(hole.id)
-            updates[hole.id] = hole.model_copy(
-                update={"employee_id": emp_id, "break_minutes": sh.break_minutes})
-            out["filled"].append((hole, updates[hole.id]))
-            out["replaced"] += 1
+            _fill(out, updates, kept_ids, hole,
+                  {"employee_id": emp_id, "break_minutes": sh.break_minutes})
             _note_row(out, line, name, d, "replaced", f"filled the open shift {_hhmm(hole)}")
             continue
         kept_ids.add(prev.id)
@@ -450,19 +482,64 @@ def _reconcile_week(paste: dict, week_start, roster, published: bool, emp_map: d
             out["duplicates"] += 1
             _note_row(out, line, name, d, "skipped", "already imported")
     # After every other row, so someone pasted into the slot keeps it.
+    retimed = []
     for line, name, sh in off:
         d, mine = sh.date, leave["opened"].get((sh.employee_id, sh.date), ())
-        left = (next((s for s in old if s.id in mine and _slot(s) == _slot(sh)), None)
-                or _open_slot(old, sh, kept_ids))
-        if left is not None:
-            kept_ids.add(left.id)
+        left = _left_open(old, sh, mine) or _open_slot(old, sh, kept_ids)
+        if left is None:
+            retimed.append((line, name, sh))
+            continue
+        kept_ids.add(left.id)
+        out["duplicates"] += 1
+        _note_row(out, line, name, d, "skipped",
+                  f"already imported \u2014 {name} is on approved leave in RosterIQ that day, "
+                  "so their shift was left open for cover")
+        out["flagged"].append(_leave_flag(line, name, d, (
+            f"{name} is on approved leave in RosterIQ that day; the export still has them on "
+            f"{_hhmm(sh)}, which the leave left open for cover")))
+    # A row that matches nothing stored may be an open shift the export moved:
+    # it fills the one it overlaps, unless it's the person's own shift moved.
+    for line, name, sh in loose:
+        hole = None
+        if not any(s.employee_id == sh.employee_id and s.date == sh.date
+                   and s.id not in kept_ids and _overlaps(s, sh) for s in old):
+            hole = _open_overlap(old, sh, kept_ids)
+        if hole is None:
+            added.append((line, name, sh))
+            continue
+        _fill(out, updates, kept_ids, hole,
+              {"employee_id": sh.employee_id, "break_minutes": sh.break_minutes,
+               "start_time": sh.start_time, "end_time": sh.end_time})
+        _note_row(out, line, name, sh.date, "replaced",
+                  f"filled the open shift {_hhmm(hole)}, moved to {_hhmm(sh)}")
+    for line, name, sh in retimed:
+        d, mine = sh.date, leave["opened"].get((sh.employee_id, sh.date), ())
+        hole = _open_overlap(old, sh, kept_ids, mine)
+        taken = None if hole else next(
+            (s for s in old if s.id in mine and s.date == d and _overlaps(s, sh)
+             and normalise_area(s.role) == normalise_area(sh.role)), None)
+        if taken is not None:
+            kept_ids.add(taken.id)
             out["duplicates"] += 1
             _note_row(out, line, name, d, "skipped",
-                      f"already imported \u2014 {name} is on approved leave in RosterIQ that day, "
-                      "so their shift was left open for cover")
+                      f"{name} is on approved leave in RosterIQ that day and the shift their "
+                      f"leave left open ({_hhmm(taken)}) has been covered \u2014 not imported")
             out["flagged"].append(_leave_flag(line, name, d, (
-                f"{name} is on approved leave in RosterIQ that day; the export still has them on "
-                f"{_hhmm(sh)}, which the leave left open for cover")))
+                f"{name} is on approved leave in RosterIQ that day; the export has them on "
+                f"{_hhmm(sh)}, and the shift their leave left open ({_hhmm(taken)}) has been "
+                "covered \u2014 check its times")))
+            continue
+        hole = hole or _open_overlap(old, sh, kept_ids)
+        if hole is not None:
+            _fill(out, updates, kept_ids, hole,
+                  {"break_minutes": sh.break_minutes, "start_time": sh.start_time,
+                   "end_time": sh.end_time})
+            _note_row(out, line, name, d, "replaced",
+                      f"moved the open shift {_hhmm(hole)} to {_hhmm(sh)} \u2014 {name} is on "
+                      "approved leave in RosterIQ that day, so it stays open for cover")
+            out["flagged"].append(_leave_flag(line, name, d, (
+                f"{name} is on approved leave in RosterIQ that day \u2014 the open shift "
+                f"{_hhmm(hole)} moved to {_hhmm(sh)} and stays posted for cover")))
             continue
         hole = sh.model_copy(update={"employee_id": OPEN, "cost": None})
         added.append((line, name, hole))
@@ -555,18 +632,33 @@ def _save_week(db, paste: dict, week: dict, emp_map: dict, state, venue_id: str,
 
 
 def _paste_leave(db, venue_id: str) -> dict:
-    """Approved leave as _reconcile_week reads it."""
-    opened: dict = {}
+    """Approved leave as _reconcile_week reads it. The shifts a person's leave
+    left open, on days it still covers, are the ones its record opened and the
+    ones its covers were posted for (a paste records none on the leave), even
+    once someone has been approved onto them."""
+    opened, spans = {}, {}
     for r in db.list_leave_requests(venue_id) or []:
         if r.get("status") != "approved":
             continue
+        who = str(r.get("employee_id") or "")
+        try:
+            first = date.fromisoformat(str(r.get("start_date"))[:10])
+            last = date.fromisoformat(str(r.get("end_date"))[:10])
+        except ValueError:
+            continue
+        spans.setdefault(who, []).append((first, last))
         for o in r.get("opened_shifts") or []:
             try:
                 d = date.fromisoformat(str(o.get("date"))[:10])
             except ValueError:
                 continue
-            opened.setdefault((r.get("employee_id"), d), set()).update(
-                o.get("shift_ids") or [o.get("shift_id")])
+            if first <= d <= last:
+                opened.setdefault((who, d), set()).update(o.get("shift_ids") or [o.get("shift_id")])
+    for cv in db.list_shift_covers(venue_id) or []:
+        who, d = str(cv.get("requested_by") or ""), cover_day(cv)
+        if (cv.get("origin") == "leave" and cv.get("status") in LIVE_COVER + ("approved",)
+                and d is not None and any(a <= d <= b for a, b in spans.get(who, ()))):
+            opened.setdefault((who, d), set()).add(cv.get("shift_id"))
     return {"days": edit.approved_leave(db, venue_id), "opened": opened}
 
 

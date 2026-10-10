@@ -7,16 +7,24 @@ Approved leave after it is approved, and the Deputy paste around it.
         generator, payroll prep); a defaulted paid-hours figure is worked out
         again over the new dates; the still-open covers posted for the
         released days are withdrawn; nobody is put back on a shift
-        automatically. The publish refusal says how to change the leave, and
-        the dashboard's approved leave rows carry Cancel leave and Change
-        dates.
+        automatically, and the shifts still open on the released days are
+        named, including the ones a paste left open. Paid hours can change on
+        their own. A day of the leave they also work part of (a morning
+        appointment, then an evening shift) can be marked: the leave keeps its
+        paid hours and they can be rostered that day, though nothing rosters
+        them onto it by itself. The publish refusal says how to change the
+        leave, and the dashboard's approved leave rows carry Cancel leave,
+        Change dates and Working part of a day.
 [12]    Recording or approving leave that overlaps the same person's approved
         leave is refused with a 409 naming that record, unless the manager
-        says both are right (allow_overlap); the dashboard asks first.
+        says both are right (allow_overlap); the dashboard asks first. The
+        second record's default paid hours are only what the others don't
+        already have.
 [3]/[4] A pasted row for someone on approved leave that day, whose shift
         hasn't started, comes in as an open shift posted for cover and is
         flagged; a re-paste finds the slot their leave left open instead of
-        adding them back, and a row for someone else in that slot fills it.
+        adding them back, even when the export moved its times, and a row for
+        someone else in that slot (at the same or new times) fills it.
 [7]     A paste into a week RosterIQ has published (or whose import a publish
         superseded) changes nothing for that week and says so plainly.
 """
@@ -182,6 +190,120 @@ def test_shortening_keeps_hours_the_manager_typed_unless_given_new_ones():
     assert r.status_code == 200 and r.json()["paid_hours"] is None
 
 
+def test_the_paid_hours_of_approved_leave_change_on_their_own():
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    nm = _next_week(vid)
+    fri = nm + timedelta(days=4)
+    _publish(vid, nm, [_shift("jo-fri", ids["jo"], fri, dtime(10), dtime(17, 30), "Duty Manager", 30)])
+    lv = _record_leave(c, mgr, vid, ids["jo"], fri, leave_type="personal")
+    assert lv["paid_hours"] == 7.0
+
+    r = _amend(c, mgr, vid, lv["request_id"], paid_hours=3.5)
+    assert r.status_code == 200, r.text
+    assert r.json()["paid_hours"] == 3.5 and "Paid hours: 7h → 3.5h" in r.json()["message"]
+    stored = db.get_leave_request(lv["request_id"])
+    assert (stored["status"], stored["paid_hours"]) == ("approved", 3.5)
+    assert str(stored["start_date"])[:10] == str(stored["end_date"])[:10] == fri.isoformat()
+    # Nothing withdrawn: the shift it left open is still up for cover
+    assert _leave_covers(vid, "jo-fri")["jo-fri"]["status"] == "open"
+    details = db.list_events(venue_id=vid, action_prefix="leave.amend")[0]["details"]
+    assert details["change"] == "paid_hours"
+    assert (float(details["old_paid_hours"]), float(details["paid_hours"])) == (7.0, 3.5)
+
+    for same in ({}, {"paid_hours": 3.5}, {"start_date": fri.isoformat(), "end_date": fri.isoformat()}):
+        r = _amend(c, mgr, vid, lv["request_id"], **same)
+        assert r.status_code == 422 and "Nothing to change" in _detail(r), (same, r.text)
+
+
+def test_a_leave_day_they_work_part_of_keeps_its_paid_hours_and_lets_the_week_publish():
+    from rosteriq.api import _approved_leave_map
+    from rosteriq.services.current_roster import live_shifts
+    from rosteriq.services.payroll_export import PayrollExporter
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    nm = _next_week(vid)
+    thu, fri = nm + timedelta(days=3), nm + timedelta(days=4)
+    rid = _publish(vid, nm, [
+        _shift("jo-fri", ids["jo"], fri, dtime(10), dtime(17, 30), "Duty Manager", 30),
+        _shift("pat-thu", ids["pat"], thu, dtime(17), dtime(23), "Front Bar")])
+    # Paid personal leave for a morning appointment; her day shift is left open
+    lv = _record_leave(c, mgr, vid, ids["jo"], fri, leave_type="personal", reason="dentist 9am")
+    assert lv["paid_hours"] == 7.0
+
+    # She offers to work the evening: added on the recalled week, the publish is refused
+    assert c.post(f"/api/v1/rosters/{rid}/recall", json={"reason": "Jo's evening"},
+                  headers=mgr).status_code == 200
+    add = c.post(f"/rosters/{rid}/shifts", json={
+        "employee_id": ids["jo"], "date": fri.isoformat(), "start_time": "18:00",
+        "end_time": "22:00", "break_minutes": 0, "role": "Duty Manager"}, headers=mgr)
+    assert add.status_code == 200, add.text
+    refused = _publish_api(c, mgr, rid)
+    assert refused["success"] is False
+    assert "working part of a leave day" in refused["message"]
+    assert "keeps its paid hours" in refused["message"]
+
+    r = _amend(c, mgr, vid, lv["request_id"], working_days=[fri.isoformat()])
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert (out["status"], out["paid_hours"], out["working_days"]) == \
+        ("approved", 7.0, [fri.isoformat()])
+    assert out["withdrawn_covers"] == 0 and out["released_shifts"] == []
+    assert f"Fri {fri.day} {fri:%b}" in out["message"] and "paid hours" in out["message"]
+    stored = db.get_leave_request(lv["request_id"])
+    assert stored["working_days"] == [fri.isoformat()] and stored["paid_hours"] == 7.0
+    details = db.list_events(venue_id=vid, action_prefix="leave.amend")[0]["details"]
+    assert (details["change"], details["old_working_days"], details["working_days"]) == \
+        ("working_days", [], [fri.isoformat()])
+    listed = c.get(f"/api/leave?venue_id={vid}&status=approved", headers=mgr).json()["requests"]
+    assert [x["working_days"] for x in listed] == [[fri.isoformat()]]
+
+    # The morning stays open for cover; the week publishes with her evening on it
+    assert _leave_covers(vid, "jo-fri")["jo-fri"]["status"] == "open"
+    assert _publish_api(c, mgr, rid)["success"] is True
+    assert _roster_shift(rid, "jo-fri").employee_id == ""
+    assert [s.start_time for s in db.get_roster(rid).shifts if s.employee_id == ids["jo"]] == \
+        [dtime(18)]
+
+    # Payroll prep keeps the 7h of personal leave and prices the evening she works
+    paid = approved_paid_leave(db.list_leave_requests(vid), nm, nm + timedelta(days=6))
+    assert [(t, str(h)) for t, h, _ in paid[ids["jo"]]] == [("personal", "7.00")]
+    batch = PayrollExporter(db).prepare_timesheet_data(
+        venue_id=vid, period_start=nm, period_end=nm + timedelta(days=6), state="wa",
+        shifts=live_shifts(db, vid, nm, nm + timedelta(days=6), staff=True),
+        employees={e.id: e for e in db.get_employees(vid)},
+        leave_requests=db.list_leave_requests(vid), rostered=True)
+    assert not [n for n in batch.notes if "not priced" in n]
+    jo = next(e for e in batch.employees if e.employee_id == ids["jo"])
+    assert float(jo.ordinary_hours) + sum(float(p.hours) for p in jo.penalty_entries) == 4.0
+    assert [(e.leave_type, float(e.hours)) for e in jo.leave_entries] == [("personal", 7.0)]
+
+    # Nothing rosters her onto that day by itself
+    assert edit.approved_leave(db, vid).get(ids["jo"], []) == []
+    assert edit.approved_leave(db, vid, with_working_days=True)[ids["jo"]] == [(fri, fri)]
+    assert _approved_leave_map(vid)[ids["jo"]] == [(fri, fri)]
+
+
+def test_days_worked_part_of_sit_inside_the_leave_and_can_be_unmarked():
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    nm = _next_week(vid)
+    mon, wed, fri, sat = (nm + timedelta(days=n) for n in (0, 2, 4, 5))
+    lv = _record_leave(c, mgr, vid, ids["jo"], mon, fri)
+    bad = _amend(c, mgr, vid, lv["request_id"], working_days=[sat.isoformat()])
+    assert bad.status_code == 422 and sat.isoformat() in _detail(bad)
+    ok = _amend(c, mgr, vid, lv["request_id"], working_days=[wed.isoformat()])
+    assert ok.status_code == 200, ok.text
+    assert edit.approved_leave(db, vid)[ids["jo"]] == [(mon, wed - timedelta(days=1)),
+                                                       (wed + timedelta(days=1), fri)]
+    # Shortened past it, the day goes with the dates
+    cut = _amend(c, mgr, vid, lv["request_id"], end_date=(wed - timedelta(days=1)).isoformat())
+    assert cut.status_code == 200 and cut.json()["working_days"] == []
+    lv2 = _record_leave(c, mgr, vid, ids["sam"], mon, fri, leave_type="unpaid")
+    assert _amend(c, mgr, vid, lv2["request_id"], working_days=[wed.isoformat()]).status_code == 200
+    off = _amend(c, mgr, vid, lv2["request_id"], working_days=[])
+    assert off.status_code == 200 and off.json()["working_days"] == []
+    assert edit.approved_leave(db, vid)[ids["sam"]] == [(mon, fri)]
 
 
 def test_amending_leave_is_for_the_venues_managers_and_approved_leave_only():
@@ -286,6 +408,68 @@ def test_approving_a_request_over_approved_leave_needs_the_manager_to_say_both_a
     no = c.post(f"/api/leave/{p2.json()['request_id']}/decide",
                 json={"venue_id": vid, "approve": False}, headers=mgr)
     assert no.status_code == 200 and no.json()["status"] == "declined"
+
+
+def _paid_total(vid, emp_id, first, last):
+    return sum(float(h or 0) for _, h, _ in approved_paid_leave(
+        get_db().list_leave_requests(vid), first, last).get(emp_id, []))
+
+
+def test_record_anyway_gives_the_second_record_only_the_hours_the_first_doesnt_have():
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    yday = venue_today(vid, db) - timedelta(days=1)
+    _publish(vid, _monday(yday), [_shift("jo-y", ids["jo"], yday, dtime(10), dtime(16),
+                                         "Duty Manager", 30)])
+    # Went home sick from yesterday's shift
+    first = _record_leave(c, mgr, vid, ids["jo"], yday, leave_type="personal")
+    assert first["paid_hours"] == 5.5
+    body = {"venue_id": vid, "employee_id": ids["jo"], "start_date": yday.isoformat(),
+            "end_date": yday.isoformat(), "leave_type": "annual"}
+    refused = c.post("/api/leave", json=body, headers=mgr)
+    assert refused.status_code == 409 and "its own share of the hours" in _detail(refused)
+
+    both = c.post("/api/leave", json={**body, "allow_overlap": True}, headers=mgr)
+    assert both.status_code == 200, both.text
+    assert both.json()["paid_hours"] == 0
+    assert "5.5h" in both.json()["message"] and "other leave" in both.json()["message"]
+    assert _paid_total(vid, ids["jo"], yday, yday) == 5.5
+
+    # Half and half: the first record's hours change on their own, the second takes the rest
+    assert _amend(c, mgr, vid, both.json()["request_id"], cancel=True).status_code == 200
+    assert _amend(c, mgr, vid, first["request_id"], paid_hours=3).status_code == 200
+    half = c.post("/api/leave", json={**body, "allow_overlap": True}, headers=mgr)
+    assert half.status_code == 200 and half.json()["paid_hours"] == 2.5, half.text
+    assert _paid_total(vid, ids["jo"], yday, yday) == 5.5
+    # Hours the manager gives are kept as given
+    typed = c.post("/api/leave", json={**body, "leave_type": "personal", "paid_hours": 1,
+                                       "allow_overlap": True}, headers=mgr)
+    assert typed.status_code == 200 and typed.json()["paid_hours"] == 1
+
+
+def test_approve_anyway_counts_the_shifts_the_first_leave_opened_once():
+    c, mgr, vid, ids, staff, _ = _world()
+    nm = _next_week(vid)
+    mon, tue, wed = nm, nm + timedelta(days=1), nm + timedelta(days=2)
+    _publish(vid, nm, [_shift("jo-mon", ids["jo"], mon, dtime(10), dtime(15), "Front Bar"),
+                       _shift("jo-tue", ids["jo"], tue, dtime(16), dtime(23), "Duty Manager", 30),
+                       _shift("jo-wed", ids["jo"], wed, dtime(10), dtime(15), "Front Bar")])
+    # Half of Tuesday is annual leave; the rest of Tuesday and Wednesday are personal
+    _record_leave(c, mgr, vid, ids["jo"], tue, paid_hours=3)
+    p = c.post("/api/me/leave", json={"start_date": tue.isoformat(), "end_date": wed.isoformat(),
+                                      "leave_type": "personal"}, headers=staff["jo"])
+    assert p.status_code == 200, p.text
+    ok = c.post(f"/api/leave/{p.json()['request_id']}/decide",
+                json={"venue_id": vid, "approve": True, "allow_overlap": True}, headers=mgr)
+    assert ok.status_code == 200, ok.text
+    assert get_db().get_leave_request(p.json()["request_id"])["paid_hours"] == 8.5
+    assert "8.5h" in ok.json()["message"]
+    assert _paid_total(vid, ids["jo"], nm, nm + timedelta(days=6)) == 11.5
+
+    # Recorded over the whole stretch: Monday and Wednesday are all that's left to pay
+    wide = _record_leave(c, mgr, vid, ids["jo"], mon, wed, leave_type="personal",
+                         allow_overlap=True)
+    assert wide["paid_hours"] == 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +604,169 @@ def test_a_re_paste_with_someone_else_in_the_open_slot_fills_it_and_withdraws_th
     assert sat.isoformat() in _my_days(c, staff["meca"])
 
 
+def _live_covers(vid):
+    return sorted((cv["shift_id"], str(cv["shift_start"])[:5], cv["origin"], cv["requested_by"])
+                  for cv in get_db().list_shift_covers(vid) if cv["status"] in ("open", "claimed"))
+
+
+@pytest.mark.parametrize("leave_first", [True, False])
+def test_a_re_paste_that_moves_the_shift_of_someone_on_leave_moves_its_open_slot(leave_first):
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    nm = _next_week(vid)
+    fri, sat = nm + timedelta(days=4), nm + timedelta(days=5)
+    rid = f"imported-{vid}-{nm.isoformat()}"
+    rows = _week_rows(fri, sat)
+    if leave_first:
+        _record_leave(c, mgr, vid, ids["jo"], sat)
+        _paste(c, mgr, vid, rows)
+    else:
+        _paste(c, mgr, vid, rows)
+        _record_leave(c, mgr, vid, ids["jo"], sat)
+    hole = next(s.id for s in db.get_roster(rid).shifts if s.date == sat and not s.employee_id)
+
+    # Deputy moves Jo's Saturday to 5pm and still has her on it (and moves Sam's too)
+    moved = [rows[0], ("Jo Taylor", sat, "17:00", "23:00", "Duty Manager", 30),
+             ("Sam Kelly", sat, "18:00", "23:00", "Front Bar", 0)]
+    out = _paste(c, mgr, vid, moved)
+    assert (out["shifts_imported"], out["shifts_replaced"], out["shifts_removed"]) == (1, 2, 0)
+    assert _day_shifts(rid, sat) == [("17:00", "", "Duty Manager"),
+                                     ("18:00", ids["sam"], "Front Bar")]
+    assert [s.id for s in db.get_roster(rid).shifts if s.date == sat and not s.employee_id] == [hole]
+    row = next(x for x in out["rows"] if x["date"] == sat.isoformat() and x["name"] == "Jo Taylor")
+    assert row["status"] == "replaced"
+    assert "moved the open shift 16:00-23:00 to 17:00-23:00" in row["reason"]
+    assert [f["flag"] for f in out["flagged"]] == ["on_leave"]
+    assert _live_covers(vid) == [(hole, "17:00", "leave", ids["jo"])]
+    assert _grabs(c, staff["pat"]) == [hole]
+    assert _my_days(c, staff["jo"]) == [fri.isoformat()]
+
+    again = _paste(c, mgr, vid, moved)
+    assert (again["shifts_imported"], again["shifts_replaced"]) == (0, 0)
+    assert _day_shifts(rid, sat) == [("17:00", "", "Duty Manager"),
+                                     ("18:00", ids["sam"], "Front Bar")]
+    assert _live_covers(vid) == [(hole, "17:00", "leave", ids["jo"])]
+
+
+def test_a_re_paste_after_the_pasted_leave_slot_was_covered_adds_no_second_slot():
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    nm = _next_week(vid)
+    fri, sat = nm + timedelta(days=4), nm + timedelta(days=5)
+    rid = f"imported-{vid}-{nm.isoformat()}"
+    rows = _week_rows(fri, sat)
+    # The paste itself left Jo's Saturday open (her leave came first); Pat covers it
+    _record_leave(c, mgr, vid, ids["jo"], sat)
+    _paste(c, mgr, vid, rows)
+    cover = next(cv for cv in db.list_shift_covers(vid) if cv["status"] == "open")
+    assert c.post(f"/api/me/cover/{cover['id']}/claim", headers=staff["pat"]).status_code == 200
+    assert c.post(f"/api/cover/{cover['id']}/decide", json={"venue_id": vid, "approve": True},
+                  headers=mgr).status_code == 200
+    covered = [("16:00", ids["pat"], "Duty Manager"), ("17:00", ids["sam"], "Front Bar")]
+
+    same = _paste(c, mgr, vid, rows)
+    assert same["shifts_imported"] == 0 and _day_shifts(rid, sat) == covered
+    # Deputy moved Jo's shift but the slot is Pat's now: nothing new, and the times are flagged
+    out = _paste(c, mgr, vid, [rows[0], ("Jo Taylor", sat, "17:00", "23:00", "Duty Manager", 30),
+                               ("Sam Kelly", sat, "18:00", "23:00", "Front Bar", 0)])
+    assert (out["shifts_imported"], out["shifts_replaced"]) == (1, 1)
+    assert _day_shifts(rid, sat) == [("16:00", ids["pat"], "Duty Manager"),
+                                     ("18:00", ids["sam"], "Front Bar")]
+    assert _live_covers(vid) == []
+    assert ["has been covered" in f["detail"] and "16:00-23:00" in f["detail"]
+            for f in out["flagged"]] == [True]
+
+
+def test_a_re_paste_with_someone_else_at_new_times_in_the_open_slot_fills_it():
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    nm = _next_week(vid)
+    fri, sat = nm + timedelta(days=4), nm + timedelta(days=5)
+    rid = f"imported-{vid}-{nm.isoformat()}"
+    _paste(c, mgr, vid, _week_rows(fri, sat))
+    _record_leave(c, mgr, vid, ids["jo"], sat)
+    hole = next(s.id for s in db.get_roster(rid).shifts if s.date == sat and not s.employee_id)
+
+    # Deputy gives Jo's Saturday to Meca, from 5pm
+    rows = [("Jo Taylor", fri, "16:00", "23:00", "Duty Manager", 30),
+            ("Meca Ryan", sat, "17:00", "23:00", "Duty Manager", 30),
+            ("Sam Kelly", sat, "17:00", "23:00", "Front Bar", 0)]
+    out = _paste(c, mgr, vid, rows)
+    assert (out["shifts_imported"], out["shifts_replaced"]) == (0, 1)
+    assert _day_shifts(rid, sat) == [("17:00", ids["meca"], "Duty Manager"),
+                                     ("17:00", ids["sam"], "Front Bar")]
+    filled = _roster_shift(rid, hole)
+    assert filled.employee_id == ids["meca"] and filled.cost is not None
+    row = next(x for x in out["rows"] if x["name"] == "Meca Ryan")
+    assert row["status"] == "replaced"
+    assert "filled the open shift 16:00-23:00, moved to 17:00-23:00" in row["reason"]
+    assert _live_covers(vid) == [] and _grabs(c, staff["pat"]) == []
+    assert (_paste(c, mgr, vid, rows)["shifts_imported"], _day_shifts(rid, sat)) == \
+        (0, [("17:00", ids["meca"], "Duty Manager"), ("17:00", ids["sam"], "Front Bar")])
+
+
+def test_someone_moving_their_own_shift_never_takes_the_open_slot_beside_it():
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    nm = _next_week(vid)
+    sat = nm + timedelta(days=5)
+    rid = f"imported-{vid}-{nm.isoformat()}"
+    _paste(c, mgr, vid, [("Jo Taylor", sat, "16:00", "23:00", "Duty Manager", 30),
+                         ("Meca Ryan", sat, "16:00", "22:00", "Duty Manager", 30)])
+    _record_leave(c, mgr, vid, ids["jo"], sat)
+    hole = next(s.id for s in db.get_roster(rid).shifts if s.date == sat and not s.employee_id)
+    out = _paste(c, mgr, vid, [("Jo Taylor", sat, "16:00", "23:00", "Duty Manager", 30),
+                               ("Meca Ryan", sat, "17:00", "23:00", "Duty Manager", 30)])
+    assert _day_shifts(rid, sat) == [("16:00", "", "Duty Manager"),
+                                     ("17:00", ids["meca"], "Duty Manager")]
+    assert _roster_shift(rid, hole).employee_id == ""
+    row = next(x for x in out["rows"] if x["name"] == "Meca Ryan")
+    assert row["status"] == "replaced" and "replaced 16:00-22:00" in row["reason"]
+    assert [cv[0] for cv in _live_covers(vid)] == [hole]
+
+
+def test_cancelling_leave_names_the_shift_the_paste_left_open():
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    nm = _next_week(vid)
+    fri, sat = nm + timedelta(days=4), nm + timedelta(days=5)
+    rid = f"imported-{vid}-{nm.isoformat()}"
+    lv = _record_leave(c, mgr, vid, ids["jo"], fri, sat)
+    _paste(c, mgr, vid, _week_rows(fri, sat))
+    assert [s.employee_id for s in db.get_roster(rid).shifts if s.role == "Duty Manager"] == ["", ""]
+
+    cut = _amend(c, mgr, vid, lv["request_id"], end_date=fri.isoformat())
+    assert cut.status_code == 200, cut.text
+    assert cut.json()["released_shifts"] == ["Sat 4-11pm Duty Manager"]
+    assert ("Still open on the days released: Sat 4-11pm Duty Manager — put Jo Taylor back "
+            "on the roster") in cut.json()["message"]
+    out = _amend(c, mgr, vid, lv["request_id"], cancel=True)
+    assert out.status_code == 200, out.text
+    assert out.json()["released_shifts"] == ["Fri 4-11pm Duty Manager"]
+    assert _live_covers(vid) == []
+
+
+def test_a_paste_on_a_leave_day_they_work_part_of_keeps_their_leave_slot_open():
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    nm = _next_week(vid)
+    fri, sat = nm + timedelta(days=4), nm + timedelta(days=5)
+    rid = f"imported-{vid}-{nm.isoformat()}"
+    _paste(c, mgr, vid, _week_rows(fri, sat))
+    lv = _record_leave(c, mgr, vid, ids["jo"], sat)
+    hole = next(s.id for s in db.get_roster(rid).shifts if s.date == sat and not s.employee_id)
+    assert _amend(c, mgr, vid, lv["request_id"], working_days=[sat.isoformat()]).status_code == 200
+
+    # Deputy still has her evening, and the lunch she's now working
+    out = _paste(c, mgr, vid, _week_rows(fri, sat) + [
+        ("Jo Taylor", sat, "10:00", "14:00", "Front Bar", 0)])
+    assert out["shifts_imported"] == 1
+    assert _day_shifts(rid, sat) == [("10:00", ids["jo"], "Front Bar"),
+                                     ("16:00", "", "Duty Manager"),
+                                     ("17:00", ids["sam"], "Front Bar")]
+    assert [cv[0] for cv in _live_covers(vid)] == [hole]
+
+
 # ---------------------------------------------------------------------------
 # [7] A week RosterIQ has published
 # ---------------------------------------------------------------------------
@@ -494,6 +841,30 @@ def test_pg_saves_changed_leave_dates():
                 "decided_by=EXCLUDED.decided_by", "decision_note=EXCLUDED.decision_note"):
         assert col in on_conflict, col
     assert params[3:5] == (date(2026, 10, 19), date(2026, 10, 21))
+
+
+def test_pg_stores_the_days_worked_part_of():
+    import inspect
+    assert "working_days JSONB DEFAULT '[]'::jsonb" in PostgresStore._TABLE_DDL["leave_requests"]
+    assert ("ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS working_days JSONB DEFAULT "
+            "'[]'::jsonb") in inspect.getsource(PostgresStore._ensure_core_schema)
+    pg = _PG()
+    PostgresStore.save_leave_request(pg, {
+        "id": "lv-1", "venue_id": "v", "employee_id": "e", "start_date": date(2026, 10, 16),
+        "end_date": date(2026, 10, 16), "leave_type": "personal", "paid_hours": 7.0,
+        "status": "approved", "working_days": ["2026-10-16"]})
+    sql, params = next((s, p) for s, p in pg.log if s.startswith("INSERT INTO leave_requests"))
+    cols = [c.strip() for c in sql[sql.index("(") + 1:sql.index(")")].split(",")]
+    assert json.loads(params[cols.index("working_days")]) == ["2026-10-16"]
+    assert "working_days=EXCLUDED.working_days" in sql[sql.index("DO UPDATE SET"):]
+    PostgresStore.save_leave_request(pg, {
+        "id": "lv-2", "venue_id": "v", "employee_id": "e", "start_date": date(2026, 10, 16),
+        "end_date": date(2026, 10, 16)})
+    assert json.loads(pg.log[-1][1][cols.index("working_days")]) == []
+    row = PostgresStore._leave_row({"id": "lv-1", "opened_shifts": "[]", "paid_hours": None,
+                                    "working_days": '["2026-10-16"]'})
+    assert row["working_days"] == ["2026-10-16"]
+    assert PostgresStore._leave_row({"id": "lv-3", "opened_shifts": None})["working_days"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +996,48 @@ def test_dashboard_cancel_and_change_dates_send_the_amendment():
     assert data["bad"] == [] and data["after"] == []
     assert ["Done <ok>", "success"] in data["toasts"]
     assert any(k == "warning" for _, k in data["toasts"])
+
+
+@needs_node
+def test_dashboard_marks_the_leave_days_they_work_part_of():
+    data = _run_js(LEAVE_ROWS + """
+      lvRows[0].working_days = ['2026-10-24', '<x>'];
+      renderLeaveRequests();
+      const rows = el('lv-rows').innerHTML.split('<tr').slice(1);
+      lvRows[0].working_days = ['2026-10-24'];
+      reply = function (url, body) {
+        if (url.indexOf('/amend') > 0) return { status: 'approved', message: 'Marked' };
+        return { requests: lvRows };
+      };
+      const posts = function () { return calls.filter(function (c) { return c.method === 'POST'; }); };
+      answers = ['2026-10-24, 2026-10-25'];
+      await markWorkingDays(0);
+      const sent = posts(), asked = prompts.slice();
+      calls = []; answers = ['25/10/2026'];
+      await markWorkingDays(0);
+      const bad = posts();
+      calls = []; answers = [''];
+      await markWorkingDays(0);
+      const cleared = posts();
+      calls = []; answers = [];
+      await markWorkingDays(0);
+      const kept = posts();
+      calls = []; answers = [null];
+      await markWorkingDays(0);
+      console.log(JSON.stringify({ rows, sent, asked, bad, cleared, kept, after: posts(), toasts }));
+    """)
+    approved, cancelled, pending = data["rows"]
+    assert "markWorkingDays(0)" in approved and "Working part of a day" in approved
+    assert "2026-10-24" in approved and "&lt;x&gt;" in approved and "<x>" not in approved
+    assert "markWorkingDays(" not in cancelled and "markWorkingDays(" not in pending
+    assert [(c["url"], c["body"]) for c in data["sent"]] == \
+        [("/api/leave/lv-1/amend", {"venue_id": "wem", "working_days": ["2026-10-24", "2026-10-25"]})]
+    assert "&lt;" not in data["asked"][0] and "paid hours" in data["asked"][0]
+    assert data["bad"] == [] and data["after"] == []
+    # The days already marked are offered as they are
+    assert [c["body"]["working_days"] for c in data["kept"]] == [["2026-10-24"]]
+    assert [c["body"] for c in data["cleared"]] == [{"venue_id": "wem", "working_days": []}]
+    assert ["Marked", "success"] in data["toasts"]
 
 
 @needs_node

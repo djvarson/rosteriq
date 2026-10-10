@@ -1012,6 +1012,7 @@ async def venue_leave(venue_id: str = Query(...), status: str = Query("")) -> di
         "paid_hours": r.get("paid_hours"),
         "entered_by_manager": bool(r.get("entered_by")),
         "opened_shifts": [o.get("label") for o in (r.get("opened_shifts") or [])],
+        "working_days": [str(d)[:10] for d in (r.get("working_days") or [])],
         "decided_by": r.get("decided_by"), "decision_note": r.get("decision_note"),
     } for r in rows]}
 
@@ -1254,10 +1255,13 @@ async def decide_leave(req_id: str, body: LeaveDecision,
         req["leave_type"] = body.leave_type
     if body.paid_hours is not None:
         req["paid_hours"] = body.paid_hours
-    opened = []
+    opened, hours_note = [], ""
     if body.approve:
         emp = db.get_employee(req.get("employee_id"))
         if emp is not None and getattr(emp, "venue_id", None) == body.venue_id:
+            if body.allow_overlap:
+                from rosteriq.routes.leave_cover import overlap_paid_hours
+                hours_note = overlap_paid_hours(db, body.venue_id, emp, req)
             try:
                 opened = apply_approved_leave(db, body.venue_id, req, emp)
             except edit.RosterBusy:
@@ -1274,7 +1278,7 @@ async def decide_leave(req_id: str, body: LeaveDecision,
           reason=req.get("reason"), note=body.note)
     return {"status": req["status"], "request_id": req_id,
             "opened_shifts": opened,
-            "message": _opened_message(opened)}
+            "message": _opened_message(opened) + hours_note}
 
 
 def _opened_message(opened: list) -> str:

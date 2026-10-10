@@ -7078,7 +7078,8 @@ function renderLeaveRequests() {
       ? '<button class="btn btn-primary btn-small" onclick="decideLeave(' + i + ', true)">Approve</button> ' +
         '<button class="btn btn-secondary btn-small" onclick="decideLeave(' + i + ', false)">Decline</button>'
       : (r.status === 'approved'
-        ? '<button class="btn btn-secondary btn-small" onclick="changeLeaveDates(' + i + ')">Change dates</button> ' +
+        ? '<button class="btn btn-secondary btn-small" onclick="changeLeaveDates(' + i + ')">Change dates or hours</button> ' +
+          '<button class="btn btn-secondary btn-small" onclick="markWorkingDays(' + i + ')">Working part of a day</button> ' +
           '<button class="btn btn-secondary btn-small" onclick="cancelLeave(' + i + ')">Cancel leave</button>'
         : '');
     return '<tr style="border-top:1px solid var(--border);">' +
@@ -7091,6 +7092,7 @@ function renderLeaveRequests() {
         esc(r.reason || '—') +
         (r.entered_by_manager ? '<div style="font-size:12px;">Recorded by a manager</div>' : '') +
         ((r.opened_shifts || []).length ? '<div style="font-size:12px;">Left open: ' + r.opened_shifts.map(esc).join(', ') + '</div>' : '') +
+        ((r.working_days || []).length ? '<div style="font-size:12px;">Working part of: ' + r.working_days.map(esc).join(', ') + ' (paid hours kept)</div>' : '') +
       '</td>' +
       '<td style="padding:10px 8px;">' + chip + '</td>' +
       '<td style="padding:10px 8px; color:var(--text-muted); font-size:13px;">' + esc(r.decision_note || '') + '</td>' +
@@ -7127,8 +7129,8 @@ async function cancelLeave(i) {
 async function changeLeaveDates(i) {
   const r = lvRows[i];
   const iso = /^\d{4}-\d{2}-\d{2}$/;
-  const from = window.prompt('Change the dates of ' + r.employee_name + '\'s ' + (r.leave_type_label || 'leave').toLowerCase() +
-    ' (' + r.start_date + ' → ' + r.end_date + ').\nThe new dates go inside these; record any extra days as new leave.\n\nFirst day (YYYY-MM-DD):', r.start_date);
+  const from = window.prompt('Change the dates or paid hours of ' + r.employee_name + '\'s ' + (r.leave_type_label || 'leave').toLowerCase() +
+    ' (' + r.start_date + ' → ' + r.end_date + ').\nThe new dates go inside these; record any extra days as new leave. Keep the dates to change only the hours.\n\nFirst day (YYYY-MM-DD):', r.start_date);
   if (from === null) return;
   if (!iso.test(from.trim())) { showToast('Enter the first day as YYYY-MM-DD', 'warning'); return; }
   const to = window.prompt('Last day (YYYY-MM-DD):', r.end_date);
@@ -7145,6 +7147,23 @@ async function changeLeaveDates(i) {
     }
   }
   await amendLeave(r, body);
+}
+
+// A day of the leave they also work part of (an appointment in the morning,
+// a shift in the evening): they can be rostered then and the leave keeps its
+// paid hours. The answer is every such day, so a day can be unmarked too.
+async function markWorkingDays(i) {
+  const r = lvRows[i];
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  const now = (r.working_days || []).join(', ') || (r.start_date === r.end_date ? r.start_date : '');
+  const answer = window.prompt('Which days of ' + r.employee_name + '\'s ' + (r.leave_type_label || 'leave').toLowerCase() +
+    ' (' + r.start_date + ' → ' + r.end_date + ') are they also working part of?\n' +
+    'They can be rostered on those days and the leave keeps its paid hours; the shifts it left open stay open for cover.\n\n' +
+    'Days as YYYY-MM-DD, separated by commas (blank for none):', now);
+  if (answer === null) return;
+  const days = answer.split(',').map(function (d) { return d.trim(); }).filter(Boolean);
+  if (days.some(function (d) { return !iso.test(d); })) { showToast('Enter each day as YYYY-MM-DD', 'warning'); return; }
+  await amendLeave(r, { working_days: days });
 }
 
 // A 409 for leave over the same person's approved leave: both records can

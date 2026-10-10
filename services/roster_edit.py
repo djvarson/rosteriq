@@ -125,8 +125,30 @@ def is_active(employee) -> bool:
     return bool(getattr(employee, "active", True))
 
 
-def approved_leave(db, venue_id: str) -> dict:
-    """employee_id -> [(first_day, last_day)] of APPROVED leave."""
+def leave_spans(first: date, last: date, working_days=()) -> list:
+    """[(first_day, last_day)] of first..last less the days of it the person
+    also works part of (a leave record's working_days)."""
+    worked = set()
+    for d in working_days or ():
+        try:
+            worked.add(d if isinstance(d, date) else date.fromisoformat(str(d)[:10]))
+        except ValueError:
+            continue
+    spans, start = [], first
+    for d in sorted(x for x in worked if first <= x <= last):
+        if d > start:
+            spans.append((start, d - timedelta(days=1)))
+        start = d + timedelta(days=1)
+    if start <= last:
+        spans.append((start, last))
+    return spans
+
+
+def approved_leave(db, venue_id: str, with_working_days: bool = False) -> dict:
+    """employee_id -> [(first_day, last_day)] of APPROVED leave, less the days
+    the person also works part of, which a manager may roster them on.
+    with_working_days keeps those days, for code that rosters people by itself
+    (copying a week), so it never puts anyone on them."""
     out: dict = {}
     try:
         rows = db.list_leave_requests(venue_id) or []
@@ -142,7 +164,10 @@ def approved_leave(db, venue_id: str) -> dict:
             last = last if isinstance(last, date) else date.fromisoformat(str(last)[:10])
         except (TypeError, ValueError):
             continue
-        out.setdefault(str(r.get("employee_id")), []).append((first, last))
+        spans = [(first, last)] if with_working_days else leave_spans(first, last,
+                                                                      r.get("working_days"))
+        if spans:
+            out.setdefault(str(r.get("employee_id")), []).extend(spans)
     return out
 
 
@@ -534,7 +559,7 @@ def copy_roster(db, source, target_monday: date, venue) -> tuple:
     target week is skipped."""
     shift_days = (target_monday - week_monday(source.week_start)).days
     target_end = target_monday + timedelta(days=6)
-    leave = approved_leave(db, source.venue_id)
+    leave = approved_leave(db, source.venue_id, with_working_days=True)
     state = venue_state(venue)
     employees: dict = {}
     shifts, skipped, left_open = [], [], []
