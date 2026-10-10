@@ -3708,6 +3708,43 @@
           </div>
         </div>
         <div class="card" style="margin-bottom:16px;">
+          <div class="chart-title" style="margin:0 0 10px;">Record leave for someone</div>
+          <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+            <div class="input-group" style="margin:0;">
+              <label for="lvr-emp">Staff member</label>
+              <select id="lvr-emp"><option value="">Choose&hellip;</option></select>
+            </div>
+            <div class="input-group" style="margin:0;">
+              <label for="lvr-type">Type</label>
+              <select id="lvr-type">
+                <option value="personal">Personal/carer's leave</option>
+                <option value="annual">Annual leave</option>
+                <option value="unpaid">Unpaid leave</option>
+                <option value="unavailable">Unavailable</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="input-group" style="margin:0;">
+              <label for="lvr-start">From</label>
+              <input type="date" id="lvr-start">
+            </div>
+            <div class="input-group" style="margin:0;">
+              <label for="lvr-end">To</label>
+              <input type="date" id="lvr-end">
+            </div>
+            <div class="input-group" style="margin:0; max-width:130px;">
+              <label for="lvr-hours">Paid hours</label>
+              <input type="number" id="lvr-hours" min="0" max="400" step="0.25" placeholder="auto">
+            </div>
+            <div class="input-group" style="margin:0; flex:1; min-width:160px;">
+              <label for="lvr-reason">Note</label>
+              <input type="text" id="lvr-reason" maxlength="300" placeholder="e.g. rang in sick">
+            </div>
+            <button class="btn btn-primary" onclick="recordLeave()">Record leave</button>
+          </div>
+          <p style="color:var(--text-muted); font-size:12px; margin-top:8px;">Past dates are fine (yesterday's sick day). Their upcoming shifts in those dates are left open and posted for cover. Paid hours go to payroll prep for your advisor; blank uses the hours they were rostered.</p>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
           <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
             <div class="input-group" style="margin:0;">
               <label>Status</label>
@@ -6580,6 +6617,7 @@ async function loadLeaveRequests() {
     const data = await fetchAPI('/api/leave?venue_id=' + encodeURIComponent(state.currentVenue) +
       (status ? '&status=' + status : ''));
     lvRows = data.requests || [];
+    fillLeaveStaffPicker();
     const pending = lvRows.filter(function(r) { return r.status === 'pending'; }).length;
     document.getElementById('lv-summary').textContent =
       lvRows.length + (lvRows.length === 1 ? ' request' : ' requests') + (pending ? ' · ' + pending + ' awaiting a decision' : '');
@@ -6609,7 +6647,13 @@ function renderLeaveRequests() {
       '<td style="padding:10px 8px; font-weight:600;">' + esc(r.employee_name) + '</td>' +
       '<td style="padding:10px 8px;">' + esc(r.start_date) + '</td>' +
       '<td style="padding:10px 8px;">' + esc(r.end_date) + '</td>' +
-      '<td style="padding:10px 8px; color:var(--text-muted); max-width:220px;">' + esc(r.reason || '—') + '</td>' +
+      '<td style="padding:10px 8px; color:var(--text-muted); max-width:240px;">' +
+        '<div style="color:var(--text); font-weight:600; font-size:13px;">' + esc(r.leave_type_label || 'Other') +
+          (r.paid_hours != null ? ' · ' + esc(r.paid_hours) + 'h' : '') + '</div>' +
+        esc(r.reason || '—') +
+        (r.entered_by_manager ? '<div style="font-size:12px;">Recorded by a manager</div>' : '') +
+        ((r.opened_shifts || []).length ? '<div style="font-size:12px;">Left open: ' + r.opened_shifts.map(esc).join(', ') + '</div>' : '') +
+      '</td>' +
       '<td style="padding:10px 8px;">' + chip + '</td>' +
       '<td style="padding:10px 8px; color:var(--text-muted); font-size:13px;">' + esc(r.decision_note || '') + '</td>' +
       '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
@@ -8326,13 +8370,14 @@ function renderCoverRequests() {
     }[c.status] || 'background:rgba(41,37,36,.06); color:var(--text-muted);';
     const chip = '<span style="' + chipStyle + ' padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">' +
       (c.status === 'claimed' ? 'READY TO APPROVE' : c.status.toUpperCase()) + '</span>';
+    const fromLeave = c.origin === 'leave';
     const actions = c.status === 'claimed'
-      ? '<button class="btn btn-primary btn-small" onclick="decideCover(' + i + ', true)">Approve swap</button> ' +
+      ? '<button class="btn btn-primary btn-small" onclick="decideCover(' + i + ', true)">' + (fromLeave ? 'Approve' : 'Approve swap') + '</button> ' +
         '<button class="btn btn-secondary btn-small" onclick="decideCover(' + i + ', false)">Decline</button>'
       : '';
     return '<tr style="border-top:1px solid var(--border);">' +
       '<td style="padding:10px 8px; font-weight:600;">' + esc(c.shift_date) + ' ' + esc(c.shift_start || '') + '–' + esc(c.shift_end || '') + (c.role ? ' · ' + esc(c.role) : '') + '</td>' +
-      '<td style="padding:10px 8px;">' + esc(c.requested_by_name) + '</td>' +
+      '<td style="padding:10px 8px;">' + esc(c.requested_by_name) + (fromLeave ? ' <span style="color:var(--text-muted); font-size:12px;">(approved leave — open shift)</span>' : '') + '</td>' +
       '<td style="padding:10px 8px; color:var(--text-muted);">' + esc(c.reason || '—') + '</td>' +
       '<td style="padding:10px 8px;">' + esc(c.claimed_by_name || '—') + '</td>' +
       '<td style="padding:10px 8px;">' + chip + '</td>' +
@@ -8343,10 +8388,26 @@ function renderCoverRequests() {
 
 async function decideCover(i, approve) {
   const c = cvRows[i];
-  const verb = approve
-    ? 'Approve: ' + c.claimed_by_name + ' covers ' + c.requested_by_name + '\'s shift on ' + c.shift_date + '?\nThe roster will be updated.'
-    : 'Decline this claim? The shift stays with ' + c.requested_by_name + ' and reopens for others.';
-  const note = window.prompt(verb + '\nOptional note:', '');
+  let verb = approve
+    ? 'Approve: ' + c.claimed_by_name + ' covers ' + (c.origin === 'leave' ? 'the open ' + (c.role || '') + ' shift' : c.requested_by_name + '\'s shift') + ' on ' + c.shift_date + '?\nThe roster will be updated.'
+    : 'Decline this claim? ' + (c.origin === 'leave' ? 'The shift stays open' : 'The shift stays with ' + c.requested_by_name) + ' and reopens for others.';
+  if (approve) {
+    let checks;
+    try {
+      checks = await fetchAPI('/api/cover/' + c.id + '/checks?venue_id=' + encodeURIComponent(state.currentVenue));
+    } catch (e) {
+      showToast('Could not check this claim: ' + e.message, 'error');
+      return;
+    }
+    if (checks.blocked) {
+      window.alert("Can't approve " + checks.claimant_name + ' for this shift:\n- ' + checks.block_reasons.join('\n- ') + '\n\nDecline it instead.');
+      return;
+    }
+    verb += '\n\nChecks:\n' + (checks.checks || []).map(function(x) {
+      return (x.result === 'ok' ? '  OK      ' : '  CHECK  ') + x.message;
+    }).join('\n');
+  }
+  const note = window.prompt(verb + '\n\nOptional note:', '');
   if (note === null) return;
   try {
     await fetchAPI('/api/cover/' + c.id + '/decide', {
@@ -8362,18 +8423,97 @@ async function decideCover(i, approve) {
 
 async function decideLeave(i, approve) {
   const r = lvRows[i];
-  const note = window.prompt((approve ? 'Approve' : 'Decline') + ' leave for ' + r.employee_name +
-    ' (' + r.start_date + ' → ' + r.end_date + ')?\nOptional note for them:', '');
+  let impactText = '';
+  let impact = null;
+  if (approve) {
+    try {
+      impact = await fetchAPI('/api/leave/impact?venue_id=' + encodeURIComponent(state.currentVenue) +
+        '&employee_id=' + encodeURIComponent(r.employee_id) + '&start_date=' + encodeURIComponent(r.start_date) +
+        '&end_date=' + encodeURIComponent(r.end_date) + '&leave_type=' + encodeURIComponent(r.leave_type || 'other'));
+      impactText = '\n\n' + (impact.shifts && impact.shifts.length
+        ? impact.shifts.map(function(s) { return '- ' + s.message; }).join('\n')
+        : impact.message);
+    } catch (e) {
+      impactText = '\n\n(Could not check their roster: ' + e.message + ')';
+    }
+  }
+  const note = window.prompt((approve ? 'Approve' : 'Decline') + ' ' + (r.leave_type_label || 'leave').toLowerCase() + ' for ' + r.employee_name +
+    ' (' + r.start_date + ' → ' + r.end_date + ')?' + impactText + '\n\nOptional note for them:', '');
   if (note === null) return; // cancelled
+  const body = { venue_id: state.currentVenue, approve: approve, note: note.trim() };
+  if (approve && impact && impact.paid_leave) {
+    const hours = window.prompt('Paid hours to record for payroll prep (your advisor prices them).\nBlank = advisor to confirm.',
+      impact.paid_hours_default != null ? String(impact.paid_hours_default) : '');
+    if (hours === null) return;
+    if (hours.trim() !== '') {
+      const h = Number(hours);
+      if (!isFinite(h) || h < 0 || h > 400) { showToast('Paid hours must be a number from 0 to 400', 'warning'); return; }
+      body.paid_hours = h;
+    }
+  }
   try {
-    await fetchAPI('/api/leave/' + r.id + '/decide', {
+    const res = await fetchAPI('/api/leave/' + r.id + '/decide', {
       method: 'POST',
-      body: JSON.stringify({ venue_id: state.currentVenue, approve: approve, note: note.trim() }),
+      body: JSON.stringify(body),
     });
-    showToast(r.employee_name + (approve ? ' approved ✓' : ' declined'), 'success');
+    showToast(r.employee_name + (approve ? ' approved ✓' + (res.opened_shifts && res.opened_shifts.length ? ' — ' + res.message : '') : ' declined'), 'success', 6000);
     loadLeaveRequests();
+    if (approve) loadCoverRequests();
   } catch (e) {
     showToast('Decision failed: ' + e.message, 'error');
+  }
+}
+
+async function fillLeaveStaffPicker() {
+  const sel = document.getElementById('lvr-emp');
+  if (!sel || !state.currentVenue) return;
+  if (sel.getAttribute('data-venue') === state.currentVenue && sel.options.length > 1) return;
+  try {
+    const emps = (await fetchVenueEmployees(state.currentVenue)).items || [];
+    emps.sort(function(a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+    sel.innerHTML = '<option value="">Choose&hellip;</option>' + emps.map(function(e) {
+      return '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>';
+    }).join('');
+    sel.setAttribute('data-venue', state.currentVenue);
+  } catch (e) { /* the picker stays empty; recordLeave says so */ }
+}
+
+async function recordLeave() {
+  const emp = document.getElementById('lvr-emp').value;
+  const type = document.getElementById('lvr-type').value;
+  const start = document.getElementById('lvr-start').value;
+  const end = document.getElementById('lvr-end').value || start;
+  const hoursRaw = document.getElementById('lvr-hours').value.trim();
+  if (!emp || !start) { showToast('Choose the staff member and the first day', 'warning'); return; }
+  const name = document.getElementById('lvr-emp').selectedOptions[0].textContent;
+  let impactText = '';
+  try {
+    const impact = await fetchAPI('/api/leave/impact?venue_id=' + encodeURIComponent(state.currentVenue) +
+      '&employee_id=' + encodeURIComponent(emp) + '&start_date=' + encodeURIComponent(start) +
+      '&end_date=' + encodeURIComponent(end));
+    impactText = impact.shifts && impact.shifts.length
+      ? impact.shifts.map(function(s) { return '- ' + s.message; }).join('\n') : impact.message;
+  } catch (e) {
+    showToast('Could not check their roster: ' + e.message, 'error');
+    return;
+  }
+  const label = document.getElementById('lvr-type').selectedOptions[0].textContent;
+  if (!window.confirm('Record ' + label.toLowerCase() + ' for ' + name + ' (' + start + ' → ' + end + ')?\n\n' + impactText)) return;
+  const body = { venue_id: state.currentVenue, employee_id: emp, start_date: start, end_date: end,
+                 leave_type: type, reason: document.getElementById('lvr-reason').value.trim() };
+  if (hoursRaw !== '') {
+    const h = Number(hoursRaw);
+    if (!isFinite(h) || h < 0 || h > 400) { showToast('Paid hours must be a number from 0 to 400', 'warning'); return; }
+    body.paid_hours = h;
+  }
+  try {
+    const res = await fetchAPI('/api/leave', { method: 'POST', body: JSON.stringify(body) });
+    showToast(res.message || 'Leave recorded', 'success', 6000);
+    ['lvr-start', 'lvr-end', 'lvr-hours', 'lvr-reason'].forEach(function(id) { document.getElementById(id).value = ''; });
+    loadLeaveRequests();
+    loadCoverRequests();
+  } catch (e) {
+    showToast('Could not record leave: ' + e.message, 'error');
   }
 }
 
@@ -9504,6 +9644,10 @@ function renderStaffTable() {
   body.innerHTML = rows.map(function(e, rowIdx) {
     var role = (e.skills && e.skills.length) ? e.skills.map(function(x) { return String(x).charAt(0).toUpperCase() + String(x).slice(1); }).join(', ') : '—';
     var rate = e.hourly_base_rate != null ? '$' + Number(e.hourly_base_rate).toFixed(2) : '—';
+    if (e.pay_basis === 'salaried' && e.weekly_salary != null) {
+      rate = '$' + Number(e.weekly_salary).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+        '/wk <span class="alert-badge badge-secondary" title="Salaried: costed as weekly salary ÷ 7 per rostered day, no penalties or overtime">Salaried</span>';
+    }
     var certs = (e.certifications || e.certs || []);
     var certTxt = certs.length ? certs.map(function(c) { return esc(c.name || c.type || c); }).join(', ') : '<span style="color:var(--text-muted)">—</span>';
     // Same rule as the roster: an unlisted day is available, [] is a day off,
@@ -10295,7 +10439,7 @@ function populateStaffList() {
   (state.rosters || []).forEach(function (r) {
     (r.shifts || []).forEach(function (sh) {
       const d = String(sh.date || sh.shift_date || '').slice(0, 10);
-      if (d !== todayKey) return;
+      if (d !== todayKey || !sh.employee_id) return;
       const st = String(sh.start_time || '').slice(0, 5).split(':');
       const en = String(sh.end_time || '').slice(0, 5).split(':');
       if (st.length < 2 || en.length < 2) return;
@@ -13644,9 +13788,11 @@ function renderRosterTable(roster) {
   // Group shifts by employee
   const staffMap = {};
   roster.shifts.forEach(shift => {
-    const key = shift.employee_id || shift.employee_name;
+    // An open shift (left by approved leave) has nobody on it yet.
+    const key = shift.employee_id || shift.employee_name || ('open:' + shift.id);
     if (!staffMap[key]) {
-      staffMap[key] = { name: shift.employee_name || names[shift.employee_id] || key, role: shift.role || '', shifts: {} };
+      staffMap[key] = { name: shift.employee_id || shift.employee_name ? (shift.employee_name || names[shift.employee_id] || key) : 'Open shift',
+                        role: shift.role || '', shifts: {} };
     }
     // Parse YYYY-MM-DD as a LOCAL date — new Date('2026-09-28') is UTC midnight
     const p = String(shift.date || '').slice(0, 10).split('-').map(Number);

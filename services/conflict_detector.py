@@ -124,7 +124,8 @@ class ConflictDetector:
         for shift in roster.shifts:
             employee = employees_dict.get(shift.employee_id)
             if not employee:
-                logger.warning(f"Employee {shift.employee_id} not found")
+                if shift.employee_id:
+                    logger.warning(f"Employee {shift.employee_id} not found")
                 continue
 
             emp_shifts = shifts_by_employee[shift.employee_id]
@@ -423,6 +424,8 @@ class ConflictDetector:
                 continue
             area = normalise_area(shift.role)
             for cell in shift.clock_hours():
+                if not shift.employee_id:
+                    continue  # an open shift is a gap, not cover
                 on_by_cell[cell].append(shift.employee_id)
                 on_by_area[area][cell].append(shift.employee_id)
             start_dt = datetime.combine(shift.date, shift.start_time)

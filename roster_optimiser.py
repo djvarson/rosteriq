@@ -522,6 +522,8 @@ def _rostered_coverage_by_cell(roster: Roster) -> dict:
     from collections import defaultdict
     cells: dict = defaultdict(int)
     for s in roster.shifts:
+        if not s.employee_id:
+            continue  # an open shift is a gap until someone is on it
         start_dt = datetime.combine(s.date, s.start_time)
         end_dt = datetime.combine(s.date, s.end_time)
         if s.end_time < s.start_time:          # crosses midnight

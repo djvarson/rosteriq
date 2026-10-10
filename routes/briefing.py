@@ -65,7 +65,8 @@ async def daily_briefing(venue_id: str = Query(...),
         active = current_roster(db, venue_id, today)
     except Exception as e:
         logger.warning(f"Briefing roster lookup failed for {venue_id}: {e}")
-    on_today = len([sh for sh in (active.shifts if active else []) if sh.date == today])
+    on_today = len([sh for sh in (active.shifts if active else [])
+                    if sh.date == today and sh.employee_id])
     try:
         labour_today = float((_labour_by_day(db, venue_id, today, today) or {}).get(today.isoformat(), 0.0))
     except Exception as e:
@@ -93,6 +94,18 @@ async def daily_briefing(venue_id: str = Query(...),
     except Exception as e:
         logger.warning(f"Briefing coverage failed for {venue_id}: {e}")
         attention.append("Couldn't verify today's coverage — check the roster.")
+
+    # --- Open shifts this week (left by approved leave or unfilled) --------
+    open_shifts = []
+    try:
+        from rosteriq.services.leave_shifts import open_shift_notices
+        open_shifts = open_shift_notices(db, venue_id, today, today + timedelta(days=6))
+    except Exception as e:
+        logger.warning(f"Briefing open-shift check failed for {venue_id}: {e}")
+    for notice in open_shifts[:4]:
+        attention.append(notice["message"] + " \u2014 approve a cover or roster someone.")
+    if len(open_shifts) > 4:
+        attention.append(f"{len(open_shifts) - 4} more open shift(s) this week.")
 
     # --- Approvals waiting ------------------------------------------------
     pending_leave = len([r for r in (db.list_leave_requests(venue_id) or [])
@@ -195,6 +208,7 @@ async def daily_briefing(venue_id: str = Query(...),
             "coverage": coverage,
         },
         "approvals": {"pending_leave": pending_leave, "open_covers": open_covers},
+        "open_shifts": open_shifts,
         "team": {"outstanding_acks": compliance["outstanding_acks"],
                  "documents_requiring_ack": compliance["documents"],
                  "feed_awaiting_reply": pulse["awaiting_reply"]},

@@ -30,6 +30,7 @@ from rosteriq.award_rules import (
     OVERTIME_MULTIPLIERS,
     DayType,
 )
+from rosteriq.services.pay_basis import is_salaried, salary_per_day
 
 # Per-band ordinary multipliers (permanent-style: 1.0 + loading). Evening/night
 # loading applies to weekday hours actually worked in those windows.
@@ -115,7 +116,12 @@ def calculate_shift_cost_breakdown(
     Returns:
         CostBreakdown with base_cost, penalty_cost, casual_loading,
         super_contribution, and total_cost.
+
+    A salaried employee's shift costs one day of salary (weekly_salary / 7)
+    plus super, with no penalties or loading (services/pay_basis.py).
     """
+    if is_salaried(employee):
+        return _salaried_day_breakdown(employee, shift.date)
     net_hours = Decimal(str(shift.net_hours))
     base_hourly = employee.hourly_base_rate
 
@@ -191,6 +197,40 @@ def calculate_shift_cost_breakdown(
     )
 
 
+def _salaried_day_breakdown(employee: Employee, day: date) -> CostBreakdown:
+    base = salary_per_day(employee)
+    super_contribution = (base * super_guarantee_rate(day)).quantize(_CENT, ROUND_HALF_UP)
+    return CostBreakdown(
+        base_cost=base,
+        penalty_cost=Decimal("0.00"),
+        casual_loading=Decimal("0.00"),
+        super_contribution=super_contribution,
+        total_cost=base + super_contribution,
+    )
+
+
+def _salaried_week(employee: Employee, shifts: list[Shift]) -> dict:
+    """One day of salary per rostered calendar day; never overtime."""
+    days = sorted({s.date for s in shifts if s.net_hours > 0})
+    base = Decimal("0.00")
+    super_contribution = Decimal("0.00")
+    for day in days:
+        bd = _salaried_day_breakdown(employee, day)
+        base += bd.base_cost
+        super_contribution += bd.super_contribution
+    hours = sum((Decimal(str(s.net_hours)) for s in shifts if s.net_hours > 0), Decimal("0"))
+    return {
+        "base_cost": base,
+        "penalty_cost": Decimal("0.00"),
+        "casual_loading": Decimal("0.00"),
+        "overtime_cost": Decimal("0.00"),
+        "super_contribution": super_contribution,
+        "total_cost": base + super_contribution,
+        "ordinary_hours": hours,
+        "overtime_hours": Decimal("0"),
+    }
+
+
 def _overtime_cost(
     ot_hours: Decimal,
     ot_already_used: Decimal,
@@ -234,7 +274,12 @@ def cost_employee_week(
 
     Returns a dict with base/penalty/casual_loading/overtime/super/total/
     ordinary_hours/overtime_hours so callers (and tests) can see each component.
+
+    A salaried employee costs one day of salary per rostered day, with no
+    penalties or overtime (services/pay_basis.py).
     """
+    if is_salaried(employee):
+        return _salaried_week(employee, shifts)
     base_hourly = employee.hourly_base_rate
     is_casual = employee.employment_type == EmploymentType.casual
     # Process chronologically so the LAST hours of the week become overtime.
@@ -359,6 +404,8 @@ def calculate_roster_cost(
     """
     by_employee: dict[str, list[Shift]] = {}
     for shift in roster.shifts:
+        if not shift.employee_id:
+            continue  # an open shift has nobody to pay yet
         if shift.employee_id not in employees:
             raise ValueError(f"Employee {shift.employee_id} not found")
         by_employee.setdefault(shift.employee_id, []).append(shift)
@@ -423,12 +470,18 @@ def estimate_daily_labour_cost(
         Total estimated daily labour cost.
     """
     total = Decimal("0")
+    salaried_days = set()
     for shift in shifts:
+        if not shift.employee_id:
+            continue  # an open shift has nobody to pay yet
         if shift.employee_id not in employees:
             raise ValueError(f"Employee {shift.employee_id} not found")
-        breakdown = calculate_shift_cost_breakdown(
-            employees[shift.employee_id], shift, state
-        )
+        employee = employees[shift.employee_id]
+        if is_salaried(employee):
+            if (employee.id, shift.date) in salaried_days:
+                continue
+            salaried_days.add((employee.id, shift.date))
+        breakdown = calculate_shift_cost_breakdown(employee, shift, state)
         total += breakdown.total_cost
 
     return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

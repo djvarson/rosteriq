@@ -3422,6 +3422,10 @@ class PostgresStore(BaseStore):
                 start_date DATE NOT NULL,
                 end_date DATE NOT NULL,
                 reason TEXT,
+                leave_type TEXT DEFAULT 'other',
+                paid_hours NUMERIC(6, 2),
+                entered_by TEXT,
+                opened_shifts JSONB DEFAULT '[]'::jsonb,
                 status TEXT NOT NULL DEFAULT 'pending',
                 decided_by TEXT,
                 decided_at TIMESTAMP WITH TIME ZONE,
@@ -3441,6 +3445,7 @@ class PostgresStore(BaseStore):
                 role TEXT,
                 requested_by TEXT NOT NULL,
                 reason TEXT,
+                origin TEXT,
                 claimed_by TEXT,
                 status TEXT NOT NULL DEFAULT 'open',
                 decided_by TEXT,
@@ -3588,6 +3593,8 @@ class PostgresStore(BaseStore):
                 visa_status TEXT,
                 visa_expiry DATE,
                 visa_work_limit_fortnight NUMERIC(5, 2),
+                pay_basis TEXT DEFAULT 'hourly',
+                weekly_salary NUMERIC(10, 2),
                 active BOOLEAN DEFAULT true,
                 rate_history JSONB DEFAULT '[]',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -3607,7 +3614,7 @@ class PostgresStore(BaseStore):
             CREATE TABLE IF NOT EXISTS shifts (
                 id TEXT PRIMARY KEY,
                 roster_id TEXT NOT NULL REFERENCES rosters(id) ON DELETE CASCADE,
-                employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                employee_id TEXT REFERENCES employees(id) ON DELETE CASCADE,
                 shift_date DATE NOT NULL,
                 start_time TIME NOT NULL,
                 end_time TIME NOT NULL,
@@ -3801,6 +3808,15 @@ class PostgresStore(BaseStore):
             "ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_work_limit_fortnight NUMERIC(5, 2)",
             "ALTER TABLE employees ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true",
             "ALTER TABLE employees ADD COLUMN IF NOT EXISTS rate_history JSONB DEFAULT '[]'::jsonb",
+            "ALTER TABLE employees ADD COLUMN IF NOT EXISTS pay_basis TEXT DEFAULT 'hourly'",
+            "ALTER TABLE employees ADD COLUMN IF NOT EXISTS weekly_salary NUMERIC(10, 2)",
+            # An open shift (left by approved leave) is stored with no employee.
+            "ALTER TABLE shifts ALTER COLUMN employee_id DROP NOT NULL",
+            "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS leave_type TEXT DEFAULT 'other'",
+            "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS paid_hours NUMERIC(6, 2)",
+            "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS entered_by TEXT",
+            "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS opened_shifts JSONB DEFAULT '[]'::jsonb",
+            "ALTER TABLE shift_covers ADD COLUMN IF NOT EXISTS origin TEXT",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_venue_created ON audit_logs (venue_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs ((details->>'category'), created_at DESC)",
@@ -3940,8 +3956,8 @@ class PostgresStore(BaseStore):
                 INSERT INTO employees (id, venue_id, tanda_id, name, employment_type, award_level,
                     hourly_base_rate, skills, availability, max_hours_per_week, consecutive_days, phone, email,
                     visa_status, visa_expiry, visa_work_limit_fortnight, active, rate_history,
-                    created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    pay_basis, weekly_salary, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, employment_type=EXCLUDED.employment_type,
                     award_level=EXCLUDED.award_level,
@@ -3952,6 +3968,7 @@ class PostgresStore(BaseStore):
                     visa_status=EXCLUDED.visa_status, visa_expiry=EXCLUDED.visa_expiry,
                     visa_work_limit_fortnight=EXCLUDED.visa_work_limit_fortnight,
                     active=EXCLUDED.active, rate_history=EXCLUDED.rate_history,
+                    pay_basis=EXCLUDED.pay_basis, weekly_salary=EXCLUDED.weekly_salary,
                     updated_at=now()
             """, (
                 emp.id, venue_id, emp.tanda_id, emp.name,
@@ -3963,6 +3980,8 @@ class PostgresStore(BaseStore):
                 emp.visa_work_limit_fortnight,
                 bool(getattr(emp, "active", True)),
                 _json(list(getattr(emp, "rate_history", None) or [])),
+                getattr(emp, "pay_basis", "hourly") or "hourly",
+                (float(emp.weekly_salary) if getattr(emp, "weekly_salary", None) is not None else None),
                 emp.created_at, emp.updated_at,
             ))
 
@@ -4221,15 +4240,21 @@ class PostgresStore(BaseStore):
             self._ensure_table(cur, "leave_requests")
             cur.execute("""
                 INSERT INTO leave_requests (id, venue_id, employee_id, start_date, end_date,
-                    reason, status, decided_by, decided_at, decision_note, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    reason, leave_type, paid_hours, entered_by, opened_shifts,
+                    status, decided_by, decided_at, decision_note, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
+                    leave_type=EXCLUDED.leave_type, paid_hours=EXCLUDED.paid_hours,
+                    opened_shifts=EXCLUDED.opened_shifts,
                     status=EXCLUDED.status, decided_by=EXCLUDED.decided_by,
                     decided_at=EXCLUDED.decided_at, decision_note=EXCLUDED.decision_note,
                     updated_at=now()
             """, (
                 req["id"], req["venue_id"], req["employee_id"], req["start_date"],
-                req["end_date"], req.get("reason"), req.get("status", "pending"),
+                req["end_date"], req.get("reason"), req.get("leave_type") or "other",
+                req.get("paid_hours"), req.get("entered_by"),
+                _json(list(req.get("opened_shifts") or [])),
+                req.get("status", "pending"),
                 req.get("decided_by"), req.get("decided_at"), req.get("decision_note"),
                 req.get("created_at", datetime.utcnow()),
             ))
@@ -4239,7 +4264,7 @@ class PostgresStore(BaseStore):
             self._ensure_table(cur, "leave_requests")
             cur.execute("SELECT * FROM leave_requests WHERE id = %s", (req_id,))
             row = cur.fetchone()
-            return dict(row) if row else None
+            return self._leave_row(row) if row else None
 
     def list_leave_requests(self, venue_id):
         with self._cursor() as cur:
@@ -4247,16 +4272,24 @@ class PostgresStore(BaseStore):
             cur.execute("""
                 SELECT * FROM leave_requests WHERE venue_id = %s ORDER BY created_at DESC
             """, (venue_id,))
-            return [dict(r) for r in cur.fetchall()]
+            return [self._leave_row(r) for r in cur.fetchall()]
+
+    @staticmethod
+    def _leave_row(row):
+        d = dict(row)
+        d["opened_shifts"] = _jsonb(d.get("opened_shifts"), [])
+        if d.get("paid_hours") is not None:
+            d["paid_hours"] = float(d["paid_hours"])
+        return d
 
     def save_shift_cover(self, cover):
         with self._cursor() as cur:
             self._ensure_table(cur, "shift_covers")
             cur.execute("""
                 INSERT INTO shift_covers (id, venue_id, shift_id, shift_date, shift_start,
-                    shift_end, role, requested_by, reason, claimed_by, status,
+                    shift_end, role, requested_by, reason, origin, claimed_by, status,
                     decided_by, decided_at, decision_note, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
                     claimed_by=EXCLUDED.claimed_by, status=EXCLUDED.status,
                     decided_by=EXCLUDED.decided_by, decided_at=EXCLUDED.decided_at,
@@ -4264,7 +4297,8 @@ class PostgresStore(BaseStore):
             """, (
                 cover["id"], cover["venue_id"], cover["shift_id"], cover["shift_date"],
                 cover.get("shift_start"), cover.get("shift_end"), cover.get("role"),
-                cover["requested_by"], cover.get("reason"), cover.get("claimed_by"),
+                cover["requested_by"], cover.get("reason"), cover.get("origin"),
+                cover.get("claimed_by"),
                 cover.get("status", "open"), cover.get("decided_by"),
                 cover.get("decided_at"), cover.get("decision_note"),
                 cover.get("created_at", datetime.utcnow()),
@@ -4925,6 +4959,9 @@ class PostgresStore(BaseStore):
                                        if row.get("visa_work_limit_fortnight") is not None else None),
             active=row.get("active") is not False,
             rate_history=_jsonb(row.get("rate_history"), []) or [],
+            pay_basis=row.get("pay_basis") or "hourly",
+            weekly_salary=(Decimal(str(row["weekly_salary"]))
+                           if row.get("weekly_salary") is not None else None),
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
 
@@ -5006,7 +5043,7 @@ class PostgresStore(BaseStore):
                         status=EXCLUDED.status, role=EXCLUDED.role,
                         cost=EXCLUDED.cost, penalty_multiplier=EXCLUDED.penalty_multiplier
                 """, (
-                    shift.id, roster.id, shift.employee_id, shift.date,
+                    shift.id, roster.id, shift.employee_id or None, shift.date,
                     shift.start_time, shift.end_time, shift.break_minutes,
                     shift.status.value, shift.role,
                     float(shift.cost) if shift.cost else None,
@@ -5048,7 +5085,7 @@ class PostgresStore(BaseStore):
 
     def _row_to_shift(self, row):
         return Shift(
-            id=row["id"], employee_id=row["employee_id"],
+            id=row["id"], employee_id=row["employee_id"] or "",
             date=row["shift_date"],
             start_time=row["start_time"], end_time=row["end_time"],
             break_minutes=row.get("break_minutes", 0),
@@ -5097,7 +5134,7 @@ class PostgresStore(BaseStore):
             """, (
                 shift.id,
                 roster_id,
-                shift.employee_id,
+                shift.employee_id or None,
                 shift.date,
                 shift.start_time,
                 shift.end_time,

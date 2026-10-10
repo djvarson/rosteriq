@@ -189,6 +189,7 @@ async def prepare_payroll_batch(
             state=request.state,
             shifts=shifts,
             employees=employees,
+            leave_requests=db.list_leave_requests(request.venue_id),
         )
 
         # Validate batch
@@ -304,6 +305,7 @@ async def prepare_payroll_from_timesheets(
         state=request.state,
         shifts=shifts,
         employees=employees,
+        leave_requests=db.list_leave_requests(request.venue_id),
     )
     errors = exporter.validate_batch(batch)
     db.save_payroll_batch(batch.to_dict())
@@ -349,7 +351,9 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
     w.writerow(["Employee", "Ordinary hours", "Ordinary rate", "Ordinary gross",
                 "Penalty hours detail", "Penalty gross", "Overtime hours",
                 "Overtime gross", "Allowance detail", "Allowances", "Total gross",
-                f"Super ({super_rate_label(super_rate)})", "Total incl super"])
+                f"Super ({super_rate_label(super_rate)})", "Total incl super",
+                "Pay basis", "Salary (fixed line)", "Hours worked (salaried, not priced)",
+                "Paid leave hours (advisor to price)"])
     for e in batch.get("employees", []):
         penalty_detail = "; ".join(
             f"{p['penalty_type']} {p['hours']}h x{p['multiplier']}"
@@ -359,19 +363,27 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
         allowance_detail = "; ".join(
             f"{a['allowance_type']} ${a['amount']}"
             for a in e.get("allowances", []))
+        salaried = e.get("pay_basis") == "salaried"
+        leave_detail = "; ".join(
+            f"{le['leave_type']} {le['hours']}h" + (f" ({le['note']})" if le.get("note") else "")
+            for le in e.get("leave_entries", []))
         w.writerow([
             e.get("name"), e.get("ordinary_hours"), e.get("ordinary_rate"),
             e.get("ordinary_gross"), penalty_detail, e.get("penalty_gross"),
             e.get("overtime_hours"), e.get("overtime_amount"),
             allowance_detail, e.get("allowances_total"), e.get("total_gross"),
             e.get("super_amount"), e.get("total_with_super"),
+            e.get("pay_basis") or "hourly",
+            e.get("salary_amount") if salaried else "",
+            e.get("worked_hours") if salaried else "",
+            leave_detail,
         ])
     w.writerow([])
     w.writerow(["TOTALS", batch.get("total_ordinary_hours"), "",
                 batch.get("total_ordinary_gross"), "", batch.get("total_penalty_gross"),
                 batch.get("total_overtime_hours"), batch.get("total_overtime_gross"),
                 "", batch.get("total_allowances"), batch.get("total_gross"),
-                batch.get("total_super"), ""])
+                batch.get("total_super"), "", "", batch.get("total_salary", ""), "", ""])
 
     return PlainTextResponse(
         buf.getvalue(),

@@ -27,6 +27,7 @@ from rosteriq.award_rules import (
     split_weekday_hours_by_band,
 )
 from rosteriq.cost_calculator import split_at_midnight, super_guarantee_rate
+from rosteriq.services.pay_basis import is_salaried, salary_for_days
 
 
 class PayrollStatus(str, Enum):
@@ -90,6 +91,7 @@ class LeaveEntry:
     hours: Decimal
     rate: Decimal
     amount: Decimal
+    note: str = ""
 
 
 @dataclass
@@ -129,6 +131,12 @@ class EmployeePayroll:
     # Superannuation
     super_amount: Decimal = Decimal("0.00")
 
+    # Salaried: one fixed line for the period (services/pay_basis.py); the
+    # hours they punched are shown for information, never priced.
+    pay_basis: str = "hourly"
+    salary_amount: Decimal = Decimal("0.00")
+    worked_hours: Decimal = Decimal("0.00")
+
     @property
     def total_ordinary_hours(self) -> Decimal:
         """Total ordinary hours worked."""
@@ -163,6 +171,7 @@ class EmployeePayroll:
             + self.overtime_amount
             + self.leave_gross
             + self.allowances_total
+            + self.salary_amount
         )
 
     @property
@@ -197,6 +206,7 @@ class PayrollBatch:
     total_overtime_gross: Decimal = Decimal("0.00")
     total_leave_gross: Decimal = Decimal("0.00")
     total_allowances: Decimal = Decimal("0.00")
+    total_salary: Decimal = Decimal("0.00")
 
     total_gross: Decimal = Decimal("0.00")
     total_super: Decimal = Decimal("0.00")
@@ -216,6 +226,7 @@ class PayrollBatch:
         self.total_overtime_gross = sum(e.overtime_amount for e in self.employees)
         self.total_leave_gross = sum(e.leave_gross for e in self.employees)
         self.total_allowances = sum(e.allowances_total for e in self.employees)
+        self.total_salary = sum((e.salary_amount for e in self.employees), Decimal("0.00"))
 
         self.total_gross = sum(e.total_gross for e in self.employees)
         self.total_super = sum(e.super_amount for e in self.employees)
@@ -240,6 +251,7 @@ class PayrollBatch:
             "total_overtime_gross": str(self.total_overtime_gross),
             "total_leave_gross": str(self.total_leave_gross),
             "total_allowances": str(self.total_allowances),
+            "total_salary": str(self.total_salary),
             "total_gross": str(self.total_gross),
             "total_super": str(self.total_super),
             "super_rate": str(super_guarantee_rate(self.period_end)),
@@ -277,6 +289,7 @@ def _employee_payroll_to_dict(emp: EmployeePayroll) -> Dict[str, Any]:
                 "hours": str(le.hours),
                 "rate": str(le.rate),
                 "amount": str(le.amount),
+                "note": le.note,
             }
             for le in emp.leave_entries
         ],
@@ -290,6 +303,9 @@ def _employee_payroll_to_dict(emp: EmployeePayroll) -> Dict[str, Any]:
         ],
         "allowances_total": str(emp.allowances_total),
         "super_amount": str(emp.super_amount),
+        "pay_basis": emp.pay_basis,
+        "salary_amount": str(emp.salary_amount),
+        "worked_hours": str(emp.worked_hours),
         "total_gross": str(emp.total_gross),
         "total_with_super": str(emp.total_with_super),
     }
@@ -326,6 +342,7 @@ def _employee_payroll_from_dict(d: Dict[str, Any]) -> EmployeePayroll:
                 hours=Decimal(le["hours"]),
                 rate=Decimal(le["rate"]),
                 amount=Decimal(le["amount"]),
+                note=le.get("note", ""),
             )
             for le in d.get("leave_entries", [])
         ],
@@ -336,6 +353,9 @@ def _employee_payroll_from_dict(d: Dict[str, Any]) -> EmployeePayroll:
         ],
         allowances_total=Decimal(d.get("allowances_total", "0.00")),
         super_amount=Decimal(d.get("super_amount", "0.00")),
+        pay_basis=d.get("pay_basis", "hourly"),
+        salary_amount=Decimal(d.get("salary_amount", "0.00")),
+        worked_hours=Decimal(d.get("worked_hours", "0.00")),
     )
 
 
@@ -389,6 +409,7 @@ class PayrollExporter:
         shifts: List[Shift],
         employees: Dict[str, Employee],
         allowance_rules: Optional[List[AllowanceRule]] = None,
+        leave_requests: Optional[List[dict]] = None,
     ) -> PayrollBatch:
         """
         Prepare timesheet data for a pay period.
@@ -411,6 +432,12 @@ class PayrollExporter:
             shifts: List of Shift objects for the period
             employees: Dict of {employee_id: Employee}
             allowance_rules: the venue's configured allowances (none if omitted)
+            leave_requests: the venue's leave requests; approved paid leave
+                becomes a separate hours line for the advisor to price (no
+                leave loading or pay is calculated)
+
+        Salaried employees of the venue get one fixed salary line for the
+        period, whether or not they have shifts (services/pay_basis.py).
 
         Returns:
             PayrollBatch with prepared timesheet data
@@ -437,12 +464,26 @@ class PayrollExporter:
                 continue
 
             emp = employees[emp_id]
-            emp_payroll = self._process_employee_shifts(
-                emp, emp_shifts, state, period_start, period_end,
-                allowance_rules=allowance_rules,
-            )
+            if is_salaried(emp):
+                emp_payroll = self._salaried_line(emp, emp_shifts, period_start, period_end)
+            else:
+                emp_payroll = self._process_employee_shifts(
+                    emp, emp_shifts, state, period_start, period_end,
+                    allowance_rules=allowance_rules,
+                )
             if emp_payroll:
                 batch.employees.append(emp_payroll)
+
+        listed = {e.employee_id for e in batch.employees}
+        for emp in employees.values():
+            if (emp.id not in listed and is_salaried(emp)
+                    and getattr(emp, "venue_id", None) == venue_id
+                    and getattr(emp, "active", True)):
+                batch.employees.append(self._salaried_line(emp, [], period_start, period_end))
+                listed.add(emp.id)
+
+        self._add_leave_lines(batch, venue_id, employees, leave_requests,
+                              period_start, period_end)
 
         # Calculate batch totals
         batch.calculate_totals()
@@ -643,6 +684,66 @@ class PayrollExporter:
 
         return emp_payroll if emp_payroll.total_hours > 0 else None
 
+    def _salaried_line(
+        self,
+        employee: Employee,
+        shifts: List[Shift],
+        period_start: date,
+        period_end: date,
+    ) -> EmployeePayroll:
+        """One fixed line: weekly_salary / 7 for each day of the period, super
+        on it, no penalties or overtime. Punched hours are informational."""
+        days = (period_end - period_start).days + 1
+        salary = salary_for_days(employee, days)
+        worked = sum((Decimal(str(s.net_hours)) for s in shifts if s.net_hours > 0), Decimal("0"))
+        line = EmployeePayroll(
+            employee_id=employee.id,
+            name=employee.name,
+            email=employee.email,
+            tax_file_number_masked=self._mask_tfn(employee.id),
+            ordinary_rate=employee.hourly_base_rate,
+            pay_basis="salaried",
+            salary_amount=salary,
+            worked_hours=worked.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        )
+        line.super_amount = (salary * super_guarantee_rate(period_end)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return line
+
+    def _add_leave_lines(self, batch, venue_id, employees, leave_requests,
+                         period_start, period_end) -> None:
+        """Approved paid leave as hours lines, unpriced, for the advisor."""
+        from rosteriq.services.leave_shifts import approved_paid_leave, leave_type_label
+        by_emp = approved_paid_leave(leave_requests or [], period_start, period_end)
+        lines = {e.employee_id: e for e in batch.employees}
+        for emp_id, entries in by_emp.items():
+            emp = employees.get(emp_id)
+            if emp is None or getattr(emp, "venue_id", None) != venue_id:
+                continue
+            line = lines.get(emp_id)
+            if line is None:
+                line = EmployeePayroll(
+                    employee_id=emp.id, name=emp.name, email=emp.email,
+                    tax_file_number_masked=self._mask_tfn(emp.id),
+                    ordinary_rate=emp.hourly_base_rate,
+                    pay_basis="salaried" if is_salaried(emp) else "hourly",
+                )
+                batch.employees.append(line)
+                lines[emp_id] = line
+            for leave_type, hours, req in entries:
+                note = (f"{leave_type_label(leave_type)} {req.get('start_date')} to "
+                        f"{req.get('end_date')} — hours as recorded; advisor to price")
+                if hours is None:
+                    note = (f"{leave_type_label(leave_type)} {req.get('start_date')} to "
+                            f"{req.get('end_date')} — no hours recorded; advisor to confirm")
+                line.leave_entries.append(LeaveEntry(
+                    leave_type=leave_type,
+                    hours=hours if hours is not None else Decimal("0.00"),
+                    rate=emp.hourly_base_rate,
+                    amount=Decimal("0.00"),
+                    note=note,
+                ))
+
     def _get_penalty_multiplier_for_type(
         self,
         employment_type: EmploymentType,
@@ -718,7 +819,7 @@ class PayrollExporter:
             errors.append("Period start must be before period end")
 
         for emp in batch.employees:
-            if emp.total_hours <= 0:
+            if emp.total_hours <= 0 and emp.salary_amount <= 0 and not emp.leave_entries:
                 errors.append(f"Employee {emp.name} has no hours")
 
             if emp.total_gross < 0:

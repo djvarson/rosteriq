@@ -162,8 +162,8 @@ class NoShowPredictor:
         risks: List[ShiftRisk] = []
         for roster in rosters_in_range:
             for shift in roster.shifts:
-                # Only assess upcoming/scheduled shifts
-                if shift.status in [ShiftStatus.scheduled, ShiftStatus.confirmed]:
+                # Only assess upcoming/scheduled shifts someone is on
+                if shift.employee_id and shift.status in [ShiftStatus.scheduled, ShiftStatus.confirmed]:
                     if start_date <= shift.date <= end_date:
                         risk = self._assess_shift_risk(shift, venue_id)
                         risks.append(risk)
