@@ -10,7 +10,7 @@ from datetime import date, time, datetime, timedelta
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, PrivateAttr, field_validator, model_validator
 
 
 __all__ = [
@@ -174,7 +174,7 @@ def normalise_skills(value) -> List[str]:
     for item in items:
         if item is None:
             continue
-        for part in re.split(r"[,;|/]", str(item)):
+        for part in re.split(r"[,;|\n]", str(item)):
             part = normalise_area(part)
             if part and part not in out:
                 out.append(part)
@@ -183,7 +183,7 @@ def normalise_skills(value) -> List[str]:
 
 def holds_skill(skills, role) -> bool:
     """Whether skills cover role, ignoring case. A role naming several areas
-    ('bar/cellar') needs every one of them."""
+    ('bar, cellar') needs every one of them; '/' is part of an area's name."""
     wanted = normalise_skills(role)
     held = set(normalise_skills(skills))
     return bool(wanted) and all(w in held for w in wanted)
@@ -361,6 +361,14 @@ class Roster(BaseModel):
     shifts: List[Shift] = []
     total_cost: Optional[Decimal] = None
     created_at: datetime
+
+    # Shift ids this copy held when it was built (read from the store, or
+    # constructed) or last saved. A store deletes only ids dropped since, so
+    # a stale copy never deletes shifts another request added meanwhile.
+    _saved_shift_ids: frozenset = PrivateAttr(default_factory=frozenset)
+
+    def model_post_init(self, __context) -> None:
+        self._saved_shift_ids = frozenset(s.id for s in self.shifts)
 
     @model_validator(mode="after")
     def validate_week_dates(self) -> "Roster":

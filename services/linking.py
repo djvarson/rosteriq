@@ -21,7 +21,8 @@ Rules
 * Join codes are deterministic — HMAC(JWT_SECRET, employee_id) rendered as
   8 unambiguous base32 characters ("XXXX-XXXX") — so nothing new is stored
   and every worker/process agrees. Rotating JWT_SECRET rotates every code.
-  Brute force: 32^8 ≈ 1e12 codes; attempts are also throttled per user.
+  Brute force: 32^8 ≈ 1e12 codes; attempts are also throttled per user, and
+  wrong codes per IP so minting accounts buys no extra guesses.
 """
 
 from __future__ import annotations
@@ -43,6 +44,10 @@ _CONFUSABLE = str.maketrans({"O": "0", "I": "1", "L": "1"})
 MAX_CODE_ATTEMPTS = 5          # per user per window
 CODE_ATTEMPT_WINDOW_S = 15 * 60
 _attempts: dict = {}           # user_id -> [first_ts, count]
+# Wrong codes per IP per window. Only failures count: a whole pub linking
+# from one Wi-Fi on day one succeeds and never gets near it.
+MAX_FAILED_CODES_PER_IP = 30
+_ip_failures: dict = {}        # ip -> [first_ts, count]
 
 
 def _secret() -> bytes:
@@ -181,7 +186,35 @@ def _clear_throttle(user_id: str) -> None:
     _attempts.pop(user_id, None)
 
 
-def link_with_code(db, user, raw_code: str) -> Tuple[Optional[object], Optional[str]]:
+def _ip_window(ip: str, now: float):
+    first, count = _ip_failures.get(ip, (now, 0))
+    return (now, 0) if now - first > CODE_ATTEMPT_WINDOW_S else (first, count)
+
+
+def _throttle_ip(ip: Optional[str]) -> None:
+    """Raise if this IP has entered MAX_FAILED_CODES_PER_IP wrong codes in the window."""
+    from fastapi import HTTPException
+    if ip and _ip_window(ip, time.time())[1] >= MAX_FAILED_CODES_PER_IP:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many join-code attempts. Try again in 15 minutes.",
+        )
+
+
+def _record_ip_failure(ip: Optional[str]) -> None:
+    if not ip:
+        return
+    now = time.time()
+    if len(_ip_failures) > 10_000:
+        for stale in [k for k, (first, _) in _ip_failures.items()
+                      if now - first > CODE_ATTEMPT_WINDOW_S]:
+            _ip_failures.pop(stale, None)
+    first, count = _ip_window(ip, now)
+    _ip_failures[ip] = [first, count + 1]
+
+
+def link_with_code(db, user, raw_code: str,
+                   client_ip: Optional[str] = None) -> Tuple[Optional[object], Optional[str]]:
     """
     Link this login to the employee whose join code was entered. The employee
     must exist, must not already belong to a venue the user holds (nothing to
@@ -193,6 +226,7 @@ def link_with_code(db, user, raw_code: str) -> Tuple[Optional[object], Optional[
     from rosteriq.services.events import audit, security
 
     uid = getattr(user, "user_id", None) or ""
+    _throttle_ip(client_ip)
     _throttle(uid)
     code = normalise_code(raw_code)
     if len(code) != 9:
@@ -213,6 +247,7 @@ def link_with_code(db, user, raw_code: str) -> Tuple[Optional[object], Optional[
             break
 
     if match is None:
+        _record_ip_failure(client_ip)
         security("link.code_rejected", venue_id=None, user_id=uid, outcome="denied")
         raise HTTPException(status_code=400, detail="That join code isn't valid. Check it with your manager.")
 

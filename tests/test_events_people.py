@@ -489,7 +489,9 @@ def test_payroll_prepare_from_roster_is_audited_and_approve_follows():
     h, email = _owner(c)
     owner = get_db().get_user_by_email(email)
     vid = _venue(c, h, f"ev-payr-{uuid.uuid4().hex[:6]}", state="vic")
-    _seed_generated_roster(c, h, vid)
+    rid = _seed_generated_roster(c, h, vid)
+    # Rostered payroll pays the published plan, never a draft
+    get_db().update_roster_state(rid, "published", "test", "test")
     r = c.post("/api/payroll/prepare", json={
         "venue_id": vid, "period_start": "2026-06-22", "period_end": "2026-06-28", "state": "vic",
     }, headers=h)

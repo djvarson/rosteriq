@@ -37,7 +37,7 @@ import logging
 import uuid
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from rosteriq.database import get_db
@@ -207,12 +207,15 @@ class LinkBody(BaseModel):
 
 
 @router.post("/api/me/link")
-async def link_my_account(body: LinkBody, user: UserContext = Depends(get_current_user)) -> dict:
+async def link_my_account(body: LinkBody, request: Request,
+                          user: UserContext = Depends(get_current_user)) -> dict:
     """Link this login to a staff record with the join code the manager gave
-    you. Grants the venue durably; throttled (5 tries / 15 min)."""
+    you. Grants the venue durably; throttled per login (5 tries / 15 min)
+    and per IP (wrong codes)."""
     from rosteriq.services.linking import link_with_code
     db = get_db()
-    emp, vid = link_with_code(db, user, body.code)
+    emp, vid = link_with_code(db, user, body.code,
+                              client_ip=request.client.host if request.client else None)
     venue = db.get_venue(vid)
     return {
         "linked": True,

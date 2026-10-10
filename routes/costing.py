@@ -29,6 +29,9 @@ from rosteriq.services.employee_costing import (
     ShiftCostDetail,
 )
 from rosteriq.database import get_db
+from rosteriq.middleware.tenant import (
+    enforce_venue_manager_any, load_employee_in_scope, load_roster_in_scope, load_shift_in_scope,
+)
 
 
 # ============================================================================
@@ -37,6 +40,14 @@ from rosteriq.database import get_db
 
 router = APIRouter(prefix="/api/v1/costing", tags=["costing"])
 service = EmployeeCostingService()
+
+
+def _employee_for_manager(db, employee_id: str):
+    """Every figure here is built from a pay rate: the employee must be in
+    the caller's venues (404 otherwise) and the caller must manage it."""
+    employee = load_employee_in_scope(db, employee_id)
+    enforce_venue_manager_any(employee.venue_id)
+    return employee
 
 
 # ============================================================================
@@ -221,11 +232,7 @@ async def get_employee_cost_projection(
         EmployeeCostProjectionJSON with detailed breakdown
     """
     db = get_db()
-
-    # Fetch employee
-    employee = db.get_employee(employee_id)
-    if not employee:
-        raise HTTPException(status_code=404, detail=f"Employee {employee_id} not found")
+    employee = _employee_for_manager(db, employee_id)
 
     # Fetch upcoming shifts
     today = date.today()
@@ -265,21 +272,8 @@ async def compare_employees(request: CompareEmployeesRequest) -> List[EmployeeCo
     """
     db = get_db()
 
-    # Fetch employees
-    employees = []
-    for emp_id in request.employee_ids:
-        emp = db.get_employee(emp_id)
-        if not emp:
-            raise HTTPException(status_code=404, detail=f"Employee {emp_id} not found")
-        employees.append(emp)
-
-    # Fetch shifts
-    shifts = []
-    for shift_id in request.shift_ids:
-        shift = db.get_shift(shift_id)
-        if not shift:
-            raise HTTPException(status_code=404, detail=f"Shift {shift_id} not found")
-        shifts.append(shift)
+    employees = [_employee_for_manager(db, emp_id) for emp_id in request.employee_ids]
+    shifts = [load_shift_in_scope(db, shift_id) for shift_id in request.shift_ids]
 
     if not shifts:
         raise HTTPException(status_code=400, detail="No shifts provided")
@@ -311,18 +305,8 @@ async def find_cheapest_employee(request: FindCheapestRequest) -> List[dict]:
     """
     db = get_db()
 
-    # Fetch employees
-    employees = []
-    for emp_id in request.eligible_employee_ids:
-        emp = db.get_employee(emp_id)
-        if not emp:
-            raise HTTPException(status_code=404, detail=f"Employee {emp_id} not found")
-        employees.append(emp)
-
-    # Fetch shift
-    shift = db.get_shift(request.shift_id)
-    if not shift:
-        raise HTTPException(status_code=404, detail=f"Shift {request.shift_id} not found")
+    employees = [_employee_for_manager(db, emp_id) for emp_id in request.eligible_employee_ids]
+    shift = load_shift_in_scope(db, request.shift_id)
 
     # Parse payroll
     venue_payroll = None
@@ -366,11 +350,7 @@ async def get_annual_cost_estimate(
         Dict with annual cost breakdown
     """
     db = get_db()
-
-    # Fetch employee
-    employee = db.get_employee(employee_id)
-    if not employee:
-        raise HTTPException(status_code=404, detail=f"Employee {employee_id} not found")
+    employee = _employee_for_manager(db, employee_id)
 
     # Parse payroll
     venue_payroll = None
@@ -409,27 +389,13 @@ async def calculate_roster_labour_cost(
     """
     db = get_db()
 
-    # Fetch roster
-    roster = db.get_roster(roster_id)
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {roster_id} not found")
+    roster = load_roster_in_scope(db, roster_id)
+    enforce_venue_manager_any(roster.venue_id)
 
-    # Fetch shifts
     roster_shifts = []
     for shift_id in request.shift_ids:
-        shift = db.get_shift(shift_id)
-        if not shift:
-            raise HTTPException(status_code=404, detail=f"Shift {shift_id} not found")
-
-        # Fetch employee for the shift
-        employee = db.get_employee(shift.employee_id)
-        if not employee:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Employee {shift.employee_id} for shift {shift_id} not found"
-            )
-
-        roster_shifts.append((employee, shift))
+        shift = load_shift_in_scope(db, shift_id)
+        roster_shifts.append((_employee_for_manager(db, shift.employee_id), shift))
 
     # Parse payroll
     venue_payroll = None

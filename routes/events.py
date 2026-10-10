@@ -5,8 +5,9 @@ Every audit / security / error event lands in the ``audit_logs`` table via the
 spine (``services/events.py``). These routes let the dashboard show them:
 
     GET /api/events?venue_id=&category=&action_prefix=&since=&limit=&offset=
-        Newest-first list. Managers/staff MUST pass a venue_id they can access
-        (403 otherwise, and 403 when omitted). Owners may omit venue_id for a
+        Newest-first list. Managers MUST pass a venue_id they manage (403
+        otherwise, and 403 when omitted); staff get 403 — the log carries rate
+        changes and payroll totals. Owners may omit venue_id for a
         platform-wide view (that is how the "Platform security & errors" card
         on the dashboard is fed).
     GET /api/events/summary?venue_id=&days=7
@@ -31,7 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager_any
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def _scope(current_user: UserContext, venue_id: Optional[str]) -> Optional[str]:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this venue",
         )
-    enforce_venue_access(venue_id)
+    enforce_venue_manager_any(venue_id)
     return venue_id
 
 

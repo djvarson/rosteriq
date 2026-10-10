@@ -268,7 +268,7 @@ def _award_level(v: str):
     return AwardLevel(f"level_{n}"), None
 
 
-_SKILL_SPLIT = re.compile(r"[,;|/\n]+")
+_SKILL_SPLIT = re.compile(r"[,;|\n]+")
 
 
 def _skills(cells) -> list:

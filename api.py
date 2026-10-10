@@ -37,6 +37,7 @@ from rosteriq.middleware.tenant import (
     TenantMiddleware, enforce_venue_access, enforce_venue_manager, enforce_owner, scoped_employee_map,
     get_tenant_context_optional,
 )
+from rosteriq.middleware.tenant import enforce_venue_manager_any
 from rosteriq.roster_optimiser import (
     generate_weekly_roster, generate_daily_roster,
     analyse_roster, suggest_improvements,
@@ -3108,7 +3109,7 @@ async def roster_coverage(roster_id: str, covers_per_staff: float = Query(DEFAUL
     roster = _store["rosters"].get(roster_id)
     if not roster:
         raise HTTPException(404, f"Roster {roster_id} not found")
-    enforce_venue_access(getattr(roster, "venue_id", None))
+    enforce_venue_manager_any(getattr(roster, "venue_id", None))
     try:
         forecasts = _db.get_forecasts(
             roster.venue_id, roster.week_start, roster.week_end) or []
@@ -3196,11 +3197,15 @@ async def list_rosters(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    enforce_venue_access(venue_id)
+    # Rosters carry every shift's cost: managers only.
+    _tenant = get_tenant_context_optional()
+    if venue_id:
+        enforce_venue_manager_any(venue_id)
+    elif _tenant is not None and not _tenant.is_manager_or_owner():
+        raise HTTPException(403, "This action requires one of these roles: manager, owner")
     from rosteriq.services.current_roster import SUPERSEDED, current_per_week, roster_state
     all_rosters = list(_store["rosters"].values())
     # Scope to the caller's venues (owners see all).
-    _tenant = get_tenant_context_optional()
     if _tenant is not None and not _tenant.is_owner:
         all_rosters = [r for r in all_rosters if getattr(r, "venue_id", None) in _tenant.venue_ids]
     # Optional filters let the dashboard load a single venue's roster for a week.
@@ -3227,7 +3232,7 @@ async def get_roster(roster_id: str):
     if roster_id not in _store["rosters"]:
         raise HTTPException(404, f"Roster {roster_id} not found")
     roster = _store["rosters"][roster_id]
-    enforce_venue_access(getattr(roster, "venue_id", None))
+    enforce_venue_manager_any(getattr(roster, "venue_id", None))
     return roster
 
 
@@ -3236,7 +3241,7 @@ async def analyse(roster_id: str):
     roster = _store["rosters"].get(roster_id)
     if not roster:
         raise HTTPException(404, f"Roster {roster_id} not found")
-    enforce_venue_access(getattr(roster, "venue_id", None))
+    enforce_venue_manager_any(getattr(roster, "venue_id", None))
 
     venue = _store["venues"].get(roster.venue_id)
     state = venue.state if venue else State.vic
@@ -3253,7 +3258,7 @@ async def get_suggestions(
     roster = _store["rosters"].get(roster_id)
     if not roster:
         raise HTTPException(404, f"Roster {roster_id} not found")
-    enforce_venue_access(getattr(roster, "venue_id", None))
+    enforce_venue_manager_any(getattr(roster, "venue_id", None))
 
     venue = _store["venues"].get(roster.venue_id)
     state = venue.state if venue else State.vic
@@ -3287,7 +3292,8 @@ async def shift_cost(
     emp = _store["employees"].get(employee_id)
     if not emp:
         raise HTTPException(404, f"Employee {employee_id} not found")
-    enforce_venue_access(getattr(emp, "venue_id", None))
+    _deny_venueless_to_non_owner(emp)
+    enforce_venue_manager_any(getattr(emp, "venue_id", None))
 
     from rosteriq.models import Shift, ShiftStatus
     from datetime import time
@@ -3309,7 +3315,7 @@ async def labour_pct(
     roster = _store["rosters"].get(roster_id)
     if not roster:
         raise HTTPException(404, f"Roster {roster_id} not found")
-    enforce_venue_access(getattr(roster, "venue_id", None))
+    enforce_venue_manager_any(getattr(roster, "venue_id", None))
 
     venue = _store["venues"].get(roster.venue_id)
     state = venue.state if venue else State.vic
@@ -3364,7 +3370,7 @@ async def calc_variance(req: VarianceRequest):
 
 @app.post("/decisions/recommend")
 async def recommend_decision(req: DecisionRequest):
-    enforce_venue_access(req.venue_id)
+    enforce_venue_manager_any(req.venue_id)
     venue = _store["venues"].get(req.venue_id)
     if not venue:
         raise HTTPException(404, f"Venue {req.venue_id} not found")

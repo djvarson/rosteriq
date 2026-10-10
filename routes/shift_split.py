@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from rosteriq.database import get_db
 from rosteriq.middleware.tenant import (
-    load_roster_in_scope, load_shift_in_scope, enforce_venue_manager,
+    load_roster_in_scope, load_shift_in_scope, enforce_venue_manager, enforce_venue_manager_any,
 )
 from rosteriq.services.shift_splitter import (
     ShiftSplitter, SplitResult, ShiftSplit, ShiftSegment
@@ -145,6 +145,7 @@ async def preview_roster_splits(roster_id: str) -> Dict:
     db = get_db()
     # 404 if missing or another tenant's (membership scope), before any work.
     roster = load_roster_in_scope(db, roster_id)
+    enforce_venue_manager_any(roster.venue_id)  # segment costs come from pay rates
 
     try:
         splitter = ShiftSplitter()
@@ -265,9 +266,8 @@ async def split_single_shift(
     # 404 if missing or another tenant's (membership scope via the shift's venue).
     shift = load_shift_in_scope(db, shift_id)
 
-    roster = db.get_roster(request.roster_id)
-    if not roster:
-        raise HTTPException(status_code=404, detail=f"Roster {request.roster_id} not found")
+    roster = load_roster_in_scope(db, request.roster_id)
+    enforce_venue_manager_any(roster.venue_id)  # segment costs come from pay rates
 
     if shift not in roster.shifts:
         raise HTTPException(
