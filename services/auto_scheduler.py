@@ -39,6 +39,7 @@ from rosteriq.services.conflict_detector import ConflictDetector, RosterConflict
 from rosteriq.services.roster_optimiser_v2 import assign_areas
 from rosteriq.services.availability_resolver import AvailabilityResolver
 from rosteriq.services.availability_rules import is_available
+from rosteriq.services.venue_areas import is_closed
 from rosteriq.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -253,11 +254,14 @@ class AutoScheduler:
         Convert demand forecasts to required staff per hour.
 
         Returns:
-            dict[date, dict[hour, dict[role, required_count]]]
+            dict[date, dict[hour, dict[role, required_count]]], with no entry
+            for a day the venue recorded closed
         """
         headcount_grid = {}
 
         for current_date, forecasts in forecasts_by_date.items():
+            if is_closed(venue, current_date):
+                continue
             hourly = {}
 
             for fc in forecasts:

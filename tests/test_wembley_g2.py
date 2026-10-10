@@ -7,20 +7,31 @@ Wembley pilot, review wave F follow-ups: Postgres re-imports and closed days.
   added meanwhile survives. A Tanda re-sync and a backup "overwrite" import
   replace a stored roster the same way, and a Tanda re-sync never takes over
   another venue's roster.
+* Each week of an import is saved under the roster lock. When another import
+  (a double-clicked button) or an edit saved the week after it was read, the
+  week is redone against what is stored now, so every pasted row is held
+  once. The Import button is disabled while a request is in flight.
 * trading_hours[day] = {"closed": true} records a closed weekday. It saves
   and loads on both stores; it has no trading window, no demand and no
-  minimums, so the forecaster, the generator, coverage, the conflict
-  detector, the budget cap and cut advice all leave that day alone.
+  minimums, so the forecaster, the generator, the optimiser, the
+  auto-scheduler, coverage, the conflict detector, the budget cap, cut advice
+  and the dashboard's Day view and On-Shift heads all leave that day alone.
 """
 
 import asyncio
 import json
+import os
+import re
+import shutil
+import subprocess
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -202,6 +213,138 @@ def test_pg_repaste_deletes_the_replaced_and_removed_shifts_and_keeps_one_added_
                    headers=h)
         assert r.status_code == 200 and r.json()["shifts_replaced"] == replaced, r.text
     assert len(pg.deletes) == 1 and len(pg.held(rid)) == 4
+
+
+def _wembley_on_pg(c, h, monkeypatch):
+    vid = f"g2imp-{uuid.uuid4().hex[:8]}"
+    assert c.post("/venues", json=_venue_body(vid, name="The Wembley Hotel"), headers=h).status_code == 200
+    r = c.post("/api/setup/import-staff", json={"venue_id": vid, "content":
+               f"Name,Email,Pay Rate,Employment Type\nAlice Ng,alice@{DOM},30,Casual\n"
+               f"Bob Tran,bob@{DOM},30,Casual\n"}, headers=h)
+    assert r.status_code == 200, r.text
+    db = get_db()
+    pg = _PGRosters()
+    monkeypatch.setattr(db, "save_roster", pg.save_roster)
+    monkeypatch.setattr(db, "get_roster", pg.get_roster)
+    monkeypatch.setattr(db, "list_rosters", pg.list_rosters)
+    ids = {e.name: e.id for e in db.get_employees(vid)}
+    return vid, pg, ids["Alice Ng"], ids["Bob Tran"]
+
+
+def _both_read_before_either_saves(monkeypatch):
+    import rosteriq.routes.roster_import as roster_import
+    real = roster_import._reconcile
+    both_read = threading.Barrier(2, timeout=10)
+
+    def _reconcile(*a, **kw):
+        both_read.wait()
+        return real(*a, **kw)
+    monkeypatch.setattr(roster_import, "_reconcile", _reconcile)
+
+
+def _post_together(h, *bodies):
+    async def _go():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as ac:
+            return await asyncio.gather(*(ac.post("/api/setup/import-roster", json=b, headers=h)
+                                          for b in bodies))
+    return asyncio.run(_go())
+
+
+DOUBLE_PASTE = ("Name,Date,Start,End\nAlice Ng,14/10/2026,11:00,17:00\nBob Tran,15/10/2026,10:00,16:00\n"
+                "Bob Tran,16/10/2026,10:00,16:00\n")
+
+
+def test_pg_double_clicked_import_holds_each_pasted_shift_once(monkeypatch):
+    c = TestClient(app)
+    h = _manager(c)
+    vid, pg, alice, bob = _wembley_on_pg(c, h, monkeypatch)
+    rid = f"imported-{vid}-{MON.isoformat()}"
+    _both_read_before_either_saves(monkeypatch)
+
+    a, b = _post_together(h, *[{"venue_id": vid, "content": DOUBLE_PASTE}] * 2)
+    assert a.status_code == b.status_code == 200, (a.text, b.text)
+    bobs = [(bob, date(2026, 10, 15), "10:00-16:00"), (bob, date(2026, 10, 16), "10:00-16:00")]
+    assert pg.held(rid) == sorted([(alice, date(2026, 10, 14), "11:00-17:00")] + bobs)
+    outs = sorted((r.json()["shifts_imported"], r.json()["duplicates_skipped"]) for r in (a, b))
+    assert outs == [(0, 3), (3, 0)]          # the second says what is already there
+
+    # A re-paste with a changed time, double-clicked: the old row goes once
+    # and the new one is held once.
+    changed = DOUBLE_PASTE.replace("Alice Ng,14/10/2026,11:00,17:00", "Alice Ng,14/10/2026,12:00,18:00")
+    a, b = _post_together(h, *[{"venue_id": vid, "content": changed}] * 2)
+    assert a.status_code == b.status_code == 200, (a.text, b.text)
+    assert pg.held(rid) == sorted([(alice, date(2026, 10, 14), "12:00-18:00")] + bobs)
+    assert sorted(r.json()["shifts_replaced"] for r in (a, b)) == [0, 1]
+
+
+def test_import_redoes_a_week_an_edit_saved_after_it_was_read(monkeypatch):
+    """A shift added by hand between the read and the save is taken as stored:
+    one on a pasted day for someone in the paste goes, as it would had the
+    edit come first; one on another day stays."""
+    import rosteriq.routes.roster_import as roster_import
+    c = TestClient(app)
+    h = _manager(c)
+    vid, pg, alice, bob = _wembley_on_pg(c, h, monkeypatch)
+    rid = f"imported-{vid}-{MON.isoformat()}"
+    assert c.post("/api/setup/import-roster", json={"venue_id": vid, "content": DOUBLE_PASTE},
+                  headers=h).status_code == 200
+    real = roster_import._reconcile
+
+    def _edited_meanwhile(*a, **kw):
+        out = real(*a, **kw)
+        stored = pg.get_roster(rid)
+        stored.shifts = stored.shifts + [_shift("hand-14", bob, date(2026, 10, 14), (9, 0), (12, 0)),
+                                         _shift("hand-18", bob, date(2026, 10, 18), (9, 0), (12, 0))]
+        pg.save_roster(stored)
+        return out
+    monkeypatch.setattr(roster_import, "_reconcile", _edited_meanwhile)
+    r = c.post("/api/setup/import-roster", json={"venue_id": vid, "content": DOUBLE_PASTE.replace(
+        "Bob Tran,16/10/2026,10:00,16:00\n", "Bob Tran,16/10/2026,11:00,16:00\n")}, headers=h)
+    assert r.status_code == 200, r.text
+    assert pg.held(rid) == sorted([
+        (alice, date(2026, 10, 14), "11:00-17:00"), (bob, date(2026, 10, 15), "10:00-16:00"),
+        (bob, date(2026, 10, 16), "11:00-16:00"), (bob, date(2026, 10, 18), "09:00-12:00")])
+    out = r.json()
+    assert out["shifts_imported"] == 1 and out["shifts_replaced"] == 1 and out["duplicates_skipped"] == 2
+    assert [(x["date"], x["start"]) for x in out["removed"]] == [("2026-10-14", "09:00")]
+
+
+def test_import_that_cant_get_the_week_saves_nothing_and_says_try_again(monkeypatch):
+    from rosteriq.services import roster_edit as edit
+    c = TestClient(app)
+    h = _manager(c)
+    vid, pg, alice, bob = _wembley_on_pg(c, h, monkeypatch)
+    taken = []
+
+    @contextmanager
+    def _busy(db, roster_id, wait_seconds=5.0):
+        taken.append(roster_id)
+        raise edit.RosterBusy()
+        yield
+    monkeypatch.setattr(edit, "roster_lock", _busy)
+    r = c.post("/api/setup/import-roster", json={"venue_id": vid, "content": DOUBLE_PASTE}, headers=h)
+    assert r.status_code == 409, r.text
+    assert taken == [f"imported-{vid}-{MON.isoformat()}"]
+    assert pg.rosters == {} and pg.shifts == {}
+
+    # Two weeks, the second busy: the first is saved and the second's rows
+    # are reported skipped.
+    second = MON + timedelta(days=7)
+
+    @contextmanager
+    def _second_busy(db, roster_id, wait_seconds=5.0):
+        if roster_id.endswith(second.isoformat()):
+            raise edit.RosterBusy()
+        yield
+    monkeypatch.setattr(edit, "roster_lock", _second_busy)
+    r = c.post("/api/setup/import-roster", json={"venue_id": vid, "content":
+               DOUBLE_PASTE + "Alice Ng,21/10/2026,11:00,17:00\n"}, headers=h)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["weeks"] == 1 and out["shifts_imported"] == 3
+    assert [x["line"] for x in out["rows"] if x["status"] == "skipped"] == [5]
+    assert "paste again" in out["skipped"][0]["reason"]
+    assert set(pg.rosters) == {f"imported-{vid}-{MON.isoformat()}"}
 
 
 class _FakeTanda:
@@ -453,3 +596,192 @@ def test_closed_day_reads_safely_from_a_bare_hours_map():
     assert venue_areas.trading_window(ns, MON) is None and venue_areas.is_closed(ns, MON)
     assert effective_trading_hours(SimpleNamespace(trading_hours={}), inferred=effective_trading_hours(ns))["mon"] \
         == {"closed": True, "source": "recorded"}
+
+
+def _next_monday(vid):
+    from rosteriq.services.clock import venue_today
+    today = venue_today(vid, get_db())
+    return today + timedelta(days=7 - today.weekday())
+
+
+@pytest.mark.parametrize("solver", ["greedy", "hybrid"])
+def test_optimise_staffs_nothing_on_a_closed_day_whatever_forecast_rows_it_has(solver):
+    c = TestClient(app)
+    h = _manager(c)
+    vid = f"g2opt-{uuid.uuid4().hex[:6]}"
+    # Sunday trades past midnight into the closed Monday's 00:00 hour.
+    hours = {**APOTHECARY_HOURS, "sun": {"open": "16:00", "close": "01:00"}}
+    r = c.post("/venues", json=_venue_body(vid, areas=BAR, trading_hours=hours), headers=h)
+    assert r.status_code == 200, r.text
+    db = get_db()
+    for i in range(8):
+        db.save_employee(_emp(vid, f"{vid}-bar{i}"))
+    mon = _next_monday(vid)
+    tue = mon + timedelta(days=1)
+    db.add_forecasts(
+        [_fc(vid, mon, hr) for hr in range(24)]                       # stored before Monday was closed
+        + [_fc(vid, tue, hr, covers=0.0, version="cold_start_v1") for hr in range(10, 24)]   # zeroed
+        + [_fc(vid, mon + timedelta(days=d), hr, covers=40.0) for d in range(2, 7) for hr in range(16, 24)])
+    r = c.post("/api/v1/rosters/optimise", json={"venue_id": vid, "week_start": mon.isoformat(),
+                                                 "solver_preference": solver, "timeout_seconds": 10},
+               headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "completed", r.json()
+    days = {s.date for s in db.get_roster(r.json()["roster_id"]).shifts}
+    assert mon not in days and tue not in days, sorted(days)
+    assert mon + timedelta(days=2) in days
+
+
+def test_optimise_a_week_with_demand_only_on_closed_days_is_a_clear_4xx():
+    c = TestClient(app)
+    h = _manager(c)
+    vid = f"g2optc-{uuid.uuid4().hex[:6]}"
+    r = c.post("/venues", json=_venue_body(vid, areas=BAR, trading_hours=APOTHECARY_HOURS), headers=h)
+    assert r.status_code == 200, r.text
+    db = get_db()
+    for i in range(3):
+        db.save_employee(_emp(vid, f"{vid}-bar{i}"))
+    mon = _next_monday(vid)
+    db.add_forecasts([_fc(vid, mon, hr) for hr in range(10, 24)])
+    r = c.post("/api/v1/rosters/optimise", json={"venue_id": vid, "week_start": mon.isoformat(),
+                                                 "solver_preference": "greedy"}, headers=h)
+    assert r.status_code == 422, r.text
+    assert "closed" in r.json()["error"]["message"]
+
+
+def test_auto_schedule_staffs_nothing_on_a_closed_day():
+    from rosteriq.services.auto_scheduler import AutoScheduler
+    db = get_db()
+    vid = f"g2auto-{uuid.uuid4().hex[:6]}"
+    db.save_venue(_venue(id=vid))
+    for i in range(6):
+        db.save_employee(_emp(vid, f"{vid}-bar{i}"))
+    # Monday has demand stored; Tuesday has none (the auto-scheduler's
+    # fallback staffs a day with no forecast 06:00-23:00).
+    db.add_forecasts([_fc(vid, MON, hr) for hr in range(10, 24)]
+                     + [_fc(vid, MON + timedelta(days=d), hr, covers=40.0) for d in range(2, 7)
+                        for hr in range(16, 23)])
+    result = AutoScheduler(db).generate_week(vid, MON)
+    days = {s.date for s in result.roster.shifts}
+    assert MON not in days and TUE not in days, sorted(days)
+    assert WED in days
+    assert not [g for g in result.coverage_gaps if g.date in (MON, TUE)]
+    grid = AutoScheduler(db).preview_week(vid, MON)["demand_grid"]
+    assert MON.isoformat() not in grid and TUE.isoformat() not in grid and WED.isoformat() in grid
+
+
+# ---------------------------------------------------------------------------
+# Dashboard: Day view, On-Shift heads and the Import button
+# ---------------------------------------------------------------------------
+
+DASHBOARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "dashboard.html")
+NODE = shutil.which("node")
+needs_node = pytest.mark.skipif(NODE is None, reason="node is required to run the dashboard JS")
+
+JS_HARNESS = r"""
+const _els = {};
+function el(id) {
+  if (!_els[id]) _els[id] = { id, innerHTML: '', textContent: '', value: '', disabled: false,
+    style: {}, classList: { toggle() {} }, setAttribute() {} };
+  return _els[id];
+}
+global.document = { getElementById: el };
+global.esc = function (s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) {
+  return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); };
+global.localIso = function (d) { return d.toISOString().slice(0, 10); };
+global.toasts = [];
+global.showToast = function (m, k) { toasts.push([m, k]); };
+global.state = { venues: [], currentVenue: 'apo', rosters: [], employees: [], isDemo: false };
+global.setInterval = function () {};
+"""
+
+
+def _between(src, start, end):
+    i = src.index(start)
+    return src[i:src.index(end, i)]
+
+
+def _run_js(scenario):
+    with open(DASHBOARD, encoding="utf-8") as fh:
+        src = re.findall(r"<script[^>]*>([\s\S]*?)</script>", fh.read())[1]
+    ops = _between(src, "var OPS_WEEK_KEYS", "// ── Staff Contact Export")
+    imp = _between(src, "async function runRosterImport() {", "\nfunction openStaffImport(")
+    prog = JS_HARNESS + ops + "\n" + imp + "\n(async () => {\n" + scenario + \
+        "\n})().catch(e => { console.log(JSON.stringify({error: String(e && e.stack || e)})); });"
+    out = subprocess.run([NODE, "-e", prog], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    data = json.loads(out.stdout.strip().splitlines()[-1])
+    assert "error" not in data, data.get("error")
+    return data
+
+
+CLOSED_MONDAY_JS = """
+const mins = { mon: 2, tue: 2, wed: 2, thu: 2, fri: 2, sat: 2, sun: 2 };
+const venue = { id: 'apo', name: 'Apothecary', timezone: 'Australia/Perth',
+  areas: [{ name: 'bar', label: 'Bar', min_by_day: mins }],
+  trading_hours: { mon: { closed: true }, tue: { closed: true }, wed: { open: '16:00', close: '00:00' } } };
+// 2026-10-12 is a Monday: one person in for a delivery.
+const shifts = [{ id: 's1', employee_id: 'e1', date: '2026-10-12', start_time: '10:00', end_time: '14:00',
+                  role: 'bar', status: 'scheduled' },
+                { id: 's2', employee_id: 'e2', date: '2026-10-14', start_time: '16:00', end_time: '20:00',
+                  role: 'bar', status: 'scheduled' }];
+"""
+
+
+@needs_node
+def test_day_view_shows_no_minimums_on_a_closed_day():
+    data = _run_js(CLOSED_MONDAY_JS + """
+      const mon = dayTimelineData(shifts, venue, '2026-10-12');
+      const wed = dayTimelineData(shifts, venue, '2026-10-14');
+      console.log(JSON.stringify({
+        mon: { below: mon.below, mins: mon.rows.map(r => r.min), closed: !!mon.closed },
+        wed: { below: wed.below, mins: wed.rows.map(r => r.min), closed: !!wed.closed },
+        empty: renderDayTimeline(dayTimelineData([], venue, '2026-10-13')),
+        unrecorded: renderDayTimeline(dayTimelineData([], venue, '2026-10-15')),
+      }));
+    """)
+    assert data["mon"] == {"below": 0, "mins": [0], "closed": True}
+    assert data["wed"]["mins"] == [2] and data["wed"]["below"] > 0 and not data["wed"]["closed"]
+    assert "closed" in data["empty"] and "no trading hours are recorded" not in data["empty"]
+    assert "no trading hours are recorded" in data["unrecorded"]
+
+
+@needs_node
+def test_on_shift_heads_show_no_minimum_on_a_closed_day():
+    data = _run_js(CLOSED_MONDAY_JS + """
+      state.venues = [venue];
+      state.rosters = [{ shifts: shifts }];
+      state.employees = [{ id: 'e1', name: 'Meca' }, { id: 'e2', name: 'Willow' }];
+      opsVenueNow = function () { return { iso: '2026-10-12', minute: 11 * 60 }; };
+      renderOnShiftNow();
+      const mon = { chips: el('headcount-areas').innerHTML, list: el('on-shift-list').innerHTML };
+      opsVenueNow = function () { return { iso: '2026-10-14', minute: 17 * 60 }; };
+      renderOnShiftNow();
+      console.log(JSON.stringify({ mon, wed: el('headcount-areas').innerHTML }));
+    """)
+    assert "<strong>1</strong> Bar" in data["mon"]["chips"] and " below" not in data["mon"]["chips"]
+    assert "(min" not in data["mon"]["list"]
+    assert "<strong>1</strong> / 2 Bar" in data["wed"] and " below" in data["wed"]
+
+
+@needs_node
+def test_import_button_sends_one_request_while_one_is_in_flight():
+    data = _run_js("""
+      let calls = 0, release;
+      global.fetchAPI = function () {
+        calls++;
+        return new Promise(function (ok) { release = function () { ok({ shifts_imported: 3, weeks: 1 }); }; });
+      };
+      global.renderRosterImportReport = function () { return ''; };
+      global.refreshRealRoster = function () {};
+      global.loadVenueData = function () {};
+      el('roster-import-text').value = 'Name,Date,Start,End';
+      const first = runRosterImport();
+      const during = el('roster-import-btn').disabled;
+      await runRosterImport();
+      const second = calls;
+      release();
+      await first;
+      console.log(JSON.stringify({ during, second, after: el('roster-import-btn').disabled }));
+    """)
+    assert data == {"during": True, "second": 1, "after": False}

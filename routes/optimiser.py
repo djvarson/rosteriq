@@ -52,6 +52,7 @@ from rosteriq.services.clock import venue_today
 from rosteriq.services.roster_optimiser_v2 import (
     MILPRosterOptimiser, HybridOptimiser, OptimisationStrategy,
 )
+from rosteriq.services.trading_hours import trading_day_of, venue_trading_hours
 from rosteriq.auth import get_current_user, require_role
 
 logger = logging.getLogger(__name__)
@@ -290,6 +291,18 @@ async def optimise_roster(
             detail=(f"There's no demand forecast for the week starting "
                     f"{week_start.strftime('%a %d %b')} yet, so the optimiser has nothing "
                     "to staff against. Use Generate Roster, or create a forecast first."),
+        )
+    # The solvers staff each forecast hour on its own date with same-day
+    # shifts, so only a day's own trading hours count: none on a closed day,
+    # and not an hour after midnight that belongs to the night before.
+    hours = venue_trading_hours(db, venue, week_start)
+    forecasts = [f for f in forecasts if trading_day_of(hours, f.date, f.hour) == f.date]
+    if not forecasts:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"Every forecast for the week starting {week_start.strftime('%a %d %b')} "
+                    "falls on a day recorded closed or outside the trading hours, so the "
+                    "optimiser has nothing to staff against."),
         )
 
     # Create job

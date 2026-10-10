@@ -3295,7 +3295,7 @@
             <input type="text" id="roster-import-location" placeholder="Optional — only for exports that cover several locations" style="flex:1 1 220px; max-width:360px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--dark-bg); color:var(--text-primary); font-size:12px;">
           </label>
           <div style="display:flex; gap:8px; margin-top:10px; align-items:center;">
-            <button class="btn btn-primary btn-small" onclick="runRosterImport()">Import roster</button>
+            <button class="btn btn-primary btn-small" id="roster-import-btn" onclick="runRosterImport()">Import roster</button>
             <button class="btn btn-secondary btn-small" onclick="document.getElementById('roster-import-card').style.display='none'">Cancel</button>
             <span id="roster-import-result" style="font-size:12px; color:var(--text-muted); margin-left:auto;"></span>
           </div>
@@ -11776,6 +11776,8 @@ function renderRosterImportReport(r) {
 async function runRosterImport() {
   const content = document.getElementById('roster-import-text').value.trim();
   if (!content) { showToast('Paste your roster export first', 'warning'); return; }
+  const btn = document.getElementById('roster-import-btn');
+  if (btn && btn.disabled) return;
   const res = document.getElementById('roster-import-result');
   const report = document.getElementById('roster-import-report');
   const body = { venue_id: state.currentVenue, content: content };
@@ -11783,6 +11785,7 @@ async function runRosterImport() {
   if (location) body.location = location;
   res.textContent = 'Importing…';
   if (report) report.innerHTML = '';
+  if (btn) btn.disabled = true;
   try {
     const r = await fetchAPI('/api/setup/import-roster', { method: 'POST', body: JSON.stringify(body) });
     let msg = r.shifts_imported + ' shifts across ' + r.weeks + ' week(s)';
@@ -11801,6 +11804,8 @@ async function runRosterImport() {
       return;
     }
     showToast('Import failed: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -15448,15 +15453,22 @@ function opsVenueAreas(venue) {
 }
 
 // {open, close} in minutes from that day's midnight (close may pass 1440),
-// or null when the venue hasn't recorded hours for that weekday.
+// or null when the venue hasn't recorded hours for that weekday or recorded
+// it closed (opsDayClosed tells which).
 function opsTradingWindow(venue, iso) {
   const h = ((venue && venue.trading_hours) || {})[opsWeekKey(iso)];
-  if (!h) return null;
+  if (!h || h.closed === true) return null;
   const open = opsMin(h.open);
   let close = opsMin(h.close);
   if (open == null || close == null) return null;
   if (close <= open) close += 1440;
   return { open: open, close: close };
+}
+
+// The venue recorded that weekday as a day it doesn't trade: no minimums.
+function opsDayClosed(venue, iso) {
+  const h = ((venue && venue.trading_hours) || {})[opsWeekKey(iso)];
+  return !!h && h.closed === true;
 }
 
 // The venue's own clock, whatever timezone the manager's phone is in.
@@ -15533,13 +15545,14 @@ function dayTimelineData(shifts, venue, iso, opts) {
     first = first == null ? sp.start : Math.min(first, sp.start);
     last = last == null ? sp.end : Math.max(last, sp.end);
   });
-  const result = { day: iso, trading: trading, slots: [], rows: [], total: [], below: 0 };
+  const closed = opsDayClosed(venue, iso);
+  const result = { day: iso, trading: trading, closed: closed, slots: [], rows: [], total: [], below: 0 };
   if (first == null) return result;
   first = Math.floor(first / OPS_SLOT_MIN) * OPS_SLOT_MIN;
   last = Math.ceil(last / OPS_SLOT_MIN) * OPS_SLOT_MIN;
   for (let m = first; m < last; m += OPS_SLOT_MIN) result.slots.push(m);
   // Minimums apply while the venue trades; with no hours recorded, while
-  // anyone at all is rostered on.
+  // anyone at all is rostered on; never on a day recorded closed.
   const openFrom = trading ? trading.open : Math.min.apply(null, spans.map(function (s) { return s.start; }));
   const openTo = trading ? trading.close : Math.max.apply(null, spans.map(function (s) { return s.end; }));
   const byName = {};
@@ -15549,7 +15562,7 @@ function dayTimelineData(shifts, venue, iso, opts) {
     result.rows.push(row);
     return row;
   };
-  areas.forEach(function (a) { add(a.name, a.label, a.min_by_day[dk] || 0); });
+  areas.forEach(function (a) { add(a.name, a.label, closed ? 0 : (a.min_by_day[dk] || 0)); });
   spans.forEach(function (sp) { if (!byName[sp.area]) add(sp.area, sp.area ? opsTitle(sp.area) : 'No area', 0); });
   spans.forEach(function (sp) {
     const row = byName[sp.area];
@@ -15571,7 +15584,7 @@ function renderDayTimeline(data, opts) {
   opts = opts || {};
   if (!data.slots.length) {
     return '<div class="ops-muted" style="padding:16px 0;">Nobody is rostered on this day' +
-      (data.trading ? '' : ' and no trading hours are recorded for it') + '.</div>';
+      (data.closed ? ' — the venue is recorded closed' : (data.trading ? '' : ' and no trading hours are recorded for it')) + '.</div>';
   }
   const scale = Math.max(1, Math.max.apply(null, data.rows.map(function (r) {
     return Math.max(r.min || 0, Math.max.apply(null, r.counts.concat([0])));
@@ -15685,9 +15698,10 @@ function renderOnShiftNow() {
     const a = areas.find(function (x) { return x.name === k; });
     return a ? a.label : (k ? opsTitle(k) : 'No area');
   };
+  const closed = opsDayClosed(venue, td.iso);
   const minOf = function (k) {
     const a = areas.find(function (x) { return x.name === k; });
-    return a ? (a.min_by_day[dk] || 0) : 0;
+    return a && !closed ? (a.min_by_day[dk] || 0) : 0;
   };
 
   const set = function (id, text) { const el = document.getElementById(id); if (el) el.textContent = text; };
