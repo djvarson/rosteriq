@@ -2388,6 +2388,72 @@
     .ai-insight-action { margin-top: 8px; }
     .ai-tools-used { font-size: 11px; color: var(--text-muted); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
 
+    /* On-Shift night tools (SOS, Cut / hold) and the roster Day view */
+    .ops-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .ops-muted { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+    .ops-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 10px 0; }
+    .ops-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+    .ops-field select, .ops-field input { font-size: 14px; padding: 8px 10px; min-height: 40px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text-primary); }
+    .ops-field input[type="number"] { width: 130px; }
+    .ops-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); margin: 4px 0 10px; cursor: pointer; }
+    .ops-toggle input { width: 18px; height: 18px; }
+    .ops-section-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin: 14px 0 6px; }
+    .ops-section-title .btn { flex: 0 0 auto; width: auto; text-transform: none; letter-spacing: 0; }
+    .ops-person { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+    .ops-person-main { flex: 1 1 200px; min-width: 0; }
+    .ops-person-name { font-weight: 700; font-size: 15px; color: var(--text-primary); }
+    .ops-person-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .ops-flag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--dark-bg); color: var(--text-secondary); margin: 4px 4px 0 0; }
+    .ops-flag.warn { background: rgba(220, 38, 38, 0.08); color: var(--danger); }
+    .ops-actions { display: flex; gap: 8px; }
+    .ops-actions .btn { min-width: 64px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+    .ops-person.unavailable .ops-person-name { color: var(--text-secondary); }
+    .ops-verdict { display: inline-block; font-size: 12px; font-weight: 800; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 6px; margin-bottom: 6px; background: var(--dark-bg); color: var(--text-primary); }
+    .ops-verdict.cut { background: rgba(220, 38, 38, 0.1); color: var(--danger); }
+    .ops-verdict.hold { background: rgba(22, 163, 74, 0.1); color: var(--success); }
+    .ops-headline { font-size: 15px; font-weight: 700; color: var(--text-primary); line-height: 1.4; }
+    .ops-numbers { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
+    .ops-list { margin: 6px 0 0 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+    .ops-headcount { display: grid; grid-template-columns: 1fr 2fr; gap: 32px; align-items: center; }
+    .ops-area-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px 12px; font-size: 12px; }
+    .ops-area-chip.below strong { color: var(--danger); }
+    .ops-group-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); padding: 10px 0 4px; }
+    .ops-group-title .below { color: var(--danger); }
+    .ops-seg { display: inline-flex; gap: 0; margin-right: 10px; }
+    .ops-seg .btn { border-radius: 0; }
+    .ops-seg .btn:first-child { border-radius: 8px 0 0 8px; }
+    .ops-seg .btn:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+    .ops-seg .btn.ops-seg-on { background: rgba(245, 158, 11, 0.14); border-color: var(--brand-blue); color: var(--text-primary); font-weight: 700; }
+    .ops-day-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+    .ops-day-pills .btn.ops-seg-on { background: rgba(245, 158, 11, 0.14); border-color: var(--brand-blue); font-weight: 700; }
+    .ops-timeline-host { margin-top: 16px; }
+    /* width 0 + min-width 100%: the table scrolls inside its card instead of
+       widening the grid column (and the page) to fit 40 half-hours */
+    .dtl-wrap { width: 0; min-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--border); border-radius: 10px; }
+    .dtl-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+    .dtl-table th, .dtl-table td { padding: 0; }
+    .dtl-area { position: sticky; left: 0; z-index: 1; background: var(--card-bg); text-align: left; font-size: 12px; font-weight: 700; color: var(--text-primary); padding: 6px 10px !important; min-width: 130px; border-right: 1px solid var(--border); white-space: nowrap; }
+    .dtl-area .dtl-min { display: block; font-weight: 500; font-size: 11px; color: var(--text-muted); }
+    .dtl-hour { font-size: 10px; font-weight: 600; color: var(--text-muted); text-align: left; height: 22px; min-width: 28px; padding-left: 2px !important; border-bottom: 1px solid var(--border); }
+    .dtl-cell { position: relative; width: 28px; min-width: 28px; height: 44px; vertical-align: bottom; border-bottom: 1px solid var(--border); background: rgba(17, 24, 39, 0.03); }
+    .dtl-cell.open { background: rgba(245, 158, 11, 0.07); }
+    .dtl-cell.hour-start { border-left: 1px solid var(--border); }
+    .dtl-bar { position: absolute; left: 3px; right: 3px; bottom: 0; background: rgba(17, 24, 39, 0.28); border-radius: 3px 3px 0 0; }
+    .dtl-cell.below .dtl-bar { background: rgba(220, 38, 38, 0.55); }
+    .dtl-cell.below { box-shadow: inset 0 -2px 0 var(--danger); }
+    .dtl-n { position: absolute; left: 0; right: 0; top: 2px; text-align: center; font-size: 11px; font-weight: 700; color: var(--text-primary); }
+    .dtl-cell.below .dtl-n { color: var(--danger); }
+    .dtl-minline { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--danger); opacity: 0.6; }
+    .dtl-cell.now { outline: 2px solid var(--brand-accent); outline-offset: -2px; }
+    .dtl-total .dtl-cell { height: 30px; }
+    .dtl-legend { font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
+    @media (max-width: 640px) {
+      .ops-headcount { grid-template-columns: 1fr; gap: 12px; }
+      .ops-actions { width: 100%; }
+      .ops-actions .btn { flex: 1; }
+      .dtl-area { min-width: 96px; }
+    }
+
     @media (max-width: 768px) {
       .onboarding-progress {
         padding: 16px;
@@ -2682,9 +2748,9 @@
           </div>
           <div class="dash-section-body">
 
-        <!-- Live Revenue Card -->
+        <!-- Live Revenue Card (hidden when the venue has no live POS feed) -->
         <div class="grid-2">
-          <div class="card">
+          <div class="card" id="live-revenue-card">
             <div class="chart-title">Live Revenue</div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
               <div>
@@ -3245,6 +3311,10 @@
               </div>
               <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
                 <span id="roster-section-pills" style="display:inline-flex; gap:6px; margin-right:10px;"></span>
+                <span class="ops-seg" role="group" aria-label="Roster view">
+                  <button class="btn btn-secondary btn-small ops-seg-on" id="btn-roster-week-view" onclick="rosterSetView('week')" aria-pressed="true">Week</button>
+                  <button class="btn btn-secondary btn-small" id="btn-roster-day-view" onclick="rosterSetView('day')" aria-pressed="false" title="Heads on per half hour, by area, against the minimums">Day</button>
+                </span>
                 <button class="btn btn-secondary btn-small" id="btn-prev-week">← Previous</button>
                 <button class="btn btn-secondary btn-small" id="btn-next-week">Next →</button>
                 <button class="btn btn-secondary btn-small" onclick="openRosterImport()" title="Paste a roster export from Deputy, Tanda, or a spreadsheet">Import roster</button>
@@ -3261,7 +3331,7 @@
               </div>
             </div>
 
-            <div class="roster-grid">
+            <div class="roster-grid" id="roster-week-view">
               <table class="roster-table" id="roster-table">
                 <thead>
                   <tr>
@@ -3339,6 +3409,7 @@
                 </tbody>
               </table>
             </div>
+            <div id="roster-day-view" style="display: none;"></div>
           </div>
         </div>
 
@@ -3377,27 +3448,52 @@
           <p class="page-subtitle">Real-time staff management and shift adjustments</p>
         </div>
 
-        <!-- Headcount + Capacity -->
+        <!-- SOS: who can I call in? (real venues; services/sos.py) -->
+        <div class="grid-1" id="sos-card-wrap" style="display: none;">
+          <div class="card ops-card">
+            <div class="ops-card-head">
+              <div class="chart-title">SOS — who can I call?</div>
+              <span class="ops-muted" id="sos-window-label"></span>
+            </div>
+            <div class="ops-controls">
+              <label class="ops-field">Area
+                <select id="sos-area" onchange="loadSosCard()"><option value="">All areas</option></select>
+              </label>
+              <label class="ops-field">Day <input type="date" id="sos-date"></label>
+              <label class="ops-field">From <input type="time" id="sos-start" step="900"></label>
+              <label class="ops-field">To <input type="time" id="sos-end" step="900"></label>
+              <button class="btn btn-primary btn-small" onclick="loadSosCard()">Find people</button>
+            </div>
+            <label class="ops-toggle">
+              <input type="checkbox" id="sos-include-unavailable" onchange="loadSosCard()">
+              Also show people marked unavailable (they might say yes)
+            </label>
+            <div id="sos-results"></div>
+          </div>
+        </div>
+
+        <!-- Headcount now, by area -->
         <div class="grid-1">
           <div class="card">
-            <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 32px; align-items: center;">
+            <div class="ops-headcount">
               <div>
                 <div class="kpi-label">Current Headcount</div>
                 <div class="kpi-value" id="headcount-now" style="font-size: 64px;">0</div>
-                <div class="kpi-sub">staff on floor</div>
+                <div class="kpi-sub" id="headcount-sub">staff on floor</div>
               </div>
               <div>
-                <div class="kpi-label">Capacity</div>
-                <div class="progress-bar" style="height: 12px; margin-bottom: 8px;">
+                <div class="kpi-label" id="headcount-areas-label">Capacity</div>
+                <div class="progress-bar" id="capacity-wrap" style="height: 12px; margin-bottom: 8px;">
                   <div class="progress-fill" id="capacity-bar" style="width: 0%; background: var(--brand-blue);"></div>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; font-size: 12px;">
+                <div id="headcount-areas" class="ops-area-chips">
                   <div><strong id="kitchen-count">0</strong> kitchen</div>
                   <div><strong id="bar-count">0</strong> bar</div>
                   <div><strong id="floor-count">0</strong> floor</div>
                 </div>
               </div>
             </div>
+            <div id="onshift-timeline" class="ops-timeline-host"></div>
           </div>
         </div>
 
@@ -3413,9 +3509,18 @@
             </div>
           </div>
 
-          <!-- Cut/Call Recommendations -->
+          <!-- Cut/Call Recommendations (real venues: Cut / hold, services/cut_advice.py) -->
           <div class="card">
-            <div class="chart-title">AI Recommendations</div>
+            <div class="chart-title" id="onshift-rec-title">AI Recommendations</div>
+            <div class="ops-controls" id="cut-controls" style="display: none;">
+              <label class="ops-field">Area
+                <select id="cut-area" onchange="loadCutAdvice()"><option value="">All areas</option></select>
+              </label>
+              <label class="ops-field">Last hour's takings
+                <input type="number" id="cut-takings" min="0" step="1" inputmode="decimal" placeholder="$ inc GST">
+              </label>
+              <button class="btn btn-primary btn-small" onclick="loadCutAdvice()">Get the call</button>
+            </div>
             <div id="onshift-recommendations" style="display: flex; flex-direction: column; gap: 12px;">
               <!-- Placeholder only until data loads: the real-venue path clears
                    this — a real venue must never see an invented derby-day
@@ -3440,8 +3545,8 @@
           </div>
         </div>
 
-        <!-- Demand Intelligence — On-Shift View -->
-        <div class="grid-1">
+        <!-- Demand Intelligence — On-Shift View (sample data; demo only) -->
+        <div class="grid-1" id="onshift-signals-card">
           <div class="card" style="border-left: 3px solid var(--brand-blue);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
               <div class="chart-title" style="margin: 0;">Live Demand Signals</div>
@@ -6437,6 +6542,9 @@ function showPage(pageId) {
   if (pageId === 'on-shift') {
     var notesCard = document.getElementById('shift-notes-card');
     if (notesCard) notesCard.style.display = state.isDemo ? '' : 'none';
+    var signalsCard = document.getElementById('onshift-signals-card');
+    if (signalsCard) signalsCard.style.display = state.isDemo ? '' : 'none';
+    openOnShiftTools();
   }
 
   if (pageId === 'compliance') {
@@ -9664,10 +9772,7 @@ async function loadVenueData() {
     }
     if (!state.isDemo) { loadRealRevenueCharts(); fetchAndUpdateLiveRevenue(); }
     try { renderStaffTable(); } catch (e) { console.warn('staff table:', e); }
-    if (!state.isDemo) {
-      const rec = document.getElementById('onshift-recommendations');
-      if (rec) rec.innerHTML = '<div style="color:var(--text-muted); font-size:13px; padding:8px 0;">No recommendations right now — ask the AI Agent about tonight.</div>';
-    }
+    if (!state.isDemo && state.currentPage === 'on-shift') openOnShiftTools();
     connectionManager.hide();
     checkDeputyStatus();
     checkMYOBStatus();
@@ -10606,12 +10711,13 @@ function populateDemoOnShift() {
 var rosterSection = '';           // '' = whole venue
 
 function venueSections() {
-  // Sections = the venue's roles. Demo and real venues both staff these three;
-  // real venues extend via min_staff keys when present.
+  // Sections = the venue's areas (else its min_staff keys). Demo and real
+  // venues with neither staff these three.
   let sections = ['kitchen', 'bar', 'floor'];
   try {
     const venue = state.venues && state.venues.find && state.venues.find(v => v.id === state.currentVenue);
-    const keys = venue && venue.min_staff ? Object.keys(venue.min_staff) : [];
+    const areas = venue && Array.isArray(venue.areas) ? venue.areas.map(a => a && a.name).filter(Boolean) : [];
+    const keys = areas.length ? areas : (venue && venue.min_staff ? Object.keys(venue.min_staff) : []);
     if (keys.length) sections = keys;
   } catch (e) { /* defaults hold */ }
   return sections;
@@ -10637,6 +10743,7 @@ function rosterSectionPills() {
 function rosterSetSection(sec) {
   rosterSection = sec;
   rosterSectionPills();
+  renderRosterDayView();
   // Filter rows: real rows carry data-section; the demo's hand-authored rows
   // carry the role in their first cell ("Floor (L3)") — match either.
   document.querySelectorAll('#roster-body tr').forEach(function (tr) {
@@ -10927,50 +11034,9 @@ function renderAlerts(alerts) {
 }
 
 function populateStaffList() {
-  const staffList = document.getElementById('on-shift-list');
-  if (!staffList) return;
-  // REAL data only: who has a rostered shift covering RIGHT NOW, with the
-  // actual end time. The old version listed the first five employees with
-  // invented "Shift ends 9:00 PM" times and a permanent On Shift badge.
-  const now = new Date();
-  const hm = now.getHours() * 60 + now.getMinutes();
-  const todayKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
-  const byId = {};
-  (state.employees || []).forEach(function (e) { byId[e.id] = e; });
-  const onNow = [];
-  (state.rosters || []).forEach(function (r) {
-    (r.shifts || []).forEach(function (sh) {
-      const d = String(sh.date || sh.shift_date || '').slice(0, 10);
-      if (d !== todayKey || !sh.employee_id) return;
-      const st = String(sh.start_time || '').slice(0, 5).split(':');
-      const en = String(sh.end_time || '').slice(0, 5).split(':');
-      if (st.length < 2 || en.length < 2) return;
-      const s0 = (+st[0]) * 60 + (+st[1]), e0 = (+en[0]) * 60 + (+en[1]);
-      const active = e0 > s0 ? (hm >= s0 && hm < e0) : (hm >= s0 || hm < e0);
-      if (active) {
-        const emp = byId[sh.employee_id];
-        onNow.push({
-          name: emp ? emp.name : 'Staff member',
-          role: sh.role || (emp && emp.skills && emp.skills[0]) || 'Staff',
-          ends: String(sh.end_time || '').slice(0, 5),
-        });
-      }
-    });
-  });
-  if (!onNow.length) {
-    staffList.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center;">Nobody rostered on right now</div>';
-    return;
-  }
-  staffList.innerHTML = onNow.slice(0, 8).map(function (p) {
-    return '<div class="staff-item">' +
-      '<div class="staff-avatar">' + esc((p.name || '?').charAt(0)) + '</div>' +
-      '<div class="staff-info">' +
-        '<div class="staff-name">' + esc(p.name) + '</div>' +
-        '<div class="staff-meta">' + esc(p.role) + ' • ends ' + esc(p.ends) + '</div>' +
-      '</div>' +
-      '<span class="staff-status on-shift">On Shift</span>' +
-    '</div>';
-  }).join('');
+  // Who is on now, from the live roster in the venue's own clock, grouped by
+  // area against today's minimums (renderOnShiftNow).
+  renderOnShiftNow();
 }
 
 function populateDemoDemandSignals() {
@@ -11169,6 +11235,8 @@ function populateDemoStaffList() {
 function resetVenuePageState() {
   state.currentRosterId = null;
   state.currentRoster = null;
+  state.displayedRoster = null;
+  opsLastSos = null;
   state.currentRosterWeek = null;
   state.employees = [];
   state.employeesTotal = 0;
@@ -12909,6 +12977,13 @@ async function fetchAndUpdateLiveRevenue() {
     document.getElementById('live-hour-count').textContent = hour.transaction_count || 0;
     document.getElementById('live-today-revenue').textContent = Number(day.total_revenue || 0).toFixed(2);
     document.getElementById('live-today-count').textContent = day.transaction_count || 0;
+    // No live POS feed: no tiles, rather than a row of $0.00.
+    const card = document.getElementById('live-revenue-card');
+    if (card) card.style.display = revData.current_hour ? '' : 'none';
+    if (!revData.current_hour) {
+      connectionManager.hide();
+      return;
+    }
 
     // Fetch variance data
     try {
@@ -12923,9 +12998,12 @@ async function fetchAndUpdateLiveRevenue() {
 
     connectionManager.hide();
   } catch (e) {
-    console.error('Error fetching live revenue:', e);
-    connectionManager.show();
-    showToast('Failed to fetch live revenue data', 'error');
+    // A venue without a POS feed is normal — hide the tiles quietly, no toast
+    // or connection banner every 30 seconds.
+    console.debug('Live revenue unavailable:', e && e.message);
+    if (state.currentVenue !== venueId) return;
+    const card = document.getElementById('live-revenue-card');
+    if (card) card.style.display = 'none';
   }
 }
 
@@ -14616,6 +14694,8 @@ async function loadRosterForWeek() {
       refreshRosterChanges(rosters[0].id);
     } else {
       clearRosterEditing();
+      state.displayedRoster = null;
+      renderRosterDayView();
       tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">No roster for this week yet. Generate one, copy last week, or import your old roster from the toolbar above.</td></tr>';
       if (costEl) costEl.textContent = '0';
       const dailyEl = document.getElementById('roster-daily-cost');
@@ -14627,6 +14707,8 @@ async function loadRosterForWeek() {
     if (state.currentVenue !== venueId) return;
     state.currentRosterId = null;
     clearRosterEditing();
+    state.displayedRoster = null;
+    renderRosterDayView();
     // Never leave placeholder sample rows on screen for a real venue
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">Couldn’t load this week’s roster — try again in a moment.</td></tr>';
     console.log('Could not load roster for week:', dateStr, err);
@@ -14693,6 +14775,8 @@ function renderRosterTable(roster) {
       if (state.currentRoster === roster && demoRosterStaff.venue === state.currentVenue) renderRosterTable(roster);
     });
   }
+  state.displayedRoster = roster;
+  renderRosterDayView();
   const tbody = document.getElementById('roster-body');
   const days = rosterWeekDays(roster);
   const names = {};
@@ -15029,6 +15113,579 @@ async function copyLastWeek() {
     if (btn) btn.disabled = false;
   }
 }
+
+// ============================================
+// ON-SHIFT NIGHT TOOLS + ROSTER DAY VIEW
+// The Day view and On-Shift "now" are drawn from rosters already in state
+// (the displayed week; the current roster of each week) with the venue's
+// areas, minimums and trading hours (mirrors services/venue_areas.py).
+// SOS and Cut / hold come from /api/sos and /api/ops/cut-advice.
+// ============================================
+var OPS_WEEK_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+var OPS_SLOT_MIN = 30;
+var rosterView = 'week';
+var rosterDayIso = null;
+var opsLastSos = null;
+
+function opsNorm(s) {
+  return String(s == null ? '' : s).trim().toLowerCase().split(/\s+/).filter(Boolean).join(' ');
+}
+
+function opsTitle(s) {
+  return String(s || '').replace(/(^|\s)\S/g, function (c) { return c.toUpperCase(); });
+}
+
+function opsAttr(s) {
+  return esc(s == null ? '' : String(s)).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function opsMin(t) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t == null ? '' : t).trim());
+  return m ? (+m[1]) * 60 + (+m[2]) : null;
+}
+
+function opsClock(min) {
+  min = ((min % 1440) + 1440) % 1440;
+  return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
+}
+
+function opsIsoAdd(iso, days) {
+  const p = String(iso).split('-').map(Number);
+  const d = new Date(p[0], p[1] - 1, p[2] + days);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function opsWeekKey(iso) {
+  const p = String(iso).split('-').map(Number);
+  return OPS_WEEK_KEYS[(new Date(p[0], p[1] - 1, p[2]).getDay() + 6) % 7];
+}
+
+function opsVenue() {
+  return (state.venues || []).find(function (v) { return v.id === state.currentVenue; }) || null;
+}
+
+function opsVenueAreas(venue) {
+  const out = [];
+  const areas = (venue && venue.areas) || [];
+  if (areas.length) {
+    areas.forEach(function (a) {
+      const name = opsNorm(a && a.name);
+      if (!name) return;
+      const by = (a && a.min_by_day) || {};
+      const mins = {};
+      OPS_WEEK_KEYS.forEach(function (k) { mins[k] = parseInt(by[k] || 0, 10) || 0; });
+      out.push({ name: name, label: a.label || opsTitle(name), min_by_day: mins });
+    });
+    return out;
+  }
+  const minStaff = (venue && venue.min_staff) || {};
+  Object.keys(minStaff).forEach(function (k) {
+    const name = opsNorm(k);
+    if (!name) return;
+    const n = parseInt(minStaff[k] || 0, 10) || 0;
+    const mins = {};
+    OPS_WEEK_KEYS.forEach(function (d) { mins[d] = n; });
+    out.push({ name: name, label: opsTitle(name), min_by_day: mins });
+  });
+  return out;
+}
+
+// {open, close} in minutes from that day's midnight (close may pass 1440),
+// or null when the venue hasn't recorded hours for that weekday.
+function opsTradingWindow(venue, iso) {
+  const h = ((venue && venue.trading_hours) || {})[opsWeekKey(iso)];
+  if (!h) return null;
+  const open = opsMin(h.open);
+  let close = opsMin(h.close);
+  if (open == null || close == null) return null;
+  if (close <= open) close += 1440;
+  return { open: open, close: close };
+}
+
+// The venue's own clock, whatever timezone the manager's phone is in.
+function opsVenueNow(venue) {
+  try {
+    const parts = {};
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: (venue && venue.timezone) || undefined, year: 'numeric', month: '2-digit',
+      day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date()).forEach(function (p) { parts[p.type] = p.value; });
+    return { iso: parts.year + '-' + parts.month + '-' + parts.day, minute: (+parts.hour % 24) * 60 + (+parts.minute) };
+  } catch (e) {
+    const d = new Date();
+    return { iso: localIso(d), minute: d.getHours() * 60 + d.getMinutes() };
+  }
+}
+
+function opsLive(sh) {
+  return ['cancelled', 'no_show'].indexOf(String(sh.status || '').toLowerCase()) === -1;
+}
+
+// [start, end) of a shift in minutes from the midnight of `iso`, or null.
+function opsSpanOn(sh, iso) {
+  const d = String(sh.date || sh.shift_date || '').slice(0, 10);
+  const offset = d === iso ? 0 : (d === opsIsoAdd(iso, -1) ? -1440 : null);
+  if (offset === null) return null;
+  const s = opsMin(sh.start_time), e0 = opsMin(sh.end_time);
+  if (s == null || e0 == null) return null;
+  return { start: s + offset, end: (e0 <= s ? e0 + 1440 : e0) + offset };
+}
+
+// Shifts on at `minute` of `iso` — last night's shift still running past
+// midnight included.
+function opsOnShiftAt(shifts, iso, minute) {
+  return (shifts || []).filter(function (sh) {
+    if (!opsLive(sh)) return false;
+    const sp = opsSpanOn(sh, iso);
+    return !!sp && sp.start <= minute && minute < sp.end;
+  });
+}
+
+// The trading day "now" belongs to: 00:30 after a Friday that closes at 01:00
+// is still Friday night.
+function opsTradingDayNow(venue, shifts, now) {
+  const yday = opsIsoAdd(now.iso, -1);
+  const win = opsTradingWindow(venue, yday);
+  const late = now.minute + 1440;
+  if (win ? late < win.close : (shifts || []).some(function (sh) {
+    const sp = opsLive(sh) && String(sh.date || '').slice(0, 10) === yday ? opsSpanOn(sh, yday) : null;
+    return !!sp && sp.start <= late && late < sp.end;
+  })) {
+    return { iso: yday, minute: late };
+  }
+  return { iso: now.iso, minute: now.minute };
+}
+
+// Heads on at the start of each 30-minute slot of one trading day, by area,
+// against that weekday's minimum. Shifts dated that day only; one running
+// past midnight carries on to the right.
+function dayTimelineData(shifts, venue, iso, opts) {
+  opts = opts || {};
+  const only = opsNorm(opts.area || '');
+  const areas = opsVenueAreas(venue);
+  const dk = opsWeekKey(iso);
+  const spans = [];
+  (shifts || []).forEach(function (sh) {
+    if (!opsLive(sh) || String(sh.date || sh.shift_date || '').slice(0, 10) !== iso) return;
+    const sp = opsSpanOn(sh, iso);
+    if (sp) spans.push({ area: opsNorm(sh.role), start: sp.start, end: sp.end });
+  });
+  const trading = opsTradingWindow(venue, iso);
+  let first = trading ? trading.open : null, last = trading ? trading.close : null;
+  spans.forEach(function (sp) {
+    first = first == null ? sp.start : Math.min(first, sp.start);
+    last = last == null ? sp.end : Math.max(last, sp.end);
+  });
+  const result = { day: iso, trading: trading, slots: [], rows: [], total: [], below: 0 };
+  if (first == null) return result;
+  first = Math.floor(first / OPS_SLOT_MIN) * OPS_SLOT_MIN;
+  last = Math.ceil(last / OPS_SLOT_MIN) * OPS_SLOT_MIN;
+  for (let m = first; m < last; m += OPS_SLOT_MIN) result.slots.push(m);
+  // Minimums apply while the venue trades; with no hours recorded, while
+  // anyone at all is rostered on.
+  const openFrom = trading ? trading.open : Math.min.apply(null, spans.map(function (s) { return s.start; }));
+  const openTo = trading ? trading.close : Math.max.apply(null, spans.map(function (s) { return s.end; }));
+  const byName = {};
+  const add = function (name, label, min) {
+    const row = { name: name, label: label, min: min, counts: result.slots.map(function () { return 0; }), below: [] };
+    byName[name] = row;
+    result.rows.push(row);
+    return row;
+  };
+  areas.forEach(function (a) { add(a.name, a.label, a.min_by_day[dk] || 0); });
+  spans.forEach(function (sp) { if (!byName[sp.area]) add(sp.area, sp.area ? opsTitle(sp.area) : 'No area', 0); });
+  spans.forEach(function (sp) {
+    const row = byName[sp.area];
+    result.slots.forEach(function (m, i) { if (sp.start <= m && m < sp.end) row.counts[i]++; });
+  });
+  result.open = result.slots.map(function (m) { return m >= openFrom && m < openTo; });
+  if (only) result.rows = result.rows.filter(function (r) { return r.name === only; });
+  result.rows.forEach(function (r) {
+    r.below = r.counts.map(function (n, i) { return !!r.min && result.open[i] && n < r.min; });
+    result.below += r.below.filter(Boolean).length;
+  });
+  result.total = result.slots.map(function (m, i) {
+    return result.rows.reduce(function (sum, r) { return sum + r.counts[i]; }, 0);
+  });
+  return result;
+}
+
+function renderDayTimeline(data, opts) {
+  opts = opts || {};
+  if (!data.slots.length) {
+    return '<div class="ops-muted" style="padding:16px 0;">Nobody is rostered on this day' +
+      (data.trading ? '' : ' and no trading hours are recorded for it') + '.</div>';
+  }
+  const scale = Math.max(1, Math.max.apply(null, data.rows.map(function (r) {
+    return Math.max(r.min || 0, Math.max.apply(null, r.counts.concat([0])));
+  })));
+  const nowIdx = opts.nowMinute == null ? -1 : data.slots.findIndex(function (m) {
+    return opts.nowMinute >= m && opts.nowMinute < m + OPS_SLOT_MIN;
+  });
+  const head = '<tr><th class="dtl-area">' + (opts.title ? esc(opts.title) : 'Area') + '</th>' +
+    data.slots.map(function (m) {
+      return '<th class="dtl-hour">' + (m % 60 === 0 ? esc(opsClock(m).slice(0, 2)) : '') + '</th>';
+    }).join('') + '</tr>';
+  const cell = function (n, i, row) {
+    const below = row && row.below[i];
+    const cls = 'dtl-cell' + (data.open[i] ? ' open' : '') + (data.slots[i] % 60 === 0 ? ' hour-start' : '') +
+      (below ? ' below' : '') + (i === nowIdx ? ' now' : '');
+    const tip = opsClock(data.slots[i]) + ' · ' + n + ' on' + (row && row.min ? ' (minimum ' + row.min + ')' : '');
+    const bar = row ? '<span class="dtl-bar" style="height:' + Math.round(n / scale * 100) + '%;"></span>' : '';
+    const line = row && row.min && data.open[i]
+      ? '<span class="dtl-minline" style="bottom:' + Math.round(row.min / scale * 100) + '%;"></span>' : '';
+    return '<td class="' + cls + '" title="' + opsAttr(tip) + '">' + bar + line +
+      '<span class="dtl-n">' + (n || (row && below) ? n : '') + '</span></td>';
+  };
+  const body = data.rows.map(function (r) {
+    return '<tr><th class="dtl-area">' + esc(r.label) +
+      '<span class="dtl-min">' + (r.min ? 'min ' + r.min : 'no minimum') + '</span></th>' +
+      r.counts.map(function (n, i) { return cell(n, i, r); }).join('') + '</tr>';
+  }).join('') + '<tr class="dtl-total"><th class="dtl-area">Total on</th>' +
+    data.total.map(function (n, i) { return cell(n, i, null); }).join('') + '</tr>';
+  const legend = (data.trading ? 'Shaded = trading hours (' + opsClock(data.trading.open) + '–' + opsClock(data.trading.close) + '). '
+    : 'No trading hours recorded for this day — minimums apply while anyone is rostered. ') +
+    'Red = fewer on than the area minimum; dashed line = the minimum.' +
+    (data.below ? ' ' + data.below + ' half-hour' + (data.below === 1 ? '' : 's') + ' below a minimum.' : '');
+  return '<div class="dtl-wrap"><table class="dtl-table"><thead>' + head + '</thead><tbody>' + body +
+    '</tbody></table></div><div class="dtl-legend">' + esc(legend) + '</div>';
+}
+
+// ── Roster page: Week / Day ────────────────────────────────────────
+function rosterSetView(view) {
+  rosterView = view === 'day' ? 'day' : 'week';
+  const week = document.getElementById('roster-week-view');
+  const day = document.getElementById('roster-day-view');
+  if (week) week.style.display = rosterView === 'day' ? 'none' : '';
+  if (day) day.style.display = rosterView === 'day' ? '' : 'none';
+  [['btn-roster-week-view', 'week'], ['btn-roster-day-view', 'day']].forEach(function (b) {
+    const el = document.getElementById(b[0]);
+    if (!el) return;
+    el.classList.toggle('ops-seg-on', rosterView === b[1]);
+    el.setAttribute('aria-pressed', rosterView === b[1] ? 'true' : 'false');
+  });
+  if (rosterView === 'day') renderRosterDayView();
+}
+
+function rosterPickDay(iso) {
+  rosterDayIso = iso;
+  renderRosterDayView();
+}
+
+function renderRosterDayView() {
+  const host = document.getElementById('roster-day-view');
+  if (!host || rosterView !== 'day') return;
+  const roster = state.displayedRoster;
+  if (!roster || !roster.shifts) {
+    host.innerHTML = '<div class="ops-muted" style="padding:24px 0; text-align:center;">' +
+      (state.isDemo ? 'Generate a roster to see its day view.' : 'No roster for this week yet — the day view shows once there is one.') + '</div>';
+    return;
+  }
+  const venue = opsVenue();
+  const monday = String(roster.week_start || '').slice(0, 10);
+  const days = OPS_WEEK_KEYS.map(function (k, i) { return opsIsoAdd(monday, i); });
+  if (days.indexOf(rosterDayIso) === -1) {
+    const today = opsVenueNow(venue).iso;
+    rosterDayIso = days.indexOf(today) !== -1 ? today : days[0];
+  }
+  const pills = '<div class="ops-day-pills">' + days.map(function (iso) {
+    const p = iso.split('-').map(Number);
+    const label = new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric' });
+    return '<button class="btn btn-secondary btn-small' + (iso === rosterDayIso ? ' ops-seg-on' : '') +
+      '" onclick="rosterPickDay(\'' + iso + '\')">' + esc(label) + '</button>';
+  }).join('') + '</div>';
+  const data = dayTimelineData(roster.shifts, venue, rosterDayIso, { area: rosterSection });
+  host.innerHTML = pills + renderDayTimeline(data);
+}
+
+// ── On-Shift: now ───────────────────────────────────────────────────
+function opsAllShifts() {
+  const out = [];
+  (state.rosters || []).forEach(function (r) { (r.shifts || []).forEach(function (sh) { out.push(sh); }); });
+  return out;
+}
+
+function renderOnShiftNow() {
+  if (state.isDemo) return;
+  const venue = opsVenue();
+  const shifts = opsAllShifts();
+  const now = opsVenueNow(venue);
+  const td = opsTradingDayNow(venue, shifts, now);
+  const on = opsOnShiftAt(shifts, now.iso, now.minute);
+  const dk = opsWeekKey(td.iso);
+  const areas = opsVenueAreas(venue);
+  const byId = {};
+  (state.employees || []).forEach(function (e) { byId[e.id] = e; });
+
+  const groups = {};
+  on.forEach(function (sh) {
+    const key = opsNorm(sh.role);
+    (groups[key] = groups[key] || []).push(sh);
+  });
+  const order = areas.map(function (a) { return a.name; });
+  Object.keys(groups).forEach(function (k) { if (order.indexOf(k) === -1) order.push(k); });
+  const label = function (k) {
+    const a = areas.find(function (x) { return x.name === k; });
+    return a ? a.label : (k ? opsTitle(k) : 'No area');
+  };
+  const minOf = function (k) {
+    const a = areas.find(function (x) { return x.name === k; });
+    return a ? (a.min_by_day[dk] || 0) : 0;
+  };
+
+  const set = function (id, text) { const el = document.getElementById(id); if (el) el.textContent = text; };
+  set('headcount-now', String(on.length));
+  set('headcount-sub', 'on shift now · ' + opsClock(now.minute));
+  set('headcount-areas-label', 'By area — on now / minimum today');
+  const cap = document.getElementById('capacity-wrap');
+  if (cap) cap.style.display = 'none';
+  const chips = document.getElementById('headcount-areas');
+  if (chips) {
+    chips.innerHTML = order.length ? order.map(function (k) {
+      const n = (groups[k] || []).length, min = minOf(k);
+      return '<div class="ops-area-chip' + (min && n < min ? ' below' : '') + '"><strong>' + n + '</strong>' +
+        (min ? ' / ' + min : '') + ' ' + esc(label(k)) + '</div>';
+    }).join('') : '<div class="ops-muted">No areas set up yet — add them in Settings.</div>';
+  }
+
+  const list = document.getElementById('on-shift-list');
+  if (list) {
+    if (!on.length) {
+      list.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center;">Nobody rostered on right now</div>';
+    } else {
+      list.innerHTML = order.filter(function (k) { return groups[k]; }).map(function (k) {
+        const people = groups[k].slice().sort(function (a, b) {
+          return (opsSpanOn(a, now.iso).end - opsSpanOn(b, now.iso).end) ||
+            String((byId[a.employee_id] || {}).name || '').localeCompare(String((byId[b.employee_id] || {}).name || ''));
+        });
+        const min = minOf(k);
+        return '<div class="ops-group-title">' + esc(label(k)) + ' · ' +
+          '<span class="' + (min && people.length < min ? 'below' : '') + '">' + people.length + ' on' +
+          (min ? ' (min ' + min + ')' : '') + '</span></div>' +
+          people.map(function (sh) {
+            const emp = byId[sh.employee_id];
+            const name = emp ? emp.name : 'Staff member';
+            return '<div class="staff-item">' +
+              '<div class="staff-avatar">' + esc((name || '?').charAt(0)) + '</div>' +
+              '<div class="staff-info">' +
+                '<div class="staff-name">' + esc(name) + '</div>' +
+                '<div class="staff-meta">' + esc(String(sh.start_time || '').slice(0, 5)) + '–' +
+                  esc(String(sh.end_time || '').slice(0, 5)) + '</div>' +
+              '</div>' +
+              '<span class="staff-status on-shift">On Shift</span>' +
+            '</div>';
+          }).join('');
+      }).join('');
+    }
+  }
+
+  const tl = document.getElementById('onshift-timeline');
+  if (tl) {
+    tl.innerHTML = renderDayTimeline(dayTimelineData(shifts, venue, td.iso), { nowMinute: td.minute, title: 'Today' });
+    const wrap = tl.querySelector && tl.querySelector('.dtl-wrap');
+    const cell = wrap && wrap.querySelector('.dtl-cell.now');
+    if (cell) wrap.scrollLeft = Math.max(0, cell.offsetLeft - wrap.clientWidth / 2);
+  }
+}
+
+// ── On-Shift: SOS — who can I call? ────────────────────────────────
+function opsFill(select, choices, keep) {
+  if (!select) return;
+  const current = keep != null ? keep : select.value;
+  select.innerHTML = '<option value="">All areas</option>' + (choices || []).map(function (c) {
+    return '<option value="' + opsAttr(c.name) + '">' + esc(c.label || opsTitle(c.name)) + '</option>';
+  }).join('');
+  select.value = (choices || []).some(function (c) { return c.name === current; }) ? current : '';
+}
+
+function sosPersonHtml(p, message, dim) {
+  const tel = String(p.tel || '').replace(/[^+\d]/g, '');
+  const type = { casual: 'Casual', part_time: 'Part-time', full_time: 'Full-time' }[p.employment_type] || opsTitle(p.employment_type || '');
+  const meta = [type, (Math.round((p.hours_this_week || 0) * 10) / 10) + 'h this week'];
+  if (p.visa && !p.visa.would_exceed) meta.push(p.visa.message);
+  const flags = (p.flags || []).map(function (f) {
+    const warn = /over it|unavailable|^On at|^Already on/.test(f);
+    return '<span class="ops-flag' + (warn ? ' warn' : '') + '">' + esc(f) + '</span>';
+  }).join('');
+  const actions = tel
+    ? '<div class="ops-actions">' +
+        '<a class="btn btn-primary btn-small" href="' + opsAttr('tel:' + tel) + '">Call</a>' +
+        '<a class="btn btn-secondary btn-small" href="' + opsAttr('sms:' + tel + '?&body=' + encodeURIComponent(message || '')) + '">Text</a>' +
+      '</div>'
+    : '<div class="ops-muted">No mobile on file</div>';
+  return '<div class="ops-person' + (dim ? ' unavailable' : '') + '">' +
+    '<div class="ops-person-main"><div class="ops-person-name">' + esc(p.name) + '</div>' +
+    '<div class="ops-person-meta">' + esc(meta.join(' · ')) + '</div>' + flags + '</div>' + actions + '</div>';
+}
+
+function sosResultsHtml(r) {
+  const msg = r.message || '';
+  let html = '';
+  if (msg) html += '<div class="ops-muted">Text says: “' + esc(msg) + '”</div>';
+  (r.notes || []).forEach(function (n) { html += '<div class="ops-muted">' + esc(n) + '</div>'; });
+  const avail = r.available || [];
+  const callable = avail.filter(function (p) { return p.tel; }).length;
+  html += '<div class="ops-section-title"><span>Available (' + avail.length + ')</span>' +
+    (callable ? '<button class="btn btn-secondary btn-small" onclick="sosCopyNumbers()">Copy all numbers</button>' : '') + '</div>';
+  html += avail.length ? avail.map(function (p) { return sosPersonHtml(p, msg, false); }).join('')
+    : '<div class="ops-muted">Nobody is free for this time on their availability.</div>';
+  if (r.include_unavailable) {
+    const un = r.unavailable || [];
+    html += '<div class="ops-section-title"><span>Marked unavailable — they might say yes (' + un.length + ')</span></div>';
+    html += un.length ? un.map(function (p) { return sosPersonHtml(p, msg, true); }).join('')
+      : '<div class="ops-muted">Nobody else.</div>';
+  } else if (r.unavailable_hidden) {
+    html += '<div class="ops-muted" style="margin-top:8px;">' + r.unavailable_hidden + ' more marked unavailable — tick the box above to see them.</div>';
+  }
+  const busy = r.already_on || [];
+  if (busy.length) {
+    html += '<div class="ops-section-title"><span>Already working (' + busy.length + ')</span></div>' +
+      '<div class="ops-muted">' + busy.map(function (p) { return esc(p.name) + ' — ' + esc((p.flags || [])[0] || ''); }).join('<br>') + '</div>';
+  }
+  const leave = r.on_leave || [];
+  if (leave.length) {
+    html += '<div class="ops-section-title"><span>On approved leave (' + leave.length + ')</span></div>' +
+      '<div class="ops-muted">' + leave.map(function (p) { return esc(p.name); }).join(', ') + '</div>';
+  }
+  return html;
+}
+
+function opsVal(id) { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; }
+
+async function loadSosCard(reset) {
+  const venueId = state.currentVenue;
+  if (!venueId || state.isDemo) return;
+  const host = document.getElementById('sos-results');
+  if (!host) return;
+  if (reset) ['sos-date', 'sos-start', 'sos-end'].forEach(function (id) { const el = document.getElementById(id); if (el) el.value = ''; });
+  const qs = ['venue_id=' + encodeURIComponent(venueId)];
+  const area = opsVal('sos-area');
+  if (area) qs.push('area=' + encodeURIComponent(area));
+  if (opsVal('sos-start')) {
+    qs.push('start=' + encodeURIComponent(opsVal('sos-start')));
+    if (opsVal('sos-end')) qs.push('end=' + encodeURIComponent(opsVal('sos-end')));
+    if (opsVal('sos-date')) qs.push('date=' + encodeURIComponent(opsVal('sos-date')));
+  }
+  const unavailable = document.getElementById('sos-include-unavailable');
+  if (unavailable && unavailable.checked) qs.push('include_unavailable=true');
+  host.innerHTML = '<div class="ops-muted">Finding people…</div>';
+  let r;
+  try {
+    r = await fetchAPI('/api/sos?' + qs.join('&'));
+  } catch (e) {
+    if (state.currentVenue !== venueId) return;
+    host.innerHTML = '<div class="ops-muted">Couldn’t load the call list: ' + esc(e.message || 'try again') + '</div>';
+    return;
+  }
+  if (state.currentVenue !== venueId) return;
+  opsLastSos = r;
+  opsFill(document.getElementById('sos-area'), r.area_choices, area);
+  const setv = function (id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; };
+  setv('sos-date', r.date);
+  setv('sos-start', r.window && r.window.start);
+  setv('sos-end', r.window && r.window.end);
+  const label = document.getElementById('sos-window-label');
+  if (label && r.window) label.textContent = r.window.label + (r.areas && r.areas.length ? ' · ' + r.areas.join(', ') : '');
+  host.innerHTML = sosResultsHtml(r);
+}
+
+function sosNumbers(r) {
+  return ((r && r.available) || []).map(function (p) { return String(p.tel || '').replace(/[^+\d]/g, ''); })
+    .filter(Boolean);
+}
+
+async function sosCopyNumbers() {
+  const nums = sosNumbers(opsLastSos);
+  if (!nums.length) { showToast('No mobile numbers to copy', 'warning'); return; }
+  const text = nums.join(', ');
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e2) { /* the prompt below still shows them */ }
+    document.body.removeChild(ta);
+  }
+  showToast('Copied ' + nums.length + ' number' + (nums.length === 1 ? '' : 's'), 'success');
+}
+
+// ── On-Shift: Cut / hold ────────────────────────────────────────────
+function cutAdviceHtml(r) {
+  const verdict = { cut: 'CUT', hold: 'HOLD', need_sales: 'NEED TAKINGS', need_target: 'NO TARGET', no_one_on: 'NOBODY ON' }[r.recommendation] || String(r.recommendation || '').toUpperCase();
+  let html = '<div><span class="ops-verdict ' + opsAttr(r.recommendation) + '">' + esc(verdict) + '</span>' +
+    '<div class="ops-headline">' + esc(r.headline || '') + '</div>';
+  const nums = [];
+  if (r.labour_per_hour != null) nums.push('Labour $' + Math.round(r.labour_per_hour) + '/h');
+  if (r.sales_per_hour_ex_gst != null) nums.push('sales $' + Math.round(r.sales_per_hour_ex_gst) + '/h ex GST');
+  if (r.labour_pct != null) nums.push(r.labour_pct.toFixed(0) + '%' + (r.labour_target_pct != null ? ' vs ' + r.labour_target_pct + '% target' : ''));
+  if (nums.length) html += '<div class="ops-numbers">' + esc(nums.join(' · ')) + '</div>';
+  if (r.sales_source) html += '<div class="ops-muted">Sales from ' + esc(r.sales_source) + '.</div>';
+  html += '</div>';
+  const cands = r.candidates || [];
+  if (cands.length) {
+    html += '<div class="ops-section-title"><span>' + (r.recommendation === 'cut' ? 'Send home' : 'First to go if it stays quiet') + '</span></div>' +
+      cands.map(function (c) {
+        return '<div class="ops-person"><div class="ops-person-main"><div class="ops-person-name">' + esc(c.name) + '</div>' +
+          '<div class="ops-person-meta">' + esc(opsTitle(c.area) + ' · on till ' + c.end +
+            (c.saving_if_sent_now != null ? ' · saves about $' + Math.round(c.saving_if_sent_now) : '')) + '</div></div></div>';
+      }).join('');
+  }
+  const why = (r.reasons || []).concat(r.information || []);
+  if (why.length) html += '<ul class="ops-list">' + why.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
+  (r.notes || []).forEach(function (n) { html += '<div class="ops-muted" style="margin-top:6px;">' + esc(n) + '</div>'; });
+  html += '<div class="ops-muted" style="margin-top:8px;">As at ' + esc(r.time || '') + ' — kept in the venue log.</div>';
+  return html;
+}
+
+async function loadCutAdvice() {
+  const venueId = state.currentVenue;
+  if (!venueId || state.isDemo) return;
+  const host = document.getElementById('onshift-recommendations');
+  if (!host) return;
+  const qs = ['venue_id=' + encodeURIComponent(venueId)];
+  const area = opsVal('cut-area');
+  if (area) qs.push('area=' + encodeURIComponent(area));
+  const takings = opsVal('cut-takings');
+  if (takings !== '' && isFinite(Number(takings)) && Number(takings) >= 0) qs.push('takings=' + encodeURIComponent(Number(takings)));
+  host.innerHTML = '<div class="ops-muted">Working it out…</div>';
+  let r;
+  try {
+    r = await fetchAPI('/api/ops/cut-advice?' + qs.join('&'));
+  } catch (e) {
+    if (state.currentVenue !== venueId) return;
+    host.innerHTML = '<div class="ops-muted">Couldn’t get the call: ' + esc(e.message || 'try again') + '</div>';
+    return;
+  }
+  if (state.currentVenue !== venueId) return;
+  opsFill(document.getElementById('cut-area'), r.area_choices, area);
+  host.innerHTML = cutAdviceHtml(r);
+}
+
+// Called whenever the On-Shift page is shown for a real venue.
+function openOnShiftTools() {
+  if (state.isDemo) return;
+  const sos = document.getElementById('sos-card-wrap');
+  if (sos) sos.style.display = '';
+  const controls = document.getElementById('cut-controls');
+  if (controls) controls.style.display = '';
+  const title = document.getElementById('onshift-rec-title');
+  if (title) title.textContent = 'Cut / hold';
+  // Fresh each time: the pickers may still hold the previous venue's areas.
+  ['sos-area', 'cut-area', 'cut-takings'].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  renderOnShiftNow();
+  loadSosCard(true);
+  loadCutAdvice();
+}
+
+// The On-Shift headcount and timeline follow the clock while the page is open.
+setInterval(function () {
+  if (!state.isDemo && state.currentPage === 'on-shift' && state.currentVenue) renderOnShiftNow();
+}, 60000);
 
 // ── Staff Contact Export ────────────────────────────────────────────
 function exportStaffContacts() {

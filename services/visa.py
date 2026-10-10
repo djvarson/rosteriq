@@ -91,6 +91,27 @@ def fortnight_cap_flags(roster, employees: Iterable, prev_roster=None) -> List[d
     return flags
 
 
+def cap_headroom(employee, rostered_fortnight_hours: float, extra_hours: float = 0.0) -> Optional[dict]:
+    """Where someone stands against their RECORDED fortnight cap before being
+    asked for ``extra_hours`` more. None when no cap is recorded."""
+    cap = getattr(employee, "visa_work_limit_fortnight", None)
+    if not cap:
+        return None
+    cap = float(cap)
+    rostered = round(float(rostered_fortnight_hours or 0.0), 2)
+    extra = round(float(extra_hours or 0.0), 2)
+    left = round(max(cap - rostered, 0.0), 2)
+    exceed = rostered + extra > cap
+    if exceed:
+        message = (f"Recorded visa cap {cap:g}h a fortnight: {rostered:g}h rostered, "
+                   f"{left:g}h left — {extra:g}h more goes over it")
+    else:
+        message = f"Recorded visa cap {cap:g}h a fortnight: {left:g}h left"
+    return {"cap_hours_fortnight": cap, "rostered_fortnight_hours": rostered,
+            "hours_left": left, "extra_hours": extra, "would_exceed": exceed,
+            "message": message}
+
+
 def preserve_recorded_work_rights(db, emp):
     """Integration syncs (Deputy/MYOB) rebuild Employee objects from the
     external system, which knows nothing about visas. Carry the manager's

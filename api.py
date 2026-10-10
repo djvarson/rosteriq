@@ -1271,6 +1271,17 @@ except Exception as e:
     logger.error(f"Failed to register skill matrix routes: {e}")
 
 
+# On-Shift night tools: SOS call-in list and cut / hold advice
+try:
+    from rosteriq.routes.ops import router as ops_router
+    app.include_router(ops_router)
+    logger.info("On-Shift ops routes registered at /api/sos and /api/ops/*")
+except ImportError as e:
+    logger.warning(f"On-Shift ops routes unavailable: {e}")
+except Exception as e:
+    logger.error(f"Failed to register On-Shift ops routes: {e}")
+
+
 # Test reporting and coverage analysis routes (platform-owner endpoints).
 # These import the pytest suite, so on an image that ships without tests the
 # import fails and the routes are simply absent — which is the current state on
