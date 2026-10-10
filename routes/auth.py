@@ -18,7 +18,7 @@ from rosteriq.services.demo import (
     DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL,
 )
 from rosteriq.middleware.auth import get_current_user, UserContext
-from rosteriq.services.events import record_event, security
+from rosteriq.services.events import audit, record_event, security
 from rosteriq.schemas import (
     RegisterRequest,
     LoginRequest,
@@ -572,6 +572,16 @@ async def invite_user(
                  resource_type="user", resource_id=user["id"],
                  details={"invited_email": user["email"], "invited_name": user.get("name"),
                           "role": user["role"], "venue_ids": list(user.get("venue_ids") or [])})
+    # A manager invited to a venue nobody owns yet becomes its owner, as if
+    # they had signed it up: the managers they appoint can't lower them
+    # there. At a venue that already has its owner they are an appointed
+    # manager.
+    if user["role"] == "manager":
+        from rosteriq.services.venue_access import has_owner
+        for vid in user.get("venue_ids") or []:
+            if not has_owner(db, vid):
+                audit("user.venue_grant", vid, "user", user["id"], email=user["email"],
+                      reason="owner_provisioned", venue_ids=list(user["venue_ids"]))
 
     return UserResponse(
         id=user["id"],

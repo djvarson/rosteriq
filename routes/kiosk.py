@@ -15,6 +15,7 @@ Staff routes (their own record only):
 """
 
 import logging
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -156,6 +157,11 @@ def _my_records(db, user: UserContext) -> list:
 @router.get("/api/me/clock")
 async def my_clock(venue_id: Optional[str] = Query(None),
                    user: UserContext = Depends(get_current_user)) -> dict:
+    """``stale``: the open punch is a forgotten clock-out, as on the kiosk
+    board. A rostered one whose shift has ended is closed first; the rest
+    need the time they finished (POST /api/clock/out with finished_at).
+    ``stale_at`` (UTC) is when an open punch becomes one, for a page left open."""
+    from rosteriq.routes.timeclock import _close_stale_punches, _fmt_local, _tz
     db = get_db()
     mine = _my_records(db, user)
     if venue_id:
@@ -163,10 +169,14 @@ async def my_clock(venue_id: Optional[str] = Query(None),
     if not mine:
         return {"linked": False}
     emp, vid = mine[0]
+    _close_stale_punches(db, vid)
     open_ts = db.get_open_timesheet(vid, emp.id)
-    state = "off"
+    state, clock_in, stale_at, stale = "off", None, None, False
     if open_ts:
         state = "break" if open_ts.get("break_started_at") else "on"
+        clock_in = kiosk.naive_utc(open_ts["clock_in"])
+        stale_at = clock_in + timedelta(hours=kiosk.STALE_OPEN_HOURS)
+        stale = datetime.utcnow() > stale_at
     else:
         today = venue_today(vid, db)
         if any(t.get("employee_id") == emp.id and t.get("clock_out")
@@ -179,7 +189,10 @@ async def my_clock(venue_id: Optional[str] = Query(None),
         "has_pin": bool(db.get_timeclock_pin(vid, emp.id)),
         "self_clock": kiosk.load_settings(db, vid)["allow_self_clock"],
         "state": state,
-        "clock_in": kiosk.naive_utc(open_ts["clock_in"]).isoformat() if open_ts else None,
+        "clock_in": clock_in.isoformat() if clock_in else None,
+        "clock_in_label": _fmt_local(clock_in, _tz(vid, db)) if clock_in else None,
+        "stale": stale,
+        "stale_at": stale_at.isoformat(timespec="seconds") if stale_at else None,
     }
 
 

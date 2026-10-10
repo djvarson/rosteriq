@@ -1015,7 +1015,8 @@ async function main() {
 }
 """)
     assert "Set my PIN" in data["plain"] and "Clock in" not in data["plain"]
-    assert "Change my PIN" in data["self"] and "Start break" in data["self"] and "Clock out" in data["self"]
+    assert "Change my PIN" in data["self"] and "Start meal break (unpaid)" in data["self"]
+    assert "Paid rest breaks: stay clocked in." in data["self"] and "Clock out" in data["self"]
     assert data["calls"][0] == {"path": "/api/me/clock-pin", "body": {"pin": "2468"}}
     assert data["calls"][1] == {"path": "/api/clock/break/start", "body": {"venue_id": "wem", "employee_id": "e0"}}
     assert data["toasts"][0]["k"] == "err"

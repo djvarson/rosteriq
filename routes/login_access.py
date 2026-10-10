@@ -12,8 +12,9 @@ holds), so every change goes through the same guards as reset links and
 access-role: the caller must fully manage every venue the login reaches.
 Adding a venue also needs the caller to fully manage that venue. Lowering
 the login's access at one venue changes nothing elsewhere, so a full
-manager of that venue may do it alone (never to the venue's creator), and
-the reply names only the venues the caller fully manages.
+manager of that venue may do it alone (never to the venue's creator, nor to
+someone who fully runs a venue the caller doesn't), and the reply names
+only the venues the caller fully manages.
 """
 
 import logging
