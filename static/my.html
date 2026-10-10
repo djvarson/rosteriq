@@ -376,31 +376,74 @@ let reauthing = false;
 
 // Access tokens last an hour; trade the refresh token for a new pair rather
 // than sending someone back to the login screen. One exchange at a time — the
-// refresh token rotates on use, and Home fires several calls at once.
+// refresh token rotates on use, and Home fires several calls at once — and
+// one across tabs: the pair in localStorage is shared with every other tab and
+// the dashboard, so the exchange holds the same Web Lock and re-reads storage,
+// taking up a pair another tab already stored instead of spending a revoked one.
+// Resolves 'adopted', 'refreshed' or false (the server refused the refresh
+// token). A 429, 5xx or dropped connection throws a retryable error and keeps
+// the pair; a Retry-After is held for every tab, as they share the network.
 let refreshing = null;
-function refreshSession() {
+function refreshSession(staleToken) {
   if (refreshing) return refreshing;
-  refreshing = (async function () {
-    let rt = '';
-    try { rt = localStorage.getItem('jwt_refresh_token') || ''; } catch (e) { return false; }
+  const RETRY_KEY = 'rosteriq_refresh_retry_at';
+  const read = function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  const adopt = function (at) { token = at; return 'adopted'; };
+  const retryable = function (msg, secs) {
+    const e = new Error(msg + " You're still signed in — try again " + (secs ? 'in ' + secs + ' s.' : 'in a moment.'));
+    e.retryable = true;
+    e.retryAfter = secs || 0;
+    return e;
+  };
+  const exchange = async function () {
+    const stored = read('jwt_token');
+    if (staleToken && stored && stored !== staleToken) return adopt(stored);
+    const rt = read('jwt_refresh_token');
     if (!rt) return false;
+    const wait = Math.ceil(((+read(RETRY_KEY) || 0) - Date.now()) / 1000);
+    if (wait > 0) throw retryable('RosterIQ asked for a pause before renewing your sign-in.', wait);
+    // Other tabs wait on this lock, so a stalled connection must not hold it.
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(function () { ctl.abort(); }, 15000) : null;
+    let r;
     try {
-      const r = await fetch('/api/auth/refresh', {
+      r = await fetch('/api/auth/refresh', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: rt }),
+        body: JSON.stringify({ refresh_token: rt }), signal: ctl ? ctl.signal : undefined,
       });
-      if (!r.ok) return false;
-      const j = await r.json();
-      if (!j || !j.access_token) return false;
-      token = j.access_token;
-      try {
-        localStorage.setItem('jwt_token', j.access_token);
-        if (j.refresh_token) localStorage.setItem('jwt_refresh_token', j.refresh_token);
-      } catch (e) { /* the in-memory token still works for this visit */ }
-      return true;
-    } catch (e) { return false; }
-  })();
-  refreshing.then(function () { refreshing = null; });
+    } catch (e) {
+      throw retryable("Couldn't reach RosterIQ to renew your sign-in.", 0);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (r.status === 401 || r.status === 403) {
+      const nowRt = read('jwt_refresh_token'), nowAt = read('jwt_token');
+      if (nowRt && nowRt !== rt && nowAt) return adopt(nowAt);
+      return false;
+    }
+    if (!r.ok) {
+      const ra = r.headers && r.headers.get ? r.headers.get('Retry-After') : null;
+      let secs = parseInt(ra, 10);
+      if (!(secs >= 0) && ra) secs = Math.ceil((Date.parse(ra) - Date.now()) / 1000);
+      secs = secs > 0 ? secs : 0;
+      if (secs) { try { localStorage.setItem(RETRY_KEY, String(Date.now() + secs * 1000)); } catch (e) { /* this tab still waits */ } }
+      throw retryable(r.status === 429 ? 'Too many sign-in requests from this network.'
+                                       : "RosterIQ couldn't renew your sign-in just now.", secs);
+    }
+    let j = null;
+    try { j = await r.json(); } catch (e) { /* treated as no token below */ }
+    if (!j || !j.access_token) throw retryable("RosterIQ couldn't renew your sign-in just now.", 0);
+    token = j.access_token;
+    try {
+      localStorage.setItem('jwt_token', j.access_token);
+      if (j.refresh_token) localStorage.setItem('jwt_refresh_token', j.refresh_token);
+    } catch (e) { /* the in-memory token still works for this visit */ }
+    return 'refreshed';
+  };
+  const locks = typeof navigator !== 'undefined' && navigator.locks;
+  refreshing = locks ? locks.request('rosteriq-auth-refresh', exchange) : exchange();
+  const done = function () { refreshing = null; };
+  refreshing.then(done, done);
   return refreshing;
 }
 
@@ -421,8 +464,12 @@ async function api(path, opts, retried) {
         sessionStorage.setItem('demo_staff_retried', '1');
         window.location.reload();
       }
-    } else if (!demoStaff && !retried && ((token && token !== sent) || await refreshSession())) {
-      return api(path, opts, true);
+    } else if (!demoStaff && retried !== 'refreshed') {
+      // A token taken from another tab may itself have expired, so a 401 on
+      // that retry still gets one real exchange.
+      const renewed = (token && token !== sent) ? 'adopted' : await refreshSession(sent);
+      if (renewed) return api(path, opts, renewed);
+      if (!reauthing) window.location.href = '/login';
     } else if (!reauthing) {
       window.location.href = '/login';
     }
