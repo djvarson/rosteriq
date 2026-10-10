@@ -69,6 +69,7 @@ FLAG_LABELS = {
     "no_break": "no break recorded",
     "finish_entered_later": "finish time entered later",
     "auto_closed": "auto-closed at rostered end — check",
+    "manager_closed": "finish time entered by a manager",
     "long_shift": f"over {LONG_SHIFT_HOURS}h",
     "short_punch": "under 5 min",
 }

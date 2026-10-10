@@ -140,7 +140,7 @@
         <button class="chip" data-filter="on" onclick="setFilter('on')">On shift</button>
       </div>
     </div>
-    <p class="hint">Tap your name to clock in, take a break or clock out</p>
+    <p class="hint">Tap your name to clock in, start an unpaid meal break or clock out. Paid rest breaks: stay clocked in.</p>
     <div id="staff-grid"></div>
   </section>
 </main>
@@ -612,10 +612,10 @@ function showActions(s) {
     return;
   }
   if (s.state === 'on') {
-    addAction('Start break', 'ghost', () => punch('break/start'));
+    addAction('Start meal break (unpaid)', 'ghost', () => punch('break/start'));
     addAction('Clock out', 'out', () => punch('out'));
   } else if (s.state === 'break') {
-    addAction('End break', 'in', () => punch('break/end'));
+    addAction('End meal break', 'in', () => punch('break/end'));
     addAction('Clock out', 'out', () => punch('out'));
   } else {
     addAction('Clock in', 'in', () => punch('in'));
@@ -629,8 +629,8 @@ function punchMessage(action, res) {
   if (action === 'in') {
     return who + ' clocked IN ✓' + (res.shift ? ' — rostered ' + res.shift.start + '–' + res.shift.end : '');
   }
-  if (action === 'break/start') return who + ' is on break ✓ — tap End break when you\'re back';
-  if (action === 'break/end') return who + ' is back from a ' + (res.break_minutes || 0) + 'm break ✓';
+  if (action === 'break/start') return who + ' is on an unpaid meal break ✓ — tap End meal break when you\'re back';
+  if (action === 'break/end') return who + ' is back from a ' + (res.break_minutes || 0) + 'm meal break ✓';
   let msg = who + ' clocked OUT ✓ — ' + minutesLabel(res.worked_minutes) + ' worked';
   if (res.break_source === 'auto') msg += ' (' + res.break_minutes + 'm meal break taken off, as rostered)';
   else if (res.break_minutes) msg += ' (' + res.break_minutes + 'm break)';
@@ -643,6 +643,9 @@ async function punch(action, extra) {
   if (!current) return;
   modalError('');
   const body = Object.assign({ venue_id: venueId, employee_id: current.employee_id, pin: pin }, extra || {});
+  // One request per tap: a second tap could reach the other server worker.
+  const buttons = Array.from(document.getElementById('m-actions').children);
+  buttons.forEach(function (b) { b.disabled = true; });
   try {
     const res = await api('/api/clock/' + action, { method: 'POST', body: JSON.stringify(body) });
     const said = punchMessage(action, res);
@@ -654,6 +657,8 @@ async function punch(action, extra) {
   } catch (e) {
     if (e.status === 401) { switchedOff(e.message); return; }
     modalError(e.message);
+  } finally {
+    buttons.forEach(function (b) { b.disabled = false; });
   }
 }
 

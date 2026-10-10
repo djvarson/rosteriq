@@ -15,7 +15,7 @@ All monetary values in AUD using Decimal for precision.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Dict, Any
 from enum import Enum
@@ -28,6 +28,7 @@ from rosteriq.award_rules import (
 )
 from rosteriq.cost_calculator import split_at_midnight, super_guarantee_rate
 from rosteriq.services.pay_basis import is_salaried, salary_for_days
+from rosteriq.services.staff_records import is_active
 
 
 class PayrollStatus(str, Enum):
@@ -213,6 +214,9 @@ class PayrollBatch:
 
     # Validation
     validation_errors: List[str] = field(default_factory=list)
+    # What preparing the batch found for the advisor to act on; validate_batch
+    # carries these into validation_errors.
+    notes: List[str] = field(default_factory=list)
 
     def calculate_totals(self):
         """Recalculate all batch totals."""
@@ -388,6 +392,46 @@ def payroll_batch_from_dict(data: Dict[str, Any]) -> PayrollBatch:
     return batch
 
 
+def _as_date(v) -> Optional[date]:
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _paid_leave_windows(leave_requests) -> Dict[str, list]:
+    """employee_id -> [(start, end, leave label)] of approved paid leave."""
+    from rosteriq.services.leave_shifts import PAID_LEAVE_TYPES, leave_type_label
+    out: Dict[str, list] = {}
+    for req in leave_requests or []:
+        if req.get("status") != "approved" or req.get("leave_type") not in PAID_LEAVE_TYPES:
+            continue
+        start, end = _as_date(req.get("start_date")), _as_date(req.get("end_date"))
+        if start is None or end is None:
+            continue
+        out.setdefault(str(req.get("employee_id")), []).append(
+            (start, end, leave_type_label(req.get("leave_type")).lower()))
+    return out
+
+
+def _local_day(when, tz) -> Optional[date]:
+    """The venue-local date of a naive-UTC timestamp."""
+    if isinstance(when, str):
+        try:
+            when = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(when, datetime):
+        return _as_date(when)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(tz).date()
+
+
 class PayrollExporter:
     """Base class for payroll export operations."""
 
@@ -399,6 +443,7 @@ class PayrollExporter:
             db: Database store instance (BaseStore)
         """
         self.db = db
+        self._memo: Dict[tuple, Any] = {}
 
     def prepare_timesheet_data(
         self,
@@ -410,6 +455,7 @@ class PayrollExporter:
         employees: Dict[str, Employee],
         allowance_rules: Optional[List[AllowanceRule]] = None,
         leave_requests: Optional[List[dict]] = None,
+        rostered: bool = False,
     ) -> PayrollBatch:
         """
         Prepare timesheet data for a pay period.
@@ -435,9 +481,15 @@ class PayrollExporter:
             leave_requests: the venue's leave requests; approved paid leave
                 becomes a separate hours line for the advisor to price (no
                 leave loading or pay is calculated)
+            rostered: shifts are the rostered plan, not worked time. A
+                person's shift dated inside their approved paid leave is then
+                left unpriced (the leave line stands for that day) and noted.
 
         Salaried employees of the venue get one fixed salary line for the
-        period, whether or not they have shifts (services/pay_basis.py).
+        period, whether or not they have shifts (services/pay_basis.py),
+        including a leaver deactivated during or after it. A leaver, or
+        approved unpaid leave in the period, is noted for the advisor to
+        prorate; the line itself is never prorated here.
 
         Returns:
             PayrollBatch with prepared timesheet data
@@ -449,10 +501,21 @@ class PayrollExporter:
             status=PayrollStatus.draft,
         )
 
+        on_leave = _paid_leave_windows(leave_requests) if rostered else {}
+
         # Group shifts by employee
         shifts_by_emp: Dict[str, List[Shift]] = {}
         for shift in shifts:
             if shift.date < period_start or shift.date > period_end:
+                continue
+            leave = next((w for w in on_leave.get(str(shift.employee_id), [])
+                          if w[0] <= shift.date <= w[1]), None)
+            if leave is not None:
+                emp = employees.get(shift.employee_id)
+                batch.notes.append(
+                    f"{getattr(emp, 'name', None) or shift.employee_id}: rostered "
+                    f"{shift.date:%a %d %b} {shift.start_time:%H:%M}-{shift.end_time:%H:%M} "
+                    f"not priced — on approved {leave[2]} that day (see the leave line)")
                 continue
             if shift.employee_id not in shifts_by_emp:
                 shifts_by_emp[shift.employee_id] = []
@@ -476,11 +539,12 @@ class PayrollExporter:
 
         listed = {e.employee_id for e in batch.employees}
         for emp in employees.values():
-            if (emp.id not in listed and is_salaried(emp)
-                    and getattr(emp, "venue_id", None) == venue_id
-                    and getattr(emp, "active", True)):
-                batch.employees.append(self._salaried_line(emp, [], period_start, period_end))
-                listed.add(emp.id)
+            if emp.id in listed or not self.salaried_line_due(emp, venue_id, period_start, period_end):
+                continue
+            batch.employees.append(self._salaried_line(emp, [], period_start, period_end))
+            listed.add(emp.id)
+
+        self._note_salaried(batch, employees, leave_requests, period_start, period_end)
 
         self._add_leave_lines(batch, venue_id, employees, leave_requests,
                               period_start, period_end)
@@ -710,6 +774,112 @@ class PayrollExporter:
             Decimal("0.01"), rounding=ROUND_HALF_UP)
         return line
 
+    def salaried_line_due(self, emp, venue_id, period_start, period_end, shift_ids=()) -> bool:
+        """Whether the venue's run for the period carries a fixed salary line
+        for ``emp``: salaried there and active, or marked as left on or after
+        period_start, or with shifts (``shift_ids``) or punches there in it."""
+        if not is_salaried(emp) or getattr(emp, "venue_id", None) != venue_id:
+            return False
+        if is_active(emp) or str(emp.id) in shift_ids:
+            return True
+        left = self.left_on(emp)
+        if left is not None and left >= period_start:
+            return True
+        return str(emp.id) in self._punched_ids(venue_id, period_start, period_end)
+
+    def left_on(self, emp) -> Optional[date]:
+        """The venue-local day an inactive record left: the day it was marked
+        as left, else (made inactive another way) the day it was last saved."""
+        marked = self.marked_left_on(emp)
+        if marked is not None:
+            return marked
+        return _local_day(getattr(emp, "updated_at", None),
+                          self._venue_tz(getattr(emp, "venue_id", None)))
+
+    def marked_left_on(self, emp) -> Optional[date]:
+        """The venue-local day the record was marked as left since it was last
+        reactivated, from the audit log (never pruned): its latest
+        deactivation, else its first anonymisation (which also makes an
+        active record inactive, but is logged on an inactive one too)."""
+        venue_id = getattr(emp, "venue_id", None)
+        deactivated = anonymised = None
+        for ev in self._status_events(venue_id).get(str(emp.id), []):
+            if ev["action"] == "employee.reactivate":
+                deactivated = anonymised = None
+            elif ev["action"] == "employee.deactivate":
+                deactivated = ev["created_at"]
+            elif anonymised is None:
+                anonymised = ev["created_at"]
+        left = deactivated or anonymised
+        return _local_day(left, self._venue_tz(venue_id)) if left is not None else None
+
+    def _venue_tz(self, venue_id):
+        from zoneinfo import ZoneInfo
+        from rosteriq.services.clock import venue_timezone
+        return ZoneInfo(venue_timezone(venue_id, self.db))
+
+    def _status_events(self, venue_id) -> Dict[str, list]:
+        """employee id -> their leave and reactivate audit events, oldest first."""
+        key = ("status_events", venue_id)
+        if key not in self._memo:
+            by_emp: Dict[str, list] = {}
+            if self.db is not None and venue_id:
+                try:
+                    for action in ("employee.deactivate", "employee.reactivate", "privacy.anonymise"):
+                        for ev in self.db.list_events(venue_id=venue_id, category="audit",
+                                                      action_prefix=action, limit=100000) or []:
+                            if ev.get("action") == action and ev.get("created_at"):
+                                by_emp.setdefault(str(ev.get("resource_id")), []).append(ev)
+                except Exception:  # noqa: BLE001 — without the log, the record's last save stands in
+                    by_emp = {}
+            for events in by_emp.values():
+                events.sort(key=lambda ev: str(ev["created_at"]))
+            self._memo[key] = by_emp
+        return self._memo[key]
+
+    def _punched_ids(self, venue_id, period_start, period_end) -> set:
+        key = ("punched", venue_id, period_start, period_end)
+        if key not in self._memo:
+            ids = set()
+            if self.db is not None:
+                try:
+                    ids = {str(t.get("employee_id"))
+                           for t in self.db.get_timesheets(venue_id, period_start, period_end) or []}
+                except Exception:  # noqa: BLE001 — a missing read only hides a leaver's line
+                    ids = set()
+            self._memo[key] = ids
+        return self._memo[key]
+
+    def _note_salaried(self, batch, employees, leave_requests, period_start, period_end) -> None:
+        """Say what the full-period salary line can't: the person has left,
+        or took approved unpaid leave in the period."""
+        for line in batch.employees:
+            if line.pay_basis != "salaried":
+                continue
+            emp = employees.get(line.employee_id)
+            if emp is None:
+                continue
+            if not is_active(emp):
+                marked = self.marked_left_on(emp)
+                when = f" (marked as left on {marked:%a %d %b %Y})" if marked else ""
+                batch.notes.append(
+                    f"{line.name} (salaried) is no longer active{when} — the salary line covers "
+                    f"{period_start} to {period_end}; confirm their last day and prorate "
+                    "with your advisor")
+            for req in leave_requests or []:
+                if (str(req.get("employee_id")) != str(emp.id) or req.get("status") != "approved"
+                        or req.get("leave_type") != "unpaid"):
+                    continue
+                start, end = _as_date(req.get("start_date")), _as_date(req.get("end_date"))
+                if start is None or end is None or end < period_start or start > period_end:
+                    continue
+                lo, hi = max(start, period_start), min(end, period_end)
+                days = (hi - lo).days + 1
+                batch.notes.append(
+                    f"{line.name} (salaried) has approved unpaid leave {lo:%a %d %b} to "
+                    f"{hi:%a %d %b} ({days} day{'s' if days != 1 else ''} in this period) — "
+                    "the salary line is the full period; advisor to deduct those days")
+
     def _add_leave_lines(self, batch, venue_id, employees, leave_requests,
                          period_start, period_end) -> None:
         """Approved paid leave as hours lines, unpriced, for the advisor."""
@@ -825,5 +995,6 @@ class PayrollExporter:
             if emp.total_gross < 0:
                 errors.append(f"Employee {emp.name} has negative gross pay")
 
+        errors.extend(batch.notes)
         batch.validation_errors = errors
         return errors
