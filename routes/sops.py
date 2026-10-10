@@ -35,7 +35,9 @@ from pydantic import BaseModel, Field, field_validator
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
-from rosteriq.routes.staff_portal import _linked_employee, _linked_employees, _no_link_response, _venue_names
+from rosteriq.routes.staff_portal import (
+    _linked_employee, _linked_employees, _no_link_response, _on_team, _team_links, _venue_names,
+)
 from rosteriq.services.audience import matches as audience_matches
 from rosteriq.services.events import audit
 from rosteriq.services.staff_records import active_only, is_active
@@ -530,6 +532,7 @@ async def my_sops(user: UserContext = Depends(get_current_user)) -> dict:
     links = _linked_employees(db, user)
     if not links:
         return _no_link_response(user)
+    links = _on_team(links)
     names = _venue_names(db, [v for _, v in links])
     out = []
     outstanding = 0
@@ -553,9 +556,7 @@ async def my_sops(user: UserContext = Depends(get_current_user)) -> dict:
 @router.post("/api/me/sops/{doc_id}/acknowledge")
 async def acknowledge_sop(doc_id: str, user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    links = _linked_employees(db, user)
-    if not links:
-        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    links = _team_links(db, user)
     doc = db.get_sop_document(doc_id)
     emp = next((e for e, v in links if doc and v == doc.get("venue_id")), None)
     if not doc or emp is None:

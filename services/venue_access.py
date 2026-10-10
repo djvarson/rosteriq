@@ -135,6 +135,24 @@ def apply_access_map(account: dict, amap: Dict[str, dict]) -> dict:
     return account
 
 
+def drop_venue(account: dict, venue_id: str) -> dict:
+    """Take ``venue_id`` off the login, dashboard or staff-only, leaving its
+    access everywhere else as it was. A manager login left managing nothing
+    becomes a staff login holding its staff venues (apply_access_map's
+    rule)."""
+    managed = [v for v in _get(account, "venue_ids", []) or [] if v != venue_id]
+    staff_only = [v for v in _get(account, "staff_venue_ids", []) or []
+                  if v != venue_id and v not in managed]
+    grants = {v: s for v, s in (_get(account, "section_grants", {}) or {}).items() if v != venue_id}
+    if _role(account) == "manager" and not managed:
+        account["role"] = "staff"
+        managed, staff_only, grants = staff_only, [], {}
+    account["venue_ids"] = managed
+    account["staff_venue_ids"] = staff_only
+    account["section_grants"] = grants
+    return account
+
+
 def same_owner_runs(db, venue_ids: Iterable[str], exclude_user_id: Optional[str] = None) -> bool:
     """True when one venue-owning login (not the platform owner) is a FULL
     manager of every venue in ``venue_ids`` — the venues belong to one

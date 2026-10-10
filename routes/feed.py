@@ -31,7 +31,9 @@ from pydantic import BaseModel, Field, field_validator
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
-from rosteriq.routes.staff_portal import _linked_employee_at, _no_link_response
+from rosteriq.routes.staff_portal import (
+    _NO_LONGER_ACTIVE, _left_at, _linked_employee_at, _no_link_response,
+)
 from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
@@ -110,7 +112,8 @@ def _is_manager_user(user: UserContext) -> bool:
 def _resolve_actor(db, user: UserContext, venue_id: str, *, hide_as_404: bool = False) -> _Actor:
     """Who is the caller AT THIS VENUE?
 
-    * Linked staff at ``venue_id``  -> staff actor (employee name).
+    * Linked staff at ``venue_id``  -> staff actor (employee name), while
+      their record there is active.
     * Manager/owner with venue access -> manager actor (user name/email).
     * BOTH (a manager whose email is also on an employee record here) ->
       manager actor, but displayed under the employee's name — a working
@@ -137,6 +140,9 @@ def _resolve_actor(db, user: UserContext, venue_id: str, *, hide_as_404: bool = 
     if _is_manager_user(user):
         return _Actor("manager", user.name or user.email)
 
+    # Their record here was set inactive: they left, and the feed goes with it.
+    if _left_at(db, user, venue_id):
+        raise HTTPException(status_code=403, detail=_NO_LONGER_ACTIVE)
     # Has venue access but is neither a linked staff member nor a manager —
     # tell them exactly how to fix it (same message the staff portal uses).
     raise HTTPException(status_code=403, detail=_no_link_response(user)["message"])

@@ -135,12 +135,22 @@ def _staff_venue_ids(db, user) -> list:
     return list(held or [])
 
 
-def find_linked_employees(db, user) -> List[Tuple[object, str]]:
+def find_linked_employees(db, user, active_only: bool = False) -> List[Tuple[object, str]]:
     """Every (employee, venue_id) this login is linked to, primary venue
     first: the email match in each venue the user holds, dashboard or
     staff-only. Same scope rules as find_linked_employee (owners: every
     venue; demo identities: the demo venue only). Records a manager has set
-    inactive are left out unless that would leave nothing."""
+    inactive are left out unless that would leave nothing, so a leaver still
+    sees their own history. ``active_only`` leaves them out regardless: what
+    only a current team member does at a venue (its feed, notices,
+    procedures, leave, availability, cover)."""
+    out = linked_records(db, user)
+    active = [(e, v) for e, v in out if getattr(e, "active", True) is not False]
+    return active if active_only else (active or out)
+
+
+def linked_records(db, user) -> List[Tuple[object, str]]:
+    """find_linked_employees with every record kept, active or not."""
     from rosteriq.services.demo import DEMO_VENUE_ID, is_demo_identity
     email = (getattr(user, "email", "") or "").strip().lower()
     if not email:
@@ -163,8 +173,24 @@ def find_linked_employees(db, user) -> List[Tuple[object, str]]:
             if _email_of(emp) == email:
                 out.append((emp, vid))
                 break
-    active = [(e, v) for e, v in out if getattr(e, "active", True)]
-    return active or out
+    return out
+
+
+def left_venue_ids(db, email: str, venue_ids) -> List[str]:
+    """Of ``venue_ids``, those where the staff record this email links to has
+    been set inactive: the person left there. Same match as
+    find_linked_employees (the first record carrying the email)."""
+    email = (email or "").strip().lower()
+    out = []
+    if not email:
+        return out
+    for vid in venue_ids or []:
+        for emp in db.get_employees(vid) or []:
+            if _email_of(emp) == email:
+                if getattr(emp, "active", True) is False:
+                    out.append(vid)
+                break
+    return out
 
 
 def _throttle(user_id: str) -> None:

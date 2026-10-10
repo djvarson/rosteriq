@@ -93,8 +93,11 @@ def rate_change_entry(previous_rate, new_rate, effective_from: date, changed_by:
 
 
 def logins_by_email(db, venue_id: str) -> dict:
-    """lower-case email -> the login records that hold this venue: the rule
-    services/linking uses to tie a login to a staff record."""
+    """lower-case email -> the login records that hold this venue, dashboard
+    or staff-only: the rule services/linking uses to tie a login to a staff
+    record."""
+    from rosteriq.services.venue_access import held_venue_ids
+
     out: dict = {}
     try:
         users = db.list_users() or []
@@ -102,7 +105,7 @@ def logins_by_email(db, venue_id: str) -> dict:
         return out
     for u in users:
         email = _email(u.get("email"))
-        if email and u.get("id") and venue_id in (u.get("venue_ids") or []):
+        if email and u.get("id") and venue_id in held_venue_ids(u):
             out.setdefault(email, []).append(u)
     return out
 
@@ -183,20 +186,20 @@ def keep_record_state(employee, previous, changed_by: Optional[str] = None,
 
 
 def retire_logins(db, venue_id: str, logins: list) -> dict:
-    """After a leaver's details are removed: a login that held only this venue
-    is switched off (and its refresh tokens revoked); one that also holds other
-    venues just loses this one. Owner accounts are never touched here."""
+    """After a leaver's details are removed, each login loses this venue,
+    dashboard or staff-only, and keeps its access everywhere else. One that
+    reaches no other venue is switched off (and its refresh tokens revoked).
+    Owner accounts are never touched here."""
+    from rosteriq.services.venue_access import drop_venue, held_venue_ids
+
     deactivated, venue_removed = [], []
     for user in logins:
         if user.get("role") == "owner" or user.get("is_owner"):
             continue
-        venues = list(user.get("venue_ids") or [])
-        if venue_id not in venues:
+        if venue_id not in held_venue_ids(user):
             continue
-        rest = [v for v in venues if v != venue_id]
-        grants = dict(user.get("section_grants") or {})
-        grants.pop(venue_id, None)
-        user["venue_ids"], user["section_grants"] = rest, grants
+        drop_venue(user, venue_id)
+        rest = held_venue_ids(user)
         if not rest:
             user["is_active"] = False
         db.save_user(user)

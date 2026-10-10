@@ -132,8 +132,10 @@ class NotificationHub:
         return out
 
     def _linked_logins(self, venue_id: str) -> Dict[str, List[str]]:
-        """email -> login ids holding this venue: how an employee record maps
-        to logins (services/linking's rule: same email, venue held)."""
+        """email -> login ids holding this venue, dashboard or staff-only: how
+        an employee record maps to logins (services/linking's rule: same
+        email, venue held)."""
+        from rosteriq.services.venue_access import held_venue_ids
         try:
             users = self._db.list_users() or []
         except Exception:
@@ -141,7 +143,7 @@ class NotificationHub:
         out: Dict[str, List[str]] = {}
         for u in users:
             email = (u.get("email") or "").strip().lower()
-            if email and u.get("id") and venue_id in (u.get("venue_ids") or []):
+            if email and u.get("id") and venue_id in held_venue_ids(u):
                 out.setdefault(email, []).append(u["id"])
         return out
 

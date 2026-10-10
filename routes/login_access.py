@@ -10,7 +10,9 @@ owner's venues (services/venue_access.py holds the storage rules).
 Changing a login is account-wide (a password reset reaches every venue it
 holds), so every change goes through the same guards as reset links and
 access-role: the caller must fully manage every venue the login reaches.
-Adding a venue also needs the caller to fully manage that venue.
+Adding a venue also needs the caller to fully manage that venue. Lowering
+the login's access at one venue changes nothing elsewhere, so a full
+manager of that venue may do it alone (never to the venue's creator).
 """
 
 import logging
@@ -70,11 +72,11 @@ async def my_access(user: UserContext = Depends(get_current_user)) -> dict:
                        for row in _venues_payload(db, account)]}
 
 
-def _target(db, user: UserContext, employee_id: str):
+def _target(db, user: UserContext, employee_id: str, lower_to=None):
     from rosteriq.routes.staff_portal import _account_management_guards
     emp = load_employee_in_scope(db, employee_id)
     enforce_venue_manager(getattr(emp, "venue_id", None))
-    account = _account_management_guards(user, emp, db)
+    account = _account_management_guards(user, emp, db, lower_to=lower_to)
     return emp, account
 
 
@@ -112,7 +114,7 @@ async def set_employee_access(employee_id: str, body: VenueAccessBody,
     to Apothecary'). Staff access somewhere new needs a staff record there
     with their email, or there would be nothing for them to see."""
     db = get_db()
-    emp, account = _target(db, user, employee_id)
+    emp, account = _target(db, user, employee_id, lower_to=(body.venue_id, body.level))
     vid = body.venue_id
     enforce_venue_manager(vid)
     if account.get("id") == user.user_id:
