@@ -6,7 +6,9 @@ get_cut_recommendation tool both call advise(), so they give the same call.
 
 * now is the venue's clock (services/clock.venue_now), never the host's
 * on shift = live-roster shifts (services/current_roster) whose span covers
-  now, including last night's shift still running past midnight
+  now, including last night's shift still running past midnight. An open
+  shift (nobody on it, e.g. left open by leave) is not a person: it never
+  counts toward an area's minimum and is listed as open_shifts
 * each hourly person's cost for this hour = their recorded rate priced for
   this hour by the cost calculator (casual loading, weekend/holiday and
   evening rates, super). Salaried people are not in the hourly figure.
@@ -32,6 +34,7 @@ from typing import Iterable, List, Optional
 from rosteriq.models import Shift, ShiftStatus, normalise_area
 from rosteriq.services.clock import venue_now
 from rosteriq.services.current_roster import live_shifts
+from rosteriq.services.leave_shifts import is_open
 from rosteriq.services.sos import area_choices, employment_type, is_salaried, shift_span, viewer_sections
 from rosteriq.services.venue_areas import area_names, find_area, min_staff_for, trading_window
 
@@ -116,8 +119,9 @@ def recorded_settings(venue, areas: List[str], day: date) -> dict:
     return {"target_pct": target, "minimums": mins, "skeleton": skeleton, "notes": notes}
 
 
-def on_shift_now(db, venue_id: str, now: datetime) -> list:
-    """[(shift, start, end)] of live-roster shifts whose span covers now."""
+def _covering_now(db, venue_id: str, now: datetime) -> list:
+    """[(shift, start, end)] of working live-roster shifts whose span covers
+    now, open ones included."""
     out = []
     for s in live_shifts(db, venue_id, now.date() - timedelta(days=1), now.date()):
         if str(getattr(s.status, "value", s.status)) in _NOT_WORKING:
@@ -126,6 +130,11 @@ def on_shift_now(db, venue_id: str, now: datetime) -> list:
         if start <= now < end:
             out.append((s, start, end))
     return out
+
+
+def on_shift_now(db, venue_id: str, now: datetime) -> list:
+    """[(shift, start, end)] of the people on live-roster shifts covering now."""
+    return [t for t in _covering_now(db, venue_id, now) if not is_open(t[0])]
 
 
 def _sales_per_hour(db, venue, venue_id: str, now: datetime, takings, whole_venue: bool,
@@ -231,12 +240,17 @@ async def advise(db, venue_id: str, *, areas: Optional[Iterable[str]] = None,
     state = getattr(venue, "state", None)
 
     employees = {str(e.id): e for e in (db.get_employees(venue_id) or [])}
-    everyone = on_shift_now(db, venue_id, now)
+    covering = _covering_now(db, venue_id, now)
+    everyone = [t for t in covering if not is_open(t[0])]
 
     def area_of(shift) -> str:
         return normalise_area(shift.role) or "no area"
 
     scoped = [(s, a, b) for s, a, b in everyone if not wanted or area_of(s) in wanted]
+    unfilled = sorted(({"area": area_of(s), "start": f"{s.start_time:%H:%M}", "end": f"{s.end_time:%H:%M}"}
+                       for s, _, _ in covering
+                       if is_open(s) and (not wanted or area_of(s) in wanted)),
+                      key=lambda o: (o["area"], o["start"], o["end"]))
     counts: dict = {}
     for s, _, _ in scoped:
         counts[area_of(s)] = counts.get(area_of(s), 0) + 1
@@ -364,6 +378,9 @@ async def advise(db, venue_id: str, *, areas: Optional[Iterable[str]] = None,
     if recommendation == "cut":
         notes.append("Anyone sent home early is still paid their minimum engagement — "
                      "advisor to confirm.")
+    for o in unfilled:
+        info.append(f"Open {o['area']} shift {o['start']}-{o['end']} — nobody on it, so it "
+                    "doesn't count toward the minimum.")
 
     on_shift = [{k: v for k, v in p.items() if not k.startswith("_")} for p in people]
     on_shift.sort(key=lambda p: (p["area"], p["end"], p["name"].lower()))
@@ -384,6 +401,7 @@ async def advise(db, venue_id: str, *, areas: Optional[Iterable[str]] = None,
                                        Decimal("0"))) if candidates else None,
         "on_shift": on_shift,
         "on_shift_count": len(on_shift),
+        "open_shifts": unfilled,
         "area_minimums": area_mins,
         "labour_per_hour": _money(labour),
         "sales_per_hour_ex_gst": _money(sales),

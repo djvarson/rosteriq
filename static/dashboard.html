@@ -2446,6 +2446,8 @@
     .dtl-minline { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--danger); opacity: 0.6; }
     .dtl-cell.now { outline: 2px solid var(--brand-accent); outline-offset: -2px; }
     .dtl-total .dtl-cell { height: 30px; }
+    .dtl-unfilled .dtl-cell { height: 30px; }
+    .dtl-unfilled .dtl-area, .dtl-unfilled .dtl-n { color: var(--danger); }
     .dtl-legend { font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
     @media (max-width: 640px) {
       .ops-headcount { grid-template-columns: 1fr; gap: 12px; }
@@ -6313,6 +6315,8 @@ function handleLogout() {
   localStorage.removeItem('pending_venue_name');
   localStorage.removeItem('rosteriq_onboarded');
   localStorage.removeItem('rosteriq_current_venue');
+  // The next person on this browser must not be shown this session's pages.
+  try { caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); }, function () {}); } catch (e) { /* no Cache API */ }
   window.location.href = '/static/login.html';
 }
 
@@ -6403,6 +6407,7 @@ function _sessionExpired() {
     localStorage.removeItem('jwt_refresh_token');
     localStorage.removeItem('auth_token');
   } catch (e) { /* the redirect still ends the session */ }
+  try { caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); }, function () {}); } catch (e) { /* no Cache API */ }
   window.location.href = '/static/login.html';
 }
 
@@ -9196,16 +9201,19 @@ function _whenLabel(iso) {
 async function loadTimeClockSettings() {
   const box = document.getElementById('tc-devices');
   if (!box || !state.currentVenue) return;
+  const vid = state.currentVenue;
   document.getElementById('tc-setup-btn').textContent = 'Set up this device as ' + _timeClockVenueName() + ' time clock';
   try {
     const results = await Promise.all([
-      fetchAPI('/api/kiosk/devices?venue_id=' + encodeURIComponent(state.currentVenue)),
-      fetchAPI('/api/kiosk/settings?venue_id=' + encodeURIComponent(state.currentVenue)),
+      fetchAPI('/api/kiosk/devices?venue_id=' + encodeURIComponent(vid)),
+      fetchAPI('/api/kiosk/settings?venue_id=' + encodeURIComponent(vid)),
     ]);
+    if (state.currentVenue !== vid) return;
     document.getElementById('tc-auto-break').checked = !!results[1].auto_meal_break;
     document.getElementById('tc-self-clock').checked = !!results[1].allow_self_clock;
     renderKioskDevices(results[0].devices || []);
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     box.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">' + esc(e.message) + '</div>';
   }
 }
@@ -10128,7 +10136,7 @@ function renderRealCompliance() {
   (state.rosters || []).forEach(function(r) {
     (r.shifts || []).forEach(function(sh) {
       var ds = String(sh.date || sh.shift_date || '').slice(0, 10);
-      if (days.indexOf(ds) < 0) return;
+      if (days.indexOf(ds) < 0 || !sh.employee_id) return;
       (worked[sh.employee_id] = worked[sh.employee_id] || {})[ds] = true;
     });
   });
@@ -10208,7 +10216,7 @@ function _weekHoursByEmployee() {
   (state.rosters || []).forEach(function(r) {
     (r.shifts || []).forEach(function(sh) {
       var d = new Date(sh.date || sh.shift_date);
-      if (isNaN(d) || d < monday || d > sunday) return;
+      if (isNaN(d) || d < monday || d > sunday || !sh.employee_id) return;
       var st = (sh.start_time || '').split(':'), en = (sh.end_time || '').split(':');
       if (st.length < 2 || en.length < 2) return;
       var hrs = ((+en[0]) * 60 + (+en[1]) - (+st[0]) * 60 - (+st[1])) / 60;
@@ -10566,7 +10574,20 @@ async function openEditEmployee(rowIdx) {
   val('ee-type', e.employment_type || 'casual');
   val('ee-level', e.award_level || 'level_2');
   val('ee-max-hours', e.max_hours_per_week);
-  val('ee-visa', e.visa_status || '');
+  // An imported status outside the list (say 'working_holiday_maker') gets
+  // its own option, or the select would read back blank and save that.
+  var visaSel = document.getElementById('ee-visa');
+  var staleVisa = document.getElementById('ee-visa-recorded');
+  if (staleVisa && staleVisa.parentNode) staleVisa.parentNode.removeChild(staleVisa);
+  var visaNow = e.visa_status || '';
+  if (visaNow && visaSel && !Array.prototype.some.call(visaSel.options, function(o) { return o.value === visaNow; })) {
+    var rec = document.createElement('option');
+    rec.id = 'ee-visa-recorded';
+    rec.value = visaNow;
+    rec.textContent = 'Recorded: ' + visaNow.replace(/_/g, ' ');
+    visaSel.appendChild(rec);
+  }
+  val('ee-visa', visaNow);
   val('ee-visa-expiry', e.visa_expiry || '');
   val('ee-visa-cap', e.visa_work_limit_fortnight);
   val('ee-area-extra', '');
@@ -10624,10 +10645,14 @@ async function saveEditEmployee() {
     employment_type: get('ee-type'),
     award_level: get('ee-level'),
     skills: areas,
-    visa_status: get('ee-visa') || null,
-    visa_expiry: get('ee-visa-expiry') || null,
-    visa_work_limit_fortnight: cap ? parseFloat(cap) : null,
   };
+  // Work rights go only when the manager changed them: what was recorded stays.
+  var visa = get('ee-visa') || null, visaExpiry = get('ee-visa-expiry') || null, visaCap = cap ? parseFloat(cap) : null;
+  if (visa !== (e.visa_status || null)) payload.visa_status = visa;
+  if (visaExpiry !== (e.visa_expiry ? String(e.visa_expiry).slice(0, 10) : null)) payload.visa_expiry = visaExpiry;
+  if (visaCap !== (e.visa_work_limit_fortnight == null ? null : Number(e.visa_work_limit_fortnight))) {
+    payload.visa_work_limit_fortnight = visaCap;
+  }
   if (maxHours) payload.max_hours_per_week = parseFloat(maxHours);
   if (Math.abs(rate - Number(e.hourly_base_rate || 0)) >= 0.005) {
     payload.hourly_base_rate = rate.toFixed(2);
@@ -11741,6 +11766,8 @@ function renderRosterImportReport(r) {
       });
   const dupes = Array.isArray(r.duplicates_skipped) ? r.duplicates_skipped.length : (+r.duplicates_skipped || 0);
   const flagged = Array.isArray(r.flagged) ? r.flagged : [];
+  const replaced = Array.isArray(r.rows) ? r.rows.filter(function (x) { return x.status === 'replaced'; }) : [];
+  const removed = Array.isArray(r.removed) ? r.removed : [];
   let html = _importExtras(r);
   // Imported, but with something the manager should look at (a break read
   // as hours, a break that couldn't be read): the shift's cost depends on it.
@@ -11753,6 +11780,27 @@ function renderRosterImportReport(r) {
       flagged.map(function (f) {
         return '<tr><td>' + esc(f.line) + '</td><td>' + esc(f.name || '') + '</td><td>' + esc(f.date || '') +
           '</td><td>' + esc(f.detail || importFlagText(f.flag)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  // A re-paste takes off shifts the export no longer has.
+  if (removed.length) {
+    html += '<div style="margin-bottom:6px; font-weight:600;">' + removed.length + ' shift' + (removed.length === 1 ? '' : 's') +
+      ' removed — no longer in the export.</div>' +
+      '<div style="max-height:200px; overflow:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:8px;">' +
+      '<table class="table" style="font-size:12px; margin:0;"><thead><tr><th>Who</th><th>Date</th><th>Shift</th><th>What happened</th></tr></thead><tbody>' +
+      removed.map(function (x) {
+        return '<tr><td>' + esc(x.name || '') + '</td><td>' + esc(x.date || '') + '</td><td>' + esc(x.start || '') + '–' +
+          esc(x.end || '') + '</td><td>Removed: no longer in the export</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  if (replaced.length) {
+    html += '<div style="margin-bottom:6px; font-weight:600;">' + replaced.length + ' shift' + (replaced.length === 1 ? '' : 's') +
+      ' changed to match the export.</div>' +
+      '<div style="max-height:200px; overflow:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:8px;">' +
+      '<table class="table" style="font-size:12px; margin:0;"><thead><tr><th>Line</th><th>Who</th><th>Date</th><th>What changed</th></tr></thead><tbody>' +
+      replaced.map(function (x) {
+        return '<tr><td>' + esc(x.line) + '</td><td>' + esc(x.name || '') + '</td><td>' + esc(x.date || '') +
+          '</td><td>' + esc(x.reason || '') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
   if (dupes) {
@@ -11785,14 +11833,18 @@ async function runRosterImport() {
   if (report) report.innerHTML = '';
   try {
     const r = await fetchAPI('/api/setup/import-roster', { method: 'POST', body: JSON.stringify(body) });
+    const replaced = +r.shifts_replaced || 0, removed = +r.shifts_removed || 0;
     let msg = r.shifts_imported + ' shifts across ' + r.weeks + ' week(s)';
+    if (replaced) msg += ', ' + replaced + ' changed';
+    if (removed) msg += ', ' + removed + ' removed';
     if (r.skipped_count) msg += ', ' + r.skipped_count + ' skipped';
     if (Array.isArray(r.flagged) && r.flagged.length) msg += ', ' + r.flagged.length + ' to check';
     res.textContent = msg;
     if (report) report.innerHTML = renderRosterImportReport(r);
-    showToast(msg, r.shifts_imported ? 'success' : 'warning');
-    if (r.shifts_imported && typeof loadVenueData === 'function') loadVenueData();
-    if (r.shifts_imported) refreshRealRoster();
+    const changed = !!(r.shifts_imported || replaced || removed);
+    showToast(msg, changed ? 'success' : 'warning');
+    if (changed && typeof loadVenueData === 'function') loadVenueData();
+    if (changed) refreshRealRoster();
   } catch (e) {
     res.textContent = '';
     const choices = importLocationChoices(e);
@@ -13969,7 +14021,7 @@ function _realReportRows() {
       if (hrs < 0) hrs += 24;
       x.hours += Math.max(0, hrs - (sh.break_minutes || 0) / 60);
       if (sh.cost == null) x.costKnown = false; else x.cost += Number(sh.cost) || 0;
-      x.staff[sh.employee_id] = true;
+      if (sh.employee_id) x.staff[sh.employee_id] = true;
     });
   });
   return Object.keys(byDay).sort().map(function(d) {
@@ -14125,6 +14177,7 @@ async function saveVenueSettings() {
 var AE_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 var AE_DAY_LABELS = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
 var aeState = {};
+var aeLoadSeq = {};
 
 function aeAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function aeNorm(s) { return String(s || '').trim().toLowerCase().split(/\s+/).filter(Boolean).join(' '); }
@@ -14134,6 +14187,9 @@ function aeTime(t) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(t) ? t : '';
 }
 function aeNeedsSkill(name) { return /duty manager|manager|supervisor/.test(name); }
+// The server's default when the venue hasn't set follows_demand on an area
+// (services/venue_areas._follows_demand).
+function aeFollowsDefault(a) { return !a.requires_skill && !/bottle|liquor/.test(a.name); }
 
 async function aeLoad(hostId, venueId, opts) {
   const host = document.getElementById(hostId);
@@ -14146,24 +14202,36 @@ async function aeLoad(hostId, venueId, opts) {
     return;
   }
   host.innerHTML = '<div class="ae-note" style="margin-top:12px;">Loading areas…</div>';
+  // A later load for this editor owns it; the Settings card also follows the
+  // venue picker, so a slow answer for the venue just left is dropped.
+  const seq = aeLoadSeq[hostId] = (aeLoadSeq[hostId] || 0) + 1;
+  const stale = function () {
+    return aeLoadSeq[hostId] !== seq || (hostId === 'settings-areas' && state.currentVenue !== venueId);
+  };
   try {
     const d = await fetchAPI('/api/venue-setup?venue_id=' + encodeURIComponent(venueId));
+    if (stale()) return;
     const hours = {};
     AE_DAYS.forEach(function (k) {
       const h = (d.trading_hours || {})[k] || {};
-      hours[k] = { open: aeTime(h.open), close: aeTime(h.close) };
+      hours[k] = h.closed === true ? { open: '', close: '', closed: true }
+                                   : { open: aeTime(h.open), close: aeTime(h.close), closed: false };
     });
     aeState[hostId] = {
       venueId: venueId, loaded: true, dirty: false, save: !(opts && opts.save === false),
       areas: (d.areas || []).map(function (a) {
         const mins = {};
         AE_DAYS.forEach(function (k) { mins[k] = parseInt((a.min_by_day || {})[k], 10) || 0; });
-        return { name: a.name, label: a.label || a.name, min_by_day: mins, requires_skill: !!a.requires_skill };
+        const area = { name: a.name, label: a.label || a.name, min_by_day: mins, requires_skill: !!a.requires_skill,
+                       fdSet: !!a.follows_demand_set };
+        area.follows_demand = typeof a.follows_demand === 'boolean' ? a.follows_demand : aeFollowsDefault(area);
+        return area;
       }),
       hours: hours, effective: d.effective_hours || {}, candidates: d.candidates || [],
     };
     aeRender(hostId);
   } catch (e) {
+    if (stale()) return;
     aeState[hostId] = { venueId: venueId, loaded: false };
     host.innerHTML = '<div class="ae-note" style="margin-top:12px;">Could not load areas: ' + esc(e.message) + '</div>';
   }
@@ -14184,6 +14252,8 @@ function aeRender(hostId) {
       }).join('') +
       '<td><input type="checkbox"' + (a.requires_skill ? ' checked' : '') +
         ' aria-label="' + aeAttr(a.label + ' needs this skill') + '" onchange="aeSetSkill(' + q + ',' + i + ',this.checked)"></td>' +
+      '<td><input type="checkbox" id="' + hostId + '-fd-' + i + '"' + (a.follows_demand ? ' checked' : '') +
+        ' aria-label="' + aeAttr(a.label + ' adds staff when busy') + '" onchange="aeSetFollows(' + q + ',' + i + ',this.checked)"></td>' +
       '<td><button type="button" class="btn btn-secondary btn-small" onclick="aeRemove(' + q + ',' + i + ')">Remove</button></td></tr>';
   }).join('');
   const options = st.candidates.map(function (c, i) {
@@ -14193,11 +14263,14 @@ function aeRender(hostId) {
   }).join('');
   const hourRows = AE_DAYS.map(function (d) {
     const h = st.hours[d];
+    const off = h.closed ? ' disabled' : '';
     return '<tr><td class="ae-area">' + AE_DAY_LABELS[d] + '</td>' +
-      '<td><input type="time" class="ae-time" value="' + aeTime(h.open) + '" aria-label="Opens ' + AE_DAY_LABELS[d] +
-        '" onchange="aeSetHours(' + q + ',\'' + d + '\',\'open\',this.value)"></td>' +
-      '<td><input type="time" class="ae-time" value="' + aeTime(h.close) + '" aria-label="Closes ' + AE_DAY_LABELS[d] +
-        '" onchange="aeSetHours(' + q + ',\'' + d + '\',\'close\',this.value)"></td>' +
+      '<td><input type="time" class="ae-time" id="' + hostId + '-open-' + d + '" value="' + aeTime(h.open) + '"' + off +
+        ' aria-label="Opens ' + AE_DAY_LABELS[d] + '" onchange="aeSetHours(' + q + ',\'' + d + '\',\'open\',this.value)"></td>' +
+      '<td><input type="time" class="ae-time" id="' + hostId + '-close-' + d + '" value="' + aeTime(h.close) + '"' + off +
+        ' aria-label="Closes ' + AE_DAY_LABELS[d] + '" onchange="aeSetHours(' + q + ',\'' + d + '\',\'close\',this.value)"></td>' +
+      '<td><input type="checkbox"' + (h.closed ? ' checked' : '') + ' aria-label="Closed all day ' + AE_DAY_LABELS[d] +
+        '" onchange="aeSetClosed(' + q + ',\'' + d + '\',this.checked)"></td>' +
       '<td class="ae-hint" id="' + hostId + '-hint-' + d + '">' + esc(_aeHint(st, d)) + '</td></tr>';
   }).join('');
   host.innerHTML =
@@ -14205,7 +14278,9 @@ function aeRender(hostId) {
     (st.areas.length
       ? '<div class="table-container"><table class="table ae-table"><thead><tr><th style="text-align:left;">Area</th>' +
         AE_DAYS.map(function (d) { return '<th>' + AE_DAY_LABELS[d] + '</th>'; }).join('') +
-        '<th title="Only people with this skill may work it">Needs skill</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+        '<th title="Only people with this skill may work it">Needs skill</th>' +
+        '<th title="Ticked: busy times add staff here above the minimum. Unticked: it stays at the minimum.">More when busy</th>' +
+        '<th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
       : '<div class="ae-note">No areas yet. Add the areas you staff, like Restaurant, Front Bar, Bottle Shop or Duty Manager.</div>') +
     '<div class="ae-row">' +
       (options ? '<select id="' + hostId + '-cand" aria-label="Area from your staff skills and roster">' + options + '</select>' +
@@ -14213,9 +14288,10 @@ function aeRender(hostId) {
       '<input type="text" id="' + hostId + '-new" maxlength="40" placeholder="Or type a new area" aria-label="New area name">' +
       '<button type="button" class="btn btn-secondary btn-small" onclick="aeAddTyped(' + q + ')">Add</button>' +
     '</div>' +
-    '<div class="ae-note">“Needs skill”: only people with that area in their skills are rostered there (on by default for duty managers and supervisors).</div>' +
+    '<div class="ae-note">“Needs skill”: only people with that area in their skills are rostered there (on by default for duty managers and supervisors). ' +
+      '“More when busy”: busy times add staff there above the minimum (off by default for supervisors and the bottle shop).</div>' +
     '<div class="ae-subtitle">Trading hours</div>' +
-    '<div class="table-container"><table class="table ae-table"><thead><tr><th style="text-align:left;">Day</th><th>Opens</th><th>Closes</th><th></th></tr></thead><tbody>' +
+    '<div class="table-container"><table class="table ae-table"><thead><tr><th style="text-align:left;">Day</th><th>Opens</th><th>Closes</th><th>Closed</th><th></th></tr></thead><tbody>' +
       hourRows + '</tbody></table></div>' +
     '<div class="ae-row"><button type="button" class="btn btn-secondary btn-small" onclick="aeFillHours(' + q + ')">Fill empty days with the hours shown</button>' +
       '<span class="ae-note">A close after midnight (say 01:00) counts as that night.</span></div>' +
@@ -14225,6 +14301,7 @@ function aeRender(hostId) {
 
 function _aeHint(st, d) {
   const h = st.hours[d], eff = st.effective[d] || {};
+  if (h.closed) return 'Closed all day';
   if (!h.open && !h.close) {
     const close = aeTime(eff.close) || '00:00';
     return 'Not set — forecasting uses ' + (aeTime(eff.open) || '10:00') + '–' + (close === '00:00' ? 'midnight' : close) +
@@ -14250,7 +14327,19 @@ function aeSetMin(hostId, i, day, value) {
 
 function aeSetSkill(hostId, i, on) {
   const st = _aeEdit(hostId);
-  if (st && st.areas[i]) st.areas[i].requires_skill = !!on;
+  const a = st && st.areas[i];
+  if (!a) return;
+  a.requires_skill = !!on;
+  if (!a.fdSet) {
+    a.follows_demand = aeFollowsDefault(a);
+    const box = document.getElementById(hostId + '-fd-' + i);
+    if (box) box.checked = a.follows_demand;
+  }
+}
+
+function aeSetFollows(hostId, i, on) {
+  const st = _aeEdit(hostId);
+  if (st && st.areas[i]) { st.areas[i].follows_demand = !!on; st.areas[i].fdSet = true; }
 }
 
 function aeRemove(hostId, i) {
@@ -14273,8 +14362,10 @@ function _aeAdd(hostId, name, label) {
   }
   const mins = {};
   AE_DAYS.forEach(function (d) { mins[d] = 1; });
-  st.areas.push({ name: name, label: label || name.replace(/\b\w/g, function (c) { return c.toUpperCase(); }),
-                  min_by_day: mins, requires_skill: aeNeedsSkill(name) });
+  const area = { name: name, label: label || name.replace(/\b\w/g, function (c) { return c.toUpperCase(); }),
+                 min_by_day: mins, requires_skill: aeNeedsSkill(name), fdSet: false };
+  area.follows_demand = !area.requires_skill && !/bottle|liquor/.test(name);
+  st.areas.push(area);
   _aeEdit(hostId);
   aeRender(hostId);
   return true;
@@ -14302,12 +14393,24 @@ function aeSetHours(hostId, day, which, value) {
   if (hint) hint.textContent = _aeHint(st, day);
 }
 
+function aeSetClosed(hostId, day, closed) {
+  const st = _aeEdit(hostId);
+  if (!st) return;
+  st.hours[day].closed = !!closed;
+  ['open', 'close'].forEach(function (w) {
+    const input = document.getElementById(hostId + '-' + w + '-' + day);
+    if (input) input.disabled = !!closed;
+  });
+  const hint = document.getElementById(hostId + '-hint-' + day);
+  if (hint) hint.textContent = _aeHint(st, day);
+}
+
 function aeFillHours(hostId) {
   const st = _aeEdit(hostId);
   if (!st) return;
   AE_DAYS.forEach(function (d) {
     const h = st.hours[d], eff = st.effective[d] || {};
-    if (!h.open && !h.close) {
+    if (!h.closed && !h.open && !h.close) {
       h.open = aeTime(eff.open) || '10:00';
       h.close = aeTime(eff.close) || '00:00';
     }
@@ -14324,8 +14427,13 @@ async function aeSave(hostId, opts) {
     return false;
   }
   if (opts.onlyIfChanged && !st.dirty) return true;
+  if (hostId === 'settings-areas' && st.venueId !== state.currentVenue) {
+    showToast('These areas belong to another venue — open Settings again to edit this one', 'warning');
+    return false;
+  }
   const hours = {};
   for (const d of AE_DAYS) {
+    if (st.hours[d].closed) { hours[d] = { closed: true }; continue; }
     const o = aeTime(st.hours[d].open), c = aeTime(st.hours[d].close);
     if (!o && !c) continue;
     if (!o || !c) { showToast(AE_DAY_LABELS[d] + ' needs both an opening and a closing time', 'warning'); return false; }
@@ -14334,7 +14442,11 @@ async function aeSave(hostId, opts) {
   const areas = st.areas.map(function (a) {
     const mins = {};
     AE_DAYS.forEach(function (d) { mins[d] = Math.max(0, Math.min(100, parseInt(a.min_by_day[d], 10) || 0)); });
-    return { name: a.name, label: a.label, min_by_day: mins, requires_skill: !!a.requires_skill };
+    const out = { name: a.name, label: a.label, min_by_day: mins, requires_skill: !!a.requires_skill };
+    // Left out unless the venue set it: the server keeps the stored value
+    // and otherwise applies its default.
+    if (a.fdSet) out.follows_demand = !!a.follows_demand;
+    return out;
   });
   const minStaff = {};
   areas.forEach(function (a) { minStaff[a.name] = Math.max.apply(null, AE_DAYS.map(function (d) { return a.min_by_day[d]; })); });
@@ -15474,8 +15586,18 @@ function opsVenueNow(venue) {
   }
 }
 
-function opsLive(sh) {
+function opsWorking(sh) {
   return ['cancelled', 'no_show'].indexOf(String(sh.status || '').toLowerCase()) === -1;
+}
+
+// A person on a shift. An open shift (no employee: left open by leave, or not
+// filled yet) is never a head; it is shown on its own as unfilled.
+function opsLive(sh) {
+  return !!sh.employee_id && opsWorking(sh);
+}
+
+function opsUnfilled(sh) {
+  return !sh.employee_id && opsWorking(sh);
 }
 
 // [start, end) of a shift in minutes from the midnight of `iso`, or null.
@@ -15489,10 +15611,11 @@ function opsSpanOn(sh, iso) {
 }
 
 // Shifts on at `minute` of `iso` — last night's shift still running past
-// midnight included.
-function opsOnShiftAt(shifts, iso, minute) {
+// midnight included. People by default; opsUnfilled for the open shifts.
+function opsOnShiftAt(shifts, iso, minute, which) {
+  which = which || opsLive;
   return (shifts || []).filter(function (sh) {
-    if (!opsLive(sh)) return false;
+    if (!which(sh)) return false;
     const sp = opsSpanOn(sh, iso);
     return !!sp && sp.start <= minute && minute < sp.end;
   });
@@ -15521,27 +15644,31 @@ function dayTimelineData(shifts, venue, iso, opts) {
   const only = opsNorm(opts.area || '');
   const areas = opsVenueAreas(venue);
   const dk = opsWeekKey(iso);
-  const spans = [];
+  const spans = [], unfilled = [];
   (shifts || []).forEach(function (sh) {
-    if (!opsLive(sh) || String(sh.date || sh.shift_date || '').slice(0, 10) !== iso) return;
-    const sp = opsSpanOn(sh, iso);
-    if (sp) spans.push({ area: opsNorm(sh.role), start: sp.start, end: sp.end });
+    if (String(sh.date || sh.shift_date || '').slice(0, 10) !== iso) return;
+    const into = opsLive(sh) ? spans : (opsUnfilled(sh) ? unfilled : null);
+    const sp = into && opsSpanOn(sh, iso);
+    if (sp && (!only || into === spans || opsNorm(sh.role) === only)) {
+      into.push({ area: opsNorm(sh.role), start: sp.start, end: sp.end });
+    }
   });
+  const rostered = spans.concat(unfilled);
   const trading = opsTradingWindow(venue, iso);
   let first = trading ? trading.open : null, last = trading ? trading.close : null;
-  spans.forEach(function (sp) {
+  rostered.forEach(function (sp) {
     first = first == null ? sp.start : Math.min(first, sp.start);
     last = last == null ? sp.end : Math.max(last, sp.end);
   });
-  const result = { day: iso, trading: trading, slots: [], rows: [], total: [], below: 0 };
+  const result = { day: iso, trading: trading, slots: [], rows: [], total: [], below: 0, unfilled: null };
   if (first == null) return result;
   first = Math.floor(first / OPS_SLOT_MIN) * OPS_SLOT_MIN;
   last = Math.ceil(last / OPS_SLOT_MIN) * OPS_SLOT_MIN;
   for (let m = first; m < last; m += OPS_SLOT_MIN) result.slots.push(m);
   // Minimums apply while the venue trades; with no hours recorded, while
-  // anyone at all is rostered on.
-  const openFrom = trading ? trading.open : Math.min.apply(null, spans.map(function (s) { return s.start; }));
-  const openTo = trading ? trading.close : Math.max.apply(null, spans.map(function (s) { return s.end; }));
+  // anyone at all is rostered on (an open shift included).
+  const openFrom = trading ? trading.open : Math.min.apply(null, rostered.map(function (s) { return s.start; }));
+  const openTo = trading ? trading.close : Math.max.apply(null, rostered.map(function (s) { return s.end; }));
   const byName = {};
   const add = function (name, label, min) {
     const row = { name: name, label: label, min: min, counts: result.slots.map(function () { return 0; }), below: [] };
@@ -15564,6 +15691,11 @@ function dayTimelineData(shifts, venue, iso, opts) {
   result.total = result.slots.map(function (m, i) {
     return result.rows.reduce(function (sum, r) { return sum + r.counts[i]; }, 0);
   });
+  if (unfilled.length) {
+    result.unfilled = { shifts: unfilled.length, counts: result.slots.map(function (m) {
+      return unfilled.filter(function (sp) { return sp.start <= m && m < sp.end; }).length;
+    }) };
+  }
   return result;
 }
 
@@ -15598,7 +15730,11 @@ function renderDayTimeline(data, opts) {
     return '<tr><th class="dtl-area">' + esc(r.label) +
       '<span class="dtl-min">' + (r.min ? 'min ' + r.min : 'no minimum') + '</span></th>' +
       r.counts.map(function (n, i) { return cell(n, i, r); }).join('') + '</tr>';
-  }).join('') + '<tr class="dtl-total"><th class="dtl-area">Total on</th>' +
+  }).join('') + (data.unfilled
+    ? '<tr class="dtl-unfilled"><th class="dtl-area">Open: unfilled (' + data.unfilled.shifts + ')' +
+      '<span class="dtl-min">nobody on yet · not in the counts</span></th>' +
+      data.unfilled.counts.map(function (n, i) { return cell(n, i, null); }).join('') + '</tr>'
+    : '') + '<tr class="dtl-total"><th class="dtl-area">Total on</th>' +
     data.total.map(function (n, i) { return cell(n, i, null); }).join('') + '</tr>';
   const legend = (data.trading ? 'Shaded = trading hours (' + opsClock(data.trading.open) + '–' + opsClock(data.trading.close) + '). '
     : 'No trading hours recorded for this day — minimums apply while anyone is rostered. ') +
@@ -15669,6 +15805,7 @@ function renderOnShiftNow() {
   const now = opsVenueNow(venue);
   const td = opsTradingDayNow(venue, shifts, now);
   const on = opsOnShiftAt(shifts, now.iso, now.minute);
+  const unfilled = opsOnShiftAt(shifts, now.iso, now.minute, opsUnfilled);
   const dk = opsWeekKey(td.iso);
   const areas = opsVenueAreas(venue);
   const byId = {};
@@ -15692,7 +15829,8 @@ function renderOnShiftNow() {
 
   const set = function (id, text) { const el = document.getElementById(id); if (el) el.textContent = text; };
   set('headcount-now', String(on.length));
-  set('headcount-sub', 'on shift now · ' + opsClock(now.minute));
+  set('headcount-sub', 'on shift now · ' + opsClock(now.minute) +
+    (unfilled.length ? ' · ' + unfilled.length + ' open shift' + (unfilled.length === 1 ? '' : 's') + ' unfilled' : ''));
   set('headcount-areas-label', 'By area — on now / minimum today');
   const cap = document.getElementById('capacity-wrap');
   if (cap) cap.style.display = 'none';
@@ -15705,10 +15843,24 @@ function renderOnShiftNow() {
     }).join('') : '<div class="ops-muted">No areas set up yet — add them in Settings.</div>';
   }
 
+  const openHtml = unfilled.length
+    ? '<div class="ops-group-title"><span class="below">Open: unfilled (' + unfilled.length + ')</span></div>' +
+      unfilled.map(function (sh) {
+        return '<div class="staff-item">' +
+          '<div class="staff-avatar">?</div>' +
+          '<div class="staff-info">' +
+            '<div class="staff-name">' + esc(label(opsNorm(sh.role))) + '</div>' +
+            '<div class="staff-meta">' + esc(String(sh.start_time || '').slice(0, 5)) + '–' +
+              esc(String(sh.end_time || '').slice(0, 5)) + '</div>' +
+          '</div>' +
+          '<span class="staff-status off-shift">Nobody on it</span>' +
+        '</div>';
+      }).join('')
+    : '';
   const list = document.getElementById('on-shift-list');
   if (list) {
     if (!on.length) {
-      list.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center;">Nobody rostered on right now</div>';
+      list.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center;">Nobody rostered on right now</div>' + openHtml;
     } else {
       list.innerHTML = order.filter(function (k) { return groups[k]; }).map(function (k) {
         const people = groups[k].slice().sort(function (a, b) {
@@ -15732,7 +15884,7 @@ function renderOnShiftNow() {
               '<span class="staff-status on-shift">On Shift</span>' +
             '</div>';
           }).join('');
-      }).join('');
+      }).join('') + openHtml;
     }
   }
 
@@ -15935,13 +16087,31 @@ function openOnShiftTools() {
     if (el) el.value = '';
   });
   renderOnShiftNow();
+  refreshOnShiftRosters();
   loadSosCard(true);
   loadCutAdvice();
 }
 
-// The On-Shift headcount and timeline follow the clock while the page is open.
+// Shift edits, copy week, leave and cover change the live roster without
+// touching state.rosters, so On-Shift reads it again each time it draws.
+let _onShiftRosterSeq = 0;
+async function refreshOnShiftRosters() {
+  const vid = state.currentVenue;
+  if (!vid || state.isDemo) return;
+  const seq = ++_onShiftRosterSeq;
+  let res = null;
+  try {
+    res = await fetchVenueRosters(vid);
+  } catch (e) { /* keep what is on screen; the clock still moves */ }
+  if (state.currentVenue !== vid || seq !== _onShiftRosterSeq) return;
+  if (res) state.rosters = (res.items || []).filter(function (r) { return r.venue_id === vid; });
+  if (state.currentPage === 'on-shift') renderOnShiftNow();
+}
+
+// The On-Shift headcount and timeline follow the clock and the live roster
+// while the page is open.
 setInterval(function () {
-  if (!state.isDemo && state.currentPage === 'on-shift' && state.currentVenue) renderOnShiftNow();
+  if (!state.isDemo && state.currentPage === 'on-shift' && state.currentVenue) refreshOnShiftRosters();
 }, 60000);
 
 // ── Staff Contact Export ────────────────────────────────────────────
