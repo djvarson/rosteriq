@@ -2929,8 +2929,9 @@
           </div>
         </div>
 
-        <!-- ROSTER OPTIMISER PANEL -->
-        <div class="grid-1">
+        <!-- ROSTER OPTIMISER PANEL: demo only. A real venue builds, costs and
+             publishes its week through Generate AI Roster above. -->
+        <div class="grid-1" id="optimiser-card" style="display:none;">
           <div class="card">
             <div class="chart-title">Roster Optimiser</div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; align-items: end; margin-bottom: 24px;">
@@ -2960,7 +2961,7 @@
 
             <!-- Results Card -->
             <div id="optimiser-results" style="display: none; border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; background: var(--card-bg);">
-              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;">
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px;">
                 <div>
                   <div class="kpi-label">Solver Used</div>
                   <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-top: 4px;" id="optimiser-solver-used">—</div>
@@ -2973,15 +2974,9 @@
                   <div class="kpi-label">Shift Count</div>
                   <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-top: 4px;" id="optimiser-shift-count">—</div>
                 </div>
-                <div>
-                  <div class="kpi-label">Quality Score</div>
-                  <div style="font-size: 14px; font-weight: 600; color: var(--brand-blue); margin-top: 4px;" id="optimiser-quality">—</div>
-                </div>
               </div>
               <div style="display: flex; gap: 8px;">
-                <button class="btn btn-secondary btn-small" id="btn-optimiser-compare">Compare MILP vs Greedy</button>
-                <button class="btn btn-secondary btn-small" id="btn-optimiser-accept">✓ Accept Roster</button>
-                <button class="btn btn-secondary btn-small" id="btn-optimiser-discard">Discard</button>
+                <button class="btn btn-secondary btn-small" id="btn-optimiser-discard">Close</button>
               </div>
             </div>
 
@@ -3202,6 +3197,10 @@
           <div style="font-weight:600; margin-bottom:4px;">Import your existing roster — no live connection</div>
           <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">Export your published roster from Deputy, Tanda, or a spreadsheet and paste it below (import your staff first so shifts can be matched). Columns matched automatically: Name/Email, Date, Start, End, Role, Break.</div>
           <textarea id="roster-import-text" rows="6" placeholder="Paste your exported roster (with a header row)…" style="width:100%; font-family:monospace; font-size:12px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); color:var(--text-primary);"></textarea>
+          <label style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--text-secondary);">
+            Location to import
+            <input type="text" id="roster-import-location" placeholder="Optional — only for exports that cover several locations" style="flex:1 1 220px; max-width:360px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--dark-bg); color:var(--text-primary); font-size:12px;">
+          </label>
           <div style="display:flex; gap:8px; margin-top:10px; align-items:center;">
             <button class="btn btn-primary btn-small" onclick="runRosterImport()">Import roster</button>
             <button class="btn btn-secondary btn-small" onclick="document.getElementById('roster-import-card').style.display='none'">Cancel</button>
@@ -3494,6 +3493,10 @@
               <textarea id="staff-import-text" rows="6" placeholder="Paste your exported staff list here (with or without a header row)…" style="width:100%; font-family:monospace; font-size:12px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); color:var(--text-primary);"></textarea>
               <label style="display:flex; gap:6px; align-items:center; margin-top:8px; font-size:12px; color:var(--text-secondary); cursor:pointer;">
                 <input type="checkbox" id="staff-import-update"> Update people already imported (matched by email) instead of skipping them
+              </label>
+              <label style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--text-secondary);">
+                Location to import
+                <input type="text" id="staff-import-location" placeholder="Optional — only for exports that cover several locations" style="flex:1 1 220px; max-width:360px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--dark-bg); color:var(--text-primary); font-size:12px;">
               </label>
               <div style="display:flex; gap:8px; margin-top:10px; align-items:center;">
                 <button class="btn btn-primary btn-small" onclick="runStaffImport()">Import staff</button>
@@ -5017,6 +5020,10 @@
       <label style="display:flex; gap:6px; align-items:center; margin-top:8px; font-size:12px; color:var(--text-secondary); cursor:pointer;">
         <input type="checkbox" id="ob-staff-update"> Update people already imported (matched by email) instead of skipping them
       </label>
+      <label style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--text-secondary);">
+        Location to import
+        <input type="text" id="ob-staff-location" placeholder="Optional — only for exports that cover several locations" style="flex:1 1 220px; max-width:360px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--card-bg); color:var(--text-primary); font-size:12px;">
+      </label>
       <div style="display:flex; align-items:center; gap:12px; margin-top:10px;">
         <button class="btn btn-primary btn-small" id="ob-staff-import-btn" onclick="obImportStaff()">Import staff</button>
         <span id="ob-staff-result" style="font-size:13px; color:var(--text-muted);"></span>
@@ -5956,31 +5963,76 @@ function handleLogout() {
 // ============================================
 // The access token lasts an hour; the refresh token rotates on every use, so
 // a burst of parallel 401s must share ONE exchange or all but the first fail.
+// Every tab (and /my) keeps the pair in localStorage, so the exchange also
+// holds a Web Lock across tabs and re-reads storage first: a tab that waited
+// for the lock, or lost the race without one, takes up the pair the winner
+// stored instead of spending a revoked token.
+// Resolves 'adopted' (another tab's newer token), 'refreshed' (a new pair) or
+// false (the server refused the refresh token: the session is over). A 429,
+// 5xx or dropped connection throws a retryable error and keeps the pair; a
+// Retry-After is held for every tab, since they share the network's limit.
 let _refreshInFlight = null;
-function _refreshAccessToken() {
+function _refreshAccessToken(staleToken) {
   if (_refreshInFlight) return _refreshInFlight;
-  _refreshInFlight = (async function () {
-    let rt = '';
-    try { rt = localStorage.getItem('jwt_refresh_token') || ''; } catch (e) { return false; }
+  const RETRY_KEY = 'rosteriq_refresh_retry_at';
+  const read = function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  const adopt = function (at) { state.authToken = at; state.token = at; return 'adopted'; };
+  const retryable = function (msg, secs) {
+    const e = new Error(msg + " You're still signed in — try again " + (secs ? 'in ' + secs + ' s.' : 'in a moment.'));
+    e.retryable = true;
+    e.retryAfter = secs || 0;
+    return e;
+  };
+  const exchange = async function () {
+    const stored = read('jwt_token');
+    if (staleToken && stored && stored !== staleToken) return adopt(stored);
+    const rt = read('jwt_refresh_token');
     if (!rt) return false;
+    const wait = Math.ceil(((+read(RETRY_KEY) || 0) - Date.now()) / 1000);
+    if (wait > 0) throw retryable('RosterIQ asked for a pause before renewing your session.', wait);
+    // Other tabs wait on this lock, so a stalled connection must not hold it.
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(function () { ctl.abort(); }, 15000) : null;
+    let r;
     try {
-      const r = await fetch(`${state.baseUrl}/api/auth/refresh`, {
+      r = await fetch(`${state.baseUrl}/api/auth/refresh`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: rt }),
+        body: JSON.stringify({ refresh_token: rt }), signal: ctl ? ctl.signal : undefined,
       });
-      if (!r.ok) return false;
-      const j = await r.json();
-      if (!j || !j.access_token) return false;
-      state.authToken = j.access_token;
-      state.token = j.access_token;
-      try {
-        localStorage.setItem('jwt_token', j.access_token);
-        if (j.refresh_token) localStorage.setItem('jwt_refresh_token', j.refresh_token);
-      } catch (e) { /* the in-memory token still works for this session */ }
-      return true;
-    } catch (e) { return false; }
-  })();
-  _refreshInFlight.then(function () { _refreshInFlight = null; });
+    } catch (e) {
+      throw retryable("Couldn't reach RosterIQ to renew your session.", 0);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (r.status === 401 || r.status === 403) {
+      const nowRt = read('jwt_refresh_token'), nowAt = read('jwt_token');
+      if (nowRt && nowRt !== rt && nowAt) return adopt(nowAt);
+      return false;
+    }
+    if (!r.ok) {
+      const ra = r.headers && r.headers.get ? r.headers.get('Retry-After') : null;
+      let secs = parseInt(ra, 10);
+      if (!(secs >= 0) && ra) secs = Math.ceil((Date.parse(ra) - Date.now()) / 1000);
+      secs = secs > 0 ? secs : 0;
+      if (secs) { try { localStorage.setItem(RETRY_KEY, String(Date.now() + secs * 1000)); } catch (e) { /* this tab still waits */ } }
+      throw retryable(r.status === 429 ? 'Too many sign-in requests from this network to renew your session.'
+                                       : "RosterIQ couldn't renew your session just now.", secs);
+    }
+    let j = null;
+    try { j = await r.json(); } catch (e) { /* treated as no token below */ }
+    if (!j || !j.access_token) throw retryable("RosterIQ couldn't renew your session just now.", 0);
+    state.authToken = j.access_token;
+    state.token = j.access_token;
+    try {
+      localStorage.setItem('jwt_token', j.access_token);
+      if (j.refresh_token) localStorage.setItem('jwt_refresh_token', j.refresh_token);
+    } catch (e) { /* the in-memory token still works for this session */ }
+    return 'refreshed';
+  };
+  const locks = typeof navigator !== 'undefined' && navigator.locks;
+  _refreshInFlight = locks ? locks.request('rosteriq-auth-refresh', exchange) : exchange();
+  const done = function () { _refreshInFlight = null; };
+  _refreshInFlight.then(done, done);
   return _refreshInFlight;
 }
 
@@ -6011,9 +6063,11 @@ async function fetchAPI(endpoint, options = {}, _retried = false) {
     headers: { ...headers, ...(options.headers || {}) },
   });
 
-  if (response.status === 401 && !_retried && !state.isDemo && sentToken) {
-    const renewed = (state.authToken && state.authToken !== sentToken) || await _refreshAccessToken();
-    if (renewed) return fetchAPI(endpoint, options, true);
+  // A token taken from another tab may itself have expired, so a 401 on
+  // that retry still gets one real exchange.
+  if (response.status === 401 && _retried !== 'refreshed' && !state.isDemo && sentToken) {
+    const renewed = (state.authToken && state.authToken !== sentToken) ? 'adopted' : await _refreshAccessToken(sentToken);
+    if (renewed) return fetchAPI(endpoint, options, renewed);
     _sessionExpired();
   }
 
@@ -6041,7 +6095,10 @@ async function fetchAPI(endpoint, options = {}, _retried = false) {
     } else if (data && typeof data === 'string') {
       errorMessage = data;
     }
-    throw new Error(errorMessage);
+    const err = new Error(errorMessage);
+    err.status = response.status;
+    err.data = data;
+    throw err;
   }
 
   return data;
@@ -6206,7 +6263,9 @@ function showPage(pageId) {
     commsTab(commsCurrentTab || 'ann');
     // Outstanding-ack chip on the tab without opening it
     if (state.currentVenue) {
-      fetchAPI('/api/sops/documents?venue_id=' + encodeURIComponent(state.currentVenue)).then(function(d) {
+      const vid = state.currentVenue;
+      fetchAPI('/api/sops/documents?venue_id=' + encodeURIComponent(vid)).then(function(d) {
+        if (state.currentVenue !== vid) return;
         const n = (d.documents || []).reduce(function(a, x) { return a + (((x.ack_stats || {}).outstanding_names) || []).length; }, 0);
         const chip = document.getElementById('sops-outstanding-chip');
         if (chip) { chip.textContent = n ? n + ' outstanding' : ''; chip.style.display = n ? 'inline-block' : 'none'; }
@@ -6257,8 +6316,10 @@ let ckRun = null;
 
 async function loadChecklistsBoard() {
   if (!state.currentVenue) return;
+  const vid = state.currentVenue;
   try {
-    const data = await fetchAPI('/api/checklists/today?venue_id=' + encodeURIComponent(state.currentVenue));
+    const data = await fetchAPI('/api/checklists/today?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     const board = document.getElementById('ck-board');
     const lists = data.checklists || [];
     document.getElementById('btn-seed-checklists').style.display = lists.length ? 'none' : 'inline-block';
@@ -6286,6 +6347,7 @@ async function loadChecklistsBoard() {
     }
     loadChecklistHistory();
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     showToast('Checklists failed to load: ' + e.message, 'error');
   }
 }
@@ -6393,12 +6455,14 @@ function closeChecklistRun() {
 }
 
 async function loadChecklistHistory() {
+  const vid = state.currentVenue;
   try {
     const end = new Date();
     const start = new Date(end.getTime() - 6 * 24 * 3600 * 1000);
     const fmt = function(d) { return d.toISOString().slice(0, 10); };
-    const data = await fetchAPI('/api/checklists/runs?venue_id=' + encodeURIComponent(state.currentVenue) +
+    const data = await fetchAPI('/api/checklists/runs?venue_id=' + encodeURIComponent(vid) +
       '&start_date=' + fmt(start) + '&end_date=' + fmt(end));
+    if (state.currentVenue !== vid) return;
     const rows = data.runs || [];
     document.getElementById('ck-history').innerHTML = rows.length ? rows.slice().reverse().map(function(r) {
       const flagged = (r.flagged_items || []).map(function(f) { return f.label + ' (' + f.value + '°C)'; }).join('; ');
@@ -6447,14 +6511,17 @@ async function loadTimesheets() {
   const start = document.getElementById('ts-start').value;
   const end = document.getElementById('ts-end').value;
   const status = document.getElementById('ts-status').value;
+  const vid = state.currentVenue;
   try {
-    const data = await fetchAPI('/api/clock/timesheets?venue_id=' + encodeURIComponent(state.currentVenue) +
+    const data = await fetchAPI('/api/clock/timesheets?venue_id=' + encodeURIComponent(vid) +
       '&start_date=' + start + '&end_date=' + end + (status ? '&status=' + status : ''));
+    if (state.currentVenue !== vid) return;
     tsRows = data.timesheets || [];
     document.getElementById('ts-summary').textContent =
       tsRows.length + ' timesheets · ' + tsMinutesLabel(data.total_worked_minutes || 0) + ' total worked';
     renderTimesheets();
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     showToast('Failed to load timesheets: ' + e.message, 'error');
   }
 }
@@ -6501,15 +6568,18 @@ let lvRows = [];
 async function loadLeaveRequests() {
   if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
   const status = document.getElementById('lv-filter').value;
+  const vid = state.currentVenue;
   try {
-    const data = await fetchAPI('/api/leave?venue_id=' + encodeURIComponent(state.currentVenue) +
+    const data = await fetchAPI('/api/leave?venue_id=' + encodeURIComponent(vid) +
       (status ? '&status=' + status : ''));
+    if (state.currentVenue !== vid) return;
     lvRows = data.requests || [];
     const pending = lvRows.filter(function(r) { return r.status === 'pending'; }).length;
     document.getElementById('lv-summary').textContent =
       lvRows.length + (lvRows.length === 1 ? ' request' : ' requests') + (pending ? ' · ' + pending + ' awaiting a decision' : '');
     renderLeaveRequests();
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     showToast('Failed to load leave requests: ' + e.message, 'error');
   }
 }
@@ -6555,8 +6625,10 @@ async function loadSetupWizard() {
     ? state.currentVenue.id : state.currentVenue;
   const card = document.getElementById('setup-card');
   if (!card || !vid) return;
+  const venue = state.currentVenue;
   try {
     const s = await fetchAPI('/api/setup?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== venue) return;
     // Hide once the required steps are all done — don't nag an established venue
     if (s.complete) { card.style.display = 'none'; return; }
     card.style.display = 'block';
@@ -6587,7 +6659,7 @@ async function loadSetupWizard() {
       '</div>';
     }).join('');
   } catch (e) {
-    card.style.display = 'none';
+    if (state.currentVenue === venue) card.style.display = 'none';
   }
 }
 
@@ -6609,8 +6681,10 @@ async function loadBriefing() {
   const card = document.getElementById('briefing-card');
   const body = document.getElementById('briefing-body');
   if (!card || !body) return;
+  const venue = state.currentVenue;
   try {
     const b = await fetchAPI('/api/briefing?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== venue) return;
     card.style.display = 'block';
     document.getElementById('briefing-date').textContent =
       new Date(b.date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -6634,7 +6708,7 @@ async function loadBriefing() {
     }
     body.innerHTML = html;
   } catch (e) {
-    card.style.display = 'none';
+    if (state.currentVenue === venue) card.style.display = 'none';
   }
 }
 
@@ -6647,8 +6721,10 @@ async function loadSnapshot() {
   if (!vid) return;
   const grid = document.getElementById('snap-grid');
   const chip = document.getElementById('snap-prime-chip');
+  const venue = state.currentVenue;
   try {
     const s = await fetchAPI('/api/snapshot?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== venue) return;
     const pct = function(v) { return v == null ? '—' : v + '%'; };
     const bandColor = {
       healthy: 'var(--success)', watch: 'var(--brand-blue)',
@@ -6676,7 +6752,7 @@ async function loadSnapshot() {
       cell('Prime cost', '<span style="color:' + bandColor + '">' + pct(s.prime_cost_pct) + '</span>', 'labour + food') +
       cell('Gross profit', formatCurrency(s.gross_profit), 'after labour & food');
   } catch (e) {
-    grid.innerHTML = '<div style="color:var(--text-muted);">' + esc(e.message) + '</div>';
+    if (state.currentVenue === venue) grid.innerHTML = '<div style="color:var(--text-muted);">' + esc(e.message) + '</div>';
   }
 }
 
@@ -6688,23 +6764,29 @@ let msIngredients = [];
 
 async function loadMenuPage() {
   if (!state.currentVenue) return;
+  const vid = state.currentVenue;
   try {
-    const s = await fetchAPI('/api/sales/summary?venue_id=' + encodeURIComponent(state.currentVenue));
+    const s = await fetchAPI('/api/sales/summary?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     document.getElementById('ms-rev').textContent = formatCurrency(s.total_revenue_inc_gst || 0);
     document.getElementById('ms-cogs').textContent = formatCurrency(s.total_cogs || 0);
     document.getElementById('ms-gp').textContent = formatCurrency(s.gross_profit || 0);
     document.getElementById('ms-fc').textContent = (s.food_cost_pct || 0) + '%';
   } catch (e) { /* chips stay dashed */ }
+  if (state.currentVenue !== vid) return;
   try {
-    const data = await fetchAPI('/api/menu/costing?venue_id=' + encodeURIComponent(state.currentVenue));
+    const data = await fetchAPI('/api/menu/costing?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     msRecipes = data.recipes || [];
     document.getElementById('ms-seed-btn').style.display = msRecipes.length ? 'none' : 'inline-block';
     renderMenuRows();
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     showToast('Failed to load menu: ' + e.message, 'error');
   }
   try {
-    const ings = await fetchAPI('/api/menu/ingredients?venue_id=' + encodeURIComponent(state.currentVenue));
+    const ings = await fetchAPI('/api/menu/ingredients?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     msIngredients = ings.ingredients || [];
     renderIngredientRows();
   } catch (e) { /* table stays empty */ }
@@ -7029,51 +7111,62 @@ let siLines = [];
 
 async function loadInventory() {
   if (!state.currentVenue) return;
+  const vid = state.currentVenue;
   try {
-    const data = await fetchAPI('/api/inventory?venue_id=' + encodeURIComponent(state.currentVenue));
+    const data = await fetchAPI('/api/inventory?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     ivRows = data.items || [];
     document.getElementById('iv-value').textContent = formatCurrency(data.total_stock_value || 0);
     document.getElementById('iv-low').textContent = data.low_count || 0;
     renderInventory();
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     showToast('Failed to load inventory: ' + e.message, 'error');
   }
   try {
-    const st = await fetchAPI('/api/inventory/stocktakes?venue_id=' + encodeURIComponent(state.currentVenue));
+    const st = await fetchAPI('/api/inventory/stocktakes?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     ivOpenStocktakes = (st.stocktakes || []).filter(function(s) { return s.status === 'open'; });
     renderStocktake();
   } catch (e) { /* card stays hidden */ }
   try {
-    const od = await fetchAPI('/api/inventory/orders?venue_id=' + encodeURIComponent(state.currentVenue));
+    const od = await fetchAPI('/api/inventory/orders?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     ivOrders = od.orders || [];
     renderOrders(ivOrders);
   } catch (e) { /* list stays empty */ }
   try {
     // Accounting context first so invoice rows can show push buttons / "In Xero/MYOB" chips
     try {
-      const xs = await fetchAPI('/api/xero/status/' + encodeURIComponent(state.currentVenue));
+      const xs = await fetchAPI('/api/xero/status/' + encodeURIComponent(vid));
+      if (state.currentVenue !== vid) return;
       ivXeroConnected = !!xs.connected;
-    } catch (e) { ivXeroConnected = false; }
+    } catch (e) { if (state.currentVenue === vid) ivXeroConnected = false; }
     try {
-      const xp = await fetchAPI('/api/xero/bill-pushes?venue_id=' + encodeURIComponent(state.currentVenue));
+      const xp = await fetchAPI('/api/xero/bill-pushes?venue_id=' + encodeURIComponent(vid));
+      if (state.currentVenue !== vid) return;
       ivXeroPushes = {};
       (xp.pushes || []).forEach(function(p) { ivXeroPushes[p.invoice_id] = p; });
-    } catch (e) { ivXeroPushes = {}; }
+    } catch (e) { if (state.currentVenue === vid) ivXeroPushes = {}; }
     try {
-      const ms = await fetchAPI('/api/myob/status?venue_id=' + encodeURIComponent(state.currentVenue));
+      const ms = await fetchAPI('/api/myob/status?venue_id=' + encodeURIComponent(vid));
+      if (state.currentVenue !== vid) return;
       ivMyobConnected = !!ms.connected;
-    } catch (e) { ivMyobConnected = false; }
+    } catch (e) { if (state.currentVenue === vid) ivMyobConnected = false; }
     try {
-      const mp = await fetchAPI('/api/myob/bill-pushes?venue_id=' + encodeURIComponent(state.currentVenue));
+      const mp = await fetchAPI('/api/myob/bill-pushes?venue_id=' + encodeURIComponent(vid));
+      if (state.currentVenue !== vid) return;
       ivMyobPushes = {};
       (mp.pushes || []).forEach(function(p) { ivMyobPushes[p.invoice_id] = p; });
-    } catch (e) { ivMyobPushes = {}; }
-    const iv = await fetchAPI('/api/inventory/invoices?venue_id=' + encodeURIComponent(state.currentVenue));
+    } catch (e) { if (state.currentVenue === vid) ivMyobPushes = {}; }
+    const iv = await fetchAPI('/api/inventory/invoices?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     ivInvoices = iv.invoices || [];
     renderInvoices(ivInvoices);
   } catch (e) { /* list stays empty */ }
   try {
-    const w = await fetchAPI('/api/inventory/waste?venue_id=' + encodeURIComponent(state.currentVenue));
+    const w = await fetchAPI('/api/inventory/waste?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     document.getElementById('iv-waste').textContent = formatCurrency(w.total_waste_value || 0);
   } catch (e) { /* chip stays dashed */ }
 }
@@ -7480,8 +7573,10 @@ async function pushInvoiceToMyob(invoiceId) {
 
 async function loadUsage() {
   const box = document.getElementById('iv-usage');
+  const vid = state.currentVenue;
   try {
-    const r = await fetchAPI('/api/inventory/usage?venue_id=' + encodeURIComponent(state.currentVenue));
+    const r = await fetchAPI('/api/inventory/usage?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     if (!r.items.length) {
       box.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding:18px;">No overlapping counted items between the last two stocktakes</div>';
       return;
@@ -7509,6 +7604,7 @@ async function loadUsage() {
       '<th style="padding:8px;">Closing</th><th style="padding:8px;">Actual use</th><th style="padding:8px;">Should be</th>' +
       '<th style="padding:8px;">Variance</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     box.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding:18px;">' + esc(e.message) + '</div>';
   }
 }
@@ -7544,19 +7640,24 @@ let anRows = [];
 
 async function loadAnnouncements() {
   if (!state.currentVenue) return;
+  const vid = state.currentVenue;
   try {
-    const st = await fetchAPI('/api/sms/status?venue_id=' + encodeURIComponent(state.currentVenue));
+    const st = await fetchAPI('/api/sms/status?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     document.getElementById('an-sms-status').textContent =
       st.configured ? '(via ' + (st.provider || 'sms') + ' ✓)'
                     : '(connect Twilio or MessageMedia to enable)';
     document.getElementById('an-sms').disabled = !st.configured;
   } catch (e) { /* status is cosmetic */ }
+  if (state.currentVenue !== vid) return;
   try {
     annAudiencePills();
-    const data = await fetchAPI('/api/announcements?venue_id=' + encodeURIComponent(state.currentVenue));
+    const data = await fetchAPI('/api/announcements?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     anRows = data.announcements || [];
     renderAnnouncements();
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     showToast('Failed to load announcements: ' + e.message, 'error');
   }
 }
@@ -7701,11 +7802,14 @@ function _ago(iso) {
 let mfPosts = [];
 async function loadManagerFeed() {
   if (!state.currentVenue) return;
+  const vid = state.currentVenue;
   const list = document.getElementById('mf-list');
   try {
-    const d = await fetchAPI('/api/feed/posts?venue_id=' + encodeURIComponent(state.currentVenue));
+    const d = await fetchAPI('/api/feed/posts?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     mfPosts = d.posts || [];
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     list.innerHTML = '<div class="card" style="color:var(--danger);">' + esc(e.message) + '</div>';
     return;
   }
@@ -7887,8 +7991,10 @@ async function loadSystemHealth() {
   const box = document.getElementById('act-health');
   if (!box || !state.currentVenue) return;
   const days = actFilter.since === '24h' ? 1 : actFilter.since === '30d' ? 30 : 7;
+  const vid = state.currentVenue;
   try {
-    const d = await fetchAPI('/api/events/insights?venue_id=' + encodeURIComponent(state.currentVenue) + '&days=' + days);
+    const d = await fetchAPI('/api/events/insights?venue_id=' + encodeURIComponent(vid) + '&days=' + days);
+    if (state.currentVenue !== vid) return;
 
     // The headline: what a person should actually do something about.
     let html = '';
@@ -7950,6 +8056,7 @@ async function loadSystemHealth() {
 
     box.innerHTML = html;
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     box.innerHTML = '<div style="color:var(--text-muted); font-size:13px; padding:8px 0;">Health data unavailable: ' + esc(e.message || 'error') + '</div>';
   }
 }
@@ -7959,12 +8066,14 @@ async function loadActivity() {
   loadSystemHealth();          // independent of the event list; never blocks it
   const list = document.getElementById('act-list');
   const sum = document.getElementById('act-summary');
-  const q = '?venue_id=' + encodeURIComponent(state.currentVenue) + '&since=' + actFilter.since + '&limit=200' + (actFilter.category ? '&category=' + actFilter.category : '');
+  const vid = state.currentVenue;
+  const q = '?venue_id=' + encodeURIComponent(vid) + '&since=' + actFilter.since + '&limit=200' + (actFilter.category ? '&category=' + actFilter.category : '');
   try {
     const [d, s] = await Promise.all([
       fetchAPI('/api/events' + q),
-      fetchAPI('/api/events/summary?venue_id=' + encodeURIComponent(state.currentVenue) + '&days=' + (actFilter.since === '24h' ? 1 : actFilter.since === '30d' ? 30 : 7)),
+      fetchAPI('/api/events/summary?venue_id=' + encodeURIComponent(vid) + '&days=' + (actFilter.since === '24h' ? 1 : actFilter.since === '30d' ? 30 : 7)),
     ]);
+    if (state.currentVenue !== vid) return;
     if (sum && s && s.by_category) {
       sum.textContent = 'Last ' + s.days + ' day' + (s.days === 1 ? '' : 's') + ': ' + s.by_category.audit + ' actions · ' + s.by_category.security + ' security events · ' + s.by_category.error + ' errors';
     }
@@ -7984,6 +8093,7 @@ async function loadActivity() {
       }).join('') + '</div>';
     }
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     list.innerHTML = '<div class="card" style="color:var(--danger);">' + esc(e.message) + '</div>';
   }
   // Owner-only platform view: the endpoint refuses non-owners without venue_id, so just try.
@@ -8019,11 +8129,14 @@ async function loadPlatformSecurity() {
 let sopDocs = [];
 async function loadSopLibrary() {
   if (!state.currentVenue) return;
+  const vid = state.currentVenue;
   const list = document.getElementById('sop-list');
   try {
-    const d = await fetchAPI('/api/sops/documents?venue_id=' + encodeURIComponent(state.currentVenue) + '&include_inactive=true');
+    const d = await fetchAPI('/api/sops/documents?venue_id=' + encodeURIComponent(vid) + '&include_inactive=true');
+    if (state.currentVenue !== vid) return;
     sopDocs = d.documents || [];
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     list.innerHTML = '<div class="card" style="color:var(--danger);">' + esc(e.message) + '</div>';
     return;
   }
@@ -8178,8 +8291,10 @@ async function loadTeamAvailability() {
   if (!state.currentVenue) return;
   const wrap = document.getElementById('team-avail-wrap');
   if (!wrap) return;
+  const vid = state.currentVenue;
   try {
-    const data = await fetchAPI('/api/availability?venue_id=' + encodeURIComponent(state.currentVenue));
+    const data = await fetchAPI('/api/availability?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     if (!data.staff || !data.staff.length) {
       wrap.innerHTML = '<div style="color:var(--text-muted); padding:14px; text-align:center;">No staff yet</div>';
       return;
@@ -8214,6 +8329,7 @@ async function loadTeamAvailability() {
       '<span style="color:#ef4444;">✕</span> unavailable</div>';
     wrap.innerHTML = html;
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     wrap.innerHTML = '<div style="color:var(--text-muted); padding:14px; text-align:center;">' + esc(e.message) + '</div>';
   }
 }
@@ -8222,14 +8338,17 @@ let cvRows = [];
 
 async function loadCoverRequests() {
   if (!state.currentVenue) return;
+  const vid = state.currentVenue;
   try {
-    const data = await fetchAPI('/api/cover?venue_id=' + encodeURIComponent(state.currentVenue));
+    const data = await fetchAPI('/api/cover?venue_id=' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     cvRows = data.covers || [];
     const claimed = cvRows.filter(function(c) { return c.status === 'claimed'; }).length;
     document.getElementById('cv-summary').textContent =
       cvRows.length + (cvRows.length === 1 ? ' request' : ' requests') + (claimed ? ' · ' + claimed + ' ready to approve' : '');
     renderCoverRequests();
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     showToast('Failed to load cover requests: ' + e.message, 'error');
   }
 }
@@ -8922,7 +9041,9 @@ async function loadVenues() {
     connectionManager.hide();
   } catch (error) {
     console.error('Failed to load venues:', error);
-    if (state.isDemo) {
+    if (error && error.retryable) {
+      showToast(error.message, 'warning', 8000);
+    } else if (state.isDemo) {
       // Only fall back to demo data if explicitly in demo mode
       console.log('Demo mode — loading demo data...');
       loadDemoVenue();
@@ -9025,10 +9146,12 @@ async function loadVenueData() {
 
     clearState('kpi-row');
 
-    // If venue has no data yet, show empty states instead of stale hardcoded content
-    if (state.employees.length === 0 && state.rosters.length === 0) {
-      showEmptyVenueStates();
-    } else {
+    // If venue has no data yet, show empty states instead of stale hardcoded
+    // content. A real venue's tiles, alerts and on-shift list still come from
+    // its own data, which says so when there is none.
+    const noData = state.employees.length === 0 && state.rosters.length === 0;
+    if (noData) showEmptyVenueStates();
+    if (!noData || !state.isDemo) {
       updateDashboardKPIs();
       if (state.isDemo) {
         initRevenueLabourChart();
@@ -9093,12 +9216,6 @@ function showEmptyVenueStates() {
     tb.innerHTML = `<tr><td colspan="6">${emptyMsg}</td></tr>`;
   });
 
-  // Clear KPI cards
-  const kpiRow = document.getElementById('kpi-row');
-  if (kpiRow) {
-    kpiRow.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Connect your systems to see live KPIs</div>`;
-  }
-
   // Clear chart containers
   ['revenue-labour-chart', 'labour-pct-chart', 'hourly-chart'].forEach(id => {
     const canvas = document.getElementById(id);
@@ -9112,6 +9229,8 @@ function showEmptyVenueStates() {
 
 function loadDemoVenueData() {
   state.employees = demoData.staff;
+  const optimiserCard = document.getElementById('optimiser-card');
+  if (optimiserCard) optimiserCard.style.display = '';
 
   // Demo-only recommendations: sample data is clearly bannered as sample, so
   // showing the venue what this panel DOES is honest here — a real venue
@@ -9748,6 +9867,7 @@ function _setKpi(id, value, fallback) {
 async function updateDashboardKPIs() {
   const venueId = _getVenueId();
   if (!venueId) return;
+  const vid = state.currentVenue;
   // Rostered today, from the briefing — never the team's headcount.
   _setKpi('kpi-staff-count', '—');
   _setKpi('kpi-staff-detail', 'rostered today');
@@ -9759,6 +9879,7 @@ async function updateDashboardKPIs() {
       fetchAPI('/api/snapshot?venue_id=' + encodeURIComponent(venueId)).catch(function () { return null; }),
     ]);
   } catch (e) { /* fall through to em dashes */ }
+  if (state.currentVenue !== vid) return;
 
   const today = (brief && brief.today) || {};
   const cov = (today.coverage && today.coverage.today) || {};
@@ -9866,12 +9987,15 @@ var _ICON_INFO = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" st
 async function populateAlerts() {
   const venueId = _getVenueId();
   if (!venueId) return renderAlerts([]);
+  const vid = state.currentVenue;
   let b = null;
   try {
     b = await fetchAPI('/api/briefing?venue_id=' + encodeURIComponent(venueId));
   } catch (e) {
-    return renderAlerts([]);
+    if (state.currentVenue === vid) renderAlerts([]);
+    return;
   }
+  if (state.currentVenue !== vid) return;
   const alerts = [];
   const today = b.today || {};
   const cov = (today.coverage && today.coverage.today) || {};
@@ -10198,11 +10322,27 @@ function resetVenuePageState() {
   rosterSection = ''; ivSection = '';
   ['ck-run-card', 'rb-card', 'iv-waste-card', 'iv-inv-card', 'ing-import-card', 'roster-import-card', 'staff-import-card']
     .forEach(function (id) { const c = document.getElementById(id); if (c) c.style.display = 'none'; });
+  // Blank the home tiles, alerts and on-shift list: the new venue's own data
+  // repaints them, and a venue with none must not keep showing the last one's.
+  ['kpi-revenue', 'kpi-labour-cost', 'kpi-labour-pct', 'kpi-covers', 'kpi-staff-count', 'staff-breakdown']
+    .forEach(function (id) { const k = document.getElementById(id); if (k) k.textContent = '—'; });
+  ['kpi-revenue-sub', 'kpi-revenue-detail', 'kpi-labour-sub', 'kpi-labour-pct-detail', 'kpi-covers-detail', 'kpi-staff-detail']
+    .forEach(function (id) { const k = document.getElementById(id); if (k) k.textContent = ''; });
+  const labourBar = document.getElementById('labour-progress');
+  if (labourBar) labourBar.style.width = '0%';
+  ['alerts-panel-top', 'on-shift-list'].forEach(function (id) { const c = document.getElementById(id); if (c) c.innerHTML = ''; });
+  const alertsBadge = document.getElementById('alerts-count-badge');
+  if (alertsBadge) alertsBadge.style.display = 'none';
   document.querySelectorAll('.modal.active').forEach(function (m) { m.classList.remove('active'); });
   clearAIChat();
 }
 
 async function onVenueSelected(venueId) {
+  // Quick switches overlap: only the latest may reopen its page, and an
+  // earlier one lifts its dimming only from a page the latest isn't holding.
+  const seq = (state.venueSwitchSeq || 0) + 1;
+  state.venueSwitchSeq = seq;
+  state.venueSwitchPage = null;
   state.currentVenue = venueId;
   // Remembered so a refresh lands back on this venue, not the first one.
   try { if (venueId) localStorage.setItem('rosteriq_current_venue', venueId); } catch (e) { /* this tab still switches */ }
@@ -10221,14 +10361,18 @@ async function onVenueSelected(venueId) {
   const page = state.currentPage || 'dashboard';
   const pageEl = document.getElementById('page-' + page);
   if (pageEl) { pageEl.style.opacity = '0.45'; pageEl.style.pointerEvents = 'none'; }
+  state.venueSwitchPage = page;
   try {
     await loadVenueData();
   } finally {
-    if (pageEl) { pageEl.style.opacity = ''; pageEl.style.pointerEvents = ''; }
+    if (pageEl && (seq === state.venueSwitchSeq || page !== state.venueSwitchPage)) {
+      pageEl.style.opacity = ''; pageEl.style.pointerEvents = '';
+    }
   }
-  if (state.currentVenue !== venueId) return;
-  // loadVenueData already reloads the home cards.
-  if (page !== 'dashboard') showPage(page);
+  if (seq !== state.venueSwitchSeq || state.currentVenue !== venueId) return;
+  // loadVenueData already reloads the home cards, and a page the user moved
+  // to meanwhile has loaded for this venue already.
+  if (page !== 'dashboard' && state.currentPage === page) showPage(page);
 }
 
 document.getElementById('venue-select').addEventListener('change', (e) => {
@@ -10365,6 +10509,7 @@ async function runIngredientImport() {
 function openRosterImport() {
   if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
   document.getElementById('roster-import-text').value = '';
+  document.getElementById('roster-import-location').value = '';
   document.getElementById('roster-import-result').textContent = '';
   document.getElementById('roster-import-report').innerHTML = '';
   document.getElementById('roster-import-card').style.display = 'block';
@@ -10376,6 +10521,7 @@ function importFlagText(f) {
   const known = {
     rate_defaulted: 'pay rate defaulted', no_rate: 'no pay rate', no_mobile: 'no mobile',
     no_phone: 'no mobile', no_email: 'no email', type_defaulted: 'employment type defaulted',
+    break_over_120: 'unusually long meal break', break_unreadable: 'unreadable meal break',
   };
   const key = String(f || '');
   return known[key] || key.replace(/_/g, ' ');
@@ -10411,7 +10557,17 @@ function staffImportCounts(r) {
 
 function _importExtras(r) {
   const out = [];
-  if (r.location) out.push('<div style="margin-bottom:6px;">Location: <b>' + esc(r.location) + '</b></div>');
+  const loc = r.location;
+  if (loc && typeof loc === 'object') {
+    if (loc.kept) {
+      const n = +loc.skipped_other || 0;
+      out.push('<div style="margin-bottom:6px;">Kept rows for <b>' + esc(loc.kept) + '</b> (' +
+        (n ? n + ' row' + (n === 1 ? '' : 's') + ' for other locations skipped' : 'no rows for other locations') + ')' +
+        (loc.column ? '<span style="color:var(--text-muted);"> · from the ' + esc(loc.column) + ' column</span>' : '') + '</div>');
+    }
+  } else if (loc) {
+    out.push('<div style="margin-bottom:6px;">Location: <b>' + esc(loc) + '</b></div>');
+  }
   const unmapped = Array.isArray(r.unmapped_columns) ? r.unmapped_columns : [];
   if (unmapped.length) out.push('<div style="margin-bottom:6px; color:var(--text-secondary);">Columns not used: ' + esc(unmapped.join(', ')) + '</div>');
   if (r.column_map && typeof r.column_map === 'object' && Object.keys(r.column_map).length) {
@@ -10419,6 +10575,62 @@ function _importExtras(r) {
       Object.keys(r.column_map).map(function (k) { return esc(k) + ' = ' + esc(r.column_map[k]); }).join(' · ') + '</div>');
   }
   return out.join('');
+}
+
+// A 422 asking which location to import: the server lists the choices, or
+// (older servers) only names them in the message. A location value never
+// holds a comma, because the server splits the column's values on commas.
+function importLocationChoices(e) {
+  if (!e || e.status !== 422) return null;
+  const d = (e.data && typeof e.data === 'object') ? e.data : {};
+  let list = null, code = '';
+  [d.error, d.detail, d].forEach(function (x) {
+    if (!x || typeof x !== 'object') return;
+    if (!list && Array.isArray(x.locations)) list = x.locations;
+    if (!list && x.details && Array.isArray(x.details.locations)) list = x.details.locations;
+    if (!code && x.code) code = String(x.code).toLowerCase();
+  });
+  if (!list) {
+    const msg = String(e.message || '');
+    const m = /more than one location \((.*)\) and none clearly matches/.exec(msg) ||
+              /Locations in this export: (.*)\.$/.exec(msg);
+    if (m) list = m[1].split(', ');
+    else if (code === 'location_choice_needed') list = [];
+    else return null;
+  }
+  const seen = {};
+  return list.map(function (x) { return String(x == null ? '' : x).trim(); })
+    .filter(function (x) { if (!x || seen[x]) return false; seen[x] = true; return true; });
+}
+
+// One button per location; choosing one fills the card's "Location to
+// import" field and runs the same import again.
+function showImportLocationPicker(report, locationInputId, choices, message, rerun) {
+  if (!report) return;
+  report.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'import-location-picker';
+  box.style.cssText = 'margin-top:12px; padding:10px 12px; border-radius:8px; background:rgba(245,158,11,0.12); font-size:12px;';
+  const head = document.createElement('div');
+  head.style.cssText = 'font-weight:600; margin-bottom:8px;';
+  head.textContent = choices.length
+    ? 'Which location in this export is this venue? Only its rows are imported.'
+    : message + ' Enter it under "Location to import" and import again.';
+  box.appendChild(head);
+  choices.forEach(function (loc) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn btn-secondary btn-small';
+    b.style.cssText = 'margin:0 6px 6px 0;';
+    b.textContent = loc;
+    b.addEventListener('click', function () {
+      const input = document.getElementById(locationInputId);
+      if (input) input.value = loc;
+      rerun();
+    });
+    box.appendChild(b);
+  });
+  report.appendChild(box);
 }
 
 function renderStaffImportReport(r) {
@@ -10467,7 +10679,21 @@ function renderRosterImportReport(r) {
         return { line: s.line || s.row || '', name: s.name || s.employee || '', date: s.date || '', reason: s.reason || '' };
       });
   const dupes = Array.isArray(r.duplicates_skipped) ? r.duplicates_skipped.length : (+r.duplicates_skipped || 0);
+  const flagged = Array.isArray(r.flagged) ? r.flagged : [];
   let html = _importExtras(r);
+  // Imported, but with something the manager should look at (a break read
+  // as hours, a break that couldn't be read): the shift's cost depends on it.
+  if (flagged.length) {
+    html += '<div style="margin-bottom:8px; padding:8px 10px; border-radius:8px; background:rgba(245,158,11,0.12); color:var(--text-primary); font-weight:600;">' +
+      '<div>⚠ ' + flagged.length + ' imported shift' + (flagged.length === 1 ? ' needs' : 's need') + ' checking</div>' +
+      importFlagsSummary(r.flags_summary).map(function (l) { return '<div>⚠ ' + esc(l) + '</div>'; }).join('') + '</div>' +
+      '<div style="max-height:200px; overflow:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:8px;">' +
+      '<table class="table" style="font-size:12px; margin:0;"><thead><tr><th>Line</th><th>Who</th><th>Date</th><th>What to check</th></tr></thead><tbody>' +
+      flagged.map(function (f) {
+        return '<tr><td>' + esc(f.line) + '</td><td>' + esc(f.name || '') + '</td><td>' + esc(f.date || '') +
+          '</td><td>' + esc(f.detail || importFlagText(f.flag)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
   if (dupes) {
     html += '<div style="margin-bottom:6px;">' + dupes + ' duplicate shift' + (dupes === 1 ? '' : 's') +
       ' skipped — already in the roster.</div>';
@@ -10491,15 +10717,16 @@ async function runRosterImport() {
   if (!content) { showToast('Paste your roster export first', 'warning'); return; }
   const res = document.getElementById('roster-import-result');
   const report = document.getElementById('roster-import-report');
+  const body = { venue_id: state.currentVenue, content: content };
+  const location = (document.getElementById('roster-import-location').value || '').trim();
+  if (location) body.location = location;
   res.textContent = 'Importing…';
   if (report) report.innerHTML = '';
   try {
-    const r = await fetchAPI('/api/setup/import-roster', {
-      method: 'POST',
-      body: JSON.stringify({ venue_id: state.currentVenue, content: content }),
-    });
+    const r = await fetchAPI('/api/setup/import-roster', { method: 'POST', body: JSON.stringify(body) });
     let msg = r.shifts_imported + ' shifts across ' + r.weeks + ' week(s)';
     if (r.skipped_count) msg += ', ' + r.skipped_count + ' skipped';
+    if (Array.isArray(r.flagged) && r.flagged.length) msg += ', ' + r.flagged.length + ' to check';
     res.textContent = msg;
     if (report) report.innerHTML = renderRosterImportReport(r);
     showToast(msg, r.shifts_imported ? 'success' : 'warning');
@@ -10507,6 +10734,11 @@ async function runRosterImport() {
     if (r.shifts_imported) refreshRealRoster();
   } catch (e) {
     res.textContent = '';
+    const choices = importLocationChoices(e);
+    if (choices) {
+      showImportLocationPicker(report, 'roster-import-location', choices, e.message, runRosterImport);
+      return;
+    }
     showToast('Import failed: ' + e.message, 'error');
   }
 }
@@ -10514,6 +10746,7 @@ async function runRosterImport() {
 function openStaffImport() {
   if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
   document.getElementById('staff-import-text').value = '';
+  document.getElementById('staff-import-location').value = '';
   document.getElementById('staff-import-result').textContent = '';
   document.getElementById('staff-import-report').innerHTML = '';
   document.getElementById('staff-import-card').style.display = 'block';
@@ -10525,13 +10758,13 @@ async function runStaffImport() {
   const res = document.getElementById('staff-import-result');
   const report = document.getElementById('staff-import-report');
   const update = document.getElementById('staff-import-update');
+  const body = { venue_id: state.currentVenue, content: content, update_existing: !!(update && update.checked) };
+  const location = (document.getElementById('staff-import-location').value || '').trim();
+  if (location) body.location = location;
   res.textContent = 'Importing…';
   if (report) report.innerHTML = '';
   try {
-    const r = await fetchAPI('/api/setup/import-staff', {
-      method: 'POST',
-      body: JSON.stringify({ venue_id: state.currentVenue, content: content, update_existing: !!(update && update.checked) }),
-    });
+    const r = await fetchAPI('/api/setup/import-staff', { method: 'POST', body: JSON.stringify(body) });
     const n = staffImportCounts(r);
     let msg = n.created + ' staff imported';
     if (n.updated) msg += ', ' + n.updated + ' updated';
@@ -10547,6 +10780,11 @@ async function runStaffImport() {
     }
   } catch (e) {
     res.textContent = '';
+    const choices = importLocationChoices(e);
+    if (choices) {
+      showImportLocationPicker(report, 'staff-import-location', choices, e.message, runStaffImport);
+      return;
+    }
     showToast('Import failed: ' + e.message, 'error');
   }
 }
@@ -10655,6 +10893,7 @@ let currentOptimisationJob = null;
 let optimisationPollInterval = null;
 
 async function startOptimisation() {
+  if (!state.isDemo) { openGenerateRoster(); return; }
   const strategy = document.getElementById('optimiser-strategy').value;
   const solver = document.getElementById('optimiser-solver').value;
 
@@ -10736,7 +10975,6 @@ function displayOptimisationResults(jobData) {
       document.getElementById('optimiser-solver-used').textContent = jobData.solver_used || 'Auto';
       document.getElementById('optimiser-total-cost').textContent = formatCurrency(roster.total_cost);
       document.getElementById('optimiser-shift-count').textContent = roster.shift_count;
-      document.getElementById('optimiser-quality').textContent = '0.94';
 
       document.getElementById('btn-optimiser-generate').disabled = false;
       document.getElementById('optimiser-btn-text').textContent = 'Generate Optimal Roster';
@@ -10747,21 +10985,6 @@ function displayOptimisationResults(jobData) {
 }
 
 document.getElementById('btn-optimiser-generate').addEventListener('click', startOptimisation);
-
-document.getElementById('btn-optimiser-compare').addEventListener('click', async () => {
-  if (!currentOptimisationJob) return;
-
-  try {
-    showSuccess('#page-dashboard', 'Comparison: MILP solution is 8% cheaper with same coverage.');
-  } catch (error) {
-    console.error('Compare failed:', error);
-  }
-});
-
-document.getElementById('btn-optimiser-accept').addEventListener('click', () => {
-  showSuccess('#page-dashboard', 'Roster accepted and published!');
-  document.getElementById('optimiser-results').style.display = 'none';
-});
 
 document.getElementById('btn-optimiser-discard').addEventListener('click', () => {
   document.getElementById('optimiser-results').style.display = 'none';
@@ -11565,6 +11788,7 @@ function updateDeputyStatus(connected, data) {
 }
 
 async function checkDeputyStatus() {
+  const vid = state.currentVenue;
   try {
     const venueId = _getVenueId();
     const resp = await fetch(state.baseUrl + '/api/deputy/status?venue_id=' + encodeURIComponent(venueId) + '&verify=true', {
@@ -11572,6 +11796,7 @@ async function checkDeputyStatus() {
     });
     if (resp.ok) {
       const data = await resp.json();
+      if (state.currentVenue !== vid) return;
       updateDeputyStatus(data.connected || false, data);
       // Show health dot colour based on live verification
       if (data.connected) {
@@ -11664,11 +11889,13 @@ function updateMYOBStatus(connected) {
 async function checkMYOBStatus() {
   try {
     var venueId = (typeof state.currentVenue === 'object' && state.currentVenue?.id) ? state.currentVenue.id : (state.currentVenue || 'default');
+    var vid = state.currentVenue;
     var resp = await fetch('/api/myob/status?venue_id=' + encodeURIComponent(venueId), {
       headers: { 'Authorization': 'Bearer ' + (state.authToken || state.token || '') }
     });
     if (resp.ok) {
       var data = await resp.json();
+      if (state.currentVenue !== vid) return;
       updateMYOBStatus(data.connected || false);
     }
   } catch (err) {
@@ -11766,11 +11993,13 @@ function updateHumanForceStatus(connected) {
 async function checkHumanForceStatus() {
   try {
     const venueId = state.currentVenue?.id || state.venueId || 'default';
+    const vid = state.currentVenue;
     const resp = await fetch('/api/humanforce/status?venue_id=' + encodeURIComponent(venueId), {
       headers: { 'Authorization': 'Bearer ' + state.token }
     });
     if (resp.ok) {
       const data = await resp.json();
+      if (state.currentVenue !== vid) return;
       updateHumanForceStatus(data.connected || false);
     }
   } catch (err) {
@@ -12309,6 +12538,8 @@ function showOnboardingWizard() {
   if (state.isDemo) { showToast('The setup wizard builds your own venue \u2014 sign up to run it.', 'info'); return; }
   // Re-running for an existing venue updates it rather than making a twin.
   obState.venueId = state.currentVenue || null;
+  const obLocation = document.getElementById('ob-staff-location');
+  if (obLocation) obLocation.value = '';
   if (obState.venueId && state.venues && state.venues.length) {
     const v = state.venues.find(x => x.id === obState.venueId);
     if (v) {
@@ -12406,19 +12637,25 @@ async function obImportStaff() {
   const btn = document.getElementById('ob-staff-import-btn');
   const report = document.getElementById('ob-staff-report');
   const update = document.getElementById('ob-staff-update');
+  const body = { venue_id: obState.venueId, content: content, update_existing: !!(update && update.checked) };
+  const location = (document.getElementById('ob-staff-location').value || '').trim();
+  if (location) body.location = location;
   btn.disabled = true;
   if (report) report.innerHTML = '';
   try {
-    const r = await fetchAPI('/api/setup/import-staff', {
-      method: 'POST',
-      body: JSON.stringify({ venue_id: obState.venueId, content: content, update_existing: !!(update && update.checked) }),
-    });
+    const r = await fetchAPI('/api/setup/import-staff', { method: 'POST', body: JSON.stringify(body) });
     const n = staffImportCounts(r);
     out.textContent = n.created + ' imported' + (n.updated ? ' · ' + n.updated + ' updated' : '') +
       (n.skipped ? ' · ' + n.skipped + ' skipped — see below' : ' ✓');
     if (report) report.innerHTML = renderStaffImportReport(r);
   } catch (err) {
-    out.textContent = 'Import failed: ' + err.message;
+    const choices = importLocationChoices(err);
+    if (choices) {
+      out.textContent = '';
+      showImportLocationPicker(report, 'ob-staff-location', choices, err.message, obImportStaff);
+    } else {
+      out.textContent = 'Import failed: ' + err.message;
+    }
   } finally {
     btn.disabled = false;
   }
@@ -12646,12 +12883,15 @@ async function loadVenueSettings() {
   if (teamBody) teamBody.innerHTML = '<tr><td>' + esc(who) + '</td><td><span class="alert-badge badge-info">' +
     esc(state.isDemo ? 'Demo' : roleLabel) + '</span></td></tr>';
   if (state.isDemo || !state.currentVenue) return;
+  var vid = state.currentVenue;
   try {
-    var v = await fetchAPI('/venues/' + encodeURIComponent(state.currentVenue));
+    var v = await fetchAPI('/venues/' + encodeURIComponent(vid));
+    if (state.currentVenue !== vid) return;
     document.getElementById('setting-venue-name').value = v.name || '';
     document.getElementById('setting-state').value = String(v.state || '').toLowerCase();
     document.getElementById('setting-max-labour').value = (v.max_labour_pct != null) ? v.max_labour_pct : '';
   } catch (e) {
+    if (state.currentVenue !== vid) return;
     showToast('Could not load venue settings: ' + e.message, 'error');
   }
 }
@@ -12688,7 +12928,8 @@ async function saveVenueSettings() {
 // Trade the refresh token for a pair minted with the current role.
 async function refreshSessionRole() {
   if (state.isDemo) return;
-  await _refreshAccessToken();   // on failure the current session stands; a re-login also fixes it
+  // On failure the current session stands; a re-login also fixes it.
+  try { await _refreshAccessToken(); } catch (e) { /* retryable: the venue is saved either way */ }
 }
 
 async function obFinish() {
@@ -13702,9 +13943,11 @@ async function loadAIInsights() {
     if (pageCards) pageCards.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Today’s insights are on the Dashboard in the demo.</div>';
     return;
   }
+  const vid = state.currentVenue;
   try {
     const venueId = _getVenueId();
     const data = await fetchAPI('/api/ai/insights?venue_id=' + encodeURIComponent(venueId));
+    if (state.currentVenue !== vid) return;
     if (pageCards) {
       pageCards.innerHTML = '';
       (data.insights || []).forEach(i => pageCards.appendChild(_aiInsightCard(i)));
