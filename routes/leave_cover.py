@@ -25,8 +25,9 @@ from rosteriq.services.clock import venue_today
 from rosteriq.services.events import audit
 from rosteriq.services.leave_shifts import (
     LEAVE_TYPE_PATTERN, LEAVE_TYPES, PAID_LEAVE_TYPES, apply_approved_leave,
-    default_paid_hours, leave_impact, leave_type_label,
+    default_paid_hours, leave_impact, leave_type_label, opened_summary,
 )
+from rosteriq.services.roster_edit import RosterBusy
 
 router = APIRouter(tags=["leave-cover"])
 
@@ -105,7 +106,11 @@ async def record_leave(body: RecordLeaveBody,
         "decision_note": "",
         "created_at": now,
     }
-    opened = apply_approved_leave(db, body.venue_id, req, emp)
+    try:
+        opened = apply_approved_leave(db, body.venue_id, req, emp)
+    except RosterBusy:
+        raise HTTPException(status_code=409, detail="Someone else is saving the roster right "
+                                                    "now \u2014 try again in a moment.")
     db.save_leave_request(req)
     audit("leave.record", body.venue_id, "leave_request", req["id"],
           employee_id=emp.id, employee=emp.name,
@@ -114,7 +119,6 @@ async def record_leave(body: RecordLeaveBody,
           past_dated=body.start_date < venue_today(body.venue_id, db),
           entered_by=user.user_id, opened_shifts=[o["label"] for o in opened],
           reason=body.reason)
-    labels = ", ".join(o["label"] for o in opened)
     return {
         "status": "approved",
         "request_id": req["id"],
@@ -122,8 +126,8 @@ async def record_leave(body: RecordLeaveBody,
         "leave_type_label": leave_type_label(body.leave_type),
         "paid_hours": req.get("paid_hours"),
         "opened_shifts": opened,
-        "message": (f"{leave_type_label(body.leave_type)} recorded for {emp.name}"
-                    + (f"; left open and posted for cover: {labels}." if opened else ".")),
+        "message": (f"{leave_type_label(body.leave_type)} recorded for {emp.name}."
+                    + (f" {opened_summary(opened)}" if opened else "")),
     }
 
 

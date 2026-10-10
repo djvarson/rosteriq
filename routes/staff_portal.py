@@ -45,8 +45,12 @@ from rosteriq.services.clock import venue_today
 from rosteriq.services.availability_rules import day_windows
 from rosteriq.services.current_roster import live_rosters, live_shifts
 from rosteriq.services.leave_shifts import (
-    LEAVE_TYPE_PATTERN, apply_approved_leave, is_open, leave_type_label,
+    LEAVE_TYPE_PATTERN, LIVE_COVER, apply_approved_leave, cover_day, cover_holders, cover_stands,
+    is_open, leave_type_label, opened_summary, shift_slot, standing_cover_ids,
+    unsuperseded_rosters, withdraw_cover,
 )
+from rosteriq.services import roster_edit as edit
+from rosteriq.middleware.tenant import scoped_employee_map
 from typing import Optional, List
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager, enforce_venue_manager_any
@@ -699,11 +703,14 @@ def _find_my_shift(db, venue_id: str, employee_id: str, shift_id: str):
     raise HTTPException(status_code=404, detail="Shift not found in your upcoming roster")
 
 
-def _cover_payload(c, emp_names: dict, staff: bool = False) -> dict:
-    if staff and c.get("origin") == "leave":
-        # Staff see an open shift, not whose leave left it open.
+def _cover_payload(c, emp_names: dict, staff: bool = False, standing=None) -> dict:
+    if c.get("origin") == "open" or (staff and c.get("origin") == "leave"):
+        # An open shift has nobody behind it to name; staff never see whose
+        # leave left one open.
         c = dict(c, requested_by=None, reason="")
         emp_names = {**emp_names, None: "Open shift"}
+    if standing is not None and c.get("status") in LIVE_COVER and c.get("id") not in standing:
+        c = dict(c, status="withdrawn")
     return {
         "id": c["id"],
         "shift_id": c["shift_id"],
@@ -778,16 +785,18 @@ async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
     for emp, vid in links:
         emp_names = {e.id: e.name for e in (db.get_employees(vid) or [])}
         venue = db.get_venue(vid)
-        for c in db.list_shift_covers(vid) or []:
-            p = _cover_payload(c, emp_names, staff=True)
+        covers = db.list_shift_covers(vid) or []
+        standing = standing_cover_ids(db, vid, covers)
+        for c in covers:
+            p = _cover_payload(c, emp_names, staff=True, standing=standing)
             p["venue_id"], p["venue_name"] = vid, names[vid]
             if c.get("requested_by") == emp.id:
                 if c.get("origin") != "leave":
                     mine.append(p)
             elif c.get("claimed_by") == emp.id and c.get("status") in ("claimed", "approved"):
                 claimed_by_me.append(p)
-            elif (c.get("status") == "open" and is_active(emp) and can_take(emp, c.get("role"), venue)
-                  and _live_shift(db, vid, c) is not None):
+            elif (c.get("status") == "open" and c.get("id") in standing and is_active(emp)
+                  and can_take(emp, c.get("role"), venue)):
                 up_for_grabs.append(p)
     return {"linked": True, "up_for_grabs": up_for_grabs, "mine": mine,
             "claimed_by_me": claimed_by_me}
@@ -890,8 +899,12 @@ async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_use
                             detail="Your staff record here is no longer active — ask your manager")
     if cover.get("status") != "open":
         raise HTTPException(status_code=409, detail=f"This shift is already {cover.get('status')}")
-    if _live_shift(db, vid, cover) is None:
+    live = _live_shift(db, vid, cover)
+    if live is None:
         raise HTTPException(status_code=409, detail="That shift is no longer on the roster \u2014 it may have been republished")
+    if not cover_stands(cover, live):
+        raise HTTPException(status_code=409, detail="That shift has changed on the roster since it "
+                                                    "was put up for cover, so it's no longer up for grabs")
     from rosteriq.services.cover_checks import can_take, not_trained_message
     if not can_take(emp, cover.get("role"), db.get_venue(vid)):
         raise HTTPException(status_code=409, detail=not_trained_message(cover.get("role")))
@@ -995,26 +1008,57 @@ async def venue_covers(venue_id: str = Query(...), status: str = Query("")) -> d
     db = get_db()
     emp_names = {e.id: e.name for e in (db.get_employees(venue_id) or [])}
     rows = db.list_shift_covers(venue_id) or []
+    standing = standing_cover_ids(db, venue_id, rows)
+    covers = [_cover_payload(c, emp_names, standing=standing) for c in rows]
     if status:
-        rows = [c for c in rows if c.get("status") == status]
-    return {"venue_id": venue_id, "count": len(rows),
-            "covers": [_cover_payload(c, emp_names) for c in rows]}
+        covers = [p for p in covers if p["status"] == status]
+    return {"venue_id": venue_id, "count": len(covers), "covers": covers}
 
 
-def _reassign_shift(db, venue_id: str, shift_id: str, new_employee_id: str) -> bool:
-    """Move the shift to its new owner on the roster itself, priced for them.
-    Returns False if the shift no longer exists (roster edited since the
-    cover was requested)."""
-    for roster in db.list_rosters() or []:
-        if getattr(roster, "venue_id", None) != venue_id:
+def _reassign_shift(db, venue_id: str, cover: dict, new_employee_id: str) -> bool:
+    """Move the cover's shift to its new owner, priced for them: on the roster
+    staff see, and on any other roster of the week not yet superseded (a newer
+    draft) where the same slot is still with whoever held it. Each roster is
+    re-read and saved under its lock; RosterBusy when another save holds the
+    lock of the roster staff see. Returns False, changing nothing, if the
+    shift there has gone or changed since the cover was posted."""
+    day = cover_day(cover)
+    staff = live_rosters(db, venue_id, day, day, staff=True) if day else []
+    if not staff:
+        return False
+    emp_map = scoped_employee_map(db, venue_id)
+    state = edit.venue_state(db.get_venue(venue_id))
+
+    def move(roster_id, pick):
+        with edit.roster_lock(db, roster_id):
+            roster = db.get_roster(roster_id)
+            if roster is None or getattr(roster, "venue_id", None) != venue_id:
+                return None
+            roster = roster.model_copy(deep=True)
+            target = pick(roster.shifts)
+            if target is None:
+                return None
+            slot = shift_slot(target)
+            target.employee_id = new_employee_id
+            _reprice(db, venue_id, target, new_employee_id)
+            edit.recost_total(roster, emp_map, state)
+            db.save_roster(roster)
+            return slot
+
+    slot = move(staff[0].id, lambda shifts: next(
+        (s for s in shifts if s.id == cover.get("shift_id") and cover_stands(cover, s)), None))
+    if slot is None:
+        return False
+    holders = cover_holders(cover)
+    for r in unsuperseded_rosters(db, venue_id, day, day):
+        if r.id == staff[0].id:
             continue
-        for s in roster.shifts:
-            if s.id == shift_id:
-                s.employee_id = new_employee_id
-                _reprice(db, venue_id, s, new_employee_id)
-                db.save_roster(roster)
-                return True
-    return False
+        try:
+            move(r.id, lambda shifts: next((s for s in shifts if shift_slot(s) == slot
+                                            and str(s.employee_id or "") in holders), None))
+        except edit.RosterBusy:
+            logger.warning(f"Roster {r.id} busy: cover {cover.get('id')} not applied to it")
+    return True
 
 
 def _reprice(db, venue_id: str, shift, employee_id: str) -> None:
@@ -1049,6 +1093,8 @@ async def decide_cover(cover_id: str, body: CoverDecision,
         if claimant is not None and not is_active(claimant):
             raise HTTPException(status_code=409, detail=f"{claimant.name} is no longer active "
                                 "here — decline this request instead.")
+        if not cover_stands(cover, _live_shift(db, body.venue_id, cover)):
+            _withdraw_changed(db, cover, cover_id, claimant_id, user)
         clash = _clashing_shift(db, body.venue_id, claimant_id, cover)
         if clash is not None:
             raise HTTPException(status_code=409, detail=_clash_detail(
@@ -1059,12 +1105,13 @@ async def decide_cover(cover_id: str, body: CoverDecision,
                                 + " \u2014 decline this request instead.")
         # The roster is the source of truth — a cover is only approved if the
         # shift genuinely moves. Fail loud if the roster changed underneath us.
-        if (_live_shift(db, body.venue_id, cover) is None
-                or not _reassign_shift(db, body.venue_id, cover["shift_id"], cover["claimed_by"])):
-            raise HTTPException(
-                status_code=409,
-                detail="That shift no longer exists on the roster — it may have "
-                       "been edited or republished. Decline this request instead.")
+        try:
+            moved = _reassign_shift(db, body.venue_id, cover, claimant_id)
+        except edit.RosterBusy:
+            raise HTTPException(status_code=409, detail="Someone else is saving this roster "
+                                                        "right now — try again in a moment.")
+        if not moved:
+            _withdraw_changed(db, cover, cover_id, claimant_id, user)
         cover["status"] = "approved"
     else:
         # Declined: shift stays with the requester; reopen for other claimants
@@ -1083,6 +1130,16 @@ async def decide_cover(cover_id: str, body: CoverDecision,
     logger.info(f"Cover approved: shift {cover['shift_id']} -> {cover['claimed_by']} at {body.venue_id}")
     return {"status": "approved", "cover_id": cover_id, "checks": checks["checks"],
             "warnings": checks["warnings"]}
+
+
+_CHANGED = ("That shift has changed on the roster since this cover was posted (it was "
+            "filled, moved, retimed or removed), so the cover request has been withdrawn.")
+
+
+def _withdraw_changed(db, cover: dict, cover_id: str, claimant_id, user: UserContext) -> None:
+    withdraw_cover(db, cover, _CHANGED, user.user_id)
+    _audit_cover_decision(db, cover, cover_id, "withdraw", claimant_id, _CHANGED)
+    raise HTTPException(status_code=409, detail=_CHANGED)
 
 
 def _run_cover_checks(db, venue_id: str, cover: dict) -> dict:
@@ -1139,7 +1196,11 @@ async def decide_leave(req_id: str, body: LeaveDecision,
     if body.approve:
         emp = db.get_employee(req.get("employee_id"))
         if emp is not None and getattr(emp, "venue_id", None) == body.venue_id:
-            opened = apply_approved_leave(db, body.venue_id, req, emp)
+            try:
+                opened = apply_approved_leave(db, body.venue_id, req, emp)
+            except edit.RosterBusy:
+                raise HTTPException(status_code=409, detail="Someone else is saving the roster "
+                                                            "right now — try again in a moment.")
     db.save_leave_request(req)
     audit("leave.decide", body.venue_id, "leave_request", req_id,
           decision="approve" if body.approve else "decline", status=req["status"],
@@ -1157,5 +1218,4 @@ async def decide_leave(req_id: str, body: LeaveDecision,
 def _opened_message(opened: list) -> str:
     if not opened:
         return "No upcoming shifts to cover."
-    labels = ", ".join(o["label"] for o in opened)
-    return f"Left open and posted for cover: {labels}."
+    return opened_summary(opened)

@@ -27,7 +27,9 @@ import uuid
 
 from rosteriq.database import get_db
 from rosteriq.models import Roster, Shift, VenueConfig, Employee
-from rosteriq.services.conflict_detector import ConflictDetector, ConflictSeverity, ConflictType
+from rosteriq.services.conflict_detector import (
+    ConflictDetector, ConflictSeverity, ConflictType, RosterConflict,
+)
 from rosteriq.services.approval_workflow import approval_workflow, ApprovalStatus
 from rosteriq.services.notification_hub import get_notification_hub, NotificationEventType
 from rosteriq.services.tanda_roster_push import TandaRosterPush as TandaRosterPusher
@@ -250,6 +252,7 @@ class RosterPublisher:
                 employees=employees,
                 forecasts=self._week_forecasts(roster),
             )
+            conflicts = list(conflicts) + self._leave_conflicts(roster, employees)
             result.conflicts_found = len(conflicts)
             result.critical_conflicts = len(
                 [c for c in conflicts if c.severity == ConflictSeverity.CRITICAL]
@@ -446,6 +449,42 @@ class RosterPublisher:
             result.state = RosterPublishState.FAILED.value
             return result
 
+    def _leave_conflicts(self, roster, employees) -> List[RosterConflict]:
+        """Approved leave wins over the roster: a shift that hasn't started yet,
+        on a day its person has approved leave, stops the publish so it never
+        reaches staff."""
+        try:
+            from rosteriq.services.clock import venue_now
+            from rosteriq.services.leave_shifts import shift_label
+            from rosteriq.services.roster_edit import approved_leave, on_leave
+            leave = approved_leave(self.db, roster.venue_id)
+            if not leave:
+                return []
+            now = venue_now(roster.venue_id, self.db)
+            now = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) else now
+            names = {e.id: e.name for e in employees}
+            out = []
+            for s in roster.shifts:
+                status = str(getattr(s.status, "value", s.status))
+                if (not s.employee_id or status in ("cancelled", "no_show")
+                        or not on_leave(leave, s.employee_id, s.date)
+                        or datetime.combine(s.date, s.start_time) <= now):
+                    continue
+                name = names.get(s.employee_id, s.employee_id)
+                out.append(RosterConflict(
+                    conflict_type=ConflictType.AVAILABILITY_VIOLATION,
+                    severity=ConflictSeverity.CRITICAL,
+                    message=f"{name} is on approved leave but rostered {shift_label(s)}",
+                    employee_ids=[s.employee_id],
+                    shift_ids=[s.id],
+                    date=s.date,
+                    suggestion="Leave the shift open or give it to someone else",
+                ))
+            return out
+        except Exception as e:
+            logger.warning(f"Approved-leave check failed for roster {roster.id}: {e}")
+            return []
+
     async def on_approval_received(
         self,
         roster_id: str,
@@ -640,6 +679,7 @@ class RosterPublisher:
             )
             if new_state == RosterPublishState.PUBLISHED.value:
                 self._supersede_rest_of_week(roster_id, actor_id)
+                self._post_open_covers(roster_id)
 
             logger.info(
                 f"Roster {roster_id} transitioned to {new_state} by {actor_id}: {reason}"
@@ -671,6 +711,17 @@ class RosterPublisher:
                 f"Could not supersede the rest of roster {roster_id}'s week: {e}",
                 exc_info=True,
             )
+
+    def _post_open_covers(self, roster_id: str) -> None:
+        """The newly published roster's open shifts go on the cover board."""
+        try:
+            from rosteriq.services.leave_shifts import post_open_covers
+            roster = self.db.get_roster(roster_id)
+            if roster is not None:
+                post_open_covers(self.db, roster)
+        except Exception as e:
+            logger.error(f"Could not post roster {roster_id}'s open shifts for cover: {e}",
+                         exc_info=True)
 
     def recall_roster(self, roster_id: str, reason: str) -> bool:
         """
