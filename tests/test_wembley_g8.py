@@ -8,10 +8,13 @@ Wembley pilot (g8): hand edits and Copy last week, after the review.
      shift whose person is now on leave, unavailable, inactive or gone is
      left open for the manager to fill, never "Unknown staff member".
 [13] An open shift can be retimed, re-dated or moved to another area and
-     stay open.
+     stay open; an area the venue doesn't have is warned about, as it is
+     for an assigned shift.
 [7]/[41] Filling, reassigning, moving, retiming, re-areaing or deleting a
      shift by hand withdraws the cover request on it, so a later claim can't
      take the shift off whoever the manager put on it; the manager is told.
+     The withdrawal is conditional, so a claim made while the manager saves
+     is kept and named, and a cover settled meanwhile is left alone.
 """
 
 import json
@@ -407,22 +410,96 @@ def test_retiming_an_offered_shift_withdraws_the_offer_and_a_new_one_can_be_made
     assert len(live) == 1 and live[0]["shift_end"] == "15:00"
 
 
+def test_moving_an_open_shift_to_an_area_the_venue_lacks_warns_like_an_assigned_one():
+    c, mgr, vid, ids, staff, _ = _world()
+    rid, _ = _leave_opened(c, mgr, vid, ids, staff)
+
+    typo = c.put(f"/rosters/{rid}/shifts/jo-fri", json={"role": "Frnt Bar"}, headers=mgr)
+    assert typo.status_code == 200, typo.text
+    assert _messages(typo, "area") == ["'frnt bar' isn't one of this venue's areas."]
+    assigned = c.put(f"/rosters/{rid}/shifts/sam-sat", json={"role": "Frnt Bar"}, headers=mgr)
+    assert _messages(assigned, "area") == _messages(typo, "area")
+
+    known = c.put(f"/rosters/{rid}/shifts/jo-fri", json={"role": "Front Bar"}, headers=mgr)
+    assert known.status_code == 200 and "area" not in _codes(known)
+    assert "jo-fri" in _grabs(c, staff["pat"])
+
+
+def _snapshot_then(db, monkeypatch, vid, between):
+    """list_shift_covers returns copies, as a Postgres SELECT does, and runs
+    ``between`` once right after the read, as another worker would."""
+    real = db.list_shift_covers
+    fired = []
+
+    def racing(venue_id):
+        rows = [dict(r) for r in (real(venue_id) or [])]
+        if venue_id == vid and not fired:
+            fired.append(between())
+        return rows
+
+    monkeypatch.setattr(db, "list_shift_covers", racing)
+    return fired
+
+
+def test_a_claim_landing_while_the_manager_fills_the_shift_is_named_not_erased(monkeypatch):
+    c, mgr, vid, ids, staff, _ = _world()
+    rid, _ = _leave_opened(c, mgr, vid, ids, staff)
+    db = get_db()
+    cover = _cover_for(c, mgr, vid, "jo-thu", "open")[0]
+    fired = _snapshot_then(db, monkeypatch, vid, lambda: db.claim_shift_cover(cover["id"], ids["pat"]))
+
+    fill = c.put(f"/rosters/{rid}/shifts/jo-thu", json={"employee_id": ids["sam"]}, headers=mgr)
+    assert fill.status_code == 200, fill.text
+    assert fired == [True]
+    assert _messages(fill, "cover_withdrawn") == [
+        "The cover request for this shift was withdrawn. Pat Nguyen had claimed it — let them know."]
+    row = db.get_shift_cover(cover["id"])
+    assert (row["status"], row["claimed_by"]) == ("withdrawn", ids["pat"])
+
+
+def test_a_request_cancelled_while_the_manager_edits_stays_cancelled(monkeypatch):
+    c, mgr, vid, ids, staff, _ = _world()
+    nm = _next_week(vid)
+    rid = _publish(vid, nm, [_b7_shift("sam-tue", ids["sam"], nm + timedelta(days=1), time(10),
+                                       time(17), "Front Bar")])
+    offer = c.post("/api/me/shifts/sam-tue/cover", json={"reason": "x"}, headers=staff["sam"])
+    assert offer.status_code == 200, offer.text
+    db = get_db()
+    cid = offer.json()["cover_id"]
+    # what Sam's cancel saves
+    fired = _snapshot_then(db, monkeypatch, vid,
+                           lambda: db.save_shift_cover(dict(db.get_shift_cover(cid), status="cancelled")))
+
+    move = c.put(f"/rosters/{rid}/shifts/sam-tue", json={"employee_id": ids["pat"]}, headers=mgr)
+    assert move.status_code == 200, move.text
+    assert fired == [None]
+    assert "cover_withdrawn" not in _codes(move)
+    assert db.get_shift_cover(cid)["status"] == "cancelled"
+
+
 # ---------------------------------------------------------------------------
-# Postgres: withdrawing goes through the existing cover upsert
+# Postgres: a withdrawal is one conditional UPDATE per cover
 # ---------------------------------------------------------------------------
 
 class _Cur:
-    def __init__(self, log, rows):
-        self.log, self.rows = log, rows
+    def __init__(self, pg):
+        self.pg, self.result = pg, []
 
     def execute(self, sql, params=None):
-        self.log.append((" ".join(sql.split()), params))
+        flat = " ".join(sql.split())
+        self.pg.log.append((flat, params))
+        if flat.startswith("SELECT"):
+            self.result = list(self.pg.rows)
+        elif flat.startswith("UPDATE shift_covers"):
+            self.result = self.pg.returning.pop(0) if self.pg.returning else []
+        else:
+            self.result = []
 
     def fetchone(self):
-        return self.rows[0] if self.rows else None
+        return self.result[0] if self.result else None
 
     def fetchall(self):
-        return list(self.rows)
+        return list(self.result)
 
     def __enter__(self):
         return self
@@ -436,17 +513,23 @@ class _PG:
     _ensure_table = PostgresStore._ensure_table
     list_shift_covers = PostgresStore.list_shift_covers
     save_shift_cover = PostgresStore.save_shift_cover
+    withdraw_shift_cover = PostgresStore.withdraw_shift_cover
 
-    def __init__(self, rows):
+    def __init__(self, rows, returning=None, staff=()):
+        """``rows`` is what the SELECT reads; ``returning`` what each UPDATE
+        hands back, by default the read row now withdrawn."""
         self.log, self.rows = [], rows
+        self.returning = list(returning) if returning is not None else \
+            [[dict(r, status="withdrawn")] for r in rows]
+        self.staff = {e.id: e for e in staff}
         self._ensured_tables = {"shift_covers"}
 
     @contextmanager
     def _cursor(self):
-        yield _Cur(self.log, self.rows)
+        yield _Cur(self)
 
-    def get_employee(self, _id):
-        return None
+    def get_employee(self, emp_id):
+        return self.staff.get(emp_id)
 
 
 def _pg_cover_row(**kw):
@@ -463,7 +546,11 @@ def _upserts(pg):
     return [p for s, p in pg.log if s.startswith("INSERT INTO shift_covers")]
 
 
-def test_pg_withdrawal_is_one_upsert_per_cover_and_a_repost_is_a_new_row():
+def _withdrawals(pg):
+    return [(s, p) for s, p in pg.log if s.startswith("UPDATE shift_covers")]
+
+
+def test_pg_withdrawal_is_a_conditional_update_and_a_repost_is_a_new_row():
     from rosteriq.services import roster_edit as edit
     before = Shift(id="s1", employee_id="", date=date(2026, 10, 16), start_time=time(10),
                    end_time=time(17), status=ShiftStatus.scheduled, role="Front Bar")
@@ -472,22 +559,46 @@ def test_pg_withdrawal_is_one_upsert_per_cover_and_a_repost_is_a_new_row():
     filled = before.model_copy(update={"employee_id": "wem-sam"})
     notes = edit.settle_covers(pg, "wem", before, filled, "mgr-1")
     assert [n["code"] for n in notes] == ["cover_withdrawn"]
-    (params,) = _upserts(pg)
-    assert params[0] == "cv-1" and params[11] == "withdrawn" and params[12] == "mgr-1"
-    assert params[14] == "The shift was filled on the roster."
+    ((sql, params),) = _withdrawals(pg)
+    assert "SET status = 'withdrawn'" in sql and "decided_at = now()" in sql
+    assert "WHERE id = %s AND status IN ('open', 'claimed') RETURNING *" in sql
+    assert params == ("mgr-1", "The shift was filled on the roster.", "cv-1")
+    assert _upserts(pg) == []
     assert all("BEGIN" not in s and "COMMIT" not in s for s, _ in pg.log)
 
     pg = _PG([_pg_cover_row()])
     retimed = before.model_copy(update={"start_time": time(11)})
     edit.settle_covers(pg, "wem", before, retimed, "mgr-1")
-    withdrawn, fresh = _upserts(pg)
-    assert withdrawn[0] == "cv-1" and withdrawn[11] == "withdrawn"
+    assert [p[2] for _, p in _withdrawals(pg)] == ["cv-1"]
+    (fresh,) = _upserts(pg)
     assert fresh[0] != "cv-1" and fresh[2:6] == ("s1", date(2026, 10, 16), "11:00", "17:00")
     assert fresh[7] == "wem-jo" and fresh[9] == "leave" and fresh[11] == "open"
 
     pg = _PG([_pg_cover_row(status="approved")])
     assert edit.settle_covers(pg, "wem", before, filled, "mgr-1") == []
-    assert _upserts(pg) == []
+    assert _withdrawals(pg) == [] and _upserts(pg) == []
+
+
+def test_pg_withdrawal_names_a_claim_made_after_the_read_and_skips_a_settled_cover():
+    from types import SimpleNamespace
+    from rosteriq.services import roster_edit as edit
+    before = Shift(id="s1", employee_id="", date=date(2026, 10, 16), start_time=time(10),
+                   end_time=time(17), status=ShiftStatus.scheduled, role="Front Bar")
+    filled = before.model_copy(update={"employee_id": "wem-sam"})
+    pat = SimpleNamespace(id="wem-pat", name="Pat Nguyen", venue_id="wem")
+
+    # read as open; Pat's claim committed before the UPDATE ran
+    pg = _PG([_pg_cover_row()], returning=[[_pg_cover_row(status="withdrawn", claimed_by="wem-pat")]],
+             staff=[pat])
+    notes = edit.settle_covers(pg, "wem", before, filled, "mgr-1")
+    assert [n["message"] for n in notes] == [
+        "The cover request for this shift was withdrawn. Pat Nguyen had claimed it — let them know."]
+
+    # read as open; approved or cancelled before the UPDATE ran: nothing to withdraw or repost
+    retimed = before.model_copy(update={"start_time": time(11)})
+    pg = _PG([_pg_cover_row()], returning=[[]])
+    assert edit.settle_covers(pg, "wem", before, retimed, "mgr-1") == []
+    assert len(_withdrawals(pg)) == 1 and _upserts(pg) == []
 
 
 # ---------------------------------------------------------------------------

@@ -223,7 +223,7 @@ async def update_shift(roster_id: str, shift_id: str, body: ShiftUpdate):
             _valid_times(shift)
             venue = db.get_venue(roster.venue_id)
             state = edit.venue_state(venue)
-            warnings = []
+            warnings = edit.area_warnings(venue, shift.role)
             if emp is not None:
                 try:
                     warnings = edit.check_shift(db, roster, venue, emp, shift, exclude_id=current.id)

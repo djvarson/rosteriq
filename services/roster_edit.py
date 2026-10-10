@@ -42,7 +42,6 @@ CHANGES_KEY = "roster_changes:"
 MAX_CHANGES_KEPT = 500
 LOCKED_STATES = frozenset({ARCHIVED, SUPERSEDED})
 LIVE_COVER = ("open", "claimed")
-WITHDRAWN = "withdrawn"
 
 _lock = threading.Lock()
 _PG_LOCK_CLASS = 7_734_101
@@ -234,6 +233,16 @@ def neighbour_shifts(db, roster, employee_id: str, exclude_id: Optional[str] = N
 # checks
 # ---------------------------------------------------------------------------
 
+def area_warnings(venue, role) -> list:
+    """A warning when the venue has named its areas and `role` isn't one."""
+    if venue is None or not role:
+        return []
+    known = area_names(venue)
+    if known and normalise_area(role) not in known:
+        return [{"code": "area", "message": f"'{role}' isn't one of this venue's areas."}]
+    return []
+
+
 def check_shift(db, roster, venue, employee, shift, exclude_id: Optional[str] = None) -> list:
     """Warnings for putting `shift` on `employee`. Raises ShiftClash when it
     overlaps one of their own shifts."""
@@ -259,9 +268,9 @@ def check_shift(db, roster, venue, employee, shift, exclude_id: Optional[str] = 
         warn("leave", f"{employee.name} is on approved leave on {shift.date.isoformat()}.")
 
     if venue is not None and shift.role:
-        known = area_names(venue)
-        if known and normalise_area(shift.role) not in known:
-            warn("area", f"'{shift.role}' isn't one of this venue's areas.")
+        unknown = area_warnings(venue, shift.role)
+        if unknown:
+            warnings.extend(unknown)
         elif not can_fill(employee, shift.role, venue):
             warn("skill", f"{employee.name} doesn't have {shift.role} in their skills.")
 
@@ -467,19 +476,27 @@ def settle_covers(db, venue_id: str, before, after, actor_id: Optional[str]) -> 
         note = "The shift was filled on the roster." if is_open(before) else "The shift was changed on the roster."
     else:
         note = "The shift was changed on the roster and posted for cover again."
-    now = datetime.utcnow()
-    claimants = []
+    claimants, withdrawn = [], []
     for c in covers:
-        db.save_shift_cover(dict(c, status=WITHDRAWN, decided_by=actor_id, decided_at=now, decision_note=note))
-        audit("cover.withdrawn", venue_id, "shift_cover", c.get("id"), shift_id=before.id,
-              previous_status=c.get("status"), claimed_by=c.get("claimed_by"),
-              origin=c.get("origin") or "staff", deleted=after is None, note=note)
-        claimant = db.get_employee(c["claimed_by"]) if c.get("claimed_by") else None
+        # Conditional, so a claim made since the read is kept and named, and a
+        # cover approved or cancelled since stays as it is.
+        row = db.withdraw_shift_cover(c["id"], actor_id, note)
+        if row is None:
+            continue
+        withdrawn.append(row)
+        claimed_by = row.get("claimed_by")
+        # a claim always sets claimed_by and a decline clears it
+        audit("cover.withdrawn", venue_id, "shift_cover", row.get("id"), shift_id=before.id,
+              previous_status="claimed" if claimed_by else "open", claimed_by=claimed_by,
+              origin=row.get("origin") or "staff", deleted=after is None, note=note)
+        claimant = db.get_employee(claimed_by) if claimed_by else None
         if claimant is not None and getattr(claimant, "venue_id", None) == venue_id:
             claimants.append(claimant)
+    if not withdrawn:
+        return []
     message = "The cover request for this shift was withdrawn"
     if after is not None and is_open(after):
-        first = next((c for c in covers if c.get("origin") == "leave"), covers[0])
+        first = next((c for c in withdrawn if c.get("origin") == "leave"), withdrawn[0])
         db.save_shift_cover({
             "id": f"cv-{uuid.uuid4().hex[:10]}",
             "venue_id": venue_id,
@@ -493,7 +510,7 @@ def settle_covers(db, venue_id: str, before, after, actor_id: Optional[str]) -> 
             "origin": "leave",
             "claimed_by": None,
             "status": "open",
-            "created_at": now,
+            "created_at": datetime.utcnow(),
         })
         message += " and the open shift posted for cover again with its new details"
     message += "."
