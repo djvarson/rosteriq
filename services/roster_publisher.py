@@ -252,7 +252,8 @@ class RosterPublisher:
                 employees=employees,
                 forecasts=self._week_forecasts(roster),
             )
-            conflicts = list(conflicts) + self._leave_conflicts(roster, employees)
+            leave_conflicts = self._leave_conflicts(roster, employees)
+            conflicts = list(conflicts) + leave_conflicts
             result.conflicts_found = len(conflicts)
             result.critical_conflicts = len(
                 [c for c in conflicts if c.severity == ConflictSeverity.CRITICAL]
@@ -272,6 +273,12 @@ class RosterPublisher:
                     f"Cannot publish: {result.critical_conflicts} critical conflicts: "
                     f"{'; '.join(critical_msgs[:3])}"
                 )
+                if leave_conflicts:
+                    result.message += (
+                        ". For anyone on approved leave: take them off the shift, or if their "
+                        "plans changed, cancel the leave or change its dates on the Leave page "
+                        "(Approved), then publish again"
+                    )
                 logger.warning(result.message)
 
                 # Transition to FAILED state
@@ -478,7 +485,8 @@ class RosterPublisher:
                     employee_ids=[s.employee_id],
                     shift_ids=[s.id],
                     date=s.date,
-                    suggestion="Leave the shift open or give it to someone else",
+                    suggestion="Leave the shift open or give it to someone else, or cancel the "
+                               "leave or change its dates on the Leave page",
                 ))
             return out
         except Exception as e:

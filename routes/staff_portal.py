@@ -90,6 +90,7 @@ class LeaveDecision(BaseModel):
     note: str = Field(default="", max_length=300)
     leave_type: Optional[str] = Field(default=None, pattern=LEAVE_TYPE_PATTERN)
     paid_hours: Optional[float] = Field(default=None, ge=0, le=400)
+    allow_overlap: bool = False
 
 
 class TimeRange(BaseModel):
@@ -1238,6 +1239,13 @@ async def decide_leave(req_id: str, body: LeaveDecision,
         raise HTTPException(status_code=404, detail="Leave request not found")
     if req.get("status") != "pending":
         raise HTTPException(status_code=409, detail=f"Request is already {req.get('status')}")
+    if body.approve and not body.allow_overlap:
+        from rosteriq.routes.leave_cover import approved_overlap, overlap_refusal
+        clash = approved_overlap(db, body.venue_id, req.get("employee_id"),
+                                 _as_date(req["start_date"]), _as_date(req["end_date"]),
+                                 exclude_id=req_id)
+        if clash is not None:
+            raise overlap_refusal(_emp_name(db, body.venue_id, req.get("employee_id")), clash)
     req["status"] = "approved" if body.approve else "declined"
     req["decided_by"] = user.user_id
     req["decided_at"] = datetime.utcnow()

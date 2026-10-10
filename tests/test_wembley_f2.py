@@ -326,15 +326,20 @@ def test_import_never_touches_generated_or_published_rosters():
     db.save_roster(Roster(id=f"{vid}-gen", venue_id=vid, week_start=monday, week_end=monday + timedelta(days=6),
                           shifts=[gen], total_cost=None, created_at=datetime.utcnow()))
     db.update_roster_state(f"{vid}-gen", "published", "seed", "test")
-    _roster(c, h, vid, "Name,Date,Start,End\nJo Smith,09/10/2026,18:00,23:00\n")
+    out = _roster(c, h, vid, "Name,Date,Start,End\nJo Smith,09/10/2026,18:00,23:00\n").json()
     kept = db.get_roster(f"{vid}-gen")
     assert [(s.id, s.start_time) for s in kept.shifts] == [(f"{vid}-g1", dtime(17))]
     assert db.get_roster_state(f"{vid}-gen") == "published"
+    # The week is published in RosterIQ, so no import is written beside it
+    assert db.get_roster(f"imported-{vid}-{monday.isoformat()}") is None
+    assert out["shifts_imported"] == 0 and "published" in _rows_by_line(out)[2]["reason"]
 
     # An imported week that has been published in RosterIQ is left as published
-    rid = f"imported-{vid}-{monday.isoformat()}"
+    nxt = monday + timedelta(days=7)
+    _roster(c, h, vid, "Name,Date,Start,End\nJo Smith,16/10/2026,18:00,23:00\n")
+    rid = f"imported-{vid}-{nxt.isoformat()}"
     db.update_roster_state(rid, "published", "seed", "test")
-    out = _roster(c, h, vid, "Name,Date,Start,End\nJo Smith,09/10/2026,12:00,16:00\n").json()
+    out = _roster(c, h, vid, "Name,Date,Start,End\nJo Smith,16/10/2026,12:00,16:00\n").json()
     assert [(s.start_time, s.end_time) for s in db.get_roster(rid).shifts] == [(dtime(18), dtime(23))]
     assert out["shifts_imported"] == 0 and "published" in _rows_by_line(out)[2]["reason"]
 

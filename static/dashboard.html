@@ -3898,6 +3898,7 @@
                 <option value="pending" selected>Pending</option>
                 <option value="approved">Approved</option>
                 <option value="declined">Declined</option>
+                <option value="cancelled">Cancelled</option>
                 <option value="">All</option>
               </select>
             </div>
@@ -7070,11 +7071,16 @@ function renderLeaveRequests() {
       ? '<span style="background:rgba(34,197,94,.15); color:var(--success); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">APPROVED</span>'
       : (r.status === 'declined'
         ? '<span style="background:rgba(239,68,68,.15); color:var(--danger); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">DECLINED</span>'
-        : '<span style="background:rgba(245,158,11,.15); color:#B45309; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">PENDING</span>');
+        : (r.status === 'cancelled'
+          ? '<span style="background:rgba(100,116,139,.15); color:var(--text-muted); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">CANCELLED</span>'
+          : '<span style="background:rgba(245,158,11,.15); color:#B45309; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">PENDING</span>'));
     const actions = r.status === 'pending'
       ? '<button class="btn btn-primary btn-small" onclick="decideLeave(' + i + ', true)">Approve</button> ' +
         '<button class="btn btn-secondary btn-small" onclick="decideLeave(' + i + ', false)">Decline</button>'
-      : '';
+      : (r.status === 'approved'
+        ? '<button class="btn btn-secondary btn-small" onclick="changeLeaveDates(' + i + ')">Change dates</button> ' +
+          '<button class="btn btn-secondary btn-small" onclick="cancelLeave(' + i + ')">Cancel leave</button>'
+        : '');
     return '<tr style="border-top:1px solid var(--border);">' +
       '<td style="padding:10px 8px; font-weight:600;">' + esc(r.employee_name) + '</td>' +
       '<td style="padding:10px 8px;">' + esc(r.start_date) + '</td>' +
@@ -7091,6 +7097,60 @@ function renderLeaveRequests() {
       '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
       '</tr>';
   }).join('');
+}
+
+// Approved leave can be cancelled or shortened; nobody goes back on a shift
+// by itself, the manager puts them back on.
+async function amendLeave(r, body) {
+  try {
+    const res = await fetchAPI('/api/leave/' + encodeURIComponent(r.id) + '/amend', {
+      method: 'POST',
+      body: JSON.stringify(Object.assign({ venue_id: state.currentVenue }, body)),
+    });
+    showToast(res.message || 'Leave changed', 'success', 8000);
+    loadLeaveRequests();
+    loadCoverRequests();
+  } catch (e) {
+    showToast('Could not change the leave: ' + e.message, 'error');
+  }
+}
+
+async function cancelLeave(i) {
+  const r = lvRows[i];
+  const note = window.prompt('Cancel ' + (r.leave_type_label || 'leave').toLowerCase() + ' for ' + r.employee_name +
+    ' (' + r.start_date + ' → ' + r.end_date + ')?\n\nShifts it left open stay open and their open cover requests are withdrawn — ' +
+    'put ' + r.employee_name + ' back on the roster if they are working.\n\nOptional note:', '');
+  if (note === null) return;
+  await amendLeave(r, { cancel: true, note: note.trim() });
+}
+
+async function changeLeaveDates(i) {
+  const r = lvRows[i];
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  const from = window.prompt('Change the dates of ' + r.employee_name + '\'s ' + (r.leave_type_label || 'leave').toLowerCase() +
+    ' (' + r.start_date + ' → ' + r.end_date + ').\nThe new dates go inside these; record any extra days as new leave.\n\nFirst day (YYYY-MM-DD):', r.start_date);
+  if (from === null) return;
+  if (!iso.test(from.trim())) { showToast('Enter the first day as YYYY-MM-DD', 'warning'); return; }
+  const to = window.prompt('Last day (YYYY-MM-DD):', r.end_date);
+  if (to === null) return;
+  if (!iso.test(to.trim())) { showToast('Enter the last day as YYYY-MM-DD', 'warning'); return; }
+  const body = { start_date: from.trim(), end_date: to.trim() };
+  if (r.leave_type === 'annual' || r.leave_type === 'personal') {
+    const hours = window.prompt('Paid hours for payroll prep over the new dates.\nBlank = worked out again from their roster (hours you typed yourself are kept).', '');
+    if (hours === null) return;
+    if (hours.trim() !== '') {
+      const h = Number(hours);
+      if (!isFinite(h) || h < 0 || h > 400) { showToast('Paid hours must be a number from 0 to 400', 'warning'); return; }
+      body.paid_hours = h;
+    }
+  }
+  await amendLeave(r, body);
+}
+
+// A 409 for leave over the same person's approved leave: both records can
+// be right (half annual, half personal), so the manager may go ahead.
+function leaveOverlap(e) {
+  return !!(e && e.status === 409 && e.data && e.data.error && e.data.error.code === 'LEAVE_OVERLAP');
 }
 
 // ============================================
@@ -8934,10 +8994,21 @@ async function decideLeave(i, approve) {
     }
   }
   try {
-    const res = await fetchAPI('/api/leave/' + r.id + '/decide', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
+    let res;
+    try {
+      res = await fetchAPI('/api/leave/' + r.id + '/decide', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      if (!leaveOverlap(e)) throw e;
+      if (!window.confirm(e.message + '\n\nApprove anyway?')) return;
+      body.allow_overlap = true;
+      res = await fetchAPI('/api/leave/' + r.id + '/decide', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    }
     showToast(r.employee_name + (approve ? ' approved ✓' + (res.opened_shifts && res.opened_shifts.length ? ' — ' + res.message : '') : ' declined'), 'success', 6000);
     loadLeaveRequests();
     if (approve) loadCoverRequests();
@@ -8989,9 +9060,20 @@ async function recordLeave() {
     body.paid_hours = h;
   }
   try {
-    const res = await fetchAPI('/api/leave', { method: 'POST', body: JSON.stringify(body) });
+    let res;
+    try {
+      res = await fetchAPI('/api/leave', { method: 'POST', body: JSON.stringify(body) });
+    } catch (e) {
+      if (!leaveOverlap(e)) throw e;
+      if (!window.confirm(e.message + '\n\nRecord anyway?')) return;
+      body.allow_overlap = true;
+      res = await fetchAPI('/api/leave', { method: 'POST', body: JSON.stringify(body) });
+    }
     showToast(res.message || 'Leave recorded', 'success', 6000);
     ['lvr-start', 'lvr-end', 'lvr-hours', 'lvr-reason'].forEach(function(id) { document.getElementById(id).value = ''; });
+    // Show the record just made (approved at once), with its Cancel and Change dates
+    const filter = document.getElementById('lv-filter');
+    if (filter.value === 'pending') filter.value = 'approved';
     loadLeaveRequests();
     loadCoverRequests();
   } catch (e) {
@@ -11654,6 +11736,7 @@ function importFlagText(f) {
     rate_defaulted: 'pay rate defaulted', no_rate: 'no pay rate', no_mobile: 'no mobile',
     no_phone: 'no mobile', no_email: 'no email', type_defaulted: 'employment type defaulted',
     break_over_120: 'unusually long meal break', break_unreadable: 'unreadable meal break',
+    on_leave: 'on approved leave: left open',
   };
   const key = String(f || '');
   return known[key] || key.replace(/_/g, ' ');
@@ -11815,6 +11898,19 @@ function renderRosterImportReport(r) {
   const replaced = Array.isArray(r.rows) ? r.rows.filter(function (x) { return x.status === 'replaced'; }) : [];
   const removed = Array.isArray(r.removed) ? r.removed : [];
   let html = _importExtras(r);
+  const published = Array.isArray(r.published_weeks) ? r.published_weeks : [];
+  if (published.length) {
+    html += '<div style="margin-bottom:8px; padding:8px 10px; border-radius:8px; background:rgba(245,158,11,0.12); color:var(--text-primary); font-weight:600;">' +
+      published.map(function (w) {
+        const p = String(w || '').split('-');
+        const when = p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(w || '');
+        return '<div>⚠ The week of ' + esc(when) + ' has been published in RosterIQ, so staff see RosterIQ\'s roster for it, ' +
+          'never an import. The pasted shifts for that week were not imported — make the change in RosterIQ.</div>';
+      }).join('') + '</div>';
+  }
+  (Array.isArray(r.cover_notes) ? r.cover_notes : []).forEach(function (n) {
+    html += '<div style="margin-bottom:6px;">' + esc(n) + '</div>';
+  });
   // Imported, but with something the manager should look at (a break read
   // as hours, a break that couldn't be read): the shift's cost depends on it.
   if (flagged.length) {
@@ -11888,6 +11984,9 @@ async function runRosterImport() {
     if (removed) msg += ', ' + removed + ' removed';
     if (r.skipped_count) msg += ', ' + r.skipped_count + ' skipped';
     if (Array.isArray(r.flagged) && r.flagged.length) msg += ', ' + r.flagged.length + ' to check';
+    if (Array.isArray(r.published_weeks) && r.published_weeks.length) {
+      msg += ' — ' + r.published_weeks.length + ' week(s) already published in RosterIQ left unchanged';
+    }
     res.textContent = msg;
     if (report) report.innerHTML = renderRosterImportReport(r);
     const changed = !!(r.shifts_imported || replaced || removed);

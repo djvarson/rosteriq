@@ -4678,6 +4678,7 @@ class PostgresStore(BaseStore):
                     status, decided_by, decided_at, decision_note, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
+                    start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date,
                     leave_type=EXCLUDED.leave_type, paid_hours=EXCLUDED.paid_hours,
                     opened_shifts=EXCLUDED.opened_shifts,
                     status=EXCLUDED.status, decided_by=EXCLUDED.decided_by,

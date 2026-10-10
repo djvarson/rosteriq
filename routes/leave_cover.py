@@ -7,12 +7,14 @@ in routes/staff_portal.py):
     POST /api/leave               -- record leave for someone (approved at
                                      once; past dates allowed, e.g. yesterday's
                                      sick day), with an audit trail
+    POST /api/leave/{id}/amend    -- cancel approved leave, or shorten it to
+                                     dates inside it
     GET  /api/cover/{id}/checks   -- what approving a claimed cover would mean:
                                      trained, hours, visa cap, rest, clashes
 """
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,10 +24,12 @@ from rosteriq.database import get_db
 from rosteriq.middleware.auth import UserContext, get_current_user
 from rosteriq.middleware.tenant import enforce_venue_manager, enforce_venue_manager_any
 from rosteriq.services.clock import venue_today
+from rosteriq.services.current_roster import live_shifts
 from rosteriq.services.events import audit
+from rosteriq.models import normalise_area
 from rosteriq.services.leave_shifts import (
-    LEAVE_TYPE_PATTERN, LEAVE_TYPES, PAID_LEAVE_TYPES, apply_approved_leave,
-    default_paid_hours, leave_impact, leave_type_label, opened_summary,
+    LEAVE_TYPE_PATTERN, LEAVE_TYPES, PAID_LEAVE_TYPES, apply_approved_leave, cover_day,
+    default_paid_hours, is_open, leave_impact, leave_type_label, opened_summary,
 )
 from rosteriq.services.roster_edit import RosterBusy
 
@@ -42,6 +46,52 @@ class RecordLeaveBody(BaseModel):
     leave_type: str = Field(..., pattern=LEAVE_TYPE_PATTERN)
     reason: str = Field(default="", max_length=300)
     paid_hours: Optional[float] = Field(default=None, ge=0, le=400)
+    # Two records for the same days can both be right (half annual, half personal).
+    allow_overlap: bool = False
+
+
+class AmendLeaveBody(BaseModel):
+    venue_id: str
+    cancel: bool = False
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    paid_hours: Optional[float] = Field(default=None, ge=0, le=400)
+    note: str = Field(default="", max_length=300)
+
+
+def _day(v) -> date:
+    if isinstance(v, datetime):
+        return v.date()
+    return v if isinstance(v, date) else date.fromisoformat(str(v)[:10])
+
+
+def _hours_text(h) -> str:
+    return "none" if h is None else f"{float(h):g}h"
+
+
+def approved_overlap(db, venue_id: str, employee_id: str, start: date, end: date,
+                     exclude_id: Optional[str] = None) -> Optional[dict]:
+    """The person's approved leave at the venue that overlaps start..end."""
+    for r in db.list_leave_requests(venue_id) or []:
+        if (r.get("employee_id") != employee_id or r.get("status") != "approved"
+                or r.get("id") == exclude_id):
+            continue
+        if _day(r["start_date"]) <= end and _day(r["end_date"]) >= start:
+            return r
+    return None
+
+
+def overlap_refusal(name: str, r: dict) -> HTTPException:
+    what = leave_type_label(r.get("leave_type"))
+    if r.get("paid_hours") is not None:
+        what += f", {_hours_text(r['paid_hours'])}"
+    first, last = _day(r["start_date"]).isoformat(), _day(r["end_date"]).isoformat()
+    return HTTPException(status_code=409, detail={
+        "code": "LEAVE_OVERLAP",
+        "message": (f"{name} already has approved leave for {first} to {last} ({what}) \u2014 "
+                    "it's on the Leave page under Approved. Change or cancel that one, or "
+                    "record both if both are right (say, half annual and half personal)."),
+    })
 
 
 def _venue_employee(db, venue_id: str, employee_id: str):
@@ -89,6 +139,10 @@ async def record_leave(body: RecordLeaveBody,
             raise HTTPException(status_code=409, detail=(
                 f"{emp.name} already has a pending request for {rs.isoformat()} to "
                 f"{re_.isoformat()} — approve or decline that one instead"))
+    if not body.allow_overlap:
+        clash = approved_overlap(db, body.venue_id, emp.id, body.start_date, body.end_date)
+        if clash is not None:
+            raise overlap_refusal(emp.name, clash)
     now = datetime.utcnow()
     req = {
         "id": f"lv-{uuid.uuid4().hex[:10]}",
@@ -128,6 +182,164 @@ async def record_leave(body: RecordLeaveBody,
         "opened_shifts": opened,
         "message": (f"{leave_type_label(body.leave_type)} recorded for {emp.name}."
                     + (f" {opened_summary(opened)}" if opened else "")),
+    }
+
+
+def _slot_key(date_iso, start, end, role) -> tuple:
+    return (str(date_iso)[:10], str(start)[:5], str(end)[:5], normalise_area(role))
+
+
+def _hours_off(db, venue_id: str, employee, req: dict, first: date, last: date) -> Optional[float]:
+    """What default_paid_hours gives for first..last now that the leave has
+    opened the person's shifts: the shifts it opened on those days plus the
+    unworked part of the ones that had started (still theirs)."""
+    impact = leave_impact(db, venue_id, employee, first, last)
+    held = {_slot_key(s["date"], s["start"], s["end"], s["role"]) for s in impact["shifts"]}
+    hours = float(impact["leave_hours"] or 0)
+    for o in req.get("opened_shifts") or []:
+        key = _slot_key(o.get("date"), o.get("start"), o.get("end"), o.get("role"))
+        if first.isoformat() <= key[0] <= last.isoformat() and key not in held:
+            hours += float(o.get("hours") or 0)
+    return default_paid_hours({"leave_hours": hours})
+
+
+def _same_hours(a, b) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return abs(float(a) - float(b)) < 0.005
+
+
+@router.post("/api/leave/{req_id}/amend")
+async def amend_leave(req_id: str, body: AmendLeaveBody,
+                      user: UserContext = Depends(get_current_user)) -> dict:
+    """Cancel approved leave, or shorten it to dates inside it. The shifts it
+    left open on the days released stay open (the manager puts the person
+    back on); the covers still open for those days are withdrawn."""
+    enforce_venue_manager(body.venue_id)
+    db = get_db()
+    stored = db.get_leave_request(req_id)
+    if not stored or stored.get("venue_id") != body.venue_id:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+    if stored.get("status") != "approved":
+        raise HTTPException(status_code=409, detail=f"Only approved leave can be changed \u2014 "
+                                                    f"this request is {stored.get('status')}")
+    req = dict(stored)
+    old_start, old_end = _day(req["start_date"]), _day(req["end_date"])
+    emp_id = req.get("employee_id")
+    emp = db.get_employee(emp_id)
+    if emp is not None and getattr(emp, "venue_id", None) != body.venue_id:
+        emp = None
+    name = getattr(emp, "name", None) or "This person"
+    label = leave_type_label(req.get("leave_type"))
+    new_start = new_end = None
+    if not body.cancel:
+        new_start, new_end = body.start_date or old_start, body.end_date or old_end
+        _check_window(new_start, new_end)
+        if new_start < old_start or new_end > old_end:
+            raise HTTPException(status_code=422, detail=(
+                f"The new dates must be inside the leave ({old_start.isoformat()} to "
+                f"{old_end.isoformat()}) \u2014 record any extra days as new leave"))
+        if (new_start, new_end) == (old_start, old_end):
+            raise HTTPException(status_code=422, detail="Those are the dates it already has "
+                                                        "\u2014 pick fewer days, or cancel it")
+
+    old_hours = req.get("paid_hours")
+    hours_note = ""
+    if body.cancel or req.get("leave_type") not in PAID_LEAVE_TYPES:
+        new_hours = None
+    elif body.paid_hours is not None:
+        new_hours = body.paid_hours
+    elif emp is not None and _same_hours(old_hours, _hours_off(db, body.venue_id, emp, req,
+                                                               old_start, old_end)):
+        new_hours = _hours_off(db, body.venue_id, emp, req, new_start, new_end)
+    else:
+        new_hours = old_hours
+        if old_hours is not None:
+            hours_note = (f" Paid hours stay at {_hours_text(old_hours)} as entered \u2014 check "
+                          "them for the new dates.")
+    if not body.cancel and not hours_note and not _same_hours(old_hours, new_hours):
+        hours_note = f" Paid hours: {_hours_text(old_hours)} \u2192 {_hours_text(new_hours)}."
+
+    # A day another approved record of theirs still covers isn't released.
+    others = [(_day(r["start_date"]), _day(r["end_date"]))
+              for r in db.list_leave_requests(body.venue_id) or []
+              if r.get("employee_id") == emp_id and r.get("status") == "approved"
+              and r.get("id") != req_id]
+    released = set()
+    for n in range((old_end - old_start).days + 1):
+        d = old_start + timedelta(days=n)
+        kept = not body.cancel and new_start <= d <= new_end
+        if not kept and not any(a <= d <= b for a, b in others):
+            released.add(d)
+
+    if body.cancel:
+        req.update(status="cancelled", decided_by=user.user_id, decided_at=datetime.utcnow(),
+                   decision_note=body.note)
+    else:
+        req.update(start_date=new_start, end_date=new_end)
+    req["paid_hours"] = new_hours
+    db.save_leave_request(req)
+
+    note = f"{name}'s leave no longer covers this day."
+    withdrawn, claimed = [], []
+    for cv in db.list_shift_covers(body.venue_id) or []:
+        if (cv.get("origin") != "leave" or str(cv.get("requested_by") or "") != str(emp_id)
+                or cover_day(cv) not in released):
+            continue
+        if cv.get("status") == "open":
+            row = db.withdraw_shift_cover(cv["id"], user.user_id, note)
+            if row is not None:
+                withdrawn.append(row)
+        elif cv.get("status") == "claimed":
+            claimed.append(cv)
+    still_open = []
+    if released:
+        open_now = {_slot_key(s.date.isoformat(), s.start_time.strftime("%H:%M"),
+                              s.end_time.strftime("%H:%M"), s.role)
+                    for s in live_shifts(db, body.venue_id, min(released), max(released))
+                    if is_open(s)}
+        for o in req.get("opened_shifts") or []:
+            key = _slot_key(o.get("date"), o.get("start"), o.get("end"), o.get("role"))
+            if o.get("label") and key in open_now and _day(key[0]) in released:
+                still_open.append(o["label"])
+
+    audit("leave.amend", body.venue_id, "leave_request", req_id,
+          change="cancel" if body.cancel else "shorten", employee_id=emp_id,
+          employee=getattr(emp, "name", None), leave_type=req.get("leave_type") or "other",
+          old_start_date=old_start.isoformat(), old_end_date=old_end.isoformat(),
+          start_date=new_start.isoformat() if new_start else None,
+          end_date=new_end.isoformat() if new_end else None,
+          old_paid_hours=old_hours, paid_hours=new_hours,
+          released_days=[d.isoformat() for d in sorted(released)],
+          withdrawn_covers=[c.get("id") for c in withdrawn], note=body.note)
+
+    if body.cancel:
+        message = (f"{label} for {name} ({old_start.isoformat()} to {old_end.isoformat()}) "
+                   "cancelled.")
+    else:
+        message = (f"{name}'s {label.lower()} now runs {new_start.isoformat()} to "
+                   f"{new_end.isoformat()}.")
+    message += hours_note
+    if still_open:
+        message += (f" Still open on the days released: {', '.join(still_open)} \u2014 put "
+                    f"{name} back on the roster if they're working.")
+    if withdrawn:
+        message += (" The cover request still open for those days was withdrawn."
+                    if len(withdrawn) == 1 else
+                    f" The {len(withdrawn)} cover requests still open for those days were "
+                    "withdrawn.")
+    if claimed:
+        message += (f" Someone has claimed {len(claimed)} of those days' shifts \u2014 approve or "
+                    "decline on the Cover page.")
+    return {
+        "status": req["status"],
+        "request_id": req_id,
+        "start_date": (new_start or old_start).isoformat(),
+        "end_date": (new_end or old_end).isoformat(),
+        "paid_hours": new_hours,
+        "released_shifts": still_open,
+        "withdrawn_covers": len(withdrawn),
+        "message": message,
     }
 
 
