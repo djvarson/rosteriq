@@ -17,6 +17,7 @@ from rosteriq.middleware.auth import get_current_user
 from rosteriq.database import get_db
 from rosteriq.services.clock import venue_today
 from rosteriq.services.current_roster import current_roster
+from rosteriq.services.trading_hours import venue_trading_hours
 from rosteriq.middleware.tenant import enforce_venue_access
 from rosteriq.routes.menu_costing import GST_RATE, _cost_recipe
 from rosteriq.roster_optimiser import compute_coverage_gaps
@@ -80,7 +81,9 @@ async def daily_briefing(venue_id: str = Query(...),
             if fcs:
                 venue = db.get_venue(venue_id)
                 min_staff = getattr(venue, "min_staff", None) if venue else None
-                cov = compute_coverage_gaps(active, fcs, min_staff_by_role=min_staff)
+                hours = venue_trading_hours(db, venue, today) if venue else None
+                cov = compute_coverage_gaps(active, fcs, min_staff_by_role=min_staff,
+                                            venue_config=venue, trading_hours=hours)
                 today_row = [d for d in cov["days"] if d["date"] == today.isoformat()]
                 coverage = {
                     "fully_covered": cov["fully_covered"],

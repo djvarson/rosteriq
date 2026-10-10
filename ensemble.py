@@ -77,8 +77,9 @@ COLD_START_HOUR_MULTIPLIERS = {
     range(22, 24): 0.4,   # late night
 }
 
-# Default trading hours
-DEFAULT_TRADING_HOURS = list(range(6, 24))  # 6am to midnight
+# Trading hours when the venue has neither recorded hours nor roster history
+# (services/trading_hours.py): 10am to midnight.
+DEFAULT_TRADING_HOURS = list(range(10, 24))
 
 
 def _get_hour_multiplier(hour: int) -> float:
@@ -97,14 +98,17 @@ class EnsembleForecaster:
     with automatic cold-start fallback when insufficient data exists.
     """
 
-    def __init__(self, venue_config: VenueConfig):
+    def __init__(self, venue_config: VenueConfig, trading_hours: Optional[dict] = None):
         """
         Initialise the forecaster for a venue.
 
         Args:
             venue_config: Configuration for the venue being forecast.
+            trading_hours: {weekday: {"open", "close"}} for weekdays the venue
+                hasn't recorded (services.trading_hours.venue_trading_hours).
         """
         self.venue_config = venue_config
+        self.trading_hours = trading_hours
         self.xgb_model = None
         self.prophet_model = None
         self.is_trained = False
@@ -244,13 +248,14 @@ class EnsembleForecaster:
 
         Args:
             target_date: Date to forecast.
-            hours: Specific hours to forecast (default: all trading hours).
+            hours: Specific hours to forecast (default: the venue's trading
+                hours that day; hours outside them get no forecast).
 
         Returns:
             List of DemandForecast objects, one per hour.
         """
         if hours is None:
-            hours = DEFAULT_TRADING_HOURS
+            hours = self.trading_hours_for(target_date)
 
         forecasts = []
         for hour in hours:
@@ -278,6 +283,12 @@ class EnsembleForecaster:
             )
 
         return forecasts
+
+    def trading_hours_for(self, target_date: date) -> list[int]:
+        """Clock hours of target_date inside the venue's trading hours."""
+        from rosteriq.services.trading_hours import demand_hours, effective_trading_hours
+        return demand_hours(
+            effective_trading_hours(self.venue_config, self.trading_hours), target_date)
 
     def predict_week(self, week_start: date) -> list[DemandForecast]:
         """
