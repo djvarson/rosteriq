@@ -27,6 +27,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Iterable, Optional
 
+from rosteriq.database import _jsonb
 from rosteriq.middleware.tenant import scoped_employee_map
 from rosteriq.models import normalise_area
 from rosteriq.services.clock import venue_now
@@ -145,30 +146,41 @@ def _punched_hours(sheet: dict, until: Optional[datetime]) -> Optional[float]:
     return max(0.0, minutes / 60)
 
 
+def _finish_guessed(sheet: dict) -> bool:
+    """Closed by the time clock at the rostered end, and since neither
+    corrected nor approved by a manager (the flag stays after a correction)."""
+    return ("auto_closed" in (_jsonb(sheet.get("flags"), []) or [])
+            and sheet.get("status") != "approved" and not sheet.get("adjustment_note"))
+
+
 def _worked_by_day(db, venue_id: str, employee_id: str, days: set, running: set,
                    now_utc: datetime) -> tuple:
     """(day -> hours this person punched at the venue that day, days with a
-    punch never clocked out). A punch still open while that day's shift is
-    running counts up to now; once the shift is over nobody knows when they
-    left, so it isn't counted."""
+    punch never clocked out, days with a punch the time clock closed at the
+    rostered end). A punch still open while that day's shift is running
+    counts up to now; once the shift is over nobody knows when they left, so
+    it isn't counted, and neither is a finish the time clock guessed."""
     if not days:
-        return {}, set()
+        return {}, set(), set()
     try:
         sheets = db.get_timesheets(venue_id, min(days), max(days)) or []
     except Exception:
-        return {}, set()
+        return {}, set(), set()
     out: dict = {}
-    unclosed = set()
+    unclosed, guessed = set(), set()
     for t in sheets:
         day = _as_date(t.get("work_date"))
         if str(t.get("employee_id")) != str(employee_id) or day not in days:
+            continue
+        if _finish_guessed(t):
+            guessed.add(day)
             continue
         hours = _punched_hours(t, now_utc if day in running else None)
         if hours is None:
             unclosed.add(day)
         else:
             out[day] = out.get(day, 0.0) + hours
-    return out, unclosed
+    return out, unclosed, guessed
 
 
 def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
@@ -206,7 +218,7 @@ def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
             started[s.date] = started.get(s.date, 0.0) + float(s.net_hours)
             if now < _shift_end(s):
                 running.add(s.date)
-    worked, unclosed = _worked_by_day(db, venue_id, employee.id, set(started), running, now_utc)
+    worked, unclosed, guessed = _worked_by_day(db, venue_id, employee.id, set(started), running, now_utc)
     leave_hours = sum(float(s.net_hours) for s in hour_shifts if not _started(s, now))
     leave_hours += sum(max(0.0, h - worked.get(d, 0.0)) for d, h in started.items())
     hour_ids = {s.id for s in hour_shifts}
@@ -222,12 +234,13 @@ def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
             if s.id in hour_ids:
                 did = worked.get(s.date, 0.0)
                 left = _hours(max(0.0, started[s.date] - did))
-                if s.date in unclosed and did:
-                    message += (f" — they worked {_hours(did)} that day besides a punch never "
-                                f"clocked out, which isn't counted, so {left} of it counts as "
-                                "leave: check the hours")
-                elif s.date in unclosed:
-                    message += (" — their punch that day was never clocked out, so it isn't "
+                how = ("never clocked out" if s.date in unclosed else
+                       "closed automatically at the rostered end" if s.date in guessed else None)
+                if how and did:
+                    message += (f" — they worked {_hours(did)} that day besides a punch {how}, "
+                                f"which isn't counted, so {left} of it counts as leave: check the hours")
+                elif how:
+                    message += (f" — their punch that day was {how}, so it isn't "
                                 f"counted and its {left} counts as leave: check the hours")
                 elif did:
                     message += f" — they worked {_hours(did)} that day, so {left} of it counts as leave"

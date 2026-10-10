@@ -41,6 +41,7 @@ from rosteriq.middleware.tenant import (
     enforce_kiosk_or_venue_manager, get_tenant_context_optional, kiosk_device_id,
 )
 from rosteriq.services.events import audit
+from rosteriq.services.payroll_export import _paid_leave_windows, latest_prepared_run, run_label
 from rosteriq.services.staff_records import is_active
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,10 @@ class ReviewRequest(BaseModel):
     clock_in: Optional[datetime] = Field(default=None, description="Corrected clock-in (UTC)")
     clock_out: Optional[datetime] = Field(default=None, description="Corrected clock-out (UTC)")
     break_minutes: Optional[int] = Field(default=None, ge=0, le=480)
+    break_from_roster: bool = Field(default=False, description=(
+        "Closing an open punch: break_minutes is the rostered meal break shown, not one the "
+        "manager entered, so it comes off only if the finish makes the shift long enough to "
+        "need a meal break."))
     note: str = Field(default="", max_length=500, description="Why the correction was made")
 
 
@@ -417,10 +422,12 @@ def _resolve_finish(hhmm: str, clock_in: datetime, now: datetime, tz) -> datetim
 
 
 def _review_state(ts, worked: Optional[int], span: Optional[int],
-                  rostered_break: Optional[int] = None, overlaps: bool = False):
+                  rostered_break: Optional[int] = None, overlaps: bool = False,
+                  on_leave: Optional[str] = None):
     """(clean, reasons). Clean = closed, within CLEAN_VARIANCE_MINUTES of the
     roster, PIN verified, an unpaid break that meets the minimum and isn't
-    well over the rostered one, no overlapping punch, nothing flagged."""
+    well over the rostered one, no overlapping punch, not on a day of the
+    person's approved paid leave (``on_leave`` names it), nothing flagged."""
     if ts.get("status") != "closed" or span is None:
         return False, []
     reasons = []
@@ -436,12 +443,14 @@ def _review_state(ts, worked: Optional[int], span: Optional[int],
     minimum = get_minimum_break_minutes(span / 60)
     if minimum and not brk:
         reasons.append("no break recorded")
-    elif brk < minimum:
+    elif brk < minimum - kiosk.BREAK_SHORTFALL_GRACE_MINUTES:
         reasons.append(f"{brk} min break, under the {minimum} min meal break")
     if rostered_break is not None and brk > rostered_break + kiosk.CLEAN_VARIANCE_MINUTES:
         reasons.append(f"{brk} min unpaid break, {rostered_break} rostered — paid rest break included?")
     if overlaps:
         reasons.append("overlaps another punch for this person")
+    if on_leave:
+        reasons.append(f"on approved {on_leave} that day")
     for f in ("finish_entered_later", "auto_closed", "manager_closed", "long_shift", "short_punch"):
         if f in flags:
             reasons.append(kiosk.FLAG_LABELS[f])
@@ -454,11 +463,12 @@ def _rostered_break(shift) -> Optional[int]:
 
 def _review_context(db, venue_id: str, sheets: list):
     """({shift id: rostered shift}, {ids of punches overlapping another of the
-    same person's}) for judging these timesheets. Neighbouring days and open
-    punches are read too, so an overnight or still-open double is seen."""
+    same person's}, {employee id: approved paid leave windows}) for judging
+    these timesheets. Neighbouring days and open punches are read too, so an
+    overnight or still-open double is seen."""
     dates = [d for d in (_as_date(t.get("work_date")) for t in sheets) if d]
     if not dates:
-        return {}, set()
+        return {}, set(), {}
     lo, hi = min(dates), max(dates)
     by_emp = _shifts_by_employee(db, venue_id, lo, hi)
     shift_by_id = {s.id: s for shifts in by_emp.values() for s in shifts}
@@ -466,7 +476,14 @@ def _review_context(db, venue_id: str, sheets: list):
                                                       hi + timedelta(days=1)) or [])}
     for t in list(sheets) + list(db.list_open_timesheets(venue_id) or []):
         nearby.setdefault(t["id"], t)
-    return shift_by_id, _overlapping_ids(nearby.values())
+    on_leave = _paid_leave_windows(db.list_leave_requests(venue_id) or [])
+    return shift_by_id, _overlapping_ids(nearby.values()), on_leave
+
+
+def _leave_that_day(on_leave: dict, ts) -> Optional[str]:
+    day = _as_date(ts.get("work_date"))
+    return next((label for start, end, label, _req in on_leave.get(str(ts.get("employee_id")), [])
+                 if day and start <= day <= end), None)
 
 
 def _emp_name(db, venue_id, employee_id) -> str:
@@ -779,21 +796,31 @@ async def review_timesheet(
 
     tz = _tz(body.venue_id, db)
     ts["clock_in"] = a
+    moved = False
     if body.clock_in is not None:
         moved_to = _local(a, tz).date()     # the venue-local day of the clock-in, as at the kiosk
         if moved_to != _as_date(ts.get("work_date")):
             ts["work_date"] = moved_to
             ts["rostered_shift_id"] = None
+            moved = True
     work_date = _as_date(ts.get("work_date"))
     shift = _matched_shift(db, body.venue_id, ts, tz) if work_date else None
     if was_open:
         _finish(db, ts, b, shift, kiosk.load_settings(db, body.venue_id),
                 add_flags=("manager_closed",), save=False)
-    if body.break_minutes is not None and body.break_minutes != int(ts.get("break_minutes") or 0):
-        ts["break_minutes"] = body.break_minutes
-        ts["break_source"] = "manager"
-    ts["clock_out"] = b
     span = int((b - a).total_seconds() // 60)
+    meal_break_due = get_minimum_break_minutes(span / 60)
+    sent_break = body.break_minutes
+    if was_open and body.break_from_roster and not meal_break_due:
+        sent_break = None
+    if sent_break is not None and sent_break != int(ts.get("break_minutes") or 0):
+        ts["break_minutes"] = sent_break
+        ts["break_source"] = "manager"
+    elif sent_break is None and ts.get("break_source") == "auto" and not meal_break_due:
+        # Only the break the time clock presumed goes; a recorded or entered one stays.
+        ts["break_minutes"] = 0
+        ts["break_source"] = None
+    ts["clock_out"] = b
     worked = max(0, span - int(ts.get("break_minutes") or 0))
     if shift is not None:
         ts["rostered_shift_id"] = shift.id
@@ -818,6 +845,12 @@ async def review_timesheet(
         emp_name = getattr(db.get_employee(ts["employee_id"]), "name", None) or str(ts["employee_id"])
     except Exception:
         emp_name = str(ts["employee_id"])
+    # Nothing under review is in a prepared run yet, so one already prepared
+    # for the day the shift moved to was made without it.
+    run = latest_prepared_run(db, body.venue_id, work_date) if moved else None
+    warning = (f"This moves {emp_name}'s shift to {work_date:%a %d %b}, in the {run_label(run)} pay "
+               "run already prepared without it — prepare that range again so it's included."
+               if run else None)
     if adjusted:
         after = {"clock_in": str(a), "clock_out": str(b), "break_minutes": ts.get("break_minutes")}
         audit("timesheet.correct", body.venue_id, "timesheet", ts_id,
@@ -825,7 +858,8 @@ async def review_timesheet(
               work_date=str(work_date), worked_minutes=worked,
               variance_minutes=ts.get("variance_minutes"), note=body.note,
               changed={k: {"old": before[k], "new": after[k]}
-                       for k in after if before[k] != after[k]})
+                       for k in after if before[k] != after[k]},
+              **({"warning": warning} if warning else {}))
     if approve:
         audit("timesheet.approve", body.venue_id, "timesheet", ts_id,
               employee_id=ts["employee_id"], employee=emp_name,
@@ -838,7 +872,7 @@ async def review_timesheet(
         f"Timesheet {ts_id} reviewed by {user.user_id}: "
         f"{'adjusted, ' if adjusted else ''}{'approved' if approve else 'saved'} ({worked}m)"
     )
-    return {
+    out = {
         "status": ts["status"],
         "timesheet_id": ts_id,
         "work_date": str(work_date),
@@ -850,6 +884,9 @@ async def review_timesheet(
         "adjusted": adjusted,
         "approved_by": ts.get("approved_by"),
     }
+    if warning:
+        out["warning"] = warning
+    return out
 
 
 @router.post("/timesheets/approve")
@@ -867,7 +904,8 @@ async def approve_timesheets(
     for ts_id in dict.fromkeys(body.ids):
         ts = db.get_timesheet(ts_id)
         found[ts_id] = ts if ts and ts.get("venue_id") == body.venue_id else None
-    shift_by_id, overlapping = _review_context(db, body.venue_id, [t for t in found.values() if t])
+    shift_by_id, overlapping, on_leave = _review_context(db, body.venue_id,
+                                                         [t for t in found.values() if t])
     approved, skipped = [], []
     for ts_id, ts in found.items():
         if not ts:
@@ -889,7 +927,7 @@ async def approve_timesheets(
         worked = max(0, span - int(ts.get("break_minutes") or 0))
         clean, reasons = _review_state(ts, worked, span,
                                        _rostered_break(shift_by_id.get(ts.get("rostered_shift_id"))),
-                                       ts_id in overlapping)
+                                       ts_id in overlapping, _leave_that_day(on_leave, ts))
         if body.only_clean and not clean:
             skipped.append({"id": ts_id, "employee": who, "reason": "; ".join(reasons)})
             continue
@@ -929,7 +967,7 @@ async def list_timesheets(
             raise HTTPException(status_code=422, detail="start_date and end_date are required")
         sheets = db.get_timesheets(venue_id, start_date, end_date) or []
     emp_names = {e.id: e.name for e in (db.get_employees(venue_id) or [])}
-    shift_by_id, overlapping = _review_context(db, venue_id, sheets)
+    shift_by_id, overlapping, on_leave = _review_context(db, venue_id, sheets)
     now = datetime.utcnow()
 
     rows = []
@@ -943,7 +981,8 @@ async def list_timesheets(
         if span is not None:
             worked = max(0, span - int(t.get("break_minutes") or 0))
         shift = shift_by_id.get(t.get("rostered_shift_id"))
-        clean, reasons = _review_state(t, worked, span, _rostered_break(shift), t["id"] in overlapping)
+        clean, reasons = _review_state(t, worked, span, _rostered_break(shift), t["id"] in overlapping,
+                                       _leave_that_day(on_leave, t))
         if status == "review" and (t.get("status") != "closed" or clean):
             continue
         total_minutes += worked or 0
