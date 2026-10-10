@@ -6,9 +6,11 @@ and what the manager reads after a cover approval or Copy last week.
      one, and can't be approved onto one: the approval checks carry an
      'on approved leave' block.
 [6]  Publishing a newer roster of the week moves a live cover whose shift
-     isn't on it, with its claim, to the identical open slot on it; with no
-     such slot the cover is withdrawn and the publish names who had claimed
-     it. The withdrawal is conditional, so a claim landing meanwhile is kept.
+     isn't on it, with its claim, to the identical open slot on it, a claim
+     ahead of an unclaimed cover; with no such slot the cover is withdrawn
+     and the publish, and every dashboard path that publishes, names who had
+     claimed it. The withdrawal is conditional, so a claim landing meanwhile
+     is kept.
 [9]  An open slot has no labour cost until someone is on it: leave leaves it
      with no cost, and Reports and the snapshot count its hours, not a cost.
 [20] Approving a claim on an open or leave shift says the shift is filled,
@@ -187,6 +189,101 @@ def test_publishing_a_newer_roster_keeps_a_swap_claim_on_the_requesters_same_shi
     ok = c.post(f"/api/cover/{live[0]['id']}/decide", json={"venue_id": vid, "approve": True}, headers=mgr)
     assert ok.status_code == 200, ok.text
     assert _roster_shift(later, "jo-sat-2").employee_id == ids["pat"]
+
+
+def test_a_claimed_cover_takes_the_only_identical_slot_ahead_of_an_unclaimed_one():
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    monday = _next_week(vid)
+    sat = monday + timedelta(days=5)
+    csv = ("Name,Date,Start,End,Area,Break\n"
+           f"Sam Kelly,{sat:%d/%m/%Y},16:00,23:00,Front Bar,30\n"
+           f"Chloe Murphy,{sat:%d/%m/%Y},16:00,23:00,Front Bar,30")
+    assert c.post("/api/setup/import-roster", json={"venue_id": vid, "content": csv}, headers=mgr).status_code == 200
+    later = _draft(vid, monday, [_shift("sam-sat-2", ids["sam"], sat, time(16), time(23), "Front Bar", 30)])
+    for who in ("sam", "chloe"):
+        lv = c.post("/api/leave", json={"venue_id": vid, "employee_id": ids[who], "start_date": sat.isoformat(),
+                                        "end_date": sat.isoformat(), "leave_type": "annual"}, headers=mgr)
+        assert lv.status_code == 200, lv.text
+    # The cover a publish reaches last, whichever order the store lists them in.
+    covers = [x for x in db.list_shift_covers(vid) if x["status"] == "open"]
+    assert len(covers) == 2
+    claim = c.post(f"/api/me/cover/{covers[-1]['id']}/claim", headers=staff["pat"])
+    assert claim.status_code == 200, claim.text
+
+    pub = _publish_api(c, mgr, later)
+    assert pub["cover_notices"] == [] and "had claimed" not in pub["message"]
+    live = [x for x in db.list_shift_covers(vid) if x["status"] in ("open", "claimed")]
+    assert [(x["shift_id"], x["status"], x["claimed_by"]) for x in live] == [("sam-sat-2", "claimed", ids["pat"])]
+    board = _board(c, staff["pat"])
+    assert [x["shift_id"] for x in board["claimed_by_me"]] == ["sam-sat-2"]
+    assert board["up_for_grabs"] == []
+
+
+_DROPPED = ("Pat Nguyen had claimed Sat 17 Oct 4-11pm Duty Manager, which isn't up for cover on this "
+            "roster — let them know.")
+
+
+@needs_node
+def test_the_roster_page_tells_the_manager_which_claim_a_publish_dropped():
+    from rosteriq.tests.test_wembley_a6 import ROSTER_STUBS, _publish_js
+    resp = {"success": True, "delivered": {"email": 0, "sms": 0, "push": 0, "in_app": 0},
+            "channels_available": ["in_app"], "staffing_warnings": ["Duty manager: nobody 17:00-23:00 Sat"],
+            "cover_notices": [_DROPPED], "message": "Roster published successfully. " + _DROPPED}
+    data = _run(ROSTER_STUBS + _publish_js() + r"""
+async function main() {
+  state.currentRosterId = 'r2';
+  global.__resp = """ + json.dumps(resp) + r""";
+  await publishRoster();
+  global.__resp = { success: true, delivered: { email: 0, sms: 0, push: 0, in_app: 0 }, cover_notices: [] };
+  const before = toasts.length;
+  await publishRoster();
+  console.log(JSON.stringify({ toasts: toasts, quiet: toasts.slice(before) }));
+}
+""")
+    dropped = [t for t in data["toasts"] if "had claimed" in t["m"]]
+    assert [t["m"] for t in dropped] == [_DROPPED]
+    assert dropped[0]["k"] == "warning"
+    assert len(data["quiet"]) == 1 and "had claimed" not in data["quiet"][0]["m"]
+
+
+@needs_node
+def test_publishing_the_first_roster_from_setup_names_a_dropped_claim():
+    js = _fns(_dash(), "rosterDeliverySummary", "obPublishFirstRoster")
+    resp = {"success": True, "delivered": {"email": 0, "sms": 0, "push": 0, "in_app": 0},
+            "channels_available": ["in_app"], "cover_notices": [_DROPPED]}
+    data = _run(r"""
+global.obState = { rosterId: 'r2' };
+global.fetchAPI = async function () { return """ + json.dumps(resp) + r"""; };
+""" + js + r"""
+async function main() {
+  await obPublishFirstRoster();
+  console.log(JSON.stringify({ out: el('ob-roster-result').textContent }));
+}
+""")
+    assert "Published" in data["out"]
+    assert data["out"].count(_DROPPED) == 1
+
+
+@needs_node
+def test_publishing_through_a_connected_tanda_names_a_dropped_claim():
+    js = _fns(_dash(), "displayedRosterId", "pushToRosteringSystem")
+    resp = {"success": True, "cover_notices": [_DROPPED]}
+    data = _run(r"""
+global.state = { currentVenue: 'wem', currentRosterId: 'r2', rosters: [] };
+global.fetchAPI = async function (url) {
+  calls.push(url);
+  if (url.indexOf('/api/feeds/config/') === 0) return { enabled: url.slice(-5) === 'tanda' };
+  return """ + json.dumps(resp) + r""";
+};
+""" + js + r"""
+async function main() {
+  await pushToRosteringSystem();
+  console.log(JSON.stringify({ calls: calls, toasts: toasts }));
+}
+""")
+    assert "/api/v1/rosters/r2/publish" in data["calls"]
+    assert [t["m"] for t in data["toasts"] if "had claimed" in t["m"]] == [_DROPPED]
 
 
 class _PGPublish(_PG):

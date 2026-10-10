@@ -448,7 +448,8 @@ def post_open_covers(db, roster, now: datetime = None) -> tuple:
             slots.setdefault((s.date, s.start_time.strftime("%H:%M"), s.end_time.strftime("%H:%M"),
                               normalise_area(s.role)), []).append(s)
     notices = []
-    for c in covers:
+    # Claims first, so a claim wins a slot an unclaimed cover could also take.
+    for c in sorted(covers, key=lambda c: c.get("status") != "claimed"):
         day = cover_day(c)
         if not (c.get("status") in LIVE_COVER and c.get("shift_id") not in on_roster
                 and day is not None and roster.week_start <= day <= roster.week_end):

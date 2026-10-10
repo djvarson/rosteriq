@@ -14029,6 +14029,7 @@ async function obPublishFirstRoster() {
       return;
     }
     out.textContent += '\nPublished — staff with linked phones see their shifts in /my. ' + rosterDeliverySummary(result).text;
+    if ((result.cover_notices || []).length) out.textContent += '\n' + result.cover_notices.join(' ');
     btn.textContent = 'Published ✓';
   } catch (err) {
     out.textContent += '\nPublish failed: ' + err.message;
@@ -14809,6 +14810,8 @@ async function publishRoster() {
         showToast('On at another venue: ' + elsewhere.slice(0, 3).join('; ') +
           (elsewhere.length > 3 ? ' (+' + (elsewhere.length - 3) + ' more)' : ''), 'warning', 12000);
       }
+      const dropped = result.cover_notices || [];
+      if (dropped.length) showToast(dropped.join(' '), 'warning', 15000);
     } else {
       showToast('Could not publish: ' + ((result && result.message) || 'roster not in a publishable state'), 'warning', 6000);
     }
@@ -14898,6 +14901,7 @@ async function pushToRosteringSystem() {
 
     const systemName = connectedSystem.name.charAt(0).toUpperCase() + connectedSystem.name.slice(1);
     showToast('Roster pushed to ' + systemName, 'success', 4000);
+    if (result && (result.cover_notices || []).length) showToast(result.cover_notices.join(' '), 'warning', 15000);
 
   } catch (err) {
     console.error('Push failed:', err);
