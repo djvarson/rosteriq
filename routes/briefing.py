@@ -114,7 +114,8 @@ async def daily_briefing(venue_id: str = Query(...),
         # (the demo account and linked staff read this briefing too).
         _is_mgr = user.role in ("manager", "owner") or getattr(user, "is_owner", False)
         from rosteriq.services.visa import visa_alerts
-        alerts = (visa_alerts(db.get_employees(venue_id) or [], today=today)
+        alerts = (visa_alerts([e for e in (db.get_employees(venue_id) or [])
+                               if getattr(e, "active", True) is not False], today=today)
                   if _is_mgr else [])
         expired = [a for a in alerts if a["kind"] == "expired"]
         expiring = [a for a in alerts if a["kind"] == "expiring"]

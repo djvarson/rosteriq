@@ -358,7 +358,8 @@ def test_privacy_export_and_anonymise_write_audit_rows():
     assert rows[0]["user_id"] == owner_id
     assert rows[0]["resource_id"] == eid
     d = rows[0]["details"]
-    assert d["employee_name_before"] == "Priya Vale"
+    # By id only: the row that records an erasure must not re-record the name.
+    assert "Priya" not in str(d)
     assert "name" in d["anonymised_fields"] and "email" in d["anonymised_fields"]
     assert d["outcome"] == "ok"
 

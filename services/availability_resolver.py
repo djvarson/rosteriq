@@ -211,6 +211,8 @@ class AvailabilityResolver:
             # Skip current employee
             if candidate.id == current_employee.id:
                 continue
+            if getattr(candidate, "active", True) is False:
+                continue
 
             # Mandatory filter: skill match
             if shift.role not in candidate.skills:

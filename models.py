@@ -217,6 +217,12 @@ class Employee(BaseModel):
     # Fortnightly work-hour cap from the visa condition (e.g. a student
     # visa's cap). None = no cap recorded.
     visa_work_limit_fortnight: Optional[float] = None
+    # False once they leave: never rostered or offered work again, while
+    # their shifts, timesheets and pay history stay on record.
+    active: bool = True
+    # Pay-rate changes made in RosterIQ, oldest first:
+    # {rate, previous_rate, effective_from, changed_at, changed_by}
+    rate_history: List[Dict[str, Any]] = []
     created_at: datetime
     updated_at: datetime
 

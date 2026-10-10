@@ -3484,6 +3484,7 @@
               <div>
                 <button class="btn btn-secondary btn-small" onclick="exportStaffContacts()" title="Download staff contact list">Export Contacts</button>
                 <button class="btn btn-secondary btn-small" onclick="openStaffImport()" title="Paste a staff export from Deputy, Tanda, or a spreadsheet">Import from export</button>
+                <button class="btn btn-secondary btn-small" id="btn-join-codes" onclick="openJoinCodes()" title="Every unlinked person's join code, to download or print">Join codes</button>
                 <button class="btn btn-primary btn-small" id="btn-add-staff">+ Add Staff</button>
               </div>
             </div>
@@ -3503,8 +3504,13 @@
               <div id="staff-import-report"></div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px;">
               <input type="text" placeholder="Search by name..." style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--dark-bg); color: var(--text-primary);" id="staff-search">
+              <select style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--dark-bg); color: var(--text-primary);" id="staff-status-filter">
+                <option value="active">Current staff</option>
+                <option value="inactive">Inactive (left)</option>
+                <option value="all">Everyone</option>
+              </select>
               <select style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--dark-bg); color: var(--text-primary);" id="staff-role-filter">
                 <option value="">All Roles</option>
                 <option value="kitchen">Kitchen</option>
@@ -5245,7 +5251,7 @@
       </div>
       <div class="input-group">
         <label>Hourly Base Rate (AUD) *</label>
-        <input type="number" id="add-emp-rate" placeholder="e.g., 28.50" step="0.01" min="0">
+        <input type="number" id="add-emp-rate" placeholder="e.g., 28.50" step="0.01" min="0" max="150">
       </div>
       <div class="input-group">
         <label>Primary Role / Skill</label>
@@ -5288,6 +5294,75 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-add-employee')">Cancel</button>
       <button class="btn btn-primary" id="btn-modal-add-employee">Add Employee</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal-edit-employee">
+  <div class="modal-content" style="max-width:560px;">
+    <div class="modal-header">Edit staff member <span id="ee-status" style="margin-left:6px;"></span></div>
+    <div class="modal-body">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+        <div class="input-group" style="margin:0; grid-column:1 / -1;"><label>Name *</label><input type="text" id="ee-name" maxlength="120"></div>
+        <div class="input-group" style="margin:0;"><label>Email</label><input type="email" id="ee-email" maxlength="254" placeholder="their login email"></div>
+        <div class="input-group" style="margin:0;"><label>Mobile</label><input type="text" id="ee-phone" maxlength="40" placeholder="e.g., 0400 000 000"></div>
+        <div class="input-group" style="margin:0;"><label>Hourly rate (AUD) *</label><input type="number" id="ee-rate" step="0.01" min="0" max="150"></div>
+        <div class="input-group" style="margin:0;"><label>New rate starts</label><input type="date" id="ee-rate-from"></div>
+        <div class="input-group" style="margin:0;"><label>Employment type</label>
+          <select id="ee-type"><option value="full_time">Full-time</option><option value="part_time">Part-time</option><option value="casual">Casual</option></select></div>
+        <div class="input-group" style="margin:0;"><label>Award level</label>
+          <select id="ee-level"><option value="level_1">Level 1</option><option value="level_2">Level 2</option><option value="level_3">Level 3</option><option value="level_4">Level 4</option><option value="level_5">Level 5</option><option value="level_6">Level 6</option></select></div>
+      </div>
+      <div id="ee-rate-history" style="font-size:12px; color:var(--text-muted); margin-top:6px;"></div>
+      <div class="input-group" style="margin-top:12px;"><label>Areas they can work</label>
+        <div id="ee-areas" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;"></div>
+        <input type="text" id="ee-area-extra" maxlength="200" placeholder="other areas, comma-separated (e.g. cellar, functions)"></div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px;">
+        <div class="input-group" style="margin:0;"><label>Max hrs / week</label><input type="number" id="ee-max-hours" min="1" max="60" step="0.5"></div>
+        <div class="input-group" style="margin:0;"><label>Visa status</label>
+          <select id="ee-visa"><option value="">Not recorded</option><option value="citizen">Citizen</option><option value="permanent_resident">Permanent resident</option><option value="student">Student visa</option><option value="working_holiday">Working holiday</option><option value="temporary_other">Other temporary visa</option></select></div>
+        <div class="input-group" style="margin:0;"><label>Visa expiry</label><input type="date" id="ee-visa-expiry"></div>
+        <div class="input-group" style="margin:0;"><label>Hour cap / fortnight</label><input type="number" id="ee-visa-cap" min="1" max="152" step="1" placeholder="from VEVO"></div>
+      </div>
+      <div id="ee-result" style="font-size:13px; margin-top:10px; color:#B45309; font-weight:600;"></div>
+      <div style="border-top:1px solid var(--border); margin-top:16px; padding-top:12px;">
+        <div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">If they leave</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-small" id="ee-toggle-active" onclick="staffToggleActive()">Mark as left</button>
+          <button class="btn btn-secondary btn-small" id="ee-remove-start" onclick="staffRemoveDetailsStart()">Remove personal details…</button>
+        </div>
+        <div style="font-size:12px; color:var(--text-muted); margin-top:6px;">Marking someone as left takes them off rosters, cover, call-ins and the kiosk. Their shifts, timesheets and pay history stay.</div>
+        <div id="ee-remove-confirm" style="display:none; margin-top:10px; padding:12px; border:1px solid #DC2626; border-radius:8px; background:rgba(220,38,38,0.06);">
+          <div style="font-size:13px; font-weight:600; margin-bottom:6px;">Remove <span id="ee-remove-who"></span>'s personal details?</div>
+          <div style="font-size:12px; color:var(--text-secondary); line-height:1.5; margin-bottom:8px;">Their name, email, mobile and work-rights details are wiped from RosterIQ, including on team feed posts and procedure sign-offs, and their staff login loses access to this venue (it's switched off if this was its only venue). Shifts and pay history stay under an anonymous name. This can't be undone.</div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-small" style="background:#DC2626; color:#fff;" onclick="staffRemoveDetailsConfirm()">Yes, remove their details</button>
+            <button class="btn btn-secondary btn-small" onclick="document.getElementById('ee-remove-confirm').style.display='none'">Keep them</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-edit-employee')">Cancel</button>
+      <button class="btn btn-primary" id="ee-save" onclick="saveEditEmployee()">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal-join-codes">
+  <div class="modal-content" style="max-width:640px;">
+    <div class="modal-header">Join codes for everyone not linked yet</div>
+    <div class="modal-body">
+      <p id="jcs-summary" style="color:var(--text-muted); margin-bottom:10px;"></p>
+      <div class="table-container" style="max-height:360px; overflow-y:auto;">
+        <table class="table"><thead><tr><th>Name</th><th>Mobile</th><th>Join code</th></tr></thead><tbody id="jcs-body"></tbody></table>
+      </div>
+      <p style="color:var(--text-muted); font-size:12px; margin-top:10px;">Each person signs up at <b id="jcs-link"></b> with their own email and enters their code once. Hand codes to the right person only: a code links whoever enters it to that staff record.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-join-codes')">Close</button>
+      <button class="btn btn-secondary" onclick="downloadJoinCodes()">Download CSV</button>
+      <button class="btn btn-primary" onclick="printJoinCodes()">Print sheet</button>
     </div>
   </div>
 </div>
@@ -7605,14 +7680,15 @@ function annPillClick(i) { annToggleAudience(i < 0 ? '' : (annPillSections[i] ||
 function annAudiencePills() {
   const host = document.getElementById('an-audience-pills');
   if (!host) return;
-  annPillSections = venueSections();
+  const opts = _audienceOptionsNow(annAudiencePills);
+  annPillSections = opts.map(function (o) { return o.value; });
   const mk = function (idx, label, on) {
     return '<button class="btn btn-secondary btn-small" onclick="annPillClick(' + idx + ')" style="' +
       (on ? 'background:rgba(245,158,11,0.14); border-color:var(--brand-blue); color:var(--text-primary); font-weight:700;' : '') +
       'text-transform:capitalize;">' + esc(label) + '</button>';
   };
   host.innerHTML = mk(-1, 'Everyone', annAudience.length === 0) +
-    annPillSections.map(function (x, i) { return mk(i, x, annAudience.indexOf(x) >= 0); }).join('');
+    annPillSections.map(function (x, i) { return mk(i, opts[i].label, annAudience.indexOf(x) >= 0); }).join('');
 }
 
 function annToggleAudience(sec) {
@@ -8077,14 +8153,15 @@ function sopRolePills() {
   if (!host) return;
   const current = document.getElementById('sop-roles').value.split(',')
     .map(function (x) { return x.trim().toLowerCase(); }).filter(Boolean);
-  sopPillSections = venueSections();
+  const opts = _audienceOptionsNow(sopRolePills);
+  sopPillSections = opts.map(function (o) { return o.value; });
   const mk = function (idx, label, on) {
     return '<button type="button" class="btn btn-secondary btn-small" onclick="sopPillClick(' + idx + ')" style="' +
       (on ? 'background:rgba(245,158,11,0.14); border-color:var(--brand-blue); color:var(--text-primary); font-weight:700;' : '') +
       'text-transform:capitalize;">' + esc(label) + '</button>';
   };
   host.innerHTML = mk(-1, 'Everyone', current.length === 0) +
-    sopPillSections.map(function (x, i) { return mk(i, x, current.indexOf(x.toLowerCase()) >= 0); }).join('');
+    sopPillSections.map(function (x, i) { return mk(i, opts[i].label, current.indexOf(x.toLowerCase()) >= 0); }).join('');
 }
 
 function sopTogglePill(sec) {
@@ -8991,6 +9068,7 @@ async function loadVenueData() {
   // A compose audience picked for the old venue must not silently target
   // the new one.
   annAudience = [];
+  _audienceCache = { venue: null, options: null, pending: null };
   annAudiencePills();
 
   showLoading('kpi-row', 'card', 5);
@@ -9380,7 +9458,7 @@ function renderStaffTable() {
   if (!body) return;
   if (!_staffTableWired) {
     _staffTableWired = true;
-    ['staff-search', 'staff-role-filter', 'staff-sort'].forEach(function(id) {
+    ['staff-search', 'staff-role-filter', 'staff-sort', 'staff-status-filter'].forEach(function(id) {
       var el = document.getElementById(id);
       if (el) el.addEventListener('input', renderStaffTable);
       if (el) el.addEventListener('change', renderStaffTable);
@@ -9404,8 +9482,10 @@ function renderStaffTable() {
   var q = ((document.getElementById('staff-search') || {}).value || '').trim().toLowerCase();
   var roleF = ((document.getElementById('staff-role-filter') || {}).value || '').toLowerCase();
   var sort = ((document.getElementById('staff-sort') || {}).value || 'name');
+  var statusF = ((document.getElementById('staff-status-filter') || {}).value || 'active');
   var hours = _weekHoursByEmployee();
   var rows = emps.filter(function(e) {
+    if (statusF !== 'all' && (statusF === 'inactive') === (e.active !== false)) return false;
     if (q && String(e.name || '').toLowerCase().indexOf(q) < 0 && String(e.email || '').toLowerCase().indexOf(q) < 0) return false;
     if (roleF) {
       var sk = (e.skills || []).map(function(x) { return String(x).toLowerCase(); });
@@ -9420,7 +9500,8 @@ function renderStaffTable() {
   });
   var _r = _jwtRole();
   var isManager = (_r === 'manager' || _r === 'owner');
-  body.innerHTML = rows.map(function(e) {
+  _staffRowIds = rows.map(function(e) { return e.id; });
+  body.innerHTML = rows.map(function(e, rowIdx) {
     var role = (e.skills && e.skills.length) ? e.skills.map(function(x) { return String(x).charAt(0).toUpperCase() + String(x).slice(1); }).join(', ') : '—';
     var rate = e.hourly_base_rate != null ? '$' + Number(e.hourly_base_rate).toFixed(2) : '—';
     var certs = (e.certifications || e.certs || []);
@@ -9455,13 +9536,16 @@ function renderStaffTable() {
             : (h > 38 ? 'High' : h > 30 ? 'Medium' : 'Low') + ' (' + Math.round(h) + 'hrs/wk)';
     var actions = isManager
       ? '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
-        '<button class="btn btn-secondary btn-small" style="white-space:nowrap" onclick="showJoinCode(\'' + esc(e.id) + '\')" title="Code the staff member enters in the app to link their login">Join code</button>' +
+        '<button class="btn btn-secondary btn-small" style="white-space:nowrap" onclick="openEditEmployee(' + rowIdx + ')" title="Change their details, rate, areas or hours — or mark them as left">Edit</button>' +
+        (e.active === false ? '' :
+        '<button class="btn btn-secondary btn-small" style="white-space:nowrap" onclick="showJoinCode(\'' + esc(e.id) + '\')" title="Code the staff member enters in the app to link their login">Join code</button>') +
         '<button class="btn btn-secondary btn-small" style="white-space:nowrap" onclick="openAccessModal(this.getAttribute(\'data-emp\'))" data-emp="' + esc(e.id) + '" title="Reset their login or change their dashboard access">Access</button>' +
         '</div>'
       : '';
     var emailLine = e.email ? '<div style="font-size:11px;color:var(--text-muted)">' + esc(e.email) + '</div>' : '<div style="font-size:11px;color:var(--text-muted)">invite pending</div>';
     return '<tr>' +
-      '<td><div style="font-weight:600">' + esc(e.name || '') + '</div>' + emailLine + '</td>' +
+      '<td><div style="font-weight:600">' + esc(e.name || '') +
+        (e.active === false ? ' <span class="alert-badge" style="background:var(--light-bg); color:var(--text-secondary); border:1px solid var(--border);">Inactive</span>' : '') + '</div>' + emailLine + '</td>' +
       '<td>' + esc(role) + '</td>' +
       '<td>' + esc(_fmtAward(e.award_level)) + '</td>' +
       '<td>' + rate + '</td>' +
@@ -9563,6 +9647,258 @@ function copyJoinCode() {
   var failed = function() { showToastNotification('Copy it by hand', 'Your browser blocked the clipboard — the code is ' + _lastJoinCode, 'warning'); };
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(_lastJoinCode).then(done, failed);
   else failed();
+}
+
+// ---------------------------------------------------------------------------
+// Edit a staff record, mark them as left, remove a leaver's details
+// (routes/staff_records.py, routes/privacy.py). Rows are addressed by index
+// into _staffRowIds so no record value is ever spliced into an attribute.
+// ---------------------------------------------------------------------------
+var _staffRowIds = [];
+var _editEmp = null;
+var _editAreaChoices = [];
+
+var STAFF_MAX_HOURLY_RATE = 150;
+function staffRateProblem(rate) {
+  if (isNaN(rate) || rate <= 0) return 'Hourly rate must be more than $0';
+  if (rate > STAFF_MAX_HOURLY_RATE) {
+    var money = function(n) { return '$' + n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+    return money(rate) + ' an hour is over ' + money(STAFF_MAX_HOURLY_RATE) +
+      ' — that looks like a weekly or annual salary. Enter what they’re paid per hour.';
+  }
+  return '';
+}
+
+function _titleCase(s) {
+  return String(s || '').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+}
+
+function _editAreaPills() {
+  var host = document.getElementById('ee-areas');
+  if (!host) return;
+  host.innerHTML = _editAreaChoices.map(function(a, i) {
+    return '<label style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer;">' +
+      '<input type="checkbox" class="ee-area-cb" data-idx="' + i + '"' + (a.on ? ' checked' : '') + '> ' + esc(a.label) + '</label>';
+  }).join('') || '<span style="font-size:12px; color:var(--text-muted);">No areas set up for this venue yet — type them below.</span>';
+}
+
+async function openEditEmployee(rowIdx) {
+  var id = _staffRowIds[rowIdx];
+  var e = (state.employees || []).find(function(x) { return x.id === id; });
+  if (!e) return;
+  _editEmp = e;
+  var val = function(elId, v) { var el = document.getElementById(elId); if (el) el.value = (v == null ? '' : v); };
+  val('ee-name', e.name);
+  val('ee-email', e.email);
+  val('ee-phone', e.phone);
+  val('ee-rate', e.hourly_base_rate != null ? Number(e.hourly_base_rate).toFixed(2) : '');
+  val('ee-rate-from', localIso(new Date()));
+  val('ee-type', e.employment_type || 'casual');
+  val('ee-level', e.award_level || 'level_2');
+  val('ee-max-hours', e.max_hours_per_week);
+  val('ee-visa', e.visa_status || '');
+  val('ee-visa-expiry', e.visa_expiry || '');
+  val('ee-visa-cap', e.visa_work_limit_fortnight);
+  val('ee-area-extra', '');
+  document.getElementById('ee-result').textContent = '';
+  document.getElementById('ee-remove-confirm').style.display = 'none';
+  document.getElementById('ee-remove-who').textContent = e.name || '';
+  var inactive = e.active === false;
+  document.getElementById('ee-status').innerHTML = inactive ? '<span class="alert-badge" style="background:var(--light-bg); color:var(--text-secondary); border:1px solid var(--border);">Inactive</span>' : '';
+  document.getElementById('ee-toggle-active').textContent = inactive ? 'Make active again' : 'Mark as left';
+  var hist = (e.rate_history || []).slice(-3).reverse();
+  document.getElementById('ee-rate-history').innerHTML = hist.length
+    ? 'Rate changes: ' + hist.map(function(h) {
+        return esc('$' + h.rate + ' from ' + h.effective_from + (h.previous_rate ? ' (was $' + h.previous_rate + ')' : ''));
+      }).join(' · ')
+    : '';
+
+  var held = (e.skills || []).map(function(s) { return String(s).toLowerCase(); });
+  _editAreaChoices = [];
+  var seen = {};
+  var add = function(value, label) {
+    var v = String(value || '').toLowerCase();
+    if (!v || seen[v]) return;
+    seen[v] = true;
+    _editAreaChoices.push({ value: v, label: label || _titleCase(v), on: held.indexOf(v) >= 0 });
+  };
+  (await audiencePillOptions()).forEach(function(o) { if (o.kind !== 'group') add(o.value, o.label); });
+  held.forEach(function(s) { add(s); });
+  _editAreaPills();
+  openModal('modal-edit-employee');
+}
+
+async function saveEditEmployee() {
+  var e = _editEmp;
+  if (!e) return;
+  var get = function(id) { return (document.getElementById(id).value || '').trim(); };
+  var out = document.getElementById('ee-result');
+  var name = get('ee-name');
+  if (!name) { out.textContent = 'Name can’t be blank.'; return; }
+  var rate = parseFloat(get('ee-rate'));
+  var rateProblem = staffRateProblem(rate);
+  if (rateProblem) { out.textContent = rateProblem; return; }
+  var areas = _editAreaChoices.filter(function(a, i) {
+    var cb = document.querySelector('.ee-area-cb[data-idx="' + i + '"]');
+    return cb ? cb.checked : a.on;
+  }).map(function(a) { return a.value; });
+  get('ee-area-extra').split(',').forEach(function(x) {
+    x = x.trim().toLowerCase();
+    if (x && areas.indexOf(x) < 0) areas.push(x);
+  });
+  var maxHours = get('ee-max-hours'), cap = get('ee-visa-cap');
+  var payload = {
+    name: name,
+    email: get('ee-email') || null,
+    phone: get('ee-phone') || null,
+    employment_type: get('ee-type'),
+    award_level: get('ee-level'),
+    skills: areas,
+    visa_status: get('ee-visa') || null,
+    visa_expiry: get('ee-visa-expiry') || null,
+    visa_work_limit_fortnight: cap ? parseFloat(cap) : null,
+  };
+  if (maxHours) payload.max_hours_per_week = parseFloat(maxHours);
+  if (Math.abs(rate - Number(e.hourly_base_rate || 0)) >= 0.005) {
+    payload.hourly_base_rate = rate.toFixed(2);
+    if (get('ee-rate-from')) payload.rate_effective_from = get('ee-rate-from');
+  }
+  var btn = document.getElementById('ee-save');
+  btn.disabled = true;
+  try {
+    var r = await fetchAPI('/employees/' + encodeURIComponent(e.id), { method: 'PUT', body: JSON.stringify(payload) });
+    var notes = (r && r.notes) || [];
+    showToast(name + (r && r.status === 'unchanged' ? ' — nothing changed' : ' saved'), notes.length ? 'warning' : 'success');
+    if (notes.length) out.textContent = notes.join(' ');
+    else closeModal('modal-edit-employee');
+    loadVenueData();
+  } catch (err) {
+    out.textContent = err.message || 'Could not save';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function staffToggleActive() {
+  var e = _editEmp;
+  if (!e) return;
+  var leaving = e.active !== false;
+  try {
+    var r = await fetchAPI('/employees/' + encodeURIComponent(e.id) + (leaving ? '/deactivate' : '/reactivate'), { method: 'POST' });
+    showToast(r.message, (r.upcoming_shifts || []).length ? 'warning' : 'success');
+    closeModal('modal-edit-employee');
+    loadVenueData();
+  } catch (err) {
+    document.getElementById('ee-result').textContent = err.message || 'Could not change their status';
+  }
+}
+
+function staffRemoveDetailsStart() {
+  document.getElementById('ee-remove-confirm').style.display = 'block';
+}
+
+async function staffRemoveDetailsConfirm() {
+  var e = _editEmp;
+  if (!e) return;
+  try {
+    var r = await fetchAPI('/api/privacy/anonymise/employee/' + encodeURIComponent(e.id), { method: 'POST' });
+    showToast('Personal details removed' + (r.logins_deactivated ? ' and their staff login switched off' : ''), 'success');
+    closeModal('modal-edit-employee');
+    loadVenueData();
+  } catch (err) {
+    document.getElementById('ee-result').textContent = err.message || 'Could not remove their details';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Join codes in bulk: everyone current with no linked login yet.
+// ---------------------------------------------------------------------------
+var _joinCodeRows = [];
+var _joinCodeLink = '';
+async function openJoinCodes() {
+  if (state.isDemo) { showToast('Sample staff can’t be invited — sign up to hand out join codes.', 'info'); return; }
+  if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
+  try {
+    var d = await fetchAPI('/api/venues/' + encodeURIComponent(state.currentVenue) + '/join-codes');
+    _joinCodeRows = d.people || [];
+    _joinCodeLink = d.register_url || '';
+    document.getElementById('jcs-summary').textContent = _joinCodeRows.length
+      ? _joinCodeRows.length + (_joinCodeRows.length === 1 ? ' person hasn’t' : ' people haven’t') + ' linked their login yet.'
+      : 'Everyone current has linked their login.';
+    document.getElementById('jcs-link').textContent = _joinCodeLink;
+    document.getElementById('jcs-body').innerHTML = _joinCodeRows.map(function(r) {
+      return '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.mobile || '—') + '</td><td style="font-family:ui-monospace,Menlo,monospace; font-weight:700; letter-spacing:1px;">' + esc(r.join_code) + '</td></tr>';
+    }).join('');
+    openModal('modal-join-codes');
+  } catch (err) {
+    showToast(err.message || 'Could not load join codes', 'error');
+  }
+}
+
+async function downloadJoinCodes() {
+  try {
+    var csv = await fetchAPI('/api/venues/' + encodeURIComponent(state.currentVenue) + '/join-codes?format=csv');
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'join-codes-' + localIso(new Date()) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  } catch (err) {
+    showToast(err.message || 'Could not download join codes', 'error');
+  }
+}
+
+function printJoinCodes() {
+  var venue = (state.venues || []).find(function(v) { return v.id === state.currentVenue; });
+  var title = 'Join codes — ' + ((venue && venue.name) || state.currentVenue || '');
+  var rows = _joinCodeRows.map(function(r) {
+    return '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.mobile || '') + '</td><td class="code">' + esc(r.join_code) + '</td></tr>';
+  }).join('');
+  var w = window.open('', '_blank');
+  if (!w) { showToast('Your browser blocked the print window — allow pop-ups, or use Download CSV.', 'warning'); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' +
+    'body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#111;margin:24px;}' +
+    'h1{font-size:20px;margin:0 0 4px;}p{font-size:13px;color:#444;margin:0 0 14px;}' +
+    'table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:8px 10px;text-align:left;font-size:14px;}' +
+    'td.code{font-family:Menlo,Consolas,monospace;font-weight:700;letter-spacing:2px;}' +
+    'tr{page-break-inside:avoid;}</style></head><body>' +
+    '<h1>' + esc(title) + '</h1>' +
+    '<p>Sign up at <b>' + esc(_joinCodeLink) + '</b> with your own email, then enter your join code once. Keep your code to yourself.</p>' +
+    '<table><thead><tr><th>Name</th><th>Mobile</th><th>Join code</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '</body></html>');
+  w.document.close();
+  w.focus();
+  w.print();
+}
+
+// ---------------------------------------------------------------------------
+// Audience pills for notices and procedures: the venue's areas, the skills its
+// current staff hold, and "All <word>" groups (GET .../audience-options).
+// ---------------------------------------------------------------------------
+var _audienceCache = { venue: null, options: null, pending: null };
+async function audiencePillOptions() {
+  var vid = state.currentVenue;
+  if (!vid || state.isDemo) return [];
+  if (_audienceCache.venue === vid && _audienceCache.options) return _audienceCache.options;
+  if (_audienceCache.venue === vid && _audienceCache.pending) return _audienceCache.pending;
+  _audienceCache = { venue: vid, options: null, pending: null };
+  _audienceCache.pending = fetchAPI('/api/venues/' + encodeURIComponent(vid) + '/audience-options')
+    .then(function(d) {
+      if (_audienceCache.venue === vid) _audienceCache.options = (d && d.options) || [];
+      return (d && d.options) || [];
+    })
+    .catch(function() { if (_audienceCache.venue === vid) _audienceCache.pending = null; return []; });
+  return _audienceCache.pending;
+}
+function _audienceOptionsNow(refresh) {
+  if (_audienceCache.venue === state.currentVenue && _audienceCache.options && _audienceCache.options.length) {
+    return _audienceCache.options;
+  }
+  audiencePillOptions().then(function(opts) { if (opts.length) refresh(); });
+  return venueSections().map(function(s) { return { value: s, label: s, kind: 'area' }; });
 }
 
 function populateRealRoster(employees, shifts) {
@@ -10587,6 +10923,7 @@ document.getElementById('btn-modal-add-employee').addEventListener('click', asyn
     showToast('Hourly base rate must be greater than 0', 'error');
     return;
   }
+  if (staffRateProblem(rate)) { showToast(staffRateProblem(rate), 'error'); return; }
   if (!state.currentVenue) { showToast('No venue selected', 'error'); return; }
 
   const now = new Date().toISOString();

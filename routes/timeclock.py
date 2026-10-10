@@ -31,6 +31,7 @@ from rosteriq.services.current_roster import live_shifts
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.services.events import audit
+from rosteriq.services.staff_records import is_active
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,8 @@ async def clock_board(venue_id: str = Query(...)) -> dict:
     board = []
     for emp in db.get_employees(venue_id) or []:
         open_ts = db.get_open_timesheet(venue_id, emp.id)
+        if not is_active(emp) and not open_ts:
+            continue  # left the venue; still shown while clocked on so they can clock out
         done = False
         if not open_ts:
             for t in db.get_timesheets(venue_id, today, today) or []:
@@ -156,6 +159,9 @@ async def clock_in(body: PunchRequest) -> dict:
     enforce_venue_access(body.venue_id)
     db = get_db()
     emp = _employee_or_404(db, body.venue_id, body.employee_id)
+    if not is_active(emp):
+        raise HTTPException(status_code=409,
+                            detail=f"{emp.name} is no longer active here — ask a manager")
 
     if not _verify_pin(db, body.venue_id, body.employee_id, body.pin):
         raise HTTPException(status_code=403, detail="Incorrect PIN")

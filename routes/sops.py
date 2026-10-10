@@ -19,8 +19,8 @@ Staff routes (email-linked identity, same as the rest of the portal):
     POST /api/me/sops/{id}/acknowledge    -- acknowledge the current version
 
 Applicability: a document with an empty ``applies_to`` applies to everyone;
-otherwise it applies to any employee whose ``skills`` intersect the roles
-listed (case-insensitive).
+otherwise services/audience decides — a listed area/skill the employee holds,
+or a group such as "all bar" (case-insensitive).
 """
 
 import logging
@@ -36,7 +36,9 @@ from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
 from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
+from rosteriq.services.audience import matches as audience_matches
 from rosteriq.services.events import audit
+from rosteriq.services.staff_records import active_only, is_active
 
 logger = logging.getLogger(__name__)
 
@@ -123,11 +125,7 @@ def _require_manager_for_doc(user: UserContext, doc: dict) -> None:
 
 
 def _applies_to_employee(doc: dict, emp) -> bool:
-    roles = [str(r).strip().lower() for r in (doc.get("applies_to") or []) if str(r).strip()]
-    if not roles:
-        return True
-    skills = {str(s).strip().lower() for s in (getattr(emp, "skills", None) or [])}
-    return any(r in skills for r in roles)
+    return audience_matches(doc.get("applies_to"), emp)
 
 
 def _doc_payload(d: dict) -> dict:
@@ -154,7 +152,7 @@ def _ack_stats(doc: dict, staff: list, acks: list) -> dict:
         a.get("employee_id") for a in acks
         if a.get("doc_id") == doc["id"] and int(a.get("doc_version") or 0) == version
     }
-    applicable = [e for e in staff if _applies_to_employee(doc, e)]
+    applicable = [e for e in staff if is_active(e) and _applies_to_employee(doc, e)]
     acked = [e for e in applicable if e.id in current]
     outstanding = sorted(e.name for e in applicable if e.id not in current)
     if not doc.get("requires_ack", True):
@@ -501,7 +499,7 @@ async def list_sop_documents(venue_id: str = Query(...),
         p["has_any_ack"] = has_any_ack
         p["deletable"] = not has_any_ack
         out.append(p)
-    return {"venue_id": venue_id, "count": len(out), "staff_count": len(staff),
+    return {"venue_id": venue_id, "count": len(out), "staff_count": len(active_only(staff)),
             "documents": out}
 
 

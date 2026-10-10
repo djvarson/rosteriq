@@ -286,6 +286,7 @@ class RosterTemplateService:
         if employees is None:
             employees = self.db.list_employees()
             employees = [e for e in employees if hasattr(e, 'venue_id') is False or e.venue_id == venue_id]
+            employees = [e for e in employees if getattr(e, "active", True) is not False]
 
         # Create roster with shifts from template
         roster = Roster(

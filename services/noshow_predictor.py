@@ -743,7 +743,8 @@ class NoShowPredictor:
         # — or reveal — another tenant's staff).
         all_employees = [
             e for e in self.db.list_employees()
-            if not target_venue_id or getattr(e, "venue_id", None) == target_venue_id
+            if (not target_venue_id or getattr(e, "venue_id", None) == target_venue_id)
+            and getattr(e, "active", True) is not False
         ]
 
         for employee in all_employees:

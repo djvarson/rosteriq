@@ -177,7 +177,8 @@ class SkillMatrixService:
         # get_employees(None) is the whole platform, never a venue's staff.
         if not venue_id:
             return []
-        return self.db.get_employees(venue_id)
+        return [e for e in (self.db.get_employees(venue_id) or [])
+                if getattr(e, "active", True) is not False]
 
     def build_skill_matrix(self, venue_id: str) -> SkillMatrix:
         """
