@@ -1195,6 +1195,15 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register roster diff routes: {e}")
 
+# Hand edits to a roster's shifts, and copy a week forward
+try:
+    from rosteriq.routes.roster_edit import router as roster_edit_router
+    app.include_router(roster_edit_router)
+except ImportError:
+    logger.warning("Roster edit routes unavailable")
+except Exception as e:
+    logger.error(f"Failed to register roster edit routes: {e}")
+
 
 # Admin logging routes (log querying and request tracing)
 try:

@@ -608,6 +608,15 @@
       color: var(--danger);
     }
 
+    /* Editable roster grid */
+    .roster-shift { cursor: pointer; margin: 2px 4px 2px 0; }
+    .roster-shift:hover, .roster-shift:focus { border-color: var(--brand-blue); outline: none; }
+    .roster-shift .shift-area { display: block; font-size: 10px; font-weight: 500; color: var(--text-muted); text-transform: capitalize; }
+    .roster-add { border: 1px dashed var(--border); background: transparent; color: var(--text-muted); border-radius: 6px; width: 24px; height: 24px; padding: 0; margin-left: 4px; cursor: pointer; font-size: 14px; line-height: 20px; opacity: 0.55; vertical-align: middle; }
+    .roster-add::before { content: '+'; }
+    .roster-table td:hover .roster-add, .roster-add:focus { opacity: 1; border-color: var(--brand-blue); color: var(--text-primary); }
+    #roster-changed-banner { display: none; margin-bottom: 14px; padding: 12px 16px; border-radius: 12px; font-size: 14px; background: rgba(245, 158, 11, 0.1); border: 1px solid var(--brand-blue); color: var(--text-primary); align-items: center; gap: 12px; flex-wrap: wrap; }
+
     /* Draggable shifts */
     .shift-cell[draggable="true"] {
       cursor: grab;
@@ -3197,6 +3206,8 @@
         </div>
 
         <div id="roster-coverage-banner" style="display:none; margin-bottom:14px; padding:12px 16px; border-radius:12px; font-size:14px; font-weight:600;"></div>
+        <div id="roster-changed-banner" role="status"></div>
+        <div id="roster-copy-report" style="display:none; margin-bottom:14px; border:1px solid var(--border); border-radius:10px; padding:12px 16px; font-size:13px; background:var(--card-bg);"></div>
 
         <div id="roster-import-card" style="display:none; margin-bottom:14px; border:1px solid var(--brand-blue); border-radius:10px; padding:14px;">
           <div style="font-weight:600; margin-bottom:4px;">Import your existing roster — no live connection</div>
@@ -3221,11 +3232,12 @@
                 <button class="btn btn-secondary btn-small" id="btn-prev-week">← Previous</button>
                 <button class="btn btn-secondary btn-small" id="btn-next-week">Next →</button>
                 <button class="btn btn-secondary btn-small" onclick="openRosterImport()" title="Paste a roster export from Deputy, Tanda, or a spreadsheet">Import roster</button>
+                <button class="btn btn-secondary btn-small" id="btn-roster-copy-week" onclick="copyLastWeek()" title="Start this week from last week's roster, as a draft">Copy last week</button>
                 <button class="btn btn-primary btn-small" id="btn-roster-generate" onclick="openGenerateRoster()">Generate Roster</button>
                 <span style="display:inline-block; width:1px; height:20px; background:var(--border); margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterPDF()" title="Download PDF for printing">PDF</button>
                 <button class="btn btn-secondary btn-small" onclick="exportRosterCSV()" title="Download CSV for Excel">CSV</button>
-                <button class="btn btn-secondary btn-small" onclick="publishRoster()" id="btn-publish-roster" title="Publish this roster and notify staff (no integration required)">Publish Roster</button>
+                <button class="btn btn-secondary btn-small" onclick="publishRoster().then(function () { refreshRosterChanges(displayedRosterId()); })" id="btn-publish-roster" title="Publish this roster and notify staff (no integration required)">Publish Roster</button>
                 <button class="btn btn-secondary btn-small" onclick="pushToRosteringSystem()" id="btn-push-roster" style="display:none" title="Also push roster to a connected rostering system (Tanda/Deputy/Humanforce)">Push to System</button>
                 <span style="display:inline-block; width:1px; height:20px; background:var(--border); margin:0 8px; vertical-align:middle;"></span>
                 <button class="btn btn-secondary btn-small" onclick="exportDailyRunsheet()" title="Print today's shift runsheet">Runsheet</button>
@@ -5173,6 +5185,47 @@
   </div>
 </div>
 
+<div class="modal" id="modal-edit-shift">
+  <div class="modal-content">
+    <div class="modal-header" id="es-title">Edit shift</div>
+    <div class="modal-body">
+      <div class="input-group">
+        <label for="es-emp">Person</label>
+        <select id="es-emp"></select>
+      </div>
+      <div class="input-group">
+        <label for="es-role">Area</label>
+        <input type="text" id="es-role" list="es-role-list" maxlength="40" autocomplete="off" placeholder="e.g. front bar">
+        <datalist id="es-role-list"></datalist>
+      </div>
+      <div class="input-group">
+        <label for="es-date">Day</label>
+        <select id="es-date"></select>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <div class="input-group" style="flex:1; min-width:110px;">
+          <label for="es-start">Start</label>
+          <input type="time" id="es-start" step="300">
+        </div>
+        <div class="input-group" style="flex:1; min-width:110px;">
+          <label for="es-end">End</label>
+          <input type="time" id="es-end" step="300">
+        </div>
+        <div class="input-group" style="flex:1; min-width:110px;">
+          <label for="es-break">Unpaid break (min)</label>
+          <input type="number" id="es-break" min="0" max="240" step="5">
+        </div>
+      </div>
+      <div id="es-warnings" style="font-size:13px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="es-delete" onclick="deleteShiftEdit()" style="margin-right:auto; color:var(--danger);">Delete shift</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-edit-shift')">Cancel</button>
+      <button class="btn btn-primary" id="es-save" onclick="saveShiftEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal-edit-timesheet">
   <div class="modal-content">
     <div class="modal-header">Review Timesheet</div>
@@ -5687,6 +5740,7 @@ let state = {
   employees: [],
   rosters: [],
   currentRosterId: null,   // the roster on screen in the Roster grid
+  currentRoster: null,
   forecasts: [],
   signals: [],
   ws: null,
@@ -10186,6 +10240,7 @@ function populateDemoStaffList() {
 // it, so no page keeps showing — or acting on — the previous venue's records.
 function resetVenuePageState() {
   state.currentRosterId = null;
+  state.currentRoster = null;
   state.currentRosterWeek = null;
   state.employees = [];
   state.employeesTotal = 0;
@@ -12737,11 +12792,10 @@ function exportRosterPDF() {
     const role = roleEl ? roleEl.textContent.trim() : '';
     const shifts = [];
     for (let i = 1; i < cells.length; i++) {
-      const shiftEl = cells[i].querySelector('.shift-cell');
-      if (shiftEl) {
-        // Get shift time only (exclude AI reason text)
-        let shiftText = shiftEl.childNodes[0].textContent.trim();
-        shifts.push(shiftText);
+      const shiftEls = cells[i].querySelectorAll('.shift-cell');
+      if (shiftEls.length) {
+        // Get shift times only (exclude AI reason / area text); a split shift is two
+        shifts.push(Array.from(shiftEls).map(s => s.childNodes[0].textContent.trim()).join(' / '));
       } else {
         shifts.push(cells[i].textContent.trim() || 'Off');
       }
@@ -12800,7 +12854,7 @@ function exportRosterPDF() {
 <table>
   <thead><tr>${headers.map(h => '<th>' + h + '</th>').join('')}</tr></thead>
   <tbody>
-    ${data.map(row => '<tr><td class="name">' + row.name + '</td><td class="role">' + row.role + '</td>' + row.shifts.map(s => s === 'Off' ? '<td class="off">Off</td>' : '<td class="shift">' + s + '</td>').join('') + '</tr>').join('\n    ')}
+    ${data.map(row => '<tr><td class="name">' + esc(row.name) + '</td><td class="role">' + esc(row.role) + '</td>' + row.shifts.map(s => s === 'Off' ? '<td class="off">Off</td>' : '<td class="shift">' + esc(s) + '</td>').join('') + '</tr>').join('\n    ')}
   </tbody>
 </table>
 ${costHTML}
@@ -12836,10 +12890,10 @@ function exportRosterCSV() {
     const role = roleEl ? roleEl.textContent.trim() : '';
     const fields = ['"' + name.replace(/"/g, '""') + '"', '"' + role.replace(/"/g, '""') + '"'];
     for (let i = 1; i < cells.length; i++) {
-      const shiftEl = cells[i].querySelector('.shift-cell');
-      if (shiftEl) {
-        let shiftText = shiftEl.childNodes[0].textContent.trim();
-        fields.push('"' + shiftText + '"');
+      const shiftEls = cells[i].querySelectorAll('.shift-cell');
+      if (shiftEls.length) {
+        const shiftText = Array.from(shiftEls).map(s => s.childNodes[0].textContent.trim()).join(' / ');
+        fields.push('"' + shiftText.replace(/"/g, '""') + '"');
       } else {
         fields.push('"Off"');
       }
@@ -13237,6 +13291,8 @@ async function loadRosterForWeek() {
 
   const tbody = document.getElementById('roster-body');
   const costEl = document.getElementById('roster-total-cost');
+  const copyReport = document.getElementById('roster-copy-report');
+  if (copyReport) copyReport.style.display = 'none';
   try {
     const resp = await fetchAPI('/rosters?venue_id=' + encodeURIComponent(venueId) + '&week_start=' + dateStr);
     // The manager switched venue while this was in flight: it is not on screen.
@@ -13247,8 +13303,10 @@ async function loadRosterForWeek() {
     state.currentRosterWeek = rosters.length > 0 ? dateStr : null;
     if (rosters.length > 0) {
       renderRosterTable(rosters[0]);
+      refreshRosterChanges(rosters[0].id);
     } else {
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">No roster for this week yet. Generate one, or import your old roster from the toolbar above.</td></tr>';
+      clearRosterEditing();
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">No roster for this week yet. Generate one, copy last week, or import your old roster from the toolbar above.</td></tr>';
       if (costEl) costEl.textContent = '0';
       const dailyEl = document.getElementById('roster-daily-cost');
       if (dailyEl) dailyEl.textContent = '0';
@@ -13258,6 +13316,7 @@ async function loadRosterForWeek() {
   } catch (err) {
     if (state.currentVenue !== venueId) return;
     state.currentRosterId = null;
+    clearRosterEditing();
     // Never leave placeholder sample rows on screen for a real venue
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">Couldn’t load this week’s roster — try again in a moment.</td></tr>';
     console.log('Could not load roster for week:', dateStr, err);
@@ -13296,33 +13355,57 @@ function displayedRosterId() {
   return state.currentRosterId || null;
 }
 
+// No roster on screen: nothing to edit, add to or re-notify.
+function clearRosterEditing() {
+  state.currentRoster = null;
+  const foot = document.querySelector('#roster-table tfoot');
+  if (foot) foot.innerHTML = '';
+  renderRosterChanges(null);
+}
+
+function rosterWeekDays(roster) {
+  const p = String((roster && roster.week_start) || '').slice(0, 10).split('-').map(Number);
+  const days = [];
+  for (let i = 0; i < 7; i++) days.push(localIso(new Date(p[0], p[1] - 1, p[2] + i)));
+  return days;
+}
+
+function escAttr(value) {
+  return esc(value == null ? '' : String(value)).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function renderRosterTable(roster) {
   if (!roster || !roster.shifts) return;
+  state.currentRoster = roster;
+  if (roster.id) state.currentRosterId = roster.id;
+  if (state.isDemo && demoRosterStaff.venue !== state.currentVenue) {
+    loadDemoRosterStaff().then(function () {
+      if (state.currentRoster === roster && demoRosterStaff.venue === state.currentVenue) renderRosterTable(roster);
+    });
+  }
   const tbody = document.getElementById('roster-body');
-  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const days = rosterWeekDays(roster);
   const names = {};
-  (state.employees || []).forEach(e => { names[e.id] = e.name; });
+  rosterPeople().forEach(e => { names[e.id] = e.name; });
   const hhmm = t => String(t || '').slice(0, 5);
 
-  // Group shifts by employee
+  // Group shifts by employee, then by day (a split shift is two shifts)
   const staffMap = {};
   roster.shifts.forEach(shift => {
     const key = shift.employee_id || shift.employee_name;
     if (!staffMap[key]) {
-      staffMap[key] = { name: shift.employee_name || names[shift.employee_id] || key, role: shift.role || '', shifts: {} };
+      staffMap[key] = { id: shift.employee_id || '', name: shift.employee_name || names[shift.employee_id] || key, roles: {}, days: {} };
     }
-    // Parse YYYY-MM-DD as a LOCAL date — new Date('2026-09-28') is UTC midnight
-    const p = String(shift.date || '').slice(0, 10).split('-').map(Number);
-    const day = new Date(p[0], p[1] - 1, p[2]).getDay();
-    const dayKey = days[day === 0 ? 6 : day - 1];
-    staffMap[key].shifts[dayKey] = hhmm(shift.start_time) + '-' + hhmm(shift.end_time);
+    const day = String(shift.date || '').slice(0, 10);
+    (staffMap[key].days[day] = staffMap[key].days[day] || []).push(shift);
+    if (shift.role) staffMap[key].roles[shift.role] = (staffMap[key].roles[shift.role] || 0) + 1;
   });
 
   const cost = Number(roster.total_cost);
   const costEl = document.getElementById('roster-total-cost');
   if (costEl) costEl.textContent = isFinite(cost) ? Math.round(cost).toLocaleString() : '0';
   const openDays = new Set();
-  Object.values(staffMap).forEach(s => Object.keys(s.shifts).forEach(d => openDays.add(d)));
+  Object.values(staffMap).forEach(s => Object.keys(s.days).forEach(d => openDays.add(d)));
   const dailyEl = document.getElementById('roster-daily-cost');
   if (dailyEl) dailyEl.textContent = (isFinite(cost) && openDays.size)
     ? Math.round(cost / openDays.size).toLocaleString() : '0';
@@ -13330,21 +13413,308 @@ function renderRosterTable(roster) {
   const varEl = document.getElementById('roster-variance');
   if (varEl) varEl.textContent = '—';
 
+  const editable = !!roster.id;
+  const addBtn = (empId, day) => editable
+    ? '<button type="button" class="roster-add" data-emp="' + escAttr(empId) + '" data-day="' + escAttr(day) +
+      '" title="Add a shift" aria-label="Add a shift"></button>'
+    : '';
   const staffList = Object.values(staffMap).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  if (!staffList.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">No shifts in this roster.</td></tr>';
+  const rows = staffList.map(staff => {
+    const roles = Object.keys(staff.roles).sort((a, b) => staff.roles[b] - staff.roles[a]);
+    const cells = days.map(d => {
+      const list = (staff.days[d] || []).slice()
+        .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
+      if (!list.length) {
+        return '<td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off' + addBtn(staff.id, d) + '</td>';
+      }
+      return '<td>' + list.map(s =>
+        '<span class="shift-cell shift-optimal roster-shift" role="button" tabindex="0" data-shift-id="' + escAttr(s.id) +
+        '" title="Edit this shift">' + esc(hhmm(s.start_time) + '-' + hhmm(s.end_time)) +
+        (s.role ? '<span class="shift-area">' + esc(s.role) + '</span>' : '') + '</span>').join('') +
+        addBtn(staff.id, d) + '</td>';
+    }).join('');
+    return '<tr data-section="' + escAttr(String(roles[0] || '').toLowerCase()) + '"><td><strong>' + esc(staff.name) +
+      '</strong><br><span style="font-size:11px;color:var(--text-muted);">' + esc(roles.join(', ')) + '</span></td>' + cells + '</tr>';
+  }).join('');
+  tbody.innerHTML = rows || ('<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-muted);">' +
+    (editable ? 'No shifts in this roster yet — add one with the + buttons below.' : 'No shifts in this roster.') + '</td></tr>');
+
+  // The add row sits in a tfoot so exports (tbody rows) and the area filter leave it alone.
+  const table = document.getElementById('roster-table');
+  let foot = table ? table.querySelector('tfoot') : null;
+  if (table && !foot) { foot = document.createElement('tfoot'); table.appendChild(foot); }
+  if (foot) {
+    foot.innerHTML = editable
+      ? '<tr class="roster-add-row"><td style="color:var(--text-muted); font-size:12px;">Add a shift</td>' +
+        days.map(d => '<td style="text-align:center;">' + addBtn('', d) + '</td>').join('') + '</tr>'
+      : '';
+  }
+  if (rosterSection) rosterSetSection(rosterSection);
+}
+
+// ── Hand edits: click a shift to edit it, + to add one ────────────────
+var shiftEdit = { id: null, rosterId: null };
+
+// The demo's staff list is sample data with its own ids; the demo venue's
+// real roster names (and is edited for) the venue's real staff.
+var demoRosterStaff = { venue: null, list: [] };
+
+function rosterPeople() {
+  if (!state.isDemo) return state.employees || [];
+  return demoRosterStaff.venue === state.currentVenue ? demoRosterStaff.list : [];
+}
+
+async function loadDemoRosterStaff() {
+  const venueId = state.currentVenue;
+  if (!state.isDemo || !venueId || demoRosterStaff.venue === venueId) return;
+  try {
+    const res = await fetchVenueEmployees(venueId);
+    demoRosterStaff = { venue: venueId, list: (res && res.items) || [] };
+  } catch (e) { /* names fall back to ids; the editor lists no one */ }
+}
+
+function rosterAreaOptions(roster) {
+  const out = [];
+  const add = a => { a = String(a || '').trim().toLowerCase(); if (a && out.indexOf(a) < 0) out.push(a); };
+  try {
+    const venue = (state.venues || []).find(v => v.id === state.currentVenue);
+    ((venue && venue.areas) || []).forEach(a => add(a && a.name));
+    if (!out.length) Object.keys((venue && venue.min_staff) || {}).forEach(add);
+  } catch (e) { /* venue list not loaded: fall back to the roster's own areas */ }
+  ((roster && roster.shifts) || []).forEach(s => add(s.role));
+  return out;
+}
+
+function rosterDayLabel(iso) {
+  const p = String(iso).split('-').map(Number);
+  return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });
+}
+
+function openShiftEditor(shiftId, empId, day) {
+  const roster = state.currentRoster;
+  if (!roster || !roster.id || roster.venue_id !== state.currentVenue) {
+    showToast('Load a week that has a roster first.', 'warning');
     return;
   }
+  const shift = shiftId ? (roster.shifts || []).find(s => s.id === shiftId) : null;
+  if (shiftId && !shift) { showToast('That shift has changed — reloading the week.', 'warning'); loadRosterForWeek(); return; }
+  shiftEdit = { id: shift ? shift.id : null, rosterId: roster.id };
+  document.getElementById('es-title').textContent = shift ? 'Edit shift' : 'Add shift';
 
-  tbody.innerHTML = staffList.map(staff => {
-    const cells = days.map(d => {
-      if (staff.shifts[d]) {
-        return '<td><span class="shift-cell shift-optimal">' + esc(staff.shifts[d]) + '</span></td>';
-      }
-      return '<td style="background: var(--dark-bg); color: var(--text-muted); text-align:center;">Off</td>';
-    }).join('');
-    return '<tr><td><strong>' + esc(staff.name) + '</strong><br><span style="font-size:11px;color:var(--text-muted);">' + esc(staff.role) + '</span></td>' + cells + '</tr>';
-  }).join('');
+  const people = rosterPeople().filter(e => e.active !== false || (shift && e.id === shift.employee_id))
+    .slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  let opts = '<option value="">Choose a person…</option>' +
+    people.map(e => '<option value="' + escAttr(e.id) + '">' + esc(e.name) + '</option>').join('');
+  if (shift && !people.some(e => e.id === shift.employee_id)) {
+    opts += '<option value="' + escAttr(shift.employee_id) + '">' + esc(shift.employee_id) + '</option>';
+  }
+  const who = document.getElementById('es-emp');
+  who.innerHTML = opts;
+  who.value = shift ? shift.employee_id : (empId || '');
+
+  const weekDays = rosterWeekDays(roster);
+  const daySel = document.getElementById('es-date');
+  daySel.innerHTML = weekDays.map(d => '<option value="' + escAttr(d) + '">' + esc(rosterDayLabel(d)) + '</option>').join('');
+  daySel.value = shift ? String(shift.date).slice(0, 10) : (day || weekDays[0]);
+
+  document.getElementById('es-role-list').innerHTML = rosterAreaOptions(roster)
+    .map(a => '<option value="' + escAttr(a) + '"></option>').join('');
+  let role = shift ? (shift.role || '') : '';
+  if (!shift && empId) {
+    const theirs = (roster.shifts || []).find(s => s.employee_id === empId && s.role);
+    const emp = rosterPeople().find(e => e.id === empId);
+    role = theirs ? theirs.role : ((emp && emp.skills && emp.skills[0]) || '');
+  }
+  document.getElementById('es-role').value = role;
+  document.getElementById('es-start').value = shift ? String(shift.start_time).slice(0, 5) : '17:00';
+  document.getElementById('es-end').value = shift ? String(shift.end_time).slice(0, 5) : '22:00';
+  document.getElementById('es-break').value = shift ? (shift.break_minutes || 0) : 0;
+  document.getElementById('es-delete').style.display = shift ? '' : 'none';
+  document.getElementById('es-warnings').innerHTML = '';
+  openModal('modal-edit-shift');
+}
+
+function shiftEditProblem(message) {
+  document.getElementById('es-warnings').innerHTML =
+    '<div style="margin-top:8px; padding:10px 12px; border-radius:8px; background:rgba(239,68,68,0.08); color:var(--danger);">' + esc(message) + '</div>';
+}
+
+function afterShiftEdit(result, label) {
+  closeModal('modal-edit-shift');
+  if (result && result.roster) renderRosterTable(result.roster);
+  const warnings = (result && result.warnings) || [];
+  if (warnings.length) {
+    showToast(label + ' — check: ' + warnings.slice(0, 3).map(w => w.message).join(' ') +
+      (warnings.length > 3 ? ' (+' + (warnings.length - 3) + ' more)' : ''), 'warning', 10000);
+  } else {
+    showToast(label + '.', 'success');
+  }
+  if (result) renderRosterChanges({ changed_since_publish: result.changed_since_publish, pending_count: result.pending_changes });
+}
+
+async function saveShiftEdit() {
+  const body = {
+    employee_id: document.getElementById('es-emp').value,
+    date: document.getElementById('es-date').value,
+    start_time: document.getElementById('es-start').value,
+    end_time: document.getElementById('es-end').value,
+    break_minutes: parseInt(document.getElementById('es-break').value, 10) || 0,
+    role: document.getElementById('es-role').value.trim(),
+  };
+  if (!body.employee_id) { shiftEditProblem('Choose who works this shift.'); return; }
+  if (!body.role) { shiftEditProblem('Choose the area this shift is in.'); return; }
+  if (!body.start_time || !body.end_time) { shiftEditProblem('Set a start and an end time.'); return; }
+  const btn = document.getElementById('es-save');
+  btn.disabled = true;
+  try {
+    const url = '/rosters/' + encodeURIComponent(shiftEdit.rosterId) + '/shifts' +
+      (shiftEdit.id ? '/' + encodeURIComponent(shiftEdit.id) : '');
+    const result = await fetchAPI(url, { method: shiftEdit.id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+    afterShiftEdit(result, shiftEdit.id ? 'Shift updated' : 'Shift added');
+  } catch (err) {
+    shiftEditProblem(err.message || 'Could not save the shift.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteShiftEdit() {
+  if (!shiftEdit.id || !window.confirm('Delete this shift?')) return;
+  const btn = document.getElementById('es-delete');
+  btn.disabled = true;
+  try {
+    const result = await fetchAPI('/rosters/' + encodeURIComponent(shiftEdit.rosterId) + '/shifts/' +
+      encodeURIComponent(shiftEdit.id), { method: 'DELETE' });
+    afterShiftEdit(result, 'Shift deleted');
+  } catch (err) {
+    shiftEditProblem(err.message || 'Could not delete the shift.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('click', function (e) {
+  if (!e.target.closest || !e.target.closest('#roster-table')) return;
+  const add = e.target.closest('.roster-add');
+  if (add) { openShiftEditor(null, add.getAttribute('data-emp') || '', add.getAttribute('data-day') || ''); return; }
+  const cell = e.target.closest('.shift-cell');
+  if (!cell) return;
+  const id = cell.getAttribute('data-shift-id');
+  if (id) { openShiftEditor(id); return; }
+  if (state.isDemo && state.currentVenue) {
+    // The demo opens on illustrative sample rows; editing works on the demo
+    // venue's real roster for the week, so show that one.
+    showToast('Showing the demo venue’s real roster for this week — click any shift to edit it.', 'info', 5000);
+    updateRosterWeekDisplay();
+    loadRosterForWeek();
+  }
+});
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const cell = e.target.closest && e.target.closest('#roster-table .roster-shift[data-shift-id]');
+  if (!cell) return;
+  e.preventDefault();
+  openShiftEditor(cell.getAttribute('data-shift-id'));
+});
+
+// ── Changed since publish: staff already see the edits; tell them ─────
+function renderRosterChanges(info) {
+  const banner = document.getElementById('roster-changed-banner');
+  if (!banner) return;
+  if (!info || !info.changed_since_publish) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
+  const n = +info.pending_count || 0;
+  const people = +info.affected_staff || 0;
+  banner.innerHTML = '<span style="flex:1; min-width:200px;"><strong>Changed since publish</strong> — ' +
+    esc(n + (n === 1 ? ' change' : ' changes') + (people ? ' affecting ' + people + (people === 1 ? ' person' : ' people') : '')) +
+    '. Staff already see the new times in the app; they haven’t been told.</span>' +
+    '<button class="btn btn-primary btn-small" id="btn-roster-notify-changes" onclick="notifyRosterChanges()">Notify staff</button>';
+  banner.style.display = 'flex';
+}
+
+async function refreshRosterChanges(rosterId) {
+  if (!rosterId) { renderRosterChanges(null); return; }
+  try {
+    const info = await fetchAPI('/rosters/' + encodeURIComponent(rosterId) + '/changes');
+    if (displayedRosterId() !== rosterId) return;
+    renderRosterChanges(info);
+  } catch (e) {
+    renderRosterChanges(null);
+  }
+}
+
+async function notifyRosterChanges() {
+  const rosterId = displayedRosterId();
+  if (!rosterId) return;
+  const btn = document.getElementById('btn-roster-notify-changes');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    const result = await fetchAPI('/rosters/' + encodeURIComponent(rosterId) + '/notify-changes', { method: 'POST' });
+    const reach = rosterDeliverySummary(result);
+    if (!result.notified_changes) showToast(result.message || 'No changes waiting to be sent.', 'info', 5000);
+    else showToast((reach.reached ? 'Changes sent: ' : '') + reach.text, reach.reached ? 'success' : 'warning', 8000);
+  } catch (err) {
+    showToast('Couldn’t notify staff: ' + (err.message || 'try again'), 'error', 6000);
+  }
+  refreshRosterChanges(rosterId);
+}
+
+// ── Copy last week into the week on screen, as a draft ──────────────
+function renderCopyReport(result) {
+  const box = document.getElementById('roster-copy-report');
+  if (!box) return;
+  const skipped = (result && result.skipped) || [];
+  const visa = (result && result.visa_flags) || [];
+  let html = '<div style="display:flex; justify-content:space-between; gap:12px; align-items:start;"><div><strong>' +
+    esc('Copied ' + result.copied + (result.copied === 1 ? ' shift' : ' shifts') + ' from last week as a draft.') + '</strong>' +
+    (skipped.length ? ' ' + esc(skipped.length + ' left off:') : ' Nobody was left off.') + '</div>' +
+    '<button class="btn btn-secondary btn-small" onclick="document.getElementById(\'roster-copy-report\').style.display=\'none\'">Close</button></div>';
+  if (skipped.length) {
+    html += '<ul style="margin:8px 0 0 18px; padding:0;">' + skipped.slice(0, 40).map(s =>
+      '<li>' + esc(s.name + ' — ' + rosterDayLabel(s.date) + ' ' + s.start + '-' + s.end + (s.role ? ' (' + s.role + ')' : '') + ': ' + s.reason) + '</li>'
+    ).join('') + (skipped.length > 40 ? '<li>' + esc('…and ' + (skipped.length - 40) + ' more') + '</li>' : '') + '</ul>';
+  }
+  if (visa.length) {
+    html += '<div style="margin-top:8px; color:#B45309;">' + visa.map(f => esc(f.message)).join('<br>') + '</div>';
+  }
+  box.innerHTML = html;
+  box.style.display = 'block';
+}
+
+async function copyLastWeek() {
+  const venueId = state.currentVenue;
+  if (!venueId) { showToast('No venue selected', 'error'); return; }
+  const target = localIso(getWeekMonday(rosterWeekOffset));
+  const source = localIso(getWeekMonday(rosterWeekOffset - 1));
+  let src = null;
+  try {
+    const resp = await fetchAPI('/rosters?venue_id=' + encodeURIComponent(venueId) + '&week_start=' + source + '&current=true');
+    src = ((resp && resp.items) || [])[0] || null;
+  } catch (err) {
+    showToast('Couldn’t load last week’s roster: ' + (err.message || 'try again'), 'error', 6000);
+    return;
+  }
+  if (state.currentVenue !== venueId) return;
+  if (!src) { showToast('There’s no roster for the week of ' + rosterDayLabel(source) + ' to copy.', 'warning', 6000); return; }
+  const onScreen = state.currentRoster && String(state.currentRoster.week_start || '').slice(0, 10) === target;
+  if (!window.confirm('Copy the week of ' + rosterDayLabel(source) + ' into the week of ' + rosterDayLabel(target) +
+      ' as a new draft? Anyone now on approved leave, inactive or unavailable is left off.' +
+      (onScreen ? ' The copy replaces the draft on screen (it stays in the roster history).' : ''))) return;
+  const btn = document.getElementById('btn-roster-copy-week');
+  if (btn) btn.disabled = true;
+  try {
+    const result = await fetchAPI('/rosters/' + encodeURIComponent(src.id) + '/copy-to?week_start=' + target, { method: 'POST' });
+    if (state.currentVenue !== venueId) return;
+    state.currentRosterId = result.roster_id;
+    state.currentRosterWeek = target;
+    renderRosterTable(result.roster);
+    renderRosterChanges(null);
+    renderCopyReport(result);
+  } catch (err) {
+    showToast('Couldn’t copy last week: ' + (err.message || 'try again'), 'error', 8000);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ── Staff Contact Export ────────────────────────────────────────────
@@ -13518,7 +13888,7 @@ function addAIChatMessage(role, content, extras) {
       // button that can only fail is worse than pointing to the manual path.
       const manual = {
         send_message: 'To send this, use Comms & Procedures — the AI can’t send messages yet.',
-        adjust_shift: 'To make this change, edit the shift on the Roster page — the AI can’t edit shifts yet.',
+        adjust_shift: 'To make this change, click the shift on the Roster page to edit it — the AI can’t edit shifts itself.',
       };
       for (const action of extras.actions) {
         if (manual[action.action_type]) {

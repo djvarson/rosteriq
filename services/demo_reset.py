@@ -61,6 +61,7 @@ _DEMO_ROSTERS = "SELECT id FROM rosters WHERE venue_id = %s"
 # scoped by the demo venue or the demo user ids; test_demo_reset pins that.
 PG_RULES = [
     ("handover notes", "DELETE FROM kv_store WHERE key LIKE 'handover%%' AND value->>'venue_id' = %s", (D,)),
+    ("roster change records", "DELETE FROM kv_store WHERE key LIKE 'roster_changes:%%' AND value->>'venue_id' = %s", (D,)),
     ("bids", "DELETE FROM bids WHERE open_shift_id IN (SELECT id FROM open_shifts WHERE venue_id = %s)", (D,)),
     ("open shifts", "DELETE FROM open_shifts WHERE venue_id = %s", (D,)),
     ("shift bids", "DELETE FROM shift_bids WHERE venue_id = %s", (D,)),
@@ -221,7 +222,7 @@ def _memory_reset(s) -> dict:
     if isinstance(g("_payroll_exports"), list):
         n["_payroll_exports"] = _prune_list(s._payroll_exports, lambda x: _v(x, "batch_id") not in batches)
     if isinstance(g("_kv"), dict):
-        n["_kv"] = _prune_dict(s._kv, lambda k, v: not (str(k).startswith("handover")
+        n["_kv"] = _prune_dict(s._kv, lambda k, v: not (str(k).startswith(("handover", "roster_changes:"))
                                                         and isinstance(v, dict) and v.get("venue_id") == D))
     if isinstance(g("_shifts"), dict):
         n["_shifts"] = _prune_dict(s._shifts, lambda k, v: k not in rsh)
