@@ -96,7 +96,8 @@ def _their_shifts(db, venue_id: str, employee, start: date, end: date, skip_id=N
     dated start..end here and, when person_identity is present, at their
     other venues: by name where the caller may see the venue, as "another
     venue" where it only shares an owner with this one. ``checked`` is
-    False when any of those venues couldn't be read."""
+    False when any of those venues couldn't be read, or holds a same-email
+    record that isn't proven to be this person."""
     out = []
     for s in live_shifts(db, venue_id, start, end):
         if str(s.employee_id) == str(employee.id) and s.id != skip_id and _live(s):
@@ -128,7 +129,7 @@ def _their_shifts(db, venue_id: str, employee, start: date, end: date, skip_id=N
     unseen = getattr(identity, "unseen_shifts", None)
     if unseen is not None:
         try:
-            out += [(s, "another venue") for s in unseen(db, employee, start, end) or []]
+            out += [(s, "another venue") for s in unseen(db, employee, start, end, strict=True) or []]
         except Exception:
             checked = False
     return out, checked

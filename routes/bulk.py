@@ -46,8 +46,8 @@ class GenerateRosterResult(BaseModel):
     status: str  # "success", "error", "skipped"
     error: Optional[str] = None
     shift_count: Optional[int] = None
-    # Recorded visa caps the generated week goes over, as POST /rosters/generate
-    # reports them.
+    # What POST /rosters/generate reports out loud: recorded visa caps the week
+    # goes over, lapsed or lapsing recorded visas, other-venue bookings.
     warnings: List[str] = []
 
 
@@ -288,12 +288,20 @@ async def _generate_roster_for_venue(venue_id: str, week_start: date) -> Generat
         out = await generate_roster(GenerateRosterRequest(venue_id=venue_id, week_start=week_start))
         if not isinstance(out, dict):
             out = {"id": out.id, "shifts": out.shifts}
+        warnings = [f["message"] for f in out.get("visa_flags") or []]
+        for a in out.get("visa_expiry_alerts") or []:
+            if a.get("kind") == "expired":
+                warnings.append(f"{a['name']}'s recorded visa expired {a['expiry']} "
+                                "— confirm their work rights before publishing")
+            else:
+                warnings.append(f"{a['name']}'s recorded visa expires {a['expiry']} — re-check VEVO")
+        warnings += [f"Kept off while {m}" for m in out.get("booked_elsewhere") or []]
         return GenerateRosterResult(
             venue_id=venue_id,
             roster_id=out["id"],
             status="success",
             shift_count=len(out["shifts"]),
-            warnings=[f["message"] for f in out.get("visa_flags") or []],
+            warnings=warnings,
         )
 
     except HTTPException as e:

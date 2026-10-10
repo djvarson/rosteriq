@@ -156,15 +156,19 @@ def same_owner_runs(db, venue_ids: Iterable[str], exclude_user_id: Optional[str]
     return False
 
 
-def same_owner_venue_ids(db, venue_id: str) -> List[str]:
+def same_owner_venue_ids(db, venue_id: str, *, strict: bool = False) -> List[str]:
     """The other venues for which same_owner_runs(db, [venue_id, v]) holds:
-    those a venue-owning login fully manages together with ``venue_id``."""
+    those a venue-owning login fully manages together with ``venue_id``.
+    With ``strict``, logins that can't be read raise instead of reading as
+    "no other venues"."""
     out: List[str] = []
     if not venue_id:
         return out
     try:
         users = db.list_users() or []
     except Exception:
+        if strict:
+            raise
         users = []
     for u in users:
         if not u or not u.get("is_active", True) or is_platform_owner(u) or _role(u) != "manager":
@@ -214,6 +218,39 @@ def created_venue_ids(db, user_id: str, venue_ids: Iterable[str]) -> List[str]:
         if found:
             out.append(v)
     return out
+
+
+def _signup_creators(db, venue_id: str, strict: bool) -> Optional[set]:
+    """The logins that created ``venue_id`` through self-serve signup (the
+    first-venue bootstrap audit event); empty for a venue RosterIQ support
+    set up, None when the audit log can't be read."""
+    out: set = set()
+    page, offset = 500, 0
+    while True:
+        try:
+            rows = db.list_events(venue_id=venue_id, category="audit", action_prefix="user.venue_grant",
+                                  limit=page, offset=offset) or []
+        except Exception:
+            if strict:
+                raise
+            return None
+        out |= {str(r.get("resource_id")) for r in rows
+                if (r.get("details") or {}).get("reason") == "first_venue_bootstrap"}
+        if len(rows) < page:
+            return out
+        offset += page
+
+
+def separate_signups(db, venue_a: str, venue_b: str, *, strict: bool = False) -> bool:
+    """True when different logins signed ``venue_a`` and ``venue_b`` up
+    themselves, or that can't be read. Two signups are two businesses,
+    whoever manages both: a manager's own venue isn't their employer's, and
+    a login that holds several clients' venues doesn't join them."""
+    a = _signup_creators(db, venue_a, strict)
+    b = _signup_creators(db, venue_b, strict)
+    if a is None or b is None:
+        return True
+    return bool(a) and bool(b) and not (a & b)
 
 
 def venue_names(db, venue_ids: Iterable[str]) -> List[str]:

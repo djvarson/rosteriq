@@ -17,16 +17,21 @@ Pins:
   check (generate, hand edits, SOS, cover approval, conflict scan, publish).
   What the check finds there names no venue and carries no ids ("another
   venue"), and the lookup never reaches a venue another owner runs
+* that lookup only follows a person whose own login holds both venues, so
+  an email typed onto a staff record reads nobody's shifts; and a venue a
+  manager signed up themselves is their business, not their employer's
 * the cover check says the person isn't on at another venue only when every
-  one of their venues was checked
+  one of their venues was checked, including when the logins can't be read
 * POST /api/bulk/generate-rosters takes the POST /rosters/generate path:
-  approved leave, the other venue's bookings, older drafts superseded
+  approved leave, the other venue's bookings, older drafts superseded, and
+  says what generate says out loud (lapsed visas, other-venue bookings)
 """
 
 import uuid
 from datetime import date, datetime, time as dtime, timedelta
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from rosteriq.api import app
@@ -101,7 +106,7 @@ def _roster(vid, week_start, shifts, state="published"):
     return rid
 
 
-def _world(cap=None, wembley_hours=EVENINGS, meca=None):
+def _world(cap=None, wembley_hours=EVENINGS, meca=None, meca_links_apothecary=True):
     """Ben runs both venues; Meca (the cheapest casual) has a record at each,
     linked to one login; two dearer Wembley casuals; Sarah is a full manager
     at Wembley and staff-only at Apothecary."""
@@ -121,8 +126,9 @@ def _world(cap=None, wembley_hours=EVENINGS, meca=None):
               **({"visa_status": "student", "visa_work_limit_fortnight": cap} if cap else {}))
     meca_h = _login(c, meca_email)
     _link(c, ben, mw, meca_h)
-    _link(c, ben, ma, meca_h)
-    pats = [_emp(c, ben, vw, f"{vw}-pat{i}", f"Pat {i}", "30.00", email=f"pat{i}_{tag}@x.com")
+    if meca_links_apothecary:
+        _link(c, ben, ma, meca_h)
+    pats =[_emp(c, ben, vw, f"{vw}-pat{i}", f"Pat {i}", "30.00", email=f"pat{i}_{tag}@x.com")
             for i in range(2)]
 
     sarah_email = f"sarah_{tag}@x.com"
@@ -142,7 +148,7 @@ def _world(cap=None, wembley_hours=EVENINGS, meca=None):
 
     week = _monday(venue_today(vw, get_db())) + timedelta(days=14)
     return SimpleNamespace(c=c, tag=tag, ben=ben, vw=vw, va=va, mw=mw, ma=ma, meca_h=meca_h,
-                           pats=pats, sarah=sarah_h, week=week)
+                           meca_email=meca_email, pats=pats, sarah=sarah_h, week=week)
 
 
 def _generate(w, headers, week=None):
@@ -423,6 +429,132 @@ def test_the_lookup_never_reaches_a_venue_another_owner_runs():
         assert unseen_venue_ids(db, w.vw) == []
 
 
+def _sarahs_cafe(w):
+    """Sarah, Wembley's AVM, signs up her own cafe and makes Carl, who has
+    nothing to do with Ben, its manager."""
+    vx = f"cafe-{w.tag}"
+    _venue(w.c, w.sarah, vx, "Sarah's Cafe")
+    sarah = _login(w.c, f"sarah_{w.tag}@x.com")
+    carl_email = f"carl_{w.tag}@x.com"
+    cx = _emp(w.c, sarah, vx, f"{vx}-carl", "Carl", email=carl_email)
+    _link(w.c, sarah, cx, _login(w.c, carl_email))
+    r = w.c.post(f"/api/employees/{cx}/access-role", json={"role": "manager"}, headers=sarah)
+    assert r.status_code == 200, r.text
+    return vx, sarah, _login(w.c, carl_email)
+
+
+def _carl_reads_nothing(w, vx, carl, mx, fri):
+    r = w.c.get("/api/sos", params={"venue_id": vx, "date": fri.isoformat(), "start": "18:00",
+                                    "end": "22:00"}, headers=carl)
+    assert r.status_code == 200, r.text
+    probe = next(e for e in r.json()["available"] + r.json()["already_on"] if e["id"] == mx)
+    assert probe["status"] != "on_elsewhere" and not probe.get("elsewhere")
+    assert probe["hours_this_week"] == 0
+    assert "another venue" not in r.text
+
+    r = w.c.post("/rosters/generate", json={"venue_id": vx, "week_start": w.week.isoformat()},
+                 headers=carl)
+    assert r.status_code == 200, r.text
+    assert not r.json().get("booked_elsewhere") and "another venue" not in r.text
+
+    rid = _roster(vx, w.week, [], state=None)
+    r = w.c.post(f"/rosters/{rid}/shifts", headers=carl, json={
+        "employee_id": mx, "date": fri.isoformat(), "start_time": "18:00", "end_time": "22:00",
+        "break_minutes": 0, "role": "bar"})
+    assert r.status_code == 200, r.text
+    assert not [x for x in r.json()["warnings"] if x["code"] == "busy_elsewhere"]
+
+
+def test_a_manager_of_a_cafe_a_wembley_manager_signed_up_reads_no_wembley_shifts():
+    w = _world()
+    vx, _, carl = _sarahs_cafe(w)
+    fri = w.week + timedelta(days=4)
+    _roster(w.vw, w.week, [_shift(w.mw, fri, dtime(17), dtime(23))])
+    # Carl types Meca's email onto a record at his cafe; Meca never joined it
+    mx = _emp(w.c, carl, vx, f"{vx}-probe", "Probe", email=w.meca_email)
+    _carl_reads_nothing(w, vx, carl, mx, fri)
+
+
+def test_someone_who_really_works_at_both_businesses_still_isnt_shared_with_the_cafe():
+    from rosteriq.services.person_identity import unseen_venue_ids
+    w = _world()
+    db = get_db()
+    vx, sarah, carl = _sarahs_cafe(w)
+    fri = w.week + timedelta(days=4)
+    _roster(w.vw, w.week, [_shift(w.mw, fri, dtime(17), dtime(23))])
+    # Meca also works at the cafe, joined with her own login: the cafe is
+    # still Sarah's business, not Ben's
+    mx = _emp(w.c, sarah, vx, f"{vx}-meca", "Meca Rossi", email=w.meca_email)
+    _link(w.c, sarah, mx, w.meca_h)
+    _carl_reads_nothing(w, vx, carl, mx, fri)
+    with _As([vx]):
+        assert unseen_venue_ids(db, vx) == []
+    with _As([w.vw]):
+        assert unseen_venue_ids(db, w.vw) == [w.va]
+
+
+def test_an_email_typed_onto_a_record_reads_nobodys_shifts_even_inside_one_owner():
+    from rosteriq.services import person_identity as pi
+    w = _world()
+    db = get_db()
+    pat_email = f"pat0_{w.tag}@x.com"
+    fri = w.week + timedelta(days=4)
+    _roster(w.vw, w.week, [_shift(w.pats[0], fri, dtime(17), dtime(23))])
+    # an Apothecary-only manager types a Wembley casual's email onto a record
+    probe_id = _emp(w.c, w.ben, w.va, f"{w.va}-pat0", "Pat 0", email=pat_email)
+    probe = db.get_employee(probe_id)
+    rid = _roster(w.va, w.week, [_shift(probe_id, fri, dtime(16), dtime(20))], state=None)
+
+    def reads():
+        with _As([w.va]):
+            assert pi.unseen_venue_ids(db, w.va) == [w.vw]
+            return (pi.busy_elsewhere(db, probe, fri),
+                    pi.busy_elsewhere_many(db, w.va, [probe], fri),
+                    pi.booked_elsewhere(db, w.va, [probe], w.week, w.week + timedelta(days=6)),
+                    pi.cross_venue_clashes(db, db.get_roster(rid)),
+                    pi.unseen_shifts(db, probe, w.week, w.week + timedelta(days=6)))
+
+    assert reads() == ([], {}, [], [], [])
+    with _As([w.va]), pytest.raises(LookupError):
+        pi.unseen_shifts(db, probe, w.week, w.week + timedelta(days=6), strict=True)
+
+    # once Pat joins both venues with her own login, the check follows her
+    pat_h = _login(w.c, pat_email)
+    _link(w.c, w.ben, w.pats[0], pat_h)
+    _link(w.c, w.ben, probe_id, pat_h)
+    busy, many, booked, clashes, unseen = reads()
+    assert [(h["venue_name"], h["start"], h["shift_id"]) for h in busy] == [("another venue", "17:00", None)]
+    assert list(many) == [probe_id] and [b[1] for b in booked] == [None]
+    assert [c["venue_name"] for c in clashes] == ["another venue"] and len(unseen) == 1
+
+
+def test_cover_check_warns_when_the_other_venues_record_isnt_proven_to_be_them():
+    w = _world(meca_links_apothecary=False)
+    day = w.week + timedelta(days=4)
+    cover_id = _offer_and_claim(w, day)
+    _roster(w.va, w.week, [_shift(w.ma, day, dtime(16), dtime(23))])
+    elsewhere, r = _elsewhere_check(w, cover_id)
+    assert elsewhere["result"] == "warn" and "couldn't" in elsewhere["message"].lower()
+    assert "Apothecary" not in r.text and "another venue" not in r.text
+
+
+def test_cover_check_warns_when_the_logins_cannot_be_read(monkeypatch):
+    w = _world()
+    db = get_db()
+    day = w.week + timedelta(days=4)
+    cover_id = _offer_and_claim(w, day)
+    _roster(w.va, w.week, [_shift(w.ma, day, dtime(16), dtime(23))])
+
+    def broken():
+        raise RuntimeError("server closed the connection unexpectedly")
+
+    monkeypatch.setattr(db, "list_users", broken)
+    elsewhere, _ = _elsewhere_check(w, cover_id)
+    assert elsewhere["result"] == "warn"
+    assert "isn't rostered" not in elsewhere["message"]
+    assert "couldn't" in elsewhere["message"].lower()
+
+
 # --- bulk generation ---------------------------------------------------------------
 
 def test_bulk_generate_takes_the_generate_path():
@@ -457,3 +589,18 @@ def test_bulk_generate_takes_the_generate_path():
     r = w.c.post("/api/bulk/generate-rosters", json={"venue_ids": [w.vw, w.va],
                                                      "week_start": w.week.isoformat()}, headers=w.sarah)
     assert r.status_code == 403
+
+
+def test_bulk_generate_says_what_generate_says_out_loud():
+    w = _world()
+    nina = _emp(w.c, w.ben, w.vw, f"{w.vw}-nina", "Nina Patel", "15.00", visa_status="student",
+                visa_expiry=(date.today() - timedelta(days=30)).isoformat())
+    _roster(w.va, w.week, [_shift(w.ma, w.week + timedelta(days=4), dtime(16), dtime(23))])
+    r = w.c.post("/api/bulk/generate-rosters", json={"venue_ids": [w.vw], "week_start": w.week.isoformat()},
+                 headers=w.sarah)
+    assert r.status_code == 200, r.text
+    out = r.json()["results"][0]
+    assert any(s.employee_id == nina for s in get_db().get_roster(out["roster_id"]).shifts)
+    assert any("Nina Patel" in m and "expired" in m for m in out["warnings"]), out
+    assert any("Meca Rossi is on at another venue 16:00-23:00" in m for m in out["warnings"]), out
+    assert "Apothecary" not in r.text and w.va not in r.text
