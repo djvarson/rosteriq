@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field, field_validator
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
-from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
+from rosteriq.routes.staff_portal import _linked_employee_at, _no_link_response
 from rosteriq.services.events import audit
 
 logger = logging.getLogger(__name__)
@@ -118,9 +118,12 @@ def _resolve_actor(db, user: UserContext, venue_id: str, *, hide_as_404: bool = 
     * Anyone else -> 403 (or 404 when ``hide_as_404`` — per-post routes must
       not reveal that another venue's post exists).
     """
-    emp, emp_vid = _linked_employee(db, user)
-    if emp is not None and str(emp_vid) == str(venue_id):
-        if _is_manager_user(user):
+    emp = _linked_employee_at(db, user, venue_id)
+    if emp is not None:
+        # Linked here as staff only (a manager elsewhere who works shifts
+        # here) posts as staff: managing needs the venue's dashboard access.
+        if _is_manager_user(user) and (getattr(user, "is_owner", False)
+                                       or venue_id in (user.venue_ids or [])):
             return _Actor("manager", emp.name, employee_id=emp.id)
         return _Actor("staff", emp.name, employee_id=emp.id)
 

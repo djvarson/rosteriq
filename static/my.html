@@ -62,6 +62,7 @@
     .badge.declined { background: rgba(239,68,68,.15); color: var(--red); }
     .badge.open { background: rgba(245,158,11,.15); color: #92400E; }
     .badge.closed { background: rgba(245,158,11,.15); color: #92400E; }
+    .badge.venue { background: var(--card-2); color: var(--text); border: 1px solid var(--border); }
 
     /* Hours */
     .hours-total { font-size: 30px; font-weight: 800; }
@@ -216,6 +217,16 @@
         <div class="card" id="home-todo"></div>
       </div>
 
+      <div class="section-title">Work at another venue too?</div>
+      <div class="card">
+        <label for="join-more-code" style="font-size:12px;color:var(--muted);font-weight:600;">Join code from that venue&rsquo;s manager</label>
+        <input id="join-more-code" type="text" inputmode="text" autocapitalize="characters" autocomplete="one-time-code"
+               maxlength="9" placeholder="ABCD-EFGH" spellcheck="false"
+               style="width:100%;margin:6px 0 10px;text-align:center;font-size:18px;letter-spacing:3px;text-transform:uppercase;">
+        <button class="btn" id="join-more-btn" onclick="submitJoinCode('more')">Join another venue</button>
+        <p id="join-more-err" style="color:#B42318;font-size:13px;margin-top:8px;display:none;"></p>
+      </div>
+
       <!-- Staff hit problems managers never see. Give them somewhere to say so. -->
       <div id="report-wrap" style="margin-top:22px; text-align:center;">
         <button id="report-open" onclick="openReport()"
@@ -256,6 +267,7 @@
         <button class="seg-btn" id="seg-ann" onclick="newsMode('ann')">Announcements</button>
       </div>
       <div id="news-feed">
+        <div id="feed-venue" class="seg" style="display:none; gap:6px; margin-bottom:12px;"></div>
         <div class="card" style="padding:12px;">
           <textarea id="feed-body" rows="2" maxlength="2000" placeholder="Post to the team…" style="margin:0;"></textarea>
           <div style="display:flex; justify-content:flex-end; margin-top:8px;">
@@ -303,6 +315,10 @@
         <input type="date" id="lv-start">
         <label for="lv-end">Last day off</label>
         <input type="date" id="lv-end">
+        <div id="lv-venues-wrap" style="display:none;">
+          <label>Which venue(s)?</label>
+          <div id="lv-venues" style="display:flex; flex-wrap:wrap; gap:12px; margin:6px 0 10px; font-size:14px;"></div>
+        </div>
         <label for="lv-reason">Reason (optional)</label>
         <textarea id="lv-reason" rows="2" maxlength="300" placeholder="e.g. Family trip"></textarea>
         <button class="btn" id="lv-submit" onclick="submitLeave()">Request leave</button>
@@ -504,6 +520,34 @@ function show(view) {
 
 // ---- Team feed (two-way) ------------------------------------------------------
 let myVenueId = null;
+// Every venue this person works at; the chip only shows when there are two or more.
+let myVenues = [];
+function venueChip(item) {
+  if (myVenues.length < 2 || !item || !item.venue_name) return '';
+  return ' <span class="badge venue">' + esc(item.venue_name) + '</span>';
+}
+function pickFeedVenue(vid) {
+  myVenueId = vid;
+  document.querySelectorAll('#feed-venue .seg-btn').forEach(function (b) {
+    b.classList.toggle('active', b.getAttribute('data-vid') === vid);
+  });
+  loadFeed();
+}
+function setUpVenuePickers() {
+  const seg = document.getElementById('feed-venue');
+  const wrap = document.getElementById('lv-venues-wrap');
+  if (myVenues.length < 2) { seg.style.display = 'none'; wrap.style.display = 'none'; return; }
+  seg.innerHTML = myVenues.map(function (v) {
+    return '<button class="seg-btn' + (v.venue_id === myVenueId ? ' active' : '') + '" data-vid="' + esc(v.venue_id) +
+      '" onclick="pickFeedVenue(this.getAttribute(\'data-vid\'))">' + esc(v.venue_name) + '</button>';
+  }).join('');
+  seg.style.display = 'flex';
+  document.getElementById('lv-venues').innerHTML = myVenues.map(function (v) {
+    return '<label style="display:inline-flex; align-items:center; gap:6px;"><input type="checkbox" class="lv-venue" style="width:auto; margin:0;" value="' +
+      esc(v.venue_id) + '" checked> ' + esc(v.venue_name) + '</label>';
+  }).join('');
+  wrap.style.display = 'block';
+}
 const REACTS = ['👍', '❤️', '🎉', '👏', '😂'];
 
 function newsMode(mode) {
@@ -601,7 +645,7 @@ async function loadSops() {
       const needs = d.requires_ack !== false && !d.acknowledged;
       return '<div class="sop" id="sop-' + esc(d.id) + '">' +
         '<div class="sop-head" onclick="document.getElementById(\'sop-' + esc(d.id) + '\').classList.toggle(\'open\')">' +
-          '<div><span class="sop-cat">' + esc((d.category || 'sop').toUpperCase()) + '</span><span class="sop-title">' + esc(d.title) + '</span>' +
+          '<div><span class="sop-cat">' + esc((d.category || 'sop').toUpperCase()) + '</span><span class="sop-title">' + esc(d.title) + '</span>' + venueChip(d) +
             '<div class="note">v' + esc(d.version) + (d.acknowledged ? ' &middot; acknowledged ' + esc(localDay(d.acknowledged_at)) : (needs ? ' &middot; needs your acknowledgement' : '')) + '</div></div>' +
           '<span class="badge ' + (d.acknowledged ? 'approved' : (needs ? 'pending' : 'today')) + '">' + (d.acknowledged ? 'Done' : (needs ? 'Read me' : 'Info')) + '</span>' +
         '</div>' +
@@ -652,7 +696,7 @@ async function loadHome() {
     next.innerHTML =
       '<div class="home-next-when">' + (isToday ? 'Today' : 'Next shift &middot; ' + niceDate(upcoming.date)) + '</div>' +
       '<div class="home-next-time">' + esc(upcoming.start) + ' &ndash; ' + esc(upcoming.end) + '</div>' +
-      '<div class="note">' + esc(upcoming.role || '') + (upcoming.break_minutes ? ' &middot; ' + upcoming.break_minutes + 'm break' : '') + '</div>' +
+      '<div class="note">' + esc(upcoming.role || '') + (upcoming.break_minutes ? ' &middot; ' + upcoming.break_minutes + 'm break' : '') + venueChip(upcoming) + '</div>' +
       (isToday ? '' : '<button class="cover-btn" style="margin-top:10px;" onclick="offerCover(\'' + esc(upcoming.id) + '\', \'' + esc(upcoming.date) + ' ' + esc(upcoming.start) + '\')">Can&rsquo;t work it?</button>');
   }
 
@@ -797,7 +841,7 @@ async function loadNews() {
       return '<div class="leave-row">' +
         '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">' +
           '<span class="dates">' + (a.pinned ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg> ' : '') + esc(a.title) +
-            ((a.audience && a.audience.length) ? ' <span class="badge" style="background:rgba(245,158,11,0.14); text-transform:capitalize;">' + esc(a.audience.join(', ')) + '</span>' : '') + '</span>' +
+            ((a.audience && a.audience.length) ? ' <span class="badge" style="background:rgba(245,158,11,0.14); text-transform:capitalize;">' + esc(a.audience.join(', ')) + '</span>' : '') + venueChip(a) + '</span>' +
           (a.read ? '' : '<span class="badge pending">New</span>') +
         '</div>' +
         '<div class="note" style="white-space:pre-wrap;">' + esc(a.body) + '</div>' +
@@ -839,7 +883,7 @@ async function loadShifts() {
         '<div class="date-badge"><div class="dow">' + DOW[d.getDay()] + '</div><div class="dom">' + d.getDate() + '</div></div>' +
         '<div style="flex:1;">' +
           '<div class="times">' + esc(s.start) + ' &ndash; ' + esc(s.end) + '</div>' +
-          '<div class="meta">' + esc(s.role || '') + (s.break_minutes ? ' &middot; ' + s.break_minutes + 'm break' : '') + '</div>' +
+          '<div class="meta">' + esc(s.role || '') + (s.break_minutes ? ' &middot; ' + s.break_minutes + 'm break' : '') + venueChip(s) + '</div>' +
         '</div>' +
         (isToday
           ? '<span class="badge today">Today</span>'
@@ -869,7 +913,7 @@ async function loadHours() {
     }
     card.innerHTML = data.timesheets.map(function (t) {
       return '<div class="ts-row">' +
-        '<span class="d">' + esc(niceDate(String(t.work_date).slice(0, 10))) + '</span>' +
+        '<span class="d">' + esc(niceDate(String(t.work_date).slice(0, 10))) + venueChip(t) + '</span>' +
         '<span>' + fmtMins(t.worked_minutes) + '</span>' +
         '<span class="badge ' + esc(t.status || 'open') + '">' + esc(t.status || 'open') + '</span>' +
       '</div>';
@@ -961,7 +1005,7 @@ async function loadLeave() {
     card.innerHTML = data.requests.map(function (r) {
       return '<div class="leave-row">' +
         '<div style="display:flex; justify-content:space-between; align-items:center;">' +
-          '<span class="dates">' + esc(niceDate(r.start_date)) + ' &rarr; ' + esc(niceDate(r.end_date)) + '</span>' +
+          '<span class="dates">' + esc(niceDate(r.start_date)) + ' &rarr; ' + esc(niceDate(r.end_date)) + venueChip(r) + '</span>' +
           '<span class="badge ' + esc(r.status) + '">' + esc(r.status) + '</span>' +
         '</div>' +
         '<div class="note">' + esc(r.leave_type_label || 'Other') + (r.reason ? ' &middot; ' + esc(r.reason) : '') + '</div>' +
@@ -990,7 +1034,7 @@ function coverRow(c, extra) {
   return '<div class="leave-row">' +
     '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">' +
       '<div>' +
-        '<div class="dates">' + esc(niceDate(c.shift_date)) + ' &middot; ' + esc(c.shift_start) + '&ndash;' + esc(c.shift_end) + '</div>' +
+        '<div class="dates">' + esc(niceDate(c.shift_date)) + ' &middot; ' + esc(c.shift_start) + '&ndash;' + esc(c.shift_end) + venueChip(c) + '</div>' +
         '<div class="note">' + esc(c.role || '') + ' &middot; ' + esc(c.requested_by_name) +
           (c.reason ? ' &middot; ' + esc(c.reason) : '') + '</div>' +
         (c.claimed_by_name ? '<div class="note">Claimed by ' + esc(c.claimed_by_name) + '</div>' : '') +
@@ -1047,15 +1091,19 @@ async function submitLeave() {
   const start = document.getElementById('lv-start').value;
   const end = document.getElementById('lv-end').value;
   if (!start || !end) { toast('Pick both dates', 'err'); return; }
+  const body = { start_date: start, end_date: end, leave_type: document.getElementById('lv-type').value,
+                 reason: document.getElementById('lv-reason').value.trim() };
+  if (myVenues.length > 1) {
+    body.venue_ids = Array.prototype.slice.call(document.querySelectorAll('.lv-venue'))
+      .filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
+    if (!body.venue_ids.length) { toast('Pick at least one venue', 'err'); return; }
+  }
   const btn = document.getElementById('lv-submit');
   btn.disabled = true;
   try {
-    await api('/api/me/leave', { method: 'POST', body: {
-      start_date: start, end_date: end,
-      leave_type: document.getElementById('lv-type').value,
-      reason: document.getElementById('lv-reason').value.trim(),
-    }});
-    toast('Leave requested — your manager will review it', 'ok');
+    const r = await api('/api/me/leave', { method: 'POST', body: body });
+    toast('Leave requested' + (myVenues.length > 1 && r.venues ? ' at ' + r.venues.join(' and ') : '') +
+      ' — your manager will review it', 'ok');
     document.getElementById('lv-start').value = '';
     document.getElementById('lv-end').value = '';
     document.getElementById('lv-reason').value = '';
@@ -1067,8 +1115,11 @@ async function submitLeave() {
   }
 }
 
-async function submitJoinCode() {
-  var inp = document.getElementById('join-code'), btn = document.getElementById('join-btn'), err = document.getElementById('join-err');
+async function submitJoinCode(which) {
+  var more = which === 'more';
+  var inp = document.getElementById(more ? 'join-more-code' : 'join-code'),
+      btn = document.getElementById(more ? 'join-more-btn' : 'join-btn'),
+      err = document.getElementById(more ? 'join-more-err' : 'join-err');
   var code = (inp.value || '').trim();
   err.style.display = 'none';
   if (code.replace(/[^A-Za-z0-9]/g, '').length < 8) { err.textContent = 'Enter the 8-character code, e.g. ABCD-EFGH.'; err.style.display = 'block'; return; }
@@ -1076,8 +1127,9 @@ async function submitJoinCode() {
   try {
     var r = await api('/api/me/link', { method: 'POST', body: { code: code } });
     toast('Linked to ' + (r.venue_name || 'your venue') + ' — welcome!', 'ok');
+    inp.value = '';
     document.getElementById('nolink').style.display = 'none';
-    document.getElementById('loading').style.display = 'block';
+    if (!more) document.getElementById('loading').style.display = 'block';
     boot();
   } catch (e) {
     err.textContent = e.message; err.style.display = 'block';
@@ -1143,8 +1195,11 @@ async function boot() {
       return;
     }
     document.getElementById('hi').textContent = 'Hi, ' + (prof.name.split(' ')[0] || prof.name);
-    document.getElementById('venue').textContent = prof.venue_name;
-    myVenueId = prof.venue_id;
+    myVenues = prof.venues || [];
+    document.getElementById('venue').textContent = myVenues.length > 1
+      ? myVenues.map(function (v) { return v.venue_name; }).join(' · ') : prof.venue_name;
+    if (!myVenueId || !myVenues.some(function (v) { return v.venue_id === myVenueId; })) myVenueId = prof.venue_id;
+    setUpVenuePickers();
     document.getElementById('tabbar').style.display = 'flex';
     show('home');
     refreshNewsDot();

@@ -285,6 +285,15 @@ def _is_employee_available(
         if rest_hours < 10:
             return False, f"Only {rest_hours}h rest (need 10h minimum)"
 
+    # A shift already booked the next day (at another venue) needs the rest
+    # gap after this one too.
+    proposed_end = datetime.combine(target_date, time(0)) + timedelta(hours=end_hour)
+    for s in existing_shifts:
+        if s.employee_id == employee.id and s.date == target_date + timedelta(days=1):
+            gap = (datetime.combine(s.date, s.start_time) - proposed_end).total_seconds() / 3600
+            if gap < MINIMUM_HOURS_BETWEEN_SHIFTS:
+                return False, f"Only {gap:g}h rest before their next shift"
+
     # Availability, by the one shared rule (to the minute; "23:59" = close).
     if not is_available(employee.availability, target_date,
                         f"{start_hour:02d}:00", f"{end_hour:02d}:00"):

@@ -109,6 +109,22 @@ class PublishRosterResponse(BaseModel):
     # which outbound channels are switched on at all.
     delivered: Optional[dict] = None
     channels_available: Optional[List[str]] = None
+    # "Meca Rossi is on at Apothecary 16:00-23:00 on Fri 16 Oct": people on
+    # this roster who are on at the owner's other venue then. Warnings only.
+    cross_venue_warnings: List[str] = []
+
+
+def cross_venue_warnings(roster) -> List[str]:
+    """Overlaps (and turnarounds under the minimum rest) with the same
+    people's shifts at the other venues the caller may see."""
+    from rosteriq.award_rules import MINIMUM_HOURS_BETWEEN_SHIFTS
+    from rosteriq.services.person_identity import cross_venue_clashes
+    try:
+        return [c["message"] for c in cross_venue_clashes(
+            get_db(), roster, min_rest_hours=MINIMUM_HOURS_BETWEEN_SHIFTS)]
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Cross-venue check failed for roster {getattr(roster, 'id', '?')}: {e}")
+        return []
 
 
 class RecallRosterRequest(BaseModel):
@@ -238,6 +254,11 @@ async def publish_roster(
         skip_approval=body.skip_approval and user.role in ("owner", "manager"),
     )
     _audit_publish(roster, result, skip_approval=bool(body.skip_approval))
+    elsewhere = cross_venue_warnings(roster)
+    message = result.message
+    if elsewhere:
+        message += " On at another venue: " + "; ".join(elsewhere[:3]) + (
+            f" (+{len(elsewhere) - 3} more)." if len(elsewhere) > 3 else ".")
 
     return PublishRosterResponse(
         success=result.success,
@@ -247,12 +268,13 @@ async def publish_roster(
         critical_conflicts=result.critical_conflicts,
         tanda_push_result=result.tanda_push_result,
         notifications_sent=result.notifications_sent,
-        message=result.message,
+        message=message,
         timestamp=result.timestamp,
         approval_request_id=result.approval_request_id,
         staffing_warnings=result.staffing_warnings,
         delivered=result.delivered,
         channels_available=result.channels_available,
+        cross_venue_warnings=elsewhere,
     )
 
 

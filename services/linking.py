@@ -31,7 +31,7 @@ import hmac
 import logging
 import os
 import time
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,49 @@ def find_linked_employee(db, user) -> Tuple[Optional[object], Optional[str]]:
     return fallback
 
 
+def _staff_venue_ids(db, user) -> list:
+    """Venues a MANAGER login is linked to as staff only (services/venue_access.py)."""
+    held = getattr(user, "staff_venue_ids", None)
+    if held is None:
+        try:
+            held = (db.get_user_by_id(getattr(user, "user_id", None)) or {}).get("staff_venue_ids")
+        except Exception:
+            held = None
+    return list(held or [])
+
+
+def find_linked_employees(db, user) -> List[Tuple[object, str]]:
+    """Every (employee, venue_id) this login is linked to, primary venue
+    first: the email match in each venue the user holds, dashboard or
+    staff-only. Same scope rules as find_linked_employee (owners: every
+    venue; demo identities: the demo venue only). Records a manager has set
+    inactive are left out unless that would leave nothing."""
+    from rosteriq.services.demo import DEMO_VENUE_ID, is_demo_identity
+    email = (getattr(user, "email", "") or "").strip().lower()
+    if not email:
+        return []
+    if is_demo_identity(getattr(user, "user_id", None), email):
+        emp, vid = find_linked_employee(db, user)
+        return [(emp, vid)] if emp is not None else []
+    if getattr(user, "is_owner", False):
+        venue_ids = [v.id for v in (db.list_venues() or [])]
+    else:
+        venue_ids = list(getattr(user, "venue_ids", None) or [])
+    for v in _staff_venue_ids(db, user):
+        if v not in venue_ids:
+            venue_ids.append(v)
+    out = []
+    for vid in venue_ids:
+        if vid == DEMO_VENUE_ID:
+            continue
+        for emp in db.get_employees(vid) or []:
+            if _email_of(emp) == email:
+                out.append((emp, vid))
+                break
+    active = [(e, v) for e, v in out if getattr(e, "active", True)]
+    return active or out
+
+
 def _throttle(user_id: str) -> None:
     """Raise if this user has burned MAX_CODE_ATTEMPTS in the window."""
     from fastapi import HTTPException
@@ -199,20 +242,29 @@ def link_with_code(db, user, raw_code: str) -> Tuple[Optional[object], Optional[
         )
 
     # Dashboard role is account-wide. A login that already manages some venue
-    # (e.g. a throwaway it created itself) must not join another venue as
-    # staff, or it would arrive there as a manager.
+    # must not arrive at another venue as a manager, so it is linked there as
+    # STAFF ONLY (staff_venue_ids: its shifts reach /my, the dashboard stays
+    # shut). Even that only inside one owner's business: a login that manages
+    # a throwaway venue it created itself is refused, because no other manager
+    # runs both the throwaway and the workplace.
+    from rosteriq.services.venue_access import (
+        held_venue_ids, is_manager_login, is_platform_owner, same_owner_runs,
+    )
     rec_now = db.get_user_by_id(uid) or {}
-    if match_vid not in (rec_now.get("venue_ids") or []):
-        role_now = getattr(rec_now.get("role"), "value", rec_now.get("role"))
-        if role_now in ("manager", "owner") or rec_now.get("is_owner"):
+    held_now = held_venue_ids(rec_now)
+    staff_only = False
+    if match_vid not in held_now and is_manager_login(rec_now):
+        if is_platform_owner(rec_now) or not same_owner_runs(db, held_now + [match_vid],
+                                                             exclude_user_id=uid):
             security("link.manager_account_refused", venue_id=match_vid, user_id=uid,
                      outcome="denied", employee_id=match.id)
             raise HTTPException(
                 status_code=409,
-                detail="This login already manages a venue, so it can't also be linked as "
-                       "staff somewhere else. Sign up for your staff account with a different "
-                       "email, or ask your manager.",
+                detail="This login manages a venue, so it can only be linked as staff at "
+                       "another venue the same owner runs. Ask a manager of both venues to "
+                       "add this one from Staff \u2192 Access, or ask RosterIQ support.",
             )
+        staff_only = True
 
     # A record with no email yet: the code IS the proof — stamp the login
     # email on it so every later email lookup finds this employee. Never
@@ -238,23 +290,21 @@ def link_with_code(db, user, raw_code: str) -> Tuple[Optional[object], Optional[
     # Grant the venue durably on the user record
     try:
         rec = db.get_user_by_id(uid)
-        if rec is not None:
-            vids = list(rec.get("venue_ids") or [])
-            if match_vid not in vids:
-                vids.append(match_vid)
-                rec["venue_ids"] = vids
-                db.save_user(rec)
+        field = "staff_venue_ids" if staff_only else "venue_ids"
+        if rec is not None and match_vid not in held_venue_ids(rec):
+            rec[field] = list(rec.get(field) or []) + [match_vid]
+            db.save_user(rec)
     except Exception as e:  # noqa: BLE001
         logger.warning(f"join-code grant failed for {uid}: {e}")
         raise HTTPException(status_code=500, detail="Could not link your account. Try again.")
     try:
         # keep the in-flight request's context consistent
-        if hasattr(user, "venue_ids") and match_vid not in (user.venue_ids or []):
-            user.venue_ids = list(user.venue_ids or []) + [match_vid]
+        if hasattr(user, field) and match_vid not in (getattr(user, field) or []):
+            setattr(user, field, list(getattr(user, field) or []) + [match_vid])
     except Exception:
         pass
     _clear_throttle(uid)
     audit("user.venue_grant", match_vid, "user", uid, email=email, employee_id=match.id,
-          reason="join_code")
+          reason="join_code", staff_only=staff_only or None)
     logger.info(f"Join code: {email} -> employee {match.id} at {match_vid}")
     return match, match_vid

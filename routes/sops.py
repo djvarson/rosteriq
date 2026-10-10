@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field, field_validator
 from rosteriq.database import get_db
 from rosteriq.middleware.auth import get_current_user, UserContext
 from rosteriq.middleware.tenant import enforce_venue_access, enforce_venue_manager
-from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
+from rosteriq.routes.staff_portal import _linked_employee, _linked_employees, _no_link_response, _venue_names
 from rosteriq.services.audience import matches as audience_matches
 from rosteriq.services.events import audit
 from rosteriq.services.staff_records import active_only, is_active
@@ -527,35 +527,40 @@ async def seed_sops(body: SeedBody, user: UserContext = Depends(get_current_user
 @router.get("/api/me/sops")
 async def my_sops(user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         return _no_link_response(user)
-    docs = db.list_sop_documents(vid) or []
-    acks = db.list_sop_acks(vid) or []
+    names = _venue_names(db, [v for _, v in links])
     out = []
     outstanding = 0
-    for d in docs:
-        if not d.get("active", True) or not _applies_to_employee(d, emp):
-            continue
-        ack = _find_ack(acks, d["id"], int(d.get("version") or 1), emp.id)
-        p = _doc_payload(d)
-        p["acknowledged"] = ack is not None
-        p["acknowledged_at"] = str(ack.get("acknowledged_at")) if ack else None
-        if p["requires_ack"] and not p["acknowledged"]:
-            outstanding += 1
-        out.append(p)
+    for emp, vid in links:
+        docs = db.list_sop_documents(vid) or []
+        acks = db.list_sop_acks(vid) or []
+        for d in docs:
+            if not d.get("active", True) or not _applies_to_employee(d, emp):
+                continue
+            ack = _find_ack(acks, d["id"], int(d.get("version") or 1), emp.id)
+            p = _doc_payload(d)
+            p["acknowledged"] = ack is not None
+            p["acknowledged_at"] = str(ack.get("acknowledged_at")) if ack else None
+            p["venue_name"] = names[vid]
+            if p["requires_ack"] and not p["acknowledged"]:
+                outstanding += 1
+            out.append(p)
     return {"linked": True, "count": len(out), "outstanding": outstanding, "documents": out}
 
 
 @router.post("/api/me/sops/{doc_id}/acknowledge")
 async def acknowledge_sop(doc_id: str, user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
     doc = db.get_sop_document(doc_id)
-    if not doc or doc.get("venue_id") != vid:
+    emp = next((e for e, v in links if doc and v == doc.get("venue_id")), None)
+    if not doc or emp is None:
         raise HTTPException(status_code=404, detail="Procedure not found")
+    vid = doc.get("venue_id")
     if not doc.get("active", True):
         raise HTTPException(
             status_code=404,

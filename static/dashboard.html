@@ -5203,6 +5203,7 @@
         <div id="al-sections" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px; font-size:13px;"></div>
         <button class="btn btn-secondary btn-small" onclick="staffSetDeptManager()" title="Manager of only the ticked departments">Make department manager</button>
       </div>
+      <div id="al-venues" style="display:none; margin:4px 0 12px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); font-size:13px;"></div>
       <textarea id="al-link" readonly rows="2" style="display:none; width:100%; font-family:ui-monospace,monospace; font-size:11px; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--dark-bg); color:var(--text-primary); margin-bottom:8px;"></textarea>
       <div id="al-result" style="font-size:13px; color:var(--text-muted); min-height:20px;"></div>
       <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">They need a linked login first (Join code). Access changes take effect on their next sign-in. Every change lands in the audit log.</div>
@@ -8767,6 +8768,11 @@ async function preparePayroll() {
     const errs = (batch.validation_errors || []).length
       ? '<div style="color:var(--danger); font-size:13px; margin-top:6px;">⚠ ' + batch.validation_errors.map(esc).join('<br>⚠ ') + '</div>'
       : '';
+    const acrossVenues = (batch.cross_venue_hours || []).length
+      ? '<div style="font-size:13px; margin-top:8px; padding:8px 10px; border:1px solid var(--border); border-radius:8px;">' +
+        '<b>Works at more than one of your venues</b> — this pay run covers this venue only:<br>⚠ ' +
+        batch.cross_venue_hours.map(esc).join('<br>⚠ ') + '</div>'
+      : '';
     box.innerHTML =
       '<div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">' +
         '<div><div style="font-size:11px; font-weight:600; letter-spacing:0.5px; color:var(--text-muted); text-transform:uppercase;">Staff</div><div style="font-size:20px; font-weight:800;">' + batch.employee_count + '</div></div>' +
@@ -8775,7 +8781,7 @@ async function preparePayroll() {
         '<a class="btn btn-secondary" style="margin-left:auto;" href="/api/payroll/batch/' + esc(batch.batch_id) + '/csv?venue_id=' + encodeURIComponent(state.currentVenue) + '" onclick="return downloadPayrollCsv(event, \'' + esc(batch.batch_id) + '\')">Download accountant CSV</a>' +
       '</div>' +
       '<div style="color:var(--text-muted); font-size:12px; margin-top:8px;">Figures are prepared for review — RosterIQ never pays anyone. Have your payroll advisor sign off award rates before running pays.</div>' +
-      errs;
+      errs + acrossVenues;
   } catch (e) {
     box.innerHTML = '<div style="color:var(--danger); font-size:13px;">' + esc(e.message) + '</div>';
   }
@@ -10121,6 +10127,99 @@ function openAccessModal(employeeId) {
     }
   } catch (e) { /* non-fatal */ }
   openModal('modal-access');
+  loadAccessVenues(employeeId);
+}
+
+// Per-venue access for a login that reaches more than one of the owner's
+// venues, and "Also give access to <venue>" for the venues you run.
+var _accessVenues = null;
+var _AL_LEVELS = { full: 'Manager', department: 'Department manager', staff: 'Staff' };
+
+function _alSectionBoxes(key, options, picked) {
+  return (options || []).map(function (s) {
+    return '<label style="display:inline-flex; align-items:center; gap:4px; cursor:pointer; margin-right:8px;">' +
+      '<input type="checkbox" class="alv-sec-' + key + '" value="' + esc(s) + '"' +
+      ((picked || []).indexOf(s) >= 0 ? ' checked' : '') + '> ' + esc(s) + '</label>';
+  }).join('');
+}
+
+function _alLevelSelect(key, current, allowStaff) {
+  return '<select id="alv-level-' + key + '" onchange="alvLevelChanged(\'' + key + '\')" style="padding:4px 6px; border:1px solid var(--border); border-radius:6px;">' +
+    ['full', 'department', 'staff'].filter(function (l) { return l !== 'staff' || allowStaff; }).map(function (l) {
+      return '<option value="' + l + '"' + (l === current ? ' selected' : '') + '>' + _AL_LEVELS[l] + '</option>';
+    }).join('') + '</select>';
+}
+
+function alvLevelChanged(key) {
+  var sel = document.getElementById('alv-level-' + key);
+  var secs = document.getElementById('alv-secs-' + key);
+  if (sel && secs) secs.style.display = sel.value === 'department' ? 'block' : 'none';
+}
+
+async function loadAccessVenues(employeeId) {
+  var box = document.getElementById('al-venues');
+  box.style.display = 'none'; box.innerHTML = '';
+  _accessVenues = null;
+  var d;
+  try {
+    d = await fetchAPI('/api/employees/' + encodeURIComponent(employeeId) + '/access');
+  } catch (e) { return; }   // not linked yet etc. — the buttons above say why when used
+  if (_accessEmpId !== employeeId) return;
+  var held = d.venues || [], add = d.can_add || [];
+  if (held.length < 2 && !add.length) return;
+  _accessVenues = { held: held, add: add };
+  var html = '<div style="margin-bottom:8px;">Their login: <b>' + esc(d.label || '') + '</b></div>';
+  if (d.self) {
+    box.innerHTML = html + '<div style="color:var(--text-muted);">This is your own login — your access is set by RosterIQ support.</div>';
+    box.style.display = 'block';
+    return;
+  }
+  html += held.map(function (v, i) {
+    var key = 'h' + i;
+    return '<div style="padding:6px 0; border-top:1px solid var(--border);">' +
+      '<div style="font-weight:600; margin-bottom:4px;">' + esc(v.venue_name) + ' <span class="alert-badge badge-info">' +
+        esc(_AL_LEVELS[v.level] + (v.sections && v.sections.length ? ' — ' + v.sections.join(', ') : '')) + '</span></div>' +
+      '<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">' + _alLevelSelect(key, v.level, true) +
+        '<button class="btn btn-secondary btn-small" onclick="saveVenueAccess(\'' + key + '\')">Save</button></div>' +
+      '<div id="alv-secs-' + key + '" style="display:' + (v.level === 'department' ? 'block' : 'none') + '; margin-top:6px;">' +
+        _alSectionBoxes(key, v.section_options, v.sections) + '</div>' +
+    '</div>';
+  }).join('');
+  html += add.map(function (v, i) {
+    var key = 'a' + i;
+    return '<div style="padding:6px 0; border-top:1px solid var(--border);">' +
+      '<div style="font-weight:600; margin-bottom:4px;">Also give access to ' + esc(v.venue_name) + '</div>' +
+      '<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">' + _alLevelSelect(key, 'full', v.has_staff_record) +
+        '<button class="btn btn-secondary btn-small" onclick="saveVenueAccess(\'' + key + '\')">Give access</button></div>' +
+      '<div id="alv-secs-' + key + '" style="display:none; margin-top:6px;">' + _alSectionBoxes(key, v.section_options, []) + '</div>' +
+    '</div>';
+  }).join('');
+  box.innerHTML = html;
+  box.style.display = 'block';
+}
+
+async function saveVenueAccess(key) {
+  if (!_accessVenues) return;
+  var list = key.charAt(0) === 'h' ? _accessVenues.held : _accessVenues.add;
+  var v = list[parseInt(key.slice(1), 10)];
+  if (!v) return;
+  var level = document.getElementById('alv-level-' + key).value;
+  var sections = Array.prototype.slice.call(document.querySelectorAll('.alv-sec-' + key))
+    .filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
+  if (level === 'department' && !sections.length) {
+    document.getElementById('al-result').textContent = 'Tick at least one department first.';
+    return;
+  }
+  try {
+    var d = await fetchAPI('/api/employees/' + encodeURIComponent(_accessEmpId) + '/access', {
+      method: 'POST', body: JSON.stringify({ venue_id: v.venue_id, level: level, sections: sections }),
+    });
+    document.getElementById('al-result').textContent = d.message;
+    showToast(d.message, 'success');
+    loadAccessVenues(_accessEmpId);
+  } catch (err) {
+    document.getElementById('al-result').textContent = err.message;
+  }
 }
 
 async function staffSetDeptManager() {
@@ -10138,6 +10237,7 @@ async function staffSetDeptManager() {
     });
     document.getElementById('al-result').textContent = d.message;
     showToast(d.message, 'success');
+    loadAccessVenues(_accessEmpId);
   } catch (err) {
     document.getElementById('al-result').textContent = err.message;
   }
@@ -10168,6 +10268,7 @@ async function staffSetRole(role) {
     });
     document.getElementById('al-result').textContent = d.message;
     showToast(d.message, 'success');
+    loadAccessVenues(_accessEmpId);
   } catch (err) {
     document.getElementById('al-result').textContent = err.message;
   }
@@ -11171,6 +11272,11 @@ document.getElementById('btn-modal-generate').addEventListener('click', async ()
         ? a.name + "'s visa has EXPIRED — confirm work rights before publishing."
         : a.name + "'s visa expires " + a.expiry + ' — re-check VEVO.', 'warning');
     }
+    var be = (result && result.booked_elsewhere) || [];
+    if (be.length) {
+      showToast('Kept off while on at another venue: ' + be.slice(0, 2).join('; ') +
+        (be.length > 2 ? ' (+' + (be.length - 2) + ' more)' : ''), 'info', 9000);
+    }
     if (result && result.id) { state.currentRosterId = result.id; state.currentRosterWeek = date; }
     await loadVenueData();
     showRosterWeekOf(date, result);
@@ -11715,13 +11821,13 @@ function displayConflicts(data) {
   listEl.innerHTML = Object.entries(grouped).map(([type, items]) => `
     <div style="margin-bottom: 20px;">
       <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 8px; font-size: 13px; text-transform: uppercase; color: var(--text-muted);">
-        ${type.replace(/_/g, ' ')}
+        ${esc(type.replace(/_/g, ' '))}
       </div>
       ${items.map(conflict => `
         <div class="conflict-item ${conflict.severity.toLowerCase()}">
           <div class="conflict-header">
             <span>${getSeverityIcon(conflict.severity)}</span>
-            <span>${conflict.message}</span>
+            <span>${esc(conflict.message)}</span>
           </div>
           <div class="conflict-footer">
             <span class="conflict-employees">${conflict.employee_ids?.length || 0} employee(s)</span>
@@ -13632,11 +13738,18 @@ async function loadVenueSettings() {
   var roleLabel = role === 'owner' ? 'Owner' : role === 'manager' ? 'Manager' : role === 'staff' ? 'Staff' : '—';
   var who = state.isDemo ? 'Demo session' : (claims.email || '—');
   var teamBody = document.getElementById('team-self-body');
-  if (teamBody) teamBody.innerHTML = '<tr><td>' + esc(who) + '</td><td><span class="alert-badge badge-info">' +
+  if (teamBody) teamBody.innerHTML = '<tr><td>' + esc(who) + '</td><td><span class="alert-badge badge-info" id="team-self-role">' +
     esc(state.isDemo ? 'Demo' : roleLabel) + '</span></td></tr>';
   var addBtn = document.getElementById('btn-add-venue');
   if (addBtn) addBtn.style.display = (!state.isDemo && _obCanManage()) ? '' : 'none';
   aeLoad('settings-areas', state.currentVenue, { save: true });
+  if (!state.isDemo) {
+    // "Owner (The Wembley Hotel, Apothecary)" for the login that runs them
+    fetchAPI('/api/me/access').then(function (a) {
+      var el = document.getElementById('team-self-role');
+      if (el && a && a.label) el.textContent = a.label;
+    }).catch(function () { /* the role from the token stands */ });
+  }
   if (state.isDemo || !state.currentVenue) return;
   try {
     var v = await fetchAPI('/venues/' + encodeURIComponent(state.currentVenue));
@@ -14188,6 +14301,11 @@ async function publishRoster() {
           (short.length > 3 ? ' (+' + (short.length - 3) + ' more)' : '') + '. ' + reach.text, 'warning', 9000);
       } else {
         showToast('Roster published. ' + reach.text, reach.reached ? 'success' : 'warning', 7000);
+      }
+      const elsewhere = result.cross_venue_warnings || [];
+      if (elsewhere.length) {
+        showToast('On at another venue: ' + elsewhere.slice(0, 3).join('; ') +
+          (elsewhere.length > 3 ? ' (+' + (elsewhere.length - 3) + ' more)' : ''), 'warning', 12000);
       }
     } else {
       showToast('Could not publish: ' + ((result && result.message) || 'roster not in a publishable state'), 'warning', 6000);
