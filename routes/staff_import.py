@@ -473,6 +473,12 @@ async def import_staff(body: StaffImportBody) -> dict:
                 upd = match.model_copy(deep=True)
                 for attr, value in changes.values():
                     setattr(upd, attr, value)
+                if "rate" in changes:
+                    from rosteriq.services.clock import venue_today
+                    from rosteriq.services.staff_records import rate_change_entry
+                    upd.rate_history = list(match.rate_history or []) + [rate_change_entry(
+                        match.hourly_base_rate, upd.hourly_base_rate,
+                        venue_today(body.venue_id, db), "import")]
                 upd.updated_at = now
                 db.save_employee(upd)
             except Exception as e:

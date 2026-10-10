@@ -151,7 +151,8 @@ class NotificationHub:
         from a spreadsheet who has neither is left alone."""
         from rosteriq.services.clock import venue_today
         today = today or venue_today(venue_id, self._db)
-        staff = self._db.get_employees(venue_id) or []
+        staff = [e for e in (self._db.get_employees(venue_id) or [])
+                 if getattr(e, "active", True) is not False]
         try:
             rostered = {str(getattr(s, "employee_id", "")) for s in
                         (self._db.get_shifts(venue_id, today, today + timedelta(days=days_ahead)) or [])}
@@ -385,10 +386,14 @@ class NotificationHub:
             # store's list_employees() is platform-wide, and caller-supplied
             # ids are unverified — either path could otherwise reach another
             # venue's staff.
-            venue_staff_ids = [e.id for e in (self._db.get_employees(venue_id) or [])]
+            venue_staff = self._db.get_employees(venue_id) or []
+            venue_staff_ids = [e.id for e in venue_staff]
             if target_employee_ids is None:
                 outside_venue = 0
-                target_employee_ids = venue_staff_ids
+                # A venue-wide send skips people who have left; a message
+                # about someone's own shift still reaches them.
+                target_employee_ids = [e.id for e in venue_staff
+                                       if getattr(e, "active", True) is not False]
             else:
                 allowed = set(venue_staff_ids)
                 requested = list(dict.fromkeys(target_employee_ids))

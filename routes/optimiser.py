@@ -260,7 +260,8 @@ async def optimise_roster(
         f"week {week_start} by user {current_user.user_id}"
     )
 
-    employees: List[Employee] = list(db.get_employees(request.venue_id) or [])
+    employees: List[Employee] = [e for e in (db.get_employees(request.venue_id) or [])
+                                 if getattr(e, "active", True) is not False]
     if not employees:
         raise HTTPException(
             status_code=422,

@@ -84,7 +84,6 @@ class PrivacyService:
                 resource_type='employee',
                 details={
                     'employee_id': employee_id,
-                    'employee_name': emp.name,  # Log original name for audit
                     'employment_type': emp.employment_type.value,
                     'timestamp': datetime.utcnow().isoformat(),
                 }
@@ -96,7 +95,8 @@ class PrivacyService:
                 'employee_id': employee_id,
                 'anonymised_at': datetime.utcnow().isoformat(),
                 'preserved': ['employment_type', 'skills', 'shift_history', 'cost_data'],
-                'anonymised_fields': ['name', 'email', 'phone'],
+                'anonymised_fields': ['name', 'email', 'phone', 'visa_status', 'visa_expiry',
+                                      'visa_work_limit_fortnight'],
             }
 
         except Exception as e:

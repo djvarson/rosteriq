@@ -161,7 +161,8 @@ class AutoScheduler:
             if not venue:
                 raise ValueError(f"Venue {venue_id} not found")
 
-            employees = self.db.get_employees(venue_id)
+            employees = [e for e in (self.db.get_employees(venue_id) or [])
+                         if getattr(e, "active", True) is not False]
             if not employees:
                 raise ValueError(f"No employees found")
 
@@ -679,7 +680,8 @@ class AutoScheduler:
         """
         try:
             venue = self.db.get_venue(venue_id)
-            employees = self.db.get_employees(venue_id)
+            employees = [e for e in (self.db.get_employees(venue_id) or [])
+                         if getattr(e, "active", True) is not False]
 
             forecasts_by_date = {}
             for i in range(7):

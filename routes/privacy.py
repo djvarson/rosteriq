@@ -30,8 +30,12 @@ from rosteriq.services.privacy import PrivacyService
 from rosteriq.services.data_retention import DataRetentionService
 from rosteriq.services.demo import DEMO_USER_ID
 from rosteriq.middleware.auth import get_current_user, require_role
-from rosteriq.middleware.tenant import enforce_venue_access
+from rosteriq.middleware.tenant import (
+    enforce_venue_access, enforce_venue_manager, get_tenant_context_optional,
+    load_employee_in_scope,
+)
 from rosteriq.services.events import audit
+from rosteriq.services.staff_records import linked_logins, retire_logins
 
 logger = logging.getLogger(__name__)
 
@@ -189,50 +193,71 @@ async def anonymise_employee(
     db=Depends(get_db),
 ):
     """
-    Anonymise an employee's personally identifiable information.
+    Remove a leaver's personal details ("right to erasure").
 
-    Preserves:
-    - Employment type, skills, award level
-    - Shift history (for reporting and compliance)
-    - Cost data
+    Preserves shift history, employment type, skills, award level and cost
+    data. Replaces the name and email, clears phone and work-rights details,
+    marks the record inactive, rewrites the name where the venue's feed posts,
+    comments and procedure sign-offs copied it, and retires their linked
+    login: switched off if it held only this venue, otherwise it just loses
+    this venue.
 
-    Anonymises:
-    - Name → "Anonymised Employee #XXXXXXXX"
-    - Email → "anon_XXXXXXXX@deleted.local"
-    - Phone → removed
-
-    Requires: Owner role (this is a significant operation), and the employee
-    must belong to a venue the caller can access.
+    Requires a FULL manager of the employee's venue (the platform owner
+    passes). Another venue's employee is a 404, never a 403.
     """
     try:
-        # The demo identity can never anonymise anyone.
         _refuse_demo(current_user)
 
-        # Tenant scope FIRST so a cross-venue caller gets 404 (no id oracle)
-        # rather than learning the id exists via a 403.
-        employee = _load_employee_in_scope(db, employee_id)
+        # Tenant scope FIRST so a cross-venue caller gets 404 (no id oracle);
+        # a record with no venue is the platform owner's alone.
+        employee = load_employee_in_scope(db, employee_id)
         _venue_id = getattr(employee, "venue_id", None)
-        _name_before = getattr(employee, "name", None)
+        enforce_venue_manager(_venue_id)
 
-        # Authorization: only owner may anonymise
-        _require_owner(current_user)
+        logins = linked_logins(db, employee)
+        if any(u.get("id") == current_user.user_id for u in logins):
+            raise HTTPException(status_code=400,
+                                detail="You can't remove your own details from here")
+        # A manager login's access is changed through Access (single-venue
+        # logins) or by the platform owner, never as a side effect here.
+        tenant = get_tenant_context_optional()
+        if not getattr(tenant, "is_owner", False) and any(
+                u.get("role") in ("manager", "owner") or u.get("is_owner") for u in logins):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{employee.name}'s login has manager access. Set their access to staff "
+                       "first (Access on their row), then remove their details.")
 
         service = PrivacyService(db)
         result = service.anonymise_employee(employee_id)
 
-        # Audit: irreversible erasure of PII — record who, whose (name before),
-        # and which fields went.
+        new_name = getattr(db.get_employee(employee_id), "name", None) or "Former staff member"
+        scrubbed = {}
+        if _venue_id:
+            scrubbed = db.scrub_person_name(_venue_id, employee_id,
+                                            [u.get("id") for u in logins], new_name)
+        retired = retire_logins(db, _venue_id, logins) if _venue_id else {
+            "deactivated": [], "venue_removed": []}
+
+        # The audit row says who removed whose record — by id, never the
+        # erased name.
         audit("privacy.anonymise", _venue_id, "employee", employee_id,
-              employee_name_before=_name_before,
               anonymised_fields=list(result.get("anonymised_fields") or []),
-              preserved=list(result.get("preserved") or []))
+              preserved=list(result.get("preserved") or []),
+              names_rewritten=scrubbed,
+              logins_deactivated=len(retired["deactivated"]),
+              logins_venue_removed=len(retired["venue_removed"]))
 
         return {
             'success': True,
             'employee_id': employee_id,
+            'name': new_name,
             'anonymised_at': result['anonymised_at'],
             'preserved': result['preserved'],
             'anonymised_fields': result['anonymised_fields'],
+            'names_rewritten': scrubbed,
+            'logins_deactivated': len(retired["deactivated"]),
+            'logins_venue_removed': len(retired["venue_removed"]),
         }
 
     except HTTPException:

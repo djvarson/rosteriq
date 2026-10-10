@@ -106,11 +106,17 @@ def find_linked_employee(db, user) -> Tuple[Optional[object], Optional[str]]:
         venue_ids = [v.id for v in (db.list_venues() or [])]
     else:
         venue_ids = list(getattr(user, "venue_ids", None) or [])
+    # A person who left one venue but still works at another (same email at
+    # both) links to the record where they are active.
+    fallback = (None, None)
     for vid in venue_ids:
         for emp in db.get_employees(vid) or []:
             if _email_of(emp) == email:
-                return emp, vid
-    return None, None
+                if getattr(emp, "active", True) is not False:
+                    return emp, vid
+                if fallback[0] is None:
+                    fallback = (emp, vid)
+    return fallback
 
 
 def _throttle(user_id: str) -> None:
@@ -172,6 +178,11 @@ def link_with_code(db, user, raw_code: str) -> Tuple[Optional[object], Optional[
     from rosteriq.services.demo import DEMO_VENUE_ID
     if match_vid == DEMO_VENUE_ID:
         raise HTTPException(status_code=400, detail="That's a demo join code — ask your manager for your own.")
+    if getattr(match, "active", True) is False:
+        security("link.code_inactive_record", venue_id=match_vid, user_id=uid, outcome="denied",
+                 employee_id=match.id)
+        raise HTTPException(status_code=400,
+                            detail="That staff record isn't active any more. Ask your manager.")
 
     email = (getattr(user, "email", "") or "").strip().lower()
     emp_email = _email_of(match)

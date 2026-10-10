@@ -750,7 +750,8 @@ class AgentContext:
         }
 
     async def _tool_get_venue_stats(self, params: dict) -> dict:
-        employees = self.db.get_employees(self.venue_id)
+        employees = [e for e in (self.db.get_employees(self.venue_id) or [])
+                     if getattr(e, "active", True) is not False]
         today = self.today
         week_shifts = self.db.get_shifts(self.venue_id, today, today + timedelta(days=7))
 
@@ -901,7 +902,8 @@ class AgentContext:
         except ValueError:
             target_date = self.today
 
-        employees = self.db.get_employees(self.venue_id)
+        employees = [e for e in (self.db.get_employees(self.venue_id) or [])
+                     if getattr(e, "active", True) is not False]
         if not employees:
             return {"available": [], "unavailable": [], "total": 0, "note": "No employees found. Connect a rostering system to import staff."}
 

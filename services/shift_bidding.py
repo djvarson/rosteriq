@@ -260,7 +260,9 @@ class ShiftBiddingService:
 
         # Get all employees for the venue
         all_employees = self.db.list_employees()
-        venue_employees = [e for e in all_employees]  # TODO: Filter by venue_id when available
+        venue_employees = [e for e in all_employees
+                           if getattr(e, "venue_id", None) == open_shift.venue_id
+                           and getattr(e, "active", True) is not False]
 
         # Filter by role and skills
         eligible = []
@@ -848,6 +850,8 @@ class ShiftBiddingService:
             # list_employees() is global, so without this a manager viewing a
             # venue-A shift would be shown venue-B staff (names + skills).
             if getattr(emp, "venue_id", None) != open_shift.venue_id:
+                continue
+            if getattr(emp, "active", True) is False:
                 continue
 
             # Check required skills

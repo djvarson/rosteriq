@@ -695,6 +695,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register staff import routes: {e}")
 
+# Staff records: edit, deactivate/reactivate, bulk join codes, audience pills
+try:
+    from rosteriq.routes.staff_records import router as staff_records_router
+    app.include_router(staff_records_router)
+    logger.info("Staff record routes registered")
+except ImportError:
+    logger.info("Staff record routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register staff record routes: {e}")
+
 # Roster import (paste a shift export from any program)
 try:
     from rosteriq.routes.roster_import import router as roster_import_router
@@ -2537,6 +2547,17 @@ async def create_employee(employee: Employee):
     # Otherwise a manager could re-home (and re-price) another venue's
     # employee by posting their id under their own venue_id.
     _guard_employee_overwrite(previous)
+    from rosteriq.services.staff_records import (
+        email_holder, email_taken_message, hourly_rate_problem, keep_record_state)
+    _rate_problem = hourly_rate_problem(employee.hourly_base_rate, getattr(employee, "pay_basis", "hourly"))
+    if _rate_problem:
+        raise HTTPException(422, _rate_problem)
+    _holder = email_holder(_db, employee.venue_id, employee.email, except_id=employee.id)
+    if _holder is not None:
+        raise HTTPException(409, email_taken_message(_holder, employee.email))
+    if previous is not None:
+        _t = get_tenant_context_optional()
+        keep_record_state(employee, previous, changed_by=_caller_email(_t) if _t is not None else None)
     _store["employees"][employee.id] = employee
     _audit_employee_saved(employee, previous)
 
@@ -2560,8 +2581,14 @@ async def bulk_create_employees(employees: list[Employee]):
         _refuse_reserved_id(emp.id, emp.venue_id, _store["employees"].get(emp.id))
         enforce_venue_manager(getattr(emp, "venue_id", None))
         _guard_employee_overwrite(_store["employees"].get(emp.id))
+        from rosteriq.services.staff_records import hourly_rate_problem
+        _rate_problem = hourly_rate_problem(emp.hourly_base_rate, getattr(emp, "pay_basis", "hourly"))
+        if _rate_problem:
+            raise HTTPException(422, f"{emp.name}: {_rate_problem}")
+    from rosteriq.services.staff_records import keep_record_state
     for emp in employees:
         previous = _store["employees"].get(emp.id)
+        keep_record_state(emp, previous, changed_by="bulk")
         _store["employees"][emp.id] = emp
         _audit_employee_saved(emp, previous, via="bulk")
 
@@ -2855,10 +2882,10 @@ def _approved_leave_map(venue_id: str) -> dict:
 
 
 def _venue_employees(venue_id: str) -> list:
-    """ONLY this venue's employees — roster generation must never see (or
-    schedule) another tenant's staff."""
+    """ONLY this venue's ACTIVE employees — roster generation must never see
+    (or schedule) another tenant's staff, or someone who has left."""
     return [e for e in _store["employees"].values()
-            if getattr(e, "venue_id", None) == venue_id]
+            if getattr(e, "venue_id", None) == venue_id and getattr(e, "active", True) is not False]
 
 
 @app.post("/rosters/generate")

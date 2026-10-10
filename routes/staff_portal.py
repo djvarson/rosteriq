@@ -52,6 +52,7 @@ from rosteriq.services.demo import (
     DEMO_STAFF_USER_ID, DEMO_STAFF_EMAIL,
 )
 from rosteriq.services.events import audit
+from rosteriq.services.staff_records import is_active
 
 logger = logging.getLogger(__name__)
 
@@ -643,7 +644,7 @@ async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
             mine.append(p)
         elif c.get("claimed_by") == emp.id and c.get("status") in ("claimed", "approved"):
             claimed_by_me.append(p)
-        elif c.get("status") == "open" and _live_shift(db, vid, c) is not None:
+        elif c.get("status") == "open" and is_active(emp) and _live_shift(db, vid, c) is not None:
             up_for_grabs.append(p)
     return {"linked": True, "up_for_grabs": up_for_grabs, "mine": mine,
             "claimed_by_me": claimed_by_me}
@@ -712,6 +713,9 @@ async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_use
         raise HTTPException(status_code=404, detail="Cover request not found")
     if cover.get("requested_by") == emp.id:
         raise HTTPException(status_code=409, detail="You can't claim your own shift")
+    if not is_active(emp):
+        raise HTTPException(status_code=403,
+                            detail="Your staff record here is no longer active — ask your manager")
     if cover.get("status") != "open":
         raise HTTPException(status_code=409, detail=f"This shift is already {cover.get('status')}")
     if _live_shift(db, vid, cover) is None:
@@ -776,6 +780,8 @@ async def team_availability(venue_id: str = Query(...)) -> dict:
     db = get_db()
     rows = []
     for emp in (db.get_employees(venue_id) or []):
+        if not is_active(emp):
+            continue
         avail = getattr(emp, "availability", {}) or {}
         days = {}
         constrained = []
@@ -842,6 +848,10 @@ async def decide_cover(cover_id: str, body: CoverDecision,
 
     claimant_id = cover.get("claimed_by")
     if body.approve:
+        claimant = db.get_employee(claimant_id) if claimant_id else None
+        if claimant is not None and not is_active(claimant):
+            raise HTTPException(status_code=409, detail=f"{claimant.name} is no longer active "
+                                "here — decline this request instead.")
         clash = _clashing_shift(db, body.venue_id, claimant_id, cover)
         if clash is not None:
             raise HTTPException(status_code=409, detail=_clash_detail(

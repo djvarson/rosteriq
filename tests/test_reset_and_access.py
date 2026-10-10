@@ -393,13 +393,24 @@ def test_hire_cannot_squat_a_colleagues_email_via_emailless_record():
 
 def test_access_changes_refuse_when_two_records_share_an_email():
     """Second layer: even if two records at a venue end up with the same email
-    (typed twice by hand), access changes and reset links refuse rather than
-    act on whichever login the email text happens to resolve to."""
+    (rows saved before POST /employees refused a duplicate), access changes and
+    reset links refuse rather than act on whichever login the email text
+    happens to resolve to."""
+    from rosteriq.models import Employee
     c, owner_h, vid, tag = _world()
     email = f"ra_dupe_{tag}@x.com"
     first = _employee(c, owner_h, vid, tag, name="Real Person", email=email)
     _link_staff(c, owner_h, vid, first, email)
-    second = _employee(c, owner_h, vid, tag, name="Duplicate Row", email=email)
+    r = c.post("/employees", json={
+        "id": f"{vid}-dupe", "venue_id": vid, "name": "Duplicate Row", "employment_type": "casual",
+        "award_level": "level_2", "state": "wa", "hourly_base_rate": "31.50", "email": email,
+        "created_at": "2026-07-01T00:00:00", "updated_at": "2026-07-01T00:00:00"}, headers=owner_h)
+    assert r.status_code == 409, r.text            # first layer: typing it twice is refused
+    second = f"{vid}-dupe"
+    get_db().save_employee(Employee(
+        id=second, venue_id=vid, name="Duplicate Row", employment_type="casual",
+        award_level="level_2", state="wa", hourly_base_rate="31.50", email=email,
+        created_at="2026-07-01T00:00:00", updated_at="2026-07-01T00:00:00"))
     for eid in (first, second):
         assert c.post(f"/api/employees/{eid}/access-role", json={"role": "manager"},
                       headers=owner_h).status_code == 409

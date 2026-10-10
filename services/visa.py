@@ -131,5 +131,7 @@ def save_synced_employee(db, emp) -> bool:
                 setattr(emp, field, getattr(prior, field))
         if getattr(prior, "created_at", None):
             emp.created_at = prior.created_at
+        from rosteriq.services.staff_records import keep_record_state
+        keep_record_state(emp, prior, changed_by="sync")
     db.save_employee(preserve_recorded_work_rights(db, emp))
     return True

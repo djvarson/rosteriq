@@ -520,6 +520,8 @@ class SurgeDetector:
 
             available = []
             for emp in all_employees:
+                if getattr(emp, "active", True) is False:
+                    continue
                 # Skip if already working
                 if emp.id in active_employee_ids:
                     continue

@@ -391,6 +391,13 @@ class BaseStore:
         """Mark an employee as anonymised (preserve shift history, anonymise PII)."""
         raise NotImplementedError
 
+    def scrub_person_name(self, venue_id: str, employee_id: str, user_ids: list,
+                          new_name: str) -> dict:
+        """Replace a person's name where other records at the venue copied it:
+        their feed posts and comments (by login id) and their SOP
+        acknowledgements (by employee id). Returns counts per table."""
+        raise NotImplementedError
+
     def get_anonymised_employees(self) -> list[dict]:
         """Get list of all anonymised employees."""
         raise NotImplementedError
@@ -2236,7 +2243,26 @@ class MemoryStore(BaseStore):
             emp.visa_status = None
             emp.visa_expiry = None
             emp.visa_work_limit_fortnight = None
+            emp.active = False
             self.save_employee(emp)
+
+    def scrub_person_name(self, venue_id, employee_id, user_ids, new_name):
+        uids = {u for u in (user_ids or []) if u}
+        posts = acks = 0
+        for post in self._feed_posts.values():
+            if post.get("venue_id") != venue_id:
+                continue
+            if post.get("author_user_id") in uids:
+                post["author_name"] = new_name
+                posts += 1
+            for comment in post.get("comments") or []:
+                if comment.get("author_user_id") in uids:
+                    comment["author_name"] = new_name
+        for ack in self._sop_acks.values():
+            if ack.get("venue_id") == venue_id and ack.get("employee_id") == employee_id:
+                ack["employee_name"] = new_name
+                acks += 1
+        return {"feed_posts": posts, "sop_acknowledgements": acks}
 
     def get_anonymised_employees(self) -> list[dict]:
         """Get list of all anonymised employees."""
@@ -3563,6 +3589,7 @@ class PostgresStore(BaseStore):
                 visa_expiry DATE,
                 visa_work_limit_fortnight NUMERIC(5, 2),
                 active BOOLEAN DEFAULT true,
+                rate_history JSONB DEFAULT '[]',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )"""),
@@ -3772,6 +3799,8 @@ class PostgresStore(BaseStore):
             "ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_status TEXT",
             "ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_expiry DATE",
             "ALTER TABLE employees ADD COLUMN IF NOT EXISTS visa_work_limit_fortnight NUMERIC(5, 2)",
+            "ALTER TABLE employees ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true",
+            "ALTER TABLE employees ADD COLUMN IF NOT EXISTS rate_history JSONB DEFAULT '[]'::jsonb",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_venue_created ON audit_logs (venue_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs ((details->>'category'), created_at DESC)",
@@ -3910,8 +3939,9 @@ class PostgresStore(BaseStore):
             cur.execute("""
                 INSERT INTO employees (id, venue_id, tanda_id, name, employment_type, award_level,
                     hourly_base_rate, skills, availability, max_hours_per_week, consecutive_days, phone, email,
-                    visa_status, visa_expiry, visa_work_limit_fortnight, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    visa_status, visa_expiry, visa_work_limit_fortnight, active, rate_history,
+                    created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, employment_type=EXCLUDED.employment_type,
                     award_level=EXCLUDED.award_level,
@@ -3921,6 +3951,7 @@ class PostgresStore(BaseStore):
                     phone=EXCLUDED.phone, email=EXCLUDED.email,
                     visa_status=EXCLUDED.visa_status, visa_expiry=EXCLUDED.visa_expiry,
                     visa_work_limit_fortnight=EXCLUDED.visa_work_limit_fortnight,
+                    active=EXCLUDED.active, rate_history=EXCLUDED.rate_history,
                     updated_at=now()
             """, (
                 emp.id, venue_id, emp.tanda_id, emp.name,
@@ -3930,12 +3961,16 @@ class PostgresStore(BaseStore):
                 emp.consecutive_days_limit, emp.phone, emp.email,
                 emp.visa_status, emp.visa_expiry,
                 emp.visa_work_limit_fortnight,
+                bool(getattr(emp, "active", True)),
+                _json(list(getattr(emp, "rate_history", None) or [])),
                 emp.created_at, emp.updated_at,
             ))
 
     def list_employees(self):
+        # Inactive (departed) staff are included: their history still prices
+        # and names past shifts. Anything that offers work filters on .active.
         with self._cursor() as cur:
-            cur.execute("SELECT * FROM employees WHERE active = true ORDER BY name")
+            cur.execute("SELECT * FROM employees ORDER BY name")
             venue_states = {}
             return [self._row_to_employee(r, venue_states) for r in cur.fetchall()]
 
@@ -4822,15 +4857,16 @@ class PostgresStore(BaseStore):
             return cur.rowcount > 0
 
     def get_employees(self, venue_id=None):
-        """Active employees, optionally scoped to one venue (AI agent tools)."""
+        """Employees, optionally scoped to one venue — inactive ones included
+        (see list_employees)."""
         with self._cursor() as cur:
             if venue_id is not None:
                 cur.execute(
-                    "SELECT * FROM employees WHERE active = true AND venue_id = %s ORDER BY name",
+                    "SELECT * FROM employees WHERE venue_id = %s ORDER BY name",
                     (venue_id,),
                 )
             else:
-                cur.execute("SELECT * FROM employees WHERE active = true ORDER BY name")
+                cur.execute("SELECT * FROM employees ORDER BY name")
             venue_states = {}
             return [self._row_to_employee(r, venue_states) for r in cur.fetchall()]
 
@@ -4887,6 +4923,8 @@ class PostgresStore(BaseStore):
             visa_expiry=row.get("visa_expiry"),
             visa_work_limit_fortnight=(float(row["visa_work_limit_fortnight"])
                                        if row.get("visa_work_limit_fortnight") is not None else None),
+            active=row.get("active") is not False,
+            rate_history=_jsonb(row.get("rate_history"), []) or [],
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
 
@@ -6141,7 +6179,7 @@ class PostgresStore(BaseStore):
                 UPDATE employees
                 SET name = %s, email = %s, phone = NULL,
                     visa_status = NULL, visa_expiry = NULL,
-                    visa_work_limit_fortnight = NULL,
+                    visa_work_limit_fortnight = NULL, active = false,
                     anonymised_at = %s, updated_at = now()
                 WHERE id = %s
             """, (anon_name, anon_email, datetime.utcnow(), employee_id))
@@ -6152,6 +6190,38 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s)
                 ON CONFLICT (employee_id) DO UPDATE SET anonymised_at = EXCLUDED.anonymised_at
             """, (employee_id, datetime.utcnow()))
+
+    def scrub_person_name(self, venue_id, employee_id, user_ids, new_name):
+        uids = [u for u in (user_ids or []) if u]
+        posts = 0
+        with self._cursor() as cur:
+            self._ensure_table(cur, "sop_acknowledgements")
+            cur.execute("""
+                UPDATE sop_acknowledgements SET employee_name = %s
+                WHERE venue_id = %s AND employee_id = %s
+            """, (new_name, venue_id, employee_id))
+            acks = cur.rowcount
+            if uids:
+                self._ensure_table(cur, "feed_posts")
+                cur.execute("""
+                    UPDATE feed_posts SET author_name = %s
+                    WHERE venue_id = %s AND author_user_id = ANY(%s)
+                """, (new_name, venue_id, uids))
+                posts = cur.rowcount
+                # One statement, like append_feed_comment, so a comment added
+                # at the same moment is never lost to a read-modify-write.
+                cur.execute("""
+                    UPDATE feed_posts SET comments = (
+                        SELECT COALESCE(jsonb_agg(
+                            CASE WHEN elem->>'author_user_id' = ANY(%s)
+                                 THEN jsonb_set(elem, '{author_name}', to_jsonb(%s::text))
+                                 ELSE elem END ORDER BY ord), '[]'::jsonb)
+                        FROM jsonb_array_elements(comments) WITH ORDINALITY AS t(elem, ord))
+                    WHERE venue_id = %s AND jsonb_typeof(comments) = 'array'
+                      AND EXISTS (SELECT 1 FROM jsonb_array_elements(comments) AS c
+                                  WHERE c->>'author_user_id' = ANY(%s))
+                """, (uids, new_name, venue_id, uids))
+        return {"feed_posts": posts, "sop_acknowledgements": acks}
 
     def get_anonymised_employees(self) -> list[dict]:
         """Get list of all anonymised employees."""

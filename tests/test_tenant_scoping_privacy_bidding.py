@@ -194,12 +194,15 @@ def test_anonymise_cross_venue_manager_gets_404(world):
     assert emp.name == f"Emp {world['emp_b']}"
 
 
-def test_anonymise_same_venue_manager_still_needs_owner(world):
-    # Scope passes (not 404); the operation itself stays owner-only (403).
+def test_anonymise_same_venue_full_manager_ok(world):
+    # The venue's own full manager removes their leaver's details (the
+    # privacy statement promises the venue can); staff of the venue can't.
     c = world["c"]
     r = c.post(f"/api/privacy/anonymise/employee/{world['emp_a2']}", headers=world["mgr_a"])
+    assert r.status_code == 200, r.text
+    staff_a = _user(c, "staff", [world["ven_a"]])
+    r = c.post(f"/api/privacy/anonymise/employee/{world['emp_a']}", headers=staff_a)
     assert r.status_code == 403, r.text
-    assert "owner" in (_err(r) or "").lower()
 
 
 def test_anonymise_owner_ok(world):

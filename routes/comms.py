@@ -50,8 +50,10 @@ def _gate_announcement(venue_id: str, audience) -> None:
         for s in secs:
             enforce_section_manager(venue_id, s)
 from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
+from rosteriq.services.audience import group_suggestion, matches as audience_matches
 from rosteriq.services.events import audit
 from rosteriq.services.sms import get_sms_service
+from rosteriq.services.staff_records import active_only
 
 logger = logging.getLogger(__name__)
 
@@ -78,14 +80,9 @@ class AnnouncementBody(BaseModel):
 
 
 def _audience_match(audience, emp) -> bool:
-    """Empty audience = everyone. Otherwise the employee's roles (skills)
-    must intersect it, case-insensitively — the same applicability rule
-    procedures use (routes/sops.py), so "bar" means the same people in both."""
-    roles = [str(r).strip().lower() for r in (audience or []) if str(r).strip()]
-    if not roles:
-        return True
-    skills = {str(sk).strip().lower() for sk in (getattr(emp, "skills", None) or [])}
-    return any(r in skills for r in roles)
+    """Empty audience = everyone; otherwise services/audience's rule — the
+    one procedures use too, so "all bar" means the same people in both."""
+    return audience_matches(audience, emp)
 
 
 class PinBody(BaseModel):
@@ -133,13 +130,16 @@ async def publish_announcement(body: AnnouncementBody,
     # their own section(s) (audience ⊆ their grant). See _gate_announcement.
     _gate_announcement(body.venue_id, body.audience)
     db = get_db()
-    staff = db.get_employees(body.venue_id) or []
+    staff = active_only(db.get_employees(body.venue_id))
     targeted = [e for e in staff if _audience_match(body.audience, e)]
     if body.audience and not targeted:
+        hints = [g for g in (group_suggestion(t, staff) for t in body.audience) if g]
         raise HTTPException(
             status_code=422,
             detail=f"No current staff work {', '.join(body.audience)} — "
-                   "check the section names or send to everyone")
+                   + (f"try {' or '.join(repr(h) for h in hints)}, "
+                      if hints else "check the section names, ")
+                   + "or send to everyone")
 
     sms_result = None
     from rosteriq.services.demo import DEMO_VENUE_ID
@@ -244,7 +244,7 @@ async def venue_announcements(venue_id: str = Query(...),
                               user: UserContext = Depends(get_current_user)) -> dict:
     enforce_venue_access(venue_id)
     db = get_db()
-    staff = db.get_employees(venue_id) or []
+    staff = active_only(db.get_employees(venue_id))
     rows = db.list_announcements(venue_id) or []
     is_manager = user.role in ("manager", "owner") or getattr(user, "is_owner", False)
     if not is_manager:
