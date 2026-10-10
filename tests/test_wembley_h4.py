@@ -12,10 +12,13 @@ Wembley pilot: owner protection and the /my phone clock.
 * /my treats a forgotten clock-out the way the kiosk does: a rostered one is
   closed at the rostered end, an unrostered one asks "when did you finish?"
   instead of offering a clock-out that records a 20-30 hour shift. Once it's
-  closed they clock in as usual.
+  closed they clock in as usual. A page left open since before the punch went
+  stale rechecks when it comes back into view, and the server refuses a phone
+  clock-out of a stale punch without a finish time.
 * The /my break buttons say what they record: an unpaid meal break.
 """
 
+import json
 import re
 import uuid
 from datetime import datetime, time as dtime, timedelta
@@ -275,6 +278,175 @@ async function main() {
     assert now["path"] == "/api/clock/out"
     assert re.fullmatch(r"\d{2}:\d{2}", now["body"]["finished_at"])
     assert "Finish time saved" in data["toasts"][1]["m"]
+
+
+
+def _age(db, w, emp_id, hours):
+    """Back-date someone's open punch: a clock-out forgotten `hours` ago."""
+    tz = timeclock._tz(w.vw, db)
+    ts = db.get_open_timesheet(w.vw, emp_id)
+    ci = datetime.utcnow() - timedelta(hours=hours)
+    ts["clock_in"], ts["work_date"] = ci, timeclock._local(ci, tz).date()
+    db.save_timesheet(ts)
+    return ci, tz
+
+
+@needs_node
+def test_a_phone_left_open_since_before_the_punch_went_stale_asks_when_they_finished():
+    w = _world()
+    c, db = w.c, get_db()
+    dan = _self_clock(w)
+    assert c.post("/api/clock/in", json={"venue_id": w.vw, "employee_id": dan.id},
+                  headers=dan.h).status_code == 200
+    fresh = _my_clock(w, dan)                      # what the open tab still holds
+    ci, tz = _age(db, w, dan.id, 30.35)
+    data = _run(_MY_CLOCK_JS + "var myClocks = [%s];\n" % json.dumps(fresh)
+                + _fns(_main("my.html"), "clockVenueName", "renderMyClock", "selfPunch") + r"""
+async function main() {
+  renderMyClock(myClocks);
+  await selfPunch('out', 0);
+  console.log(JSON.stringify({ calls: calls }));
+}
+""")
+    call = data["calls"][0]
+    r = c.post(call["path"], json=call["body"], headers=dan.h)
+    assert r.status_code == 409, r.text
+    assert f"still clocked in from {timeclock._fmt_local(ci, tz)}" in _detail(r)
+    assert "time you finished" in _detail(r)
+    assert db.get_open_timesheet(w.vw, dan.id)["clock_out"] is None
+    assert _my_clock(w, dan)["stale"] is True
+
+    # The finish time the stale card asks for still closes it.
+    finished = (timeclock._local(ci, tz) + timedelta(hours=8)).strftime("%H:%M")
+    r = c.post("/api/clock/out", json={"venue_id": w.vw, "employee_id": dan.id,
+                                       "finished_at": finished}, headers=dan.h)
+    assert r.status_code == 200 and r.json()["worked_minutes"] <= 8 * 60, r.text
+
+    # On the venue's kiosk an old punch is still recorded and flagged, as before.
+    k = kiosk_headers(c, w.ben, w.vw)
+    assert c.post("/api/clock/in", json={"venue_id": w.vw, "employee_id": dan.id},
+                  headers=k).status_code == 200
+    _age(db, w, dan.id, 15)
+    r = c.post("/api/clock/out", json={"venue_id": w.vw, "employee_id": dan.id}, headers=k)
+    assert r.status_code == 200 and "long_shift" in r.json()["flags"], r.text
+
+
+def test_a_phone_clock_out_of_a_forgotten_rostered_punch_closes_it_at_the_rostered_end():
+    w = _world()
+    c, db = w.c, get_db()
+    dan = _self_clock(w)
+    tz = timeclock._tz(w.vw, db)
+    yday = venue_today(w.vw, db) - timedelta(days=1)
+    _roster(w.vw, _monday(yday), [_shift("dan-y2", dan.id, yday, dtime(9, 0), dtime(17, 0))],
+            state="published")
+    ci = timeclock._utc(datetime.combine(yday, dtime(9, 0)), tz)
+    db.save_timesheet({"id": "ts-dan-y2", "venue_id": w.vw, "employee_id": dan.id, "work_date": yday,
+                       "clock_in": ci, "clock_out": None, "break_minutes": 0, "break_source": None,
+                       "break_started_at": None, "status": "open", "pin_verified": False,
+                       "rostered_shift_id": "dan-y2", "variance_minutes": None, "flags": [],
+                       "source": "self", "device_id": None, "created_at": ci})
+
+    r = c.post("/api/clock/out", json={"venue_id": w.vw, "employee_id": dan.id}, headers=dan.h)
+    assert r.status_code == 409 and "closed at its rostered finish" in _detail(r), r.text
+    closed = db.get_timesheet("ts-dan-y2")
+    assert naive_utc(closed["clock_out"]) == timeclock._utc(datetime.combine(yday, dtime(17, 0)), tz)
+    assert "auto_closed" in closed["flags"] and "long_shift" not in closed["flags"]
+    assert c.post("/api/clock/in", json={"venue_id": w.vw, "employee_id": dan.id},
+                  headers=dan.h).status_code == 200
+
+
+def test_my_clock_says_when_the_open_punch_goes_stale():
+    w = _world()
+    c, db = w.c, get_db()
+    dan = _self_clock(w)
+    assert _my_clock(w, dan)["stale_at"] is None
+    assert c.post("/api/clock/in", json={"venue_id": w.vw, "employee_id": dan.id},
+                  headers=dan.h).status_code == 200
+    me = _my_clock(w, dan)
+    ci = naive_utc(db.get_open_timesheet(w.vw, dan.id)["clock_in"])
+    due = ci + timedelta(hours=timeclock.kiosk.STALE_OPEN_HOURS)
+    assert me["stale_at"] == due.isoformat(timespec="seconds")
+
+
+@needs_node
+def test_my_asks_for_the_finish_time_once_the_card_it_holds_has_gone_stale():
+    src = _main("my.html")
+    data = _run(_MY_CLOCK_JS + r"""
+var reloads = 0;
+global.loadMyClock = function () { reloads++; };
+var card = { linked: true, venue_id: 'wem', employee_id: 'e0', has_pin: true, self_clock: true,
+             state: 'on', stale: false, clock_in_label: 'Fri 5:58 pm', stale_at: '2020-01-01T07:58:00' };
+var myClocks = [card];
+""" + _fns(src, "selfPunch") + r"""
+async function main() {
+  const out = [];
+  for (const a of ['out', 'break/start', 'break/end']) {
+    await selfPunch(a, 0);
+    out.push({ calls: calls.length, reloads: reloads });
+  }
+  await selfPunch('out', 0, { finished_at: '23:30' });
+  await selfPunch('in', 0);
+  myClocks = [Object.assign({}, card, { stale_at: '2999-01-01T00:00:00' })];
+  await selfPunch('out', 0);
+  myClocks = [Object.assign({}, card, { stale_at: null, state: 'off' })];
+  await selfPunch('in', 0);
+  console.log(JSON.stringify({ out: out, calls: calls, toasts: toasts }));
+}
+""")
+    assert data["out"] == [{"calls": 0, "reloads": 1}, {"calls": 0, "reloads": 2},
+                           {"calls": 0, "reloads": 3}]
+    assert all(t["k"] == "err" and "still clocked in from Fri 5:58 pm" in t["m"]
+               for t in data["toasts"][:3])
+    assert [(c["path"], (c["body"] or {}).get("finished_at")) for c in data["calls"]] == [
+        ("/api/clock/out", "23:30"), ("/api/clock/in", None),
+        ("/api/clock/out", None), ("/api/clock/in", None)]
+
+
+@needs_node
+def test_my_rechecks_the_clock_when_the_hours_tab_comes_back_into_view():
+    src = _main("my.html")
+    assert re.search(r"^document\.addEventListener\('visibilitychange', refreshMyClockOnReturn\);$",
+                     src, re.M)
+    assert re.search(r"^window\.addEventListener\('pageshow', refreshMyClockOnReturn\);$", src, re.M)
+    data = _run(_MY_CLOCK_JS + r"""
+var reloads = [];
+global.loadMyClock = function () { reloads.push(step); };
+var step = '';
+""" + _fns(src, "refreshMyClockOnReturn") + r"""
+async function main() {
+  const run = function (name, view, state, ev) {
+    step = name;
+    el('view-hours').style.display = view;
+    document.visibilityState = state;
+    refreshMyClockOnReturn(ev);
+  };
+  run('shown on hours', 'block', 'visible', { type: 'visibilitychange' });
+  run('hidden', 'block', 'hidden', { type: 'visibilitychange' });
+  run('other tab', 'none', 'visible', { type: 'visibilitychange' });
+  run('back-forward cache', 'block', 'visible', { type: 'pageshow', persisted: true });
+  run('first load', 'block', 'visible', { type: 'pageshow', persisted: false });
+  console.log(JSON.stringify({ reloads: reloads }));
+}
+""")
+    assert data["reloads"] == ["shown on hours", "back-forward cache"]
+
+
+@needs_node
+def test_my_redraws_the_clock_after_a_refused_punch():
+    src = _main("my.html")
+    data = _run(_MY_CLOCK_JS + r"""
+var reloads = 0;
+global.loadMyClock = function () { reloads++; };
+global.api = async function () { throw new Error("You're still clocked in from Fri 5:58 pm."); };
+var myClocks = [{ linked: true, venue_id: 'wem', employee_id: 'e0', self_clock: true, state: 'on' }];
+""" + _fns(src, "selfPunch") + r"""
+async function main() {
+  await selfPunch('out', 0);
+  console.log(JSON.stringify({ reloads: reloads, toasts: toasts }));
+}
+""")
+    assert data["reloads"] == 1
+    assert data["toasts"] == [{"m": "You're still clocked in from Fri 5:58 pm.", "k": "err"}]
 
 
 # --- [19] the /my break buttons -----------------------------------------------------

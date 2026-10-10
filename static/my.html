@@ -1065,6 +1065,12 @@ async function saveMyPin() {
 async function selfPunch(action, i, extra) {
   const c = myClocks[i || 0];
   if (!c) return;
+  if (!extra && action !== 'in' && c.stale_at && Date.now() > Date.parse(c.stale_at + 'Z')) {
+    toast('You\'re still clocked in from ' + (c.clock_in_label || 'an earlier shift') +
+      ' — enter the time you finished', 'err');
+    loadMyClock();
+    return;
+  }
   try {
     const r = await api('/api/clock/' + action, { method: 'POST',
       body: Object.assign({ venue_id: c.venue_id, employee_id: c.employee_id }, extra || {}) });
@@ -1076,6 +1082,7 @@ async function selfPunch(action, i, extra) {
     loadHours();
   } catch (e) {
     toast(e.message, 'err');
+    loadMyClock();
   }
 }
 
@@ -1087,6 +1094,16 @@ function saveMyFinish(i, justNow) {
   if (!/^\d{1,2}:\d{2}$/.test(v)) { toast('Enter the time you finished, e.g. 23:30', 'err'); return; }
   return selfPunch('out', i, { finished_at: v });
 }
+
+// An installed /my is resumed without a reload; the clock card it shows may be
+// from before the punch went stale.
+function refreshMyClockOnReturn(e) {
+  if (document.visibilityState === 'hidden' || (e.type === 'pageshow' && !e.persisted)) return;
+  const view = document.getElementById('view-hours');
+  if (view && view.style.display === 'block') loadMyClock();
+}
+document.addEventListener('visibilitychange', refreshMyClockOnReturn);
+window.addEventListener('pageshow', refreshMyClockOnReturn);
 
 async function loadLeave() {
   const card = document.getElementById('leave-card');

@@ -159,7 +159,8 @@ async def my_clock(venue_id: Optional[str] = Query(None),
                    user: UserContext = Depends(get_current_user)) -> dict:
     """``stale``: the open punch is a forgotten clock-out, as on the kiosk
     board. A rostered one whose shift has ended is closed first; the rest
-    need the time they finished (POST /api/clock/out with finished_at)."""
+    need the time they finished (POST /api/clock/out with finished_at).
+    ``stale_at`` (UTC) is when an open punch becomes one, for a page left open."""
     from rosteriq.routes.timeclock import _close_stale_punches, _fmt_local, _tz
     db = get_db()
     mine = _my_records(db, user)
@@ -170,11 +171,12 @@ async def my_clock(venue_id: Optional[str] = Query(None),
     emp, vid = mine[0]
     _close_stale_punches(db, vid)
     open_ts = db.get_open_timesheet(vid, emp.id)
-    state, clock_in, stale = "off", None, False
+    state, clock_in, stale_at, stale = "off", None, None, False
     if open_ts:
         state = "break" if open_ts.get("break_started_at") else "on"
         clock_in = kiosk.naive_utc(open_ts["clock_in"])
-        stale = datetime.utcnow() - clock_in > timedelta(hours=kiosk.STALE_OPEN_HOURS)
+        stale_at = clock_in + timedelta(hours=kiosk.STALE_OPEN_HOURS)
+        stale = datetime.utcnow() > stale_at
     else:
         today = venue_today(vid, db)
         if any(t.get("employee_id") == emp.id and t.get("clock_out")
@@ -190,6 +192,7 @@ async def my_clock(venue_id: Optional[str] = Query(None),
         "clock_in": clock_in.isoformat() if clock_in else None,
         "clock_in_label": _fmt_local(clock_in, _tz(vid, db)) if clock_in else None,
         "stale": stale,
+        "stale_at": stale_at.isoformat(timespec="seconds") if stale_at else None,
     }
 
 

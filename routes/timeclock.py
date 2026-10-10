@@ -644,6 +644,18 @@ async def clock_out(body: PunchRequest) -> dict:
     tz = _tz(body.venue_id, db)
     now = datetime.utcnow()
     clock_in_at = naive_utc(ts["clock_in"])
+    # A phone can still show the card from before the punch went stale. Close a
+    # forgotten clock-out as the kiosk board does, or ask when they finished,
+    # rather than record the whole span.
+    if (actor["source"] == "self" and not body.finished_at
+            and now - clock_in_at > timedelta(hours=kiosk.STALE_OPEN_HOURS)):
+        if ts["id"] in _close_stale_punches(db, body.venue_id):
+            raise HTTPException(status_code=409, detail=(
+                f"Your shift from {_fmt_local(clock_in_at, tz)} was closed at its rostered "
+                "finish. Tell your manager if you finished at a different time."))
+        raise HTTPException(status_code=409, detail=(
+            f"You're still clocked in from {_fmt_local(clock_in_at, tz)}. Enter the time you "
+            "finished that shift."))
     add = ()
     clock_out_at = now
     if body.finished_at:
