@@ -14,8 +14,8 @@ Wembley pilot (b3): managers fix the roster by hand, and copy last week.
   at once; each change is audited (who, before, after) and listed as
   "changed since publish" until the manager notifies staff or republishes.
 * POST /rosters/{id}/copy-to clones a week into another as a new draft,
-  leaving off people now inactive, on approved leave or unavailable, and
-  says who it left off.
+  leaving open the shifts of people now inactive, on approved leave or
+  unavailable, and says which it left open.
 """
 
 import sys
@@ -461,19 +461,23 @@ def test_copy_last_week_into_a_new_draft_and_report_who_was_left_off(monkeypatch
     body = resp.json()
     assert body["week_start"] == target.isoformat()
     assert body["copied"] == 3
-    reasons = {(s["name"], s["reason"]) for s in body["skipped"]}
+    assert body["skipped"] == []
+    reasons = {(s["name"], s["reason"]) for s in body["left_open"]}
     assert reasons == {("Ben Leave", "on approved leave"), ("Cat Busy", "unavailable"), ("Dan Gone", "inactive")}
     assert body["superseded"] == [old_draft.id]
 
     new = db.get_roster(body["roster_id"])
     assert new.week_start == target and db.get_roster_state(new.id) == "draft"
     assert sorted((s.employee_id, s.date, s.start_time) for s in new.shifts) == [
+        ("", target + timedelta(days=1), time(11)),
+        ("", target + timedelta(days=3), time(17)),
+        ("", target + timedelta(days=4), time(17)),
         (amy.id, target + timedelta(days=4), time(17)),
         (amy.id, target + timedelta(days=5), time(16)),
         (ben.id, target + timedelta(days=6), time(11)),
     ]
     assert not {s.id for s in new.shifts} & {s.id for s in source.shifts}
-    assert all(s.cost and s.cost > 0 for s in new.shifts)
+    assert all(s.cost and s.cost > 0 for s in new.shifts if s.employee_id)
     assert new.total_cost and new.total_cost > 0
     assert len(db.get_roster(source.id).shifts) == 6           # the source week is untouched
     assert db.get_roster_state(old_draft.id) == "superseded"

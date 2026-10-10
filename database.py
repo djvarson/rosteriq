@@ -580,6 +580,11 @@ class BaseStore:
         was no longer open, so of two simultaneous claimants only one wins."""
         raise NotImplementedError
 
+    def withdraw_shift_cover(self, cover_id: str, decided_by, note: str):
+        """open or claimed -> withdrawn in one step, keeping any claimant.
+        The withdrawn row, or None if the cover was already settled."""
+        raise NotImplementedError
+
     # --- Announcements (communication hub) ---------------------------------
 
     def save_announcement(self, ann: dict) -> None:
@@ -1463,6 +1468,14 @@ class MemoryStore(BaseStore):
         cover["claimed_by"] = employee_id
         cover["status"] = "claimed"
         return True
+
+    def withdraw_shift_cover(self, cover_id, decided_by, note):
+        cover = self._shift_covers.get(cover_id)
+        if not cover or cover.get("status") not in ("open", "claimed"):
+            return None
+        cover.update(status="withdrawn", decided_by=decided_by,
+                     decided_at=datetime.utcnow(), decision_note=note)
+        return dict(cover)
 
     # --- Announcements ---
 
@@ -4566,6 +4579,17 @@ class PostgresStore(BaseStore):
                 WHERE id = %s AND status = 'open'
             """, (employee_id, cover_id))
             return cur.rowcount > 0
+
+    def withdraw_shift_cover(self, cover_id, decided_by, note):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "shift_covers")
+            cur.execute("""
+                UPDATE shift_covers SET status = 'withdrawn', decided_by = %s, decided_at = now(),
+                    decision_note = %s, updated_at = now()
+                WHERE id = %s AND status IN ('open', 'claimed') RETURNING *
+            """, (decided_by, note, cover_id))
+            row = cur.fetchone()
+            return dict(row) if row else None
 
     def save_announcement(self, ann):
         with self._cursor() as cur:
