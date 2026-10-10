@@ -572,6 +572,12 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register staff portal routes: {e}")
 
+try:
+    from rosteriq.routes.login_access import router as login_access_router
+    app.include_router(login_access_router)
+except Exception as e:
+    logger.error(f"Failed to register login access routes: {e}")
+
 # Communication hub (announcements + SMS fan-out)
 try:
     from rosteriq.routes.comms import router as comms_router
@@ -2881,8 +2887,17 @@ async def generate_roster(req: GenerateRosterRequest):
             400, f"Could not produce a demand forecast for {req.venue_id} in week of {req.week_start}"
         )
 
+    # Staff shared with the owner's other venue are already booked there.
+    from rosteriq.services.person_identity import booked_elsewhere, describe_bookings
+    try:
+        booked = booked_elsewhere(_db, req.venue_id, employees, req.week_start,
+                                  req.week_start + timedelta(days=6))
+    except Exception as e:
+        logger.warning(f"Cross-venue bookings lookup failed for {req.venue_id}: {e}")
+        booked = []
     roster = generate_weekly_roster(
-        req.week_start, forecasts, employees, venue, req.covers_per_staff
+        req.week_start, forecasts, employees, venue, req.covers_per_staff,
+        existing_shifts=[s for s, _ in booked],
     )
 
     # Approved leave wins over the generator: drop any shift that lands on a
@@ -2918,7 +2933,19 @@ async def generate_roster(req: GenerateRosterRequest):
     from rosteriq.services.current_roster import current_roster, supersede_week_drafts
     prev_week_start = req.week_start - timedelta(days=7)
     prev_roster = current_roster(_db, req.venue_id, prev_week_start)
-    visa_flags = fortnight_cap_flags(roster, employees, prev_roster)
+    if booked:
+        # A recorded visa cap covers every job, so the other venue's hours count.
+        from types import SimpleNamespace
+        try:
+            prev_booked = [s for s, _ in booked_elsewhere(_db, req.venue_id, employees, prev_week_start,
+                                                          req.week_start - timedelta(days=1))]
+        except Exception:
+            prev_booked = []
+        visa_flags = fortnight_cap_flags(
+            SimpleNamespace(shifts=list(roster.shifts) + [s for s, _ in booked]), employees,
+            SimpleNamespace(shifts=list(getattr(prev_roster, "shifts", None) or []) + prev_booked))
+    else:
+        visa_flags = fortnight_cap_flags(roster, employees, prev_roster)
     rostered_ids = {str(sh.employee_id) for sh in roster.shifts}
     visa_expiry_alerts = [a for a in visa_alerts(employees)
                           if a["employee_id"] in rostered_ids]
@@ -2967,6 +2994,8 @@ async def generate_roster(req: GenerateRosterRequest):
         # or rosters someone whose visa has lapsed says so out loud.
         extras["visa_flags"] = visa_flags
         extras["visa_expiry_alerts"] = visa_expiry_alerts
+    if booked:
+        extras["booked_elsewhere"] = describe_bookings(_db, booked, employees)
     if extras:
         from fastapi.encoders import jsonable_encoder
         out = jsonable_encoder(roster)

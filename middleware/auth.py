@@ -24,6 +24,7 @@ class UserContext:
         role: str,
         venue_ids: List[str],
         section_grants: Optional[dict] = None,
+        staff_venue_ids: Optional[List[str]] = None,
     ):
         self.user_id = user_id
         self.email = email
@@ -33,6 +34,9 @@ class UserContext:
         # venue_id -> [section names] this user manages (department-manager
         # scope). Empty/absent for a venue = full venue manager.
         self.section_grants = section_grants or {}
+        # Venues this (manager) login is linked to as staff only — read by the
+        # staff app, never by a dashboard gate.
+        self.staff_venue_ids = list(staff_venue_ids or [])
 
     @property
     def is_owner(self) -> bool:
@@ -182,6 +186,7 @@ async def get_current_user(
         role=user["role"],
         venue_ids=venue_ids,
         section_grants=user.get("section_grants") or {},
+        staff_venue_ids=user.get("staff_venue_ids") or [],
     )
 
 
@@ -235,6 +240,7 @@ async def get_api_key_user(
         role=user["role"],
         venue_ids=venue_ids,
         section_grants=user.get("section_grants") or {},
+        staff_venue_ids=user.get("staff_venue_ids") or [],
     )
 
 

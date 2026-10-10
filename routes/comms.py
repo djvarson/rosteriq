@@ -49,7 +49,9 @@ def _gate_announcement(venue_id: str, audience) -> None:
     else:
         for s in secs:
             enforce_section_manager(venue_id, s)
-from rosteriq.routes.staff_portal import _linked_employee, _no_link_response
+from rosteriq.routes.staff_portal import (
+    _linked_employee_at, _linked_employees, _no_link_response, _venue_names,
+)
 from rosteriq.services.events import audit
 from rosteriq.services.sms import get_sms_service
 
@@ -252,9 +254,7 @@ async def venue_announcements(venue_id: str = Query(...),
         # notice must look the same here as in their /my feed: addressed to
         # them or to everyone — never someone else's. Their mark-read 404s
         # on it, so showing it here would be a notice they can't dismiss.
-        emp, evid = _linked_employee(db, user)
-        if evid != venue_id:
-            emp = None  # linked elsewhere: only whole-venue notices here
+        emp = _linked_employee_at(db, user, venue_id)  # None: only whole-venue notices here
         rows = [a for a in rows if _audience_match(a.get("audience"), emp)]
     payloads = [_ann_payload(a, staff) for a in rows]
     # The stored sms_result names exactly who has no phone number and whose
@@ -292,24 +292,29 @@ async def pin_announcement(ann_id: str, body: PinBody,
 @router.get("/api/me/announcements")
 async def my_announcements(user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         return _no_link_response(user)
-    rows = db.list_announcements(vid) or []
+    names = _venue_names(db, [v for _, v in links])
     feed = []
     unread = 0
-    for a in rows:
-        if not _audience_match(a.get("audience"), emp):
-            continue
-        read = emp.id in (a.get("read_by") or [])
-        if not read:
-            unread += 1
-        feed.append({
-            "id": a["id"], "title": a["title"], "body": a["body"],
-            "pinned": bool(a.get("pinned")), "created_at": str(a.get("created_at")),
-            "audience": [str(r) for r in (a.get("audience") or [])],
-            "read": read,
-        })
+    for emp, vid in links:
+        for a in db.list_announcements(vid) or []:
+            if not _audience_match(a.get("audience"), emp):
+                continue
+            read = emp.id in (a.get("read_by") or [])
+            if not read:
+                unread += 1
+            feed.append({
+                "id": a["id"], "title": a["title"], "body": a["body"],
+                "pinned": bool(a.get("pinned")), "created_at": str(a.get("created_at")),
+                "audience": [str(r) for r in (a.get("audience") or [])],
+                "read": read,
+                "venue_id": vid, "venue_name": names[vid],
+            })
+    if len(links) > 1:
+        feed.sort(key=lambda a: a["created_at"], reverse=True)
+        feed.sort(key=lambda a: not a["pinned"])
     return {"linked": True, "count": len(feed), "unread": unread, "announcements": feed}
 
 
@@ -317,11 +322,12 @@ async def my_announcements(user: UserContext = Depends(get_current_user)) -> dic
 async def mark_announcement_read(ann_id: str,
                                  user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
     ann = db.get_announcement(ann_id)
-    if not ann or ann.get("venue_id") != vid or not _audience_match(ann.get("audience"), emp):
+    emp = next((e for e, v in links if ann and v == ann.get("venue_id")), None)
+    if not ann or emp is None or not _audience_match(ann.get("audience"), emp):
         raise HTTPException(status_code=404, detail="Announcement not found")
     db.mark_announcement_read(ann_id, emp.id)
     return {"status": "read", "announcement_id": ann_id}

@@ -102,6 +102,29 @@ class PayrollBatchResponse(BaseModel):
     total_super: str
     validation_errors: List[str]
     created_at: str
+    # "Meca Rossi: 56h across both venues in the week of 12 Oct (...) - check
+    # overtime with your advisor". Flags only: whether two venues are one
+    # employer for overtime is the owner's and their advisor's call.
+    cross_venue_hours: List[str] = []
+
+
+def _cross_venue_hours(db, venue_id: str, period_start: date, period_end: date) -> List[str]:
+    """People here whose worked hours across the venues the caller fully
+    manages pass the weekly overtime threshold the pay run uses."""
+    from rosteriq.cost_calculator import WEEKLY_OVERTIME_THRESHOLD
+    from rosteriq.middleware.tenant import get_tenant_context_optional
+    from rosteriq.services.person_identity import combined_hours_flags
+    from rosteriq.services.venue_access import fully_managed_group
+    tenant = get_tenant_context_optional()
+    if tenant is None:
+        return []
+    try:
+        group = fully_managed_group(db, tenant, venue_id)
+        return [f["message"] for f in combined_hours_flags(
+            db, venue_id, period_start, period_end, group, float(WEEKLY_OVERTIME_THRESHOLD))]
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Cross-venue hours check failed for {venue_id}: {e}")
+        return []
 
 
 class ExportResultResponse(BaseModel):
@@ -322,6 +345,8 @@ async def prepare_payroll_from_timesheets(
         total_super=str(batch.total_super),
         validation_errors=errors,
         created_at=batch.created_at.isoformat(),
+        cross_venue_hours=_cross_venue_hours(db, request.venue_id, request.period_start,
+                                             request.period_end),
     )
 
 

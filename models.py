@@ -705,6 +705,9 @@ class User(BaseModel):
     # Department-manager scope: venue_id -> [section names] this user is confined
     # to managing. Absent/empty for a venue = full venue manager (the default).
     section_grants: Dict[str, List[str]] = {}
+    # Venues where a MANAGER login is linked to a staff record only (its shifts
+    # reach /my; the dashboard stays shut there). See services/venue_access.py.
+    staff_venue_ids: List[str] = []
     api_key_hash: str = ""
     is_active: bool = True
     created_at: datetime

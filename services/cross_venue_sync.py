@@ -13,6 +13,11 @@ Provides:
 - Weekly hours tracking for compliance
 
 Used by managers to enforce fairness and compliance across multi-venue operations.
+
+A person who works two venues has a separate staff record (and id) at each,
+so shifts are matched by PERSON: the record's own id plus the ids of the
+same person's records at the other venues the caller may see
+(services/person_identity.py: the same email).
 """
 
 from dataclasses import dataclass, field
@@ -256,12 +261,13 @@ class CrossVenueSync:
         shifts_by_venue: Dict[str, List[Shift]] = defaultdict(list)
         all_shifts: List[Shift] = []
         total_hours = 0.0
+        ids = self._person_ids(employee)
 
         for roster in self._visible_rosters():
             if start <= roster.week_start <= end or start <= roster.week_end <= end:
                 for shift in roster.shifts:
                     if (
-                        shift.employee_id == employee_id
+                        str(shift.employee_id) in ids
                         and start <= shift.date <= end
                     ):
                         shifts_by_venue[roster.venue_id].append(shift)
@@ -376,19 +382,27 @@ class CrossVenueSync:
         Returns:
             List of SharedEmployee objects
         """
-        # Map employee IDs to venues they work at
+        # Map each PERSON to the venues they work at, keeping the first
+        # record seen as the one reported.
+        from rosteriq.services.person_identity import person_key
         emp_to_venues: Dict[str, Set[str]] = defaultdict(set)
         emp_to_name: Dict[str, str] = {}
+        person_of: Dict[str, str] = {}
+        records: Dict[str, object] = {}
 
         wanted = set(venue_ids)
         for roster in self._visible_rosters():
             if roster.venue_id in wanted:
                 for shift in roster.shifts:
-                    emp_to_venues[shift.employee_id].add(roster.venue_id)
-                    if shift.employee_id not in emp_to_name:
-                        emp = self.db.get_employee(shift.employee_id)
-                        if emp:
-                            emp_to_name[shift.employee_id] = emp.name
+                    eid = str(shift.employee_id)
+                    if eid not in records:
+                        records[eid] = self.db.get_employee(eid)
+                    emp = records[eid]
+                    key = (person_key(emp) if emp else None) or f"id:{eid}"
+                    rep_id = person_of.setdefault(key, eid)
+                    emp_to_venues[rep_id].add(roster.venue_id)
+                    if rep_id not in emp_to_name and emp:
+                        emp_to_name[rep_id] = emp.name
 
         # Filter to only those in multiple venues
         shared_employees: List[SharedEmployee] = []
@@ -674,13 +688,26 @@ class CrossVenueSync:
     # ========================================================================
 
     def _visible_rosters(self) -> List[Roster]:
-        """Rosters of the venues the current caller may see (every roster for an
-        owner, or outside a request)."""
+        """The live roster of each week (published, else the newest draft) at
+        the venues the current caller may see (every venue for an owner, or
+        outside a request). Superseded drafts never count twice."""
+        from rosteriq.services.current_roster import current_per_week
         allowed = scoped_venue_ids()
         rosters = self.db.list_rosters()
-        if allowed is None:
-            return list(rosters)
-        return [r for r in rosters if r.venue_id in allowed]
+        if allowed is not None:
+            rosters = [r for r in rosters if r.venue_id in allowed]
+        return current_per_week(self.db, rosters)
+
+    def _person_ids(self, employee) -> Set[str]:
+        """``employee``'s id plus the ids of the same person's records at the
+        other venues the caller may see."""
+        ids = {str(employee.id)}
+        try:
+            from rosteriq.services.person_identity import same_person_records
+            ids |= {str(other.id) for other, _ in same_person_records(self.db, employee)}
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Person lookup failed for {employee.id}: {e}")
+        return ids
 
     def _get_shift_venue_id(self, shift: Shift, schedule: CrossVenueSchedule) -> str:
         """Find which venue a shift in ``schedule`` belongs to."""
@@ -776,12 +803,14 @@ class CrossVenueSync:
         week_end = week_start + timedelta(days=6)
 
         total = 0.0
+        employee = self.db.get_employee(employee_id)
+        ids = self._person_ids(employee) if employee else {str(employee_id)}
 
         for roster in self._visible_rosters():
             if roster.venue_id in venue_ids:
                 if week_start <= roster.week_start <= week_end:
                     for shift in roster.shifts:
-                        if shift.employee_id == employee_id:
+                        if str(shift.employee_id) in ids:
                             total += shift.net_hours
 
         return total

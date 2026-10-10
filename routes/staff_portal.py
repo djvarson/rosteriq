@@ -70,6 +70,9 @@ class LeaveRequestBody(BaseModel):
     start_date: date
     end_date: date
     reason: str = Field(default="", max_length=300)
+    # Someone who works more than one venue: which venue(s) this leave is
+    # for. Left out = every venue they work.
+    venue_ids: Optional[List[str]] = Field(default=None, max_length=10)
 
 
 class LeaveDecision(BaseModel):
@@ -132,6 +135,29 @@ def _linked_employee(db, user: UserContext):
     return find_linked_employee(db, user)
 
 
+def _linked_employees(db, user: UserContext) -> list:
+    """Every (employee, venue_id) this login is linked to, primary first —
+    a person who works two venues has a record at each."""
+    from rosteriq.services.linking import find_linked_employees
+    return find_linked_employees(db, user)
+
+
+def _linked_employee_at(db, user: UserContext, venue_id: str):
+    """This login's staff record at ``venue_id``, or None."""
+    for emp, vid in _linked_employees(db, user):
+        if vid == venue_id:
+            return emp
+    return None
+
+
+def _venue_names(db, venue_ids) -> dict:
+    out = {}
+    for vid in venue_ids:
+        venue = db.get_venue(vid)
+        out[vid] = getattr(venue, "name", vid) if venue else vid
+    return out
+
+
 def _no_link_response(user: UserContext, db=None) -> dict:
     """Not linked. The response is the SAME whether or not some venue's staff
     record carries this email: registration email is unverified, so any
@@ -152,18 +178,20 @@ def _no_link_response(user: UserContext, db=None) -> dict:
 @router.get("/api/me/profile")
 async def my_profile(user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         return _no_link_response(user, db)
-    venue = db.get_venue(vid)
+    emp, vid = links[0]
+    names = _venue_names(db, [v for _, v in links])
     return {
         "linked": True,
         "employee_id": emp.id,
         "name": emp.name,
         "venue_id": vid,
-        "venue_name": getattr(venue, "name", vid) if venue else vid,
+        "venue_name": names[vid],
         "employment_type": str(emp.employment_type.value if hasattr(emp.employment_type, "value") else emp.employment_type),
         "skills": list(emp.skills or []),
+        "venues": [{"venue_id": v, "venue_name": names[v], "employee_id": e.id} for e, v in links],
     }
 
 
@@ -219,9 +247,11 @@ def _account_management_guards(user, emp, db):
     a linked login for the email (case-insensitive); the target account
     HOLDS this venue (an email typed onto an employee record is
     attacker-controlled — without this check any manager could mint
-    takeovers for accounts platform-wide); the target holds ONLY this
-    venue (resets and role flips are account-global); target is not an
-    owner.
+    takeovers for accounts platform-wide); the caller is a FULL manager of
+    EVERY venue the target login reaches (resets and role flips are
+    account-global, so one venue's manager must never control a login that
+    reaches venues they don't run); the target is not the platform owner
+    and did not create one of its venues (the venue's owner).
     """
     if user.user_id in _DEMO_USER_IDS or (user.email or "").strip().lower() in _DEMO_EMAILS:
         raise HTTPException(status_code=403, detail="The demo can't manage logins")
@@ -251,7 +281,11 @@ def _account_management_guards(user, emp, db):
                             detail="No login exists for this email yet — hand them a join code instead")
     if (account.get("email") or "").strip().lower() in _DEMO_EMAILS:
         raise HTTPException(status_code=403, detail="Demo accounts can't be managed")
-    if vid not in (account.get("venue_ids") or []):
+    from rosteriq.services.venue_access import (
+        created_venue_ids, fully_manages, held_venue_ids, is_platform_owner,
+    )
+    held = held_venue_ids(account)
+    if vid not in held:
         raise HTTPException(status_code=409,
                             detail="Their login isn't linked to this venue yet — join code first")
     # The account was found by the email TEXT on the record. It must be the
@@ -269,18 +303,26 @@ def _account_management_guards(user, emp, db):
     if len(twins) > 1:
         raise HTTPException(status_code=409,
                             detail="More than one login uses this email in different letter case — "
-                                   "ask the platform owner to merge them")
+                                   "ask RosterIQ support to merge them")
     # Both a role flip AND a password reset act on the whole ACCOUNT, not
-    # just this venue. A login linked to other venues too must not be
-    # controllable by one venue's manager — resetting its password would
-    # hand this caller a session that reaches venues they don't run.
-    other_venues = [v for v in (account.get("venue_ids") or []) if v != vid]
-    if other_venues:
+    # just this venue: resetting its password hands the caller a session that
+    # reaches every venue the login does. So the caller must fully manage all
+    # of them (an owner running both pubs may; one venue's manager may not).
+    if not fully_manages(user, vid):
+        raise HTTPException(status_code=403,
+                            detail="Only a full manager of this venue can change staff logins")
+    if not all(fully_manages(user, v) for v in held):
         raise HTTPException(status_code=409,
-                            detail="Their login is linked to more than one venue — "
-                                   "account changes for multi-venue logins need the platform owner")
+                            detail="Their login also reaches a venue you don't fully manage — "
+                                   "changes to it need a manager of every venue it's linked to, "
+                                   "or RosterIQ support")
     if account.get("role") == "owner" or account.get("is_owner"):
         raise HTTPException(status_code=403, detail="Owner accounts can't be changed here")
+    if (not is_platform_owner(user) and account.get("id") != user.user_id
+            and created_venue_ids(db, account.get("id"), held)):
+        raise HTTPException(status_code=403,
+                            detail="This is the venue owner's login — only they (or RosterIQ "
+                                   "support) can change it")
     return account
 
 
@@ -326,14 +368,22 @@ class AccessRoleBody(BaseModel):
 @router.post("/api/employees/{employee_id}/access-role")
 async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
                                    user: UserContext = Depends(get_current_user)) -> dict:
-    """Give a linked team member manager access to THIS venue's dashboard
-    (or set them back to staff). The only role-granting path used to be
-    first-venue bootstrap — a venue's 2IC could never approve leave.
-    Guards: manager/owner only; the target must be a linked login holding
-    this venue; never an owner account; never your own account (no
-    self-lockouts); staff<->manager only."""
+    """Set a linked team member's dashboard access AT THIS RECORD'S VENUE:
+    full manager, department manager (``sections``) or staff. The only
+    role-granting path used to be first-venue bootstrap — a venue's 2IC
+    could never approve leave.
+
+    The dashboard role is one per login, so a login linked to other venues
+    keeps its access there: made a manager here, their other staff venues
+    become staff-only (their shifts still reach /my, the dashboard stays
+    shut there) rather than silently becoming full manager venues.
+    Guards: a full manager of every venue the login reaches; never an
+    owner account; never your own account (no self-lockouts)."""
     from rosteriq.middleware.tenant import load_employee_in_scope
     from rosteriq.services.events import audit
+    from rosteriq.services.venue_access import (
+        DEPARTMENT, FULL, STAFF, access_map, apply_access_map,
+    )
     db = get_db()
     emp = load_employee_in_scope(db, employee_id)
     account = _account_management_guards(user, emp, db)
@@ -355,139 +405,191 @@ async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
             seen.add(n)
             sections.append(n)
     old = account.get("role")
-    old_grants = dict(account.get("section_grants") or {})
-    account["role"] = body.role
-    grants = dict(old_grants)
-    if body.role == "manager" and sections:
-        grants[vid] = sections          # department manager, scoped to these sections
+    before = access_map(account)
+    if body.role == "manager":
+        level = DEPARTMENT if sections else FULL
     else:
-        grants.pop(vid, None)           # full venue manager, or back to staff: clear scope
-    account["section_grants"] = grants
+        level = STAFF
+    apply_access_map(account, {vid: {"level": level, "sections": sections}})
     db.save_user(account)
+    after = access_map(account)
     audit("user.role_change", vid, "user", account["id"], email=email,
-          old_role=old, new_role=body.role, changed_by=user.user_id,
-          sections=sections or None, reason="venue_manager_set")
-    if body.role == "manager" and sections:
+          old_role=old, new_role=account.get("role"), changed_by=user.user_id,
+          sections=sections or None, reason="venue_manager_set",
+          venue_access={v: a["level"] for v, a in after.items()})
+    names = _venue_names(db, after.keys())
+    if level == DEPARTMENT:
         msg = (f"{emp.name} is now a department manager for "
-               f"{', '.join(sections)} — takes effect on their next sign-in.")
-    elif body.role == "manager":
-        msg = f"{emp.name} is now a manager — takes effect on their next sign-in."
+               f"{', '.join(sections)} at {names[vid]} — takes effect on their next sign-in.")
+    elif level == FULL:
+        msg = f"{emp.name} is now a manager at {names[vid]} — takes effect on their next sign-in."
     else:
-        msg = f"{emp.name} is now staff — takes effect on their next sign-in."
+        msg = f"{emp.name} is now staff at {names[vid]} — takes effect on their next sign-in."
+    staff_elsewhere = [names[v] for v, a in after.items()
+                       if v != vid and a["level"] == STAFF and before.get(v, {}).get("level") == STAFF
+                       and account.get("role") == "manager"]
+    if staff_elsewhere:
+        msg += f" They stay staff-only at {', '.join(staff_elsewhere)}."
     return {"employee_id": emp.id, "name": emp.name, "email": email,
             "old_role": old, "role": body.role,
-            "sections": sections, "message": msg}
+            "sections": sections, "message": msg,
+            "venues": [{"venue_id": v, "venue_name": names[v], "level": a["level"],
+                        "sections": a["sections"]} for v, a in after.items()]}
 
 
 @router.get("/api/me/shifts")
 async def my_shifts(user: UserContext = Depends(get_current_user)) -> dict:
-    """My upcoming shifts — the schedule-visibility fix."""
+    """My upcoming shifts — the schedule-visibility fix. Someone who works
+    two venues sees both, each tagged with its venue."""
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         return _no_link_response(user, db)
+    emp, vid = links[0]
+    names = _venue_names(db, [v for _, v in links])
     today = venue_today(vid, db)
     horizon = today + timedelta(days=14)
     mine = []
-    try:
-        for s in live_shifts(db, vid, today, horizon, staff=True):
-            if str(getattr(s, "employee_id", "")) != str(emp.id):
-                continue
-            mine.append({
-                "id": s.id,
-                "date": s.date.isoformat(),
-                "day": s.date.strftime("%A"),
-                "start": s.start_time.strftime("%H:%M"),
-                "end": s.end_time.strftime("%H:%M"),
-                "role": s.role,
-                "break_minutes": getattr(s, "break_minutes", 0),
-            })
-    except Exception as e:
-        logger.warning(f"my_shifts read failed for {emp.id}: {e}")
+    for link_emp, link_vid in links:
+        start = venue_today(link_vid, db)
+        try:
+            for s in live_shifts(db, link_vid, start, start + timedelta(days=14), staff=True):
+                if str(getattr(s, "employee_id", "")) != str(link_emp.id):
+                    continue
+                mine.append({
+                    "id": s.id,
+                    "date": s.date.isoformat(),
+                    "day": s.date.strftime("%A"),
+                    "start": s.start_time.strftime("%H:%M"),
+                    "end": s.end_time.strftime("%H:%M"),
+                    "role": s.role,
+                    "break_minutes": getattr(s, "break_minutes", 0),
+                    "venue_id": link_vid,
+                    "venue_name": names[link_vid],
+                })
+        except Exception as e:
+            logger.warning(f"my_shifts read failed for {link_emp.id}: {e}")
     mine.sort(key=lambda x: (x["date"], x["start"]))
     return {"linked": True, "employee_id": emp.id, "name": emp.name,
             "from": today.isoformat(), "to": horizon.isoformat(),
             "count": len(mine), "shifts": mine}
 
 
+def _worked_minutes(t: dict):
+    ci, co = t.get("clock_in"), t.get("clock_out")
+    if not (ci and co):
+        return None
+    a = datetime.fromisoformat(ci) if isinstance(ci, str) else ci
+    b = datetime.fromisoformat(co) if isinstance(co, str) else co
+    if getattr(a, "tzinfo", None) is not None:
+        a = a.replace(tzinfo=None)
+    if getattr(b, "tzinfo", None) is not None:
+        b = b.replace(tzinfo=None)
+    return max(0, int((b - a).total_seconds() // 60) - int(t.get("break_minutes") or 0))
+
+
 @router.get("/api/me/timesheets")
 async def my_timesheets(user: UserContext = Depends(get_current_user)) -> dict:
-    """My worked hours, last 14 days — pay transparency."""
+    """My worked hours, last 14 days — pay transparency, every venue I work."""
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         return _no_link_response(user, db)
-    end = venue_today(vid, db)
-    start = end - timedelta(days=14)
+    names = _venue_names(db, [v for _, v in links])
     rows = []
     total = 0
-    for t in db.get_timesheets(vid, start, end) or []:
-        if t.get("employee_id") != emp.id:
-            continue
-        ci, co = t.get("clock_in"), t.get("clock_out")
-        worked = None
-        if ci and co:
-            a = datetime.fromisoformat(ci) if isinstance(ci, str) else ci
-            b = datetime.fromisoformat(co) if isinstance(co, str) else co
-            if getattr(a, "tzinfo", None) is not None:
-                a = a.replace(tzinfo=None)
-            if getattr(b, "tzinfo", None) is not None:
-                b = b.replace(tzinfo=None)
-            worked = max(0, int((b - a).total_seconds() // 60) - int(t.get("break_minutes") or 0))
-            total += worked
-        rows.append({
-            "work_date": str(t.get("work_date")),
-            "worked_minutes": worked,
-            "status": t.get("status"),
-        })
+    for emp, vid in links:
+        end = venue_today(vid, db)
+        start = end - timedelta(days=14)
+        for t in db.get_timesheets(vid, start, end) or []:
+            if t.get("employee_id") != emp.id:
+                continue
+            worked = _worked_minutes(t)
+            if worked is not None:
+                total += worked
+            rows.append({
+                "work_date": str(t.get("work_date")),
+                "worked_minutes": worked,
+                "status": t.get("status"),
+                "venue_id": vid,
+                "venue_name": names[vid],
+            })
+    rows.sort(key=lambda r: r["work_date"])
     return {"linked": True, "count": len(rows), "total_worked_minutes": total, "timesheets": rows}
 
 
 @router.get("/api/me/leave")
 async def my_leave(user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         return _no_link_response(user, db)
-    mine = [r for r in (db.list_leave_requests(vid) or []) if r.get("employee_id") == emp.id]
-    return {"linked": True, "count": len(mine), "requests": [{
-        "id": r["id"], "start_date": str(r["start_date"]), "end_date": str(r["end_date"]),
-        "reason": r.get("reason"), "status": r.get("status"),
-        "decision_note": r.get("decision_note"),
-    } for r in mine]}
+    names = _venue_names(db, [v for _, v in links])
+    requests = []
+    for emp, vid in links:
+        for r in db.list_leave_requests(vid) or []:
+            if r.get("employee_id") != emp.id:
+                continue
+            requests.append({
+                "id": r["id"], "start_date": str(r["start_date"]), "end_date": str(r["end_date"]),
+                "reason": r.get("reason"), "status": r.get("status"),
+                "decision_note": r.get("decision_note"),
+                "venue_id": vid, "venue_name": names[vid],
+            })
+    return {"linked": True, "count": len(requests), "requests": requests}
+
+
+def _as_date(v) -> date:
+    return v if isinstance(v, date) else date.fromisoformat(str(v)[:10])
 
 
 @router.post("/api/me/leave")
 async def request_leave(body: LeaveRequestBody,
                         user: UserContext = Depends(get_current_user)) -> dict:
+    """Request leave. Someone who works more than one venue picks which ones
+    (``venue_ids``); left out, it goes to every venue they work."""
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
     if body.end_date < body.start_date:
         raise HTTPException(status_code=422, detail="end_date must be on or after start_date")
-    if body.start_date < venue_today(vid, db):
-        raise HTTPException(status_code=422, detail="Leave requests must be for future dates")
-    # One pending request per overlapping period keeps things sane
-    for r in db.list_leave_requests(vid) or []:
-        if (r.get("employee_id") == emp.id and r.get("status") == "pending"):
-            rs = r["start_date"] if isinstance(r["start_date"], date) else date.fromisoformat(str(r["start_date"])[:10])
-            re_ = r["end_date"] if isinstance(r["end_date"], date) else date.fromisoformat(str(r["end_date"])[:10])
-            if rs <= body.end_date and re_ >= body.start_date:
-                raise HTTPException(status_code=409, detail="You already have a pending request overlapping those dates")
-    req = {
-        "id": f"lv-{uuid.uuid4().hex[:10]}",
-        "venue_id": vid,
-        "employee_id": emp.id,
-        "start_date": body.start_date,
-        "end_date": body.end_date,
-        "reason": body.reason,
-        "status": "pending",
-        "created_at": datetime.utcnow(),
-    }
-    db.save_leave_request(req)
-    logger.info(f"Leave requested: {emp.name} {body.start_date}..{body.end_date} at {vid}")
-    return {"status": "requested", "request_id": req["id"]}
+    by_venue = {vid: emp for emp, vid in links}
+    wanted = list(dict.fromkeys(body.venue_ids or by_venue.keys()))
+    unknown = [v for v in wanted if v not in by_venue]
+    if unknown or not wanted:
+        raise HTTPException(status_code=422, detail="Pick the venue(s) you work at for this leave")
+    names = _venue_names(db, wanted)
+    for vid in wanted:
+        if body.start_date < venue_today(vid, db):
+            raise HTTPException(status_code=422, detail="Leave requests must be for future dates")
+        emp = by_venue[vid]
+        # One pending request per overlapping period keeps things sane
+        for r in db.list_leave_requests(vid) or []:
+            if (r.get("employee_id") == emp.id and r.get("status") == "pending"
+                    and _as_date(r["start_date"]) <= body.end_date
+                    and _as_date(r["end_date"]) >= body.start_date):
+                where = f" at {names[vid]}" if len(by_venue) > 1 else ""
+                raise HTTPException(status_code=409,
+                                    detail=f"You already have a pending request overlapping those dates{where}")
+    ids = []
+    for vid in wanted:
+        emp = by_venue[vid]
+        req = {
+            "id": f"lv-{uuid.uuid4().hex[:10]}",
+            "venue_id": vid,
+            "employee_id": emp.id,
+            "start_date": body.start_date,
+            "end_date": body.end_date,
+            "reason": body.reason,
+            "status": "pending",
+            "created_at": datetime.utcnow(),
+        }
+        db.save_leave_request(req)
+        ids.append(req["id"])
+        logger.info(f"Leave requested: {emp.name} {body.start_date}..{body.end_date} at {vid}")
+    return {"status": "requested", "request_id": ids[0], "request_ids": ids,
+            "venues": [names[v] for v in wanted]}
 
 
 # ---------------------------------------------------------------------------
@@ -496,14 +598,17 @@ async def request_leave(body: LeaveRequestBody,
 #   day absent from dict  -> available all day
 #   day present, ranges [] -> unavailable all day
 #   day present, ranges    -> available only in those windows
+# Availability belongs to the person, not the venue: saving it writes every
+# staff record the login is linked to.
 # ---------------------------------------------------------------------------
 
 @router.get("/api/me/availability")
 async def my_availability(user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         return _no_link_response(user, db)
+    emp = links[0][0]
     avail = getattr(emp, "availability", {}) or {}
     days = []
     for d in _WEEKDAYS:
@@ -521,9 +626,10 @@ async def my_availability(user: UserContext = Depends(get_current_user)) -> dict
 async def set_my_availability(body: AvailabilityBody,
                               user: UserContext = Depends(get_current_user)) -> dict:
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    emp, vid = links[0]
 
     avail = dict(getattr(emp, "availability", {}) or {})
     for day, spec in (body.days or {}).items():
@@ -551,11 +657,14 @@ async def set_my_availability(body: AvailabilityBody,
                               "end": f"{e_min // 60:02d}:{e_min % 60:02d}"})
             avail[d] = clean
 
-    emp.availability = avail
-    emp.updated_at = datetime.utcnow()
-    db.save_employee(emp)
-    logger.info(f"Availability updated: {emp.name} at {vid}")
-    return {"status": "saved", "days_set": list((body.days or {}).keys())}
+    now = datetime.utcnow()
+    for link_emp, link_vid in links:
+        link_emp.availability = dict(avail)
+        link_emp.updated_at = now
+        db.save_employee(link_emp)
+        logger.info(f"Availability updated: {link_emp.name} at {link_vid}")
+    return {"status": "saved", "days_set": list((body.days or {}).keys()),
+            "venues": len(links)}
 
 
 # ---------------------------------------------------------------------------
@@ -600,10 +709,21 @@ async def offer_shift_for_cover(shift_id: str, body: CoverRequestBody,
                                 user: UserContext = Depends(get_current_user)) -> dict:
     """Put one of my upcoming shifts up for a co-worker to cover."""
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
-    shift = _find_my_shift(db, vid, emp.id, shift_id)
+    emp = vid = shift = None
+    for link_emp, link_vid in links:
+        try:
+            shift = _find_my_shift(db, link_vid, link_emp.id, shift_id)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                continue
+            raise
+        emp, vid = link_emp, link_vid
+        break
+    if shift is None:
+        raise HTTPException(status_code=404, detail="Shift not found in your upcoming roster")
     for c in db.list_shift_covers(vid) or []:
         if c.get("shift_id") == shift_id and c.get("status") in ("open", "claimed"):
             raise HTTPException(status_code=409, detail="That shift is already up for cover")
@@ -628,23 +748,25 @@ async def offer_shift_for_cover(shift_id: str, body: CoverRequestBody,
 
 @router.get("/api/me/cover")
 async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
-    """The cover board: shifts up for grabs at my venue, plus my own requests
-    and anything I've claimed."""
+    """The cover board: shifts up for grabs at my venue(s), plus my own
+    requests and anything I've claimed."""
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
+    links = _linked_employees(db, user)
+    if not links:
         return _no_link_response(user, db)
-    emp_names = {e.id: e.name for e in (db.get_employees(vid) or [])}
-    covers = db.list_shift_covers(vid) or []
+    names = _venue_names(db, [v for _, v in links])
     up_for_grabs, mine, claimed_by_me = [], [], []
-    for c in covers:
-        p = _cover_payload(c, emp_names)
-        if c.get("requested_by") == emp.id:
-            mine.append(p)
-        elif c.get("claimed_by") == emp.id and c.get("status") in ("claimed", "approved"):
-            claimed_by_me.append(p)
-        elif c.get("status") == "open" and _live_shift(db, vid, c) is not None:
-            up_for_grabs.append(p)
+    for emp, vid in links:
+        emp_names = {e.id: e.name for e in (db.get_employees(vid) or [])}
+        for c in db.list_shift_covers(vid) or []:
+            p = _cover_payload(c, emp_names)
+            p["venue_id"], p["venue_name"] = vid, names[vid]
+            if c.get("requested_by") == emp.id:
+                mine.append(p)
+            elif c.get("claimed_by") == emp.id and c.get("status") in ("claimed", "approved"):
+                claimed_by_me.append(p)
+            elif c.get("status") == "open" and _live_shift(db, vid, c) is not None:
+                up_for_grabs.append(p)
     return {"linked": True, "up_for_grabs": up_for_grabs, "mine": mine,
             "claimed_by_me": claimed_by_me}
 
@@ -700,16 +822,45 @@ def _clash_detail(sh, whose: str) -> str:
             f"{sh.end_time.strftime('%H:%M')} that day, which overlaps this shift")
 
 
+def _cover_link(db, user: UserContext, cover_id: str):
+    """(cover, my record at its venue) — or 404 when the cover isn't at a
+    venue I work."""
+    links = _linked_employees(db, user)
+    if not links:
+        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
+    cover = db.get_shift_cover(cover_id)
+    emp = None
+    if cover:
+        emp = next((e for e, v in links if v == cover.get("venue_id")), None)
+    if not cover or emp is None:
+        raise HTTPException(status_code=404, detail="Cover request not found")
+    return cover, emp, [v for _, v in links]
+
+
+def _busy_elsewhere_detail(db, emp, cover: dict, scope=None, published_only=False) -> Optional[str]:
+    """'on at Apothecary 16:00-23:00' when taking the cover would double-book
+    this person at another venue, else None."""
+    from rosteriq.services.person_identity import busy_elsewhere
+    try:
+        day = cover.get("shift_date")
+        day = day if isinstance(day, date) else date.fromisoformat(str(day)[:10])
+        hits = busy_elsewhere(db, emp, day, cover.get("shift_start"), cover.get("shift_end"),
+                              scope=scope, published_only=published_only)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"cross-venue check failed for cover {cover.get('id')}: {e}")
+        return None
+    if not hits:
+        return None
+    h = hits[0]
+    return f"on at {h['venue_name']} {h['start']}-{h['end']} that day, which overlaps this shift"
+
+
 @router.post("/api/me/cover/{cover_id}/claim")
 async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_user)) -> dict:
     """Claim a co-worker's open shift — goes to the manager for approval."""
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
-        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
-    cover = db.get_shift_cover(cover_id)
-    if not cover or cover.get("venue_id") != vid:
-        raise HTTPException(status_code=404, detail="Cover request not found")
+    cover, emp, my_venues = _cover_link(db, user, cover_id)
+    vid = cover.get("venue_id")
     if cover.get("requested_by") == emp.id:
         raise HTTPException(status_code=409, detail="You can't claim your own shift")
     if cover.get("status") != "open":
@@ -719,6 +870,9 @@ async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_use
     clash = _clashing_shift(db, vid, emp.id, cover)
     if clash is not None:
         raise HTTPException(status_code=409, detail=_clash_detail(clash, "You're"))
+    elsewhere = _busy_elsewhere_detail(db, emp, cover, scope=my_venues, published_only=True)
+    if elsewhere:
+        raise HTTPException(status_code=409, detail="You're " + elsewhere)
     if not db.claim_shift_cover(cover_id, emp.id):
         raise HTTPException(status_code=409, detail="Someone else has just claimed this shift")
     logger.info(f"Cover claimed: {emp.name} claims {cover_id} at {vid}")
@@ -730,12 +884,7 @@ async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_use
 async def cancel_cover(cover_id: str, user: UserContext = Depends(get_current_user)) -> dict:
     """Requester withdraws their cover request before it's decided."""
     db = get_db()
-    emp, vid = _linked_employee(db, user)
-    if not emp:
-        raise HTTPException(status_code=409, detail=_no_link_response(user)["message"])
-    cover = db.get_shift_cover(cover_id)
-    if not cover or cover.get("venue_id") != vid:
-        raise HTTPException(status_code=404, detail="Cover request not found")
+    cover, emp, _ = _cover_link(db, user, cover_id)
     if cover.get("requested_by") != emp.id:
         raise HTTPException(status_code=403, detail="Only the requester can cancel this")
     if cover.get("status") not in ("open", "claimed"):
@@ -846,6 +995,11 @@ async def decide_cover(cover_id: str, body: CoverDecision,
         if clash is not None:
             raise HTTPException(status_code=409, detail=_clash_detail(
                 clash, _emp_name(db, body.venue_id, claimant_id) + " is") + " \u2014 decline this request instead.")
+        claimant = db.get_employee(claimant_id) if claimant_id else None
+        elsewhere = _busy_elsewhere_detail(db, claimant, cover) if claimant is not None else None
+        if elsewhere:
+            raise HTTPException(status_code=409, detail=(
+                f"{claimant.name} is {elsewhere} \u2014 decline this request instead."))
         # The roster is the source of truth — a cover is only approved if the
         # shift genuinely moves. Fail loud if the roster changed underneath us.
         if (_live_shift(db, body.venue_id, cover) is None

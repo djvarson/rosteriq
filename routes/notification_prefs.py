@@ -194,7 +194,7 @@ async def test_sms(
     if not is_owner and role != "owner":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the platform owner can send test texts",
+            detail="Only RosterIQ support can send test texts",
         )
 
     phone = request.phone.strip()

@@ -215,7 +215,10 @@ def test_access_role_multi_venue_account_is_refused():
     """role AND password are GLOBAL on an account — neither endpoint may
     touch a login that also holds other venues, or one venue's manager
     could mint power (or a working session, via reset) at venues they
-    don't run. Re-verify round 2 proved reset-link was missing this."""
+    don't run. Re-verify round 2 proved reset-link was missing this.
+    The caller must be that one venue's manager, not the platform owner
+    (who runs every venue and may)."""
+    _login(TestClient(app), f"ra_boot_{uuid.uuid4().hex[:6]}@x.com")
     c, owner_h, vid, tag = _world()
     email = f"ra_multi_{tag}@x.com"
     eid = _employee(c, owner_h, vid, tag, email=email)

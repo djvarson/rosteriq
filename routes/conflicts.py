@@ -87,6 +87,33 @@ def _roster_context(db, roster):
     return employees, forecasts
 
 
+def _cross_venue_rows(db, roster, employees) -> List[ConflictResponse]:
+    """The same people on at another venue the caller may see, overlapping
+    or with too little rest between: warnings, never blocking."""
+    from rosteriq.award_rules import MINIMUM_HOURS_BETWEEN_SHIFTS
+    from rosteriq.middleware.tenant import get_tenant_context_optional
+    from rosteriq.services.person_identity import cross_venue_clashes
+    tenant = get_tenant_context_optional()
+    if tenant is not None and not tenant.is_manager_or_owner():
+        return []
+    try:
+        clashes = cross_venue_clashes(db, roster, employees,
+                                      min_rest_hours=MINIMUM_HOURS_BETWEEN_SHIFTS)
+    except Exception as e:
+        logger.warning(f"Cross-venue check failed for roster {roster.id}: {e}")
+        return []
+    return [ConflictResponse(
+        conflict_type="cross_venue",
+        severity=ConflictSeverity.WARNING.value,
+        message=c["message"],
+        employee_ids=[str(c["employee_id"])],
+        shift_ids=[str(c["shift_id"])],
+        date=c["date"].isoformat(),
+        suggestion=("Move one of the shifts, or check with the other venue"
+                    if c["kind"] == "overlap" else "Leave a full rest break between the two"),
+    ) for c in clashes]
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -134,38 +161,34 @@ async def detect_conflicts(
         # Run conflict detection
         detector = ConflictDetector()
         conflicts = detector.detect_conflicts(roster, venue, employees, forecasts)
+        rows = [
+            ConflictResponse(
+                conflict_type=c.conflict_type.value,
+                severity=c.severity.value,
+                message=c.message,
+                employee_ids=c.employee_ids,
+                shift_ids=c.shift_ids,
+                hour=c.hour,
+                date=c.date.isoformat() if c.date else None,
+                suggestion=c.suggestion,
+            )
+            for c in conflicts
+        ] + _cross_venue_rows(db, roster, employees)
 
         # Apply filters if specified
         if severity_filter:
-            conflicts = [c for c in conflicts if c.severity.value == severity_filter]
+            rows = [c for c in rows if c.severity == severity_filter]
 
         if conflict_type_filter:
-            conflicts = [c for c in conflicts if c.conflict_type.value == conflict_type_filter]
-
-        # Count by severity
-        critical_count = len([c for c in conflicts if c.severity == ConflictSeverity.CRITICAL])
-        warning_count = len([c for c in conflicts if c.severity == ConflictSeverity.WARNING])
-        info_count = len([c for c in conflicts if c.severity == ConflictSeverity.INFO])
+            rows = [c for c in rows if c.conflict_type == conflict_type_filter]
 
         return DetectConflictsResponse(
             roster_id=roster_id,
-            total_conflicts=len(conflicts),
-            critical=critical_count,
-            warnings=warning_count,
-            info=info_count,
-            conflicts=[
-                ConflictResponse(
-                    conflict_type=c.conflict_type.value,
-                    severity=c.severity.value,
-                    message=c.message,
-                    employee_ids=c.employee_ids,
-                    shift_ids=c.shift_ids,
-                    hour=c.hour,
-                    date=c.date.isoformat() if c.date else None,
-                    suggestion=c.suggestion,
-                )
-                for c in conflicts
-            ]
+            total_conflicts=len(rows),
+            critical=len([c for c in rows if c.severity == ConflictSeverity.CRITICAL.value]),
+            warnings=len([c for c in rows if c.severity == ConflictSeverity.WARNING.value]),
+            info=len([c for c in rows if c.severity == ConflictSeverity.INFO.value]),
+            conflicts=rows,
         )
 
     except HTTPException:

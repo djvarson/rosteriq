@@ -3616,6 +3616,7 @@ class PostgresStore(BaseStore):
                 is_active BOOLEAN DEFAULT true,
                 venue_ids JSONB DEFAULT '[]',
                 section_grants JSONB DEFAULT '{}',
+                staff_venue_ids JSONB DEFAULT '[]',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 last_login TIMESTAMP WITH TIME ZONE
             )"""),
@@ -3743,6 +3744,7 @@ class PostgresStore(BaseStore):
             # confined to. Absent/empty for a venue = full venue manager (the
             # default), so this is backward-compatible with every existing user.
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS section_grants JSONB DEFAULT '{}'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_venue_ids JSONB DEFAULT '[]'",
             # supplier_orders.section: which department an order belongs to, so a
             # department manager can own their section's ordering/receiving.
             "ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS section TEXT",
@@ -5288,20 +5290,22 @@ class PostgresStore(BaseStore):
         """Save or update a user."""
         with self._cursor() as cur:
             cur.execute("""
-                INSERT INTO users (id, email, password_hash, name, role, api_key_hash, is_active, created_at, last_login, venue_ids, section_grants)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO users (id, email, password_hash, name, role, api_key_hash, is_active, created_at, last_login, venue_ids, section_grants, staff_venue_ids)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     email=EXCLUDED.email, password_hash=EXCLUDED.password_hash,
                     name=EXCLUDED.name, role=EXCLUDED.role,
                     api_key_hash=EXCLUDED.api_key_hash, is_active=EXCLUDED.is_active,
                     last_login=EXCLUDED.last_login, venue_ids=EXCLUDED.venue_ids,
-                    section_grants=EXCLUDED.section_grants
+                    section_grants=EXCLUDED.section_grants,
+                    staff_venue_ids=EXCLUDED.staff_venue_ids
             """, (
                 user.get("id"), user.get("email"), user.get("password_hash"),
                 user.get("name"), user.get("role"), user.get("api_key_hash", ""),
                 user.get("is_active", True), user.get("created_at"), user.get("last_login"),
                 _json(user.get("venue_ids", []) or []),
                 _json(user.get("section_grants", {}) or {}),
+                _json(user.get("staff_venue_ids", []) or []),
             ))
 
     @staticmethod
@@ -5328,6 +5332,14 @@ class PostgresStore(BaseStore):
                 u["section_grants"] = json.loads(g)
             except Exception:
                 u["section_grants"] = {}
+        s = u.get("staff_venue_ids")
+        if s is None:
+            u["staff_venue_ids"] = []
+        elif isinstance(s, str):
+            try:
+                u["staff_venue_ids"] = json.loads(s)
+            except Exception:
+                u["staff_venue_ids"] = []
         return u
 
     def get_user_by_email(self, email):

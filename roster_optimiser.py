@@ -35,7 +35,7 @@ from rosteriq.award_rules import (
     get_penalty_multiplier, get_day_type, get_minimum_break_minutes,
     get_minimum_engagement_hours, validate_shift_compliance,
     check_consecutive_days, calculate_overtime_hours,
-    MAX_SHIFT_LENGTH_HOURS,
+    MAX_SHIFT_LENGTH_HOURS, MINIMUM_HOURS_BETWEEN_SHIFTS,
 )
 from rosteriq.cost_calculator import calculate_shift_cost_breakdown, calculate_roster_cost
 from rosteriq.services.availability_rules import is_available
@@ -246,6 +246,15 @@ def _is_employee_available(
         rest_hours = (24 - last_end_hour) + start_hour
         if rest_hours < 10:
             return False, f"Only {rest_hours}h rest (need 10h minimum)"
+
+    # A shift already booked the next day (at another venue) needs the rest
+    # gap after this one too.
+    proposed_end = datetime.combine(target_date, time(0)) + timedelta(hours=end_hour)
+    for s in existing_shifts:
+        if s.employee_id == employee.id and s.date == target_date + timedelta(days=1):
+            gap = (datetime.combine(s.date, s.start_time) - proposed_end).total_seconds() / 3600
+            if gap < MINIMUM_HOURS_BETWEEN_SHIFTS:
+                return False, f"Only {gap:g}h rest before their next shift"
 
     # Availability, by the one shared rule (to the minute; "23:59" = close).
     if not is_available(employee.availability, target_date,
@@ -601,6 +610,7 @@ def generate_weekly_roster(
     employees: list[Employee],
     venue_config: VenueConfig,
     covers_per_staff: float = DEFAULT_COVERS_PER_STAFF,
+    existing_shifts: Optional[list] = None,
 ) -> Roster:
     """
     Generate a full weekly roster.
@@ -614,11 +624,16 @@ def generate_weekly_roster(
         employees: Full employee pool.
         venue_config: Venue configuration.
         covers_per_staff: Covers-to-staff ratio.
+        existing_shifts: Shifts the staff are already booked for elsewhere
+            this week (another venue's roster, under the local employee id).
+            They count as booked (the day, the rest gap, the weekly hours)
+            but are not part of the roster.
 
     Returns:
         Complete Roster object with all shifts and total cost.
     """
     state = venue_config.state
+    booked = list(existing_shifts or [])
     all_shifts = []
     week_end = week_start + timedelta(days=6)
 
@@ -636,7 +651,7 @@ def generate_weekly_roster(
             forecasts=day_forecasts,
             employees=employees,
             state=state,
-            existing_shifts=all_shifts,
+            existing_shifts=booked + all_shifts,
             venue_config=venue_config,
             covers_per_staff=covers_per_staff,
         )
