@@ -73,6 +73,19 @@ Until the pilot has its own Railway service, production IS the pilot:
 - Current credential states are visible without guesswork:
   SMS `/api/sms/status` · Xero `/api/xero/status/{venue}` · Tanda
   marketplace `/api/tanda/plugin/health` (`marketplace_signature`).
+- Railway variables that change how the pilot behaves:
+  - `FORWARDED_ALLOW_IPS=*` — without it every user shares the proxy's IP,
+    so rate limits and the failed-login lockout apply across the whole
+    platform at once (a pub on one Wi-Fi gets locked out together).
+  - `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` (a domain you own,
+    with SPF/DKIM) — until these are set, "Forgot password" says so plainly
+    and managers issue reset links from the Staff page.
+  - `JWT_SECRET` — never rotate it mid-pilot: join codes are derived from it,
+    so every printed or texted code would stop working and everyone is
+    signed out.
+  - `LLM_PROVIDER` / model — the AI copilot sends the venue's data (staff
+    names, shifts, costs) to this provider. Name it, and where it processes
+    data, in the privacy statement.
 
 ## 6. Before each new venue (preflight)
 
@@ -85,3 +98,31 @@ Until the pilot has its own Railway service, production IS the pilot:
 4. Uptime monitor green for 7 straight days.
 5. Pilot agreement + privacy statement signed (venue stores staff PII,
    including work-rights records, in the system).
+6. Run the venue's REAL exports (Deputy people + schedule, filtered to the
+   venue's location) through the importers on a throwaway tenant first, and
+   read the import report: defaulted rates, salaried rows, skipped rows.
+7. On the venue's actual devices: set up the kiosk iPad as the time clock
+   and leave it over an hour, then punch; add /my to the home screen on one
+   iPhone and one Android and open it.
+8. Publish a throwaway roster with a 23:30 close while watching `/health`.
+
+## 7. The Wembley go-live, in order
+
+1. Ben signs up at `/register` ("Setting up a venue") and runs the wizard:
+   venue, staff import, **Areas & minimums** (per weekday, duty manager
+   marked "needs the skill") and trading hours (Fri/Sat past midnight).
+2. Staff page → check the import report; fix rates, areas and mobiles with
+   **Edit**. Managers paid a salary come in as salaried; confirm the weekly
+   figures with the payroll advisor.
+3. Roster → import the current Deputy week (it shows on staff phones at
+   once), or generate next week and publish.
+4. Settings → Time clock → set up the bar iPad as the device; Staff →
+   **Generate PINs** and hand out the printed sheet.
+5. Staff → **Join codes** sheet; staff sign up at `/register?join=1` with the
+   email on their record and their code.
+6. Apothecary: venue selector → **Add another venue**, same steps. Shared
+   managers get both venues from the Access dialog by a manager who runs
+   both; shared staff enter the second venue's code in /my.
+7. Payroll stays parallel: compare RosterIQ's prep with the real pay run
+   each fortnight and log differences for the advisor.
+
