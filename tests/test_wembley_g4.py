@@ -431,9 +431,14 @@ def test_the_lookup_never_reaches_a_venue_another_owner_runs():
 
 def _sarahs_cafe(w):
     """Sarah, Wembley's AVM, signs up her own cafe and makes Carl, who has
-    nothing to do with Ben, its manager."""
+    nothing to do with Ben, its manager. A manager someone else appointed
+    can no longer add venues, so this is a login from before that rule: the
+    check here is the second line of defence for accounts that already
+    exist."""
     vx = f"cafe-{w.tag}"
-    _venue(w.c, w.sarah, vx, "Sarah's Cafe")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("rosteriq.services.venue_access.is_manager_login", lambda _u: False)
+        _venue(w.c, w.sarah, vx, "Sarah's Cafe")
     sarah = _login(w.c, f"sarah_{w.tag}@x.com")
     carl_email = f"carl_{w.tag}@x.com"
     cx = _emp(w.c, sarah, vx, f"{vx}-carl", "Carl", email=carl_email)

@@ -36,6 +36,7 @@ _NON_TABLE_TOKENS = {
     "rosteriq",                                    # appears in a docstring url
     "feed", "employee", "notification",           # alias words for *_config etc.
     "jsonb_array_elements",                        # set-returning function, not a table
+    "now",                                         # EXTRACT(EPOCH FROM now() - ...)
 }
 
 _TABLE_REF_RE = re.compile(

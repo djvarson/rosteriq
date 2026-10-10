@@ -542,20 +542,25 @@ def test_paid_leave_default_leaves_out_a_punch_never_clocked_out(monkeypatch):
 
     def punch(day):
         # In at 16:00 Perth (08:00 UTC, as punches are stored), never out
-        db.save_timesheet({"id": f"ts-{uuid.uuid4().hex[:6]}", "venue_id": vid,
-                           "employee_id": ids["jo"], "work_date": day,
-                           "clock_in": datetime.combine(day, dtime(8)).isoformat(),
-                           "clock_out": None, "break_minutes": 0, "status": "pending"})
+        ts = {"id": f"ts-{uuid.uuid4().hex[:6]}", "venue_id": vid,
+              "employee_id": ids["jo"], "work_date": day,
+              "clock_in": datetime.combine(day, dtime(8)).isoformat(),
+              "clock_out": None, "break_minutes": 0, "status": "pending"}
+        db.save_timesheet(dict(ts))
+        return ts
 
     # Yesterday's shift is over and nobody knows when she left
-    punch(yday)
+    stale = punch(yday)
     imp = _impact(c, mgr, vid, ids["jo"], yday)
     assert imp["rostered_hours"] == 6.5 and imp["paid_hours_default"] == 6.5
     assert ("their punch that day was never clocked out, so it isn't counted and its 6.5h "
             "counts as leave: check the hours") in imp["message"]
     assert _record_leave(c, mgr, vid, ids["jo"], yday, leave_type="personal")["paid_hours"] == 6.5
 
-    # Today's shift is still running at 18:00: the open punch counts up to now
+    # Today's shift is still running at 18:00: the open punch counts up to now.
+    # One open punch per person, so yesterday's gets its finish time first,
+    # as the kiosk asks for it before clocking her in again.
+    db.save_timesheet({**stale, "clock_out": datetime.combine(yday, dtime(15)).isoformat()})
     punch(today)
     perth = ZoneInfo("Australia/Perth")
     monkeypatch.setattr(leave_shifts, "venue_now",
