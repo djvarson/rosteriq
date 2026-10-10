@@ -11,8 +11,18 @@ linked to shares that key as well. A record with no email is only itself.
 Every lookup is limited to the venues the CALLER may see: the request's
 tenant venues (a platform owner, or a call outside any request, sees every
 venue). A same-email record at a venue the caller doesn't hold is never
-read, so nothing here reveals another tenant's staff, shifts or venue
+returned, so nothing here reveals another tenant's staff, shifts or venue
 names. The demo venue and real venues never match each other.
+
+One exception keeps double-booking checks working for a manager who doesn't
+run the other venue (Wembley's assistant manager, staff-only at
+Apothecary): with no ``scope``, the shift checks (shifts_elsewhere,
+busy_elsewhere, booked_elsewhere, cross_venue_clashes, unseen_shifts) also
+search the venues that share an owner with the person's venue
+(unseen_venue_ids). There an email match isn't enough, since any manager can
+type any email onto a record: the person's own login must hold both venues
+(_proven). What they find there carries no venue name or id and no shift
+id: the venue is "another venue". Nothing ever looks across owners.
 
 Callers may pass ``scope`` to look in a narrower or different set of venues;
 they are then responsible for that set being one the caller may see (the
@@ -26,6 +36,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 
 _INACTIVE_STATUSES = ("cancelled", "no_show")
+ANOTHER_VENUE = "another venue"
 
 
 def person_key(employee) -> Optional[str]:
@@ -61,19 +72,87 @@ def _scope(db, home_venue: Optional[str], scope: Optional[Iterable[str]]) -> Lis
     return venues
 
 
-def same_person_records(db, employee, scope: Optional[Iterable[str]] = None) -> List[Tuple[object, str]]:
-    """Every OTHER staff record of this person, as (employee, venue_id), in
-    venues the caller may see. Never includes ``employee`` itself."""
+def unseen_venue_ids(db, home_venue: Optional[str], *, strict: bool = False) -> List[str]:
+    """Venues that share an owner with ``home_venue`` but that the current
+    caller can't open: a login fully manages both (same_owner_venue_ids) and
+    they aren't two separate signups (separate_signups). Only for a manager
+    of ``home_venue``; empty outside a request and for a caller who sees
+    every venue. With ``strict``, raises when that can't be worked out."""
+    from rosteriq.middleware.tenant import get_tenant_context_optional
+    tenant = get_tenant_context_optional()
+    if tenant is None or getattr(tenant, "is_owner", False) or not home_venue:
+        return []
+    held = list(getattr(tenant, "venue_ids", None) or [])
+    if home_venue not in held or not tenant.is_manager_or_owner():
+        return []
+    demo = _demo_venue_id()
+    if demo and home_venue == demo:
+        return []
+    from rosteriq.services.venue_access import same_owner_venue_ids, separate_signups
+    return [v for v in same_owner_venue_ids(db, home_venue, strict=strict)
+            if v not in held and v != demo and not separate_signups(db, home_venue, v, strict=strict)]
+
+
+def _reach(db, home_venue: Optional[str], scope: Optional[Iterable[str]]) -> Tuple[List[str], set]:
+    """(venues a shift check searches, the ones among them to report as
+    "another venue")."""
+    venues = _scope(db, home_venue, scope)
+    if scope is not None:
+        return venues, set()
+    unseen = [v for v in unseen_venue_ids(db, home_venue) if v not in venues]
+    return venues + unseen, set(unseen)
+
+
+def _proven(db, home_venue: Optional[str], unseen: Iterable[str], keys: Iterable[Optional[str]], *,
+            strict: bool = False) -> Dict[str, set]:
+    """person key -> the venues among ``unseen`` that ONE live login with
+    that email holds together with ``home_venue``. A login holds a venue
+    through its own join code there, or through a manager of every venue it
+    holds, so this is the person's proof they work both."""
+    unseen = set(unseen)
+    keys = {k for k in keys if k}
+    if not unseen or not keys or not home_venue:
+        return {}
+    try:
+        users = db.list_users() or []
+    except Exception:
+        if strict:
+            raise
+        return {}
+    from rosteriq.services.venue_access import held_venue_ids
+    out: Dict[str, set] = defaultdict(set)
+    for u in users:
+        if not u or not u.get("is_active", True):
+            continue
+        key = (u.get("email") or "").strip().lower()
+        if key in keys:
+            held = set(held_venue_ids(u))
+            if home_venue in held:
+                out[key] |= held & unseen
+    return out
+
+
+def _shown(vid: str, key: Optional[str], unseen: set, proven: Dict[str, set]) -> bool:
+    return vid not in unseen or vid in proven.get(key or "", ())
+
+
+def _records(db, employee, venue_ids: Iterable[str]) -> List[Tuple[object, str]]:
     key = person_key(employee)
     if not key:
         return []
     own_id = getattr(employee, "id", None)
     out = []
-    for vid in _scope(db, getattr(employee, "venue_id", None), scope):
+    for vid in venue_ids:
         for other in db.get_employees(vid) or []:
             if getattr(other, "id", None) != own_id and person_key(other) == key:
                 out.append((other, vid))
     return out
+
+
+def same_person_records(db, employee, scope: Optional[Iterable[str]] = None) -> List[Tuple[object, str]]:
+    """Every OTHER staff record of this person, as (employee, venue_id), in
+    venues the caller may see. Never includes ``employee`` itself."""
+    return _records(db, employee, _scope(db, getattr(employee, "venue_id", None), scope))
 
 
 def records_by_person(db, venue_ids: Iterable[str]) -> Dict[str, List[Tuple[object, str]]]:
@@ -130,7 +209,9 @@ def _venue_shifts(db, venue_id: str, start: date, end: date, published_only: boo
         return []
 
 
-def _venue_name(db, venue_id: str, cache: Optional[dict] = None) -> str:
+def _venue_name(db, venue_id: Optional[str], cache: Optional[dict] = None) -> str:
+    if not venue_id:
+        return ANOTHER_VENUE
     if cache is not None and venue_id in cache:
         return cache[venue_id]
     try:
@@ -145,21 +226,53 @@ def _venue_name(db, venue_id: str, cache: Optional[dict] = None) -> str:
 
 def shifts_elsewhere(db, employee, start: date, end: date, *,
                      scope: Optional[Iterable[str]] = None,
-                     published_only: bool = False) -> List[Tuple[object, str]]:
+                     published_only: bool = False) -> List[Tuple[object, Optional[str]]]:
     """This person's shifts at OTHER venues dated start-1 .. end (the day
     before, so a shift running past midnight into ``start`` is seen), as
-    (shift, venue_id). Manager view of each week (the published roster, else
-    the one being drafted) unless ``published_only``."""
+    (shift, venue_id); venue_id is None for a venue the caller can't see.
+    Manager view of each week (the published roster, else the one being
+    drafted) unless ``published_only``."""
     home = getattr(employee, "venue_id", None)
+    venues, unseen = _reach(db, home, scope)
+    key = person_key(employee)
+    proven = _proven(db, home, unseen, [key])
     ids_by_venue: Dict[str, set] = defaultdict(set)
-    for other, vid in same_person_records(db, employee, scope):
-        if vid != home:
+    for other, vid in _records(db, employee, venues):
+        if vid != home and _shown(vid, key, unseen, proven):
             ids_by_venue[vid].add(str(other.id))
     out = []
     for vid, ids in ids_by_venue.items():
         for s in _venue_shifts(db, vid, start - timedelta(days=1), end, published_only):
             if str(getattr(s, "employee_id", "")) in ids:
-                out.append((s, vid))
+                out.append((s, None if vid in unseen else vid))
+    return out
+
+
+def unseen_shifts(db, employee, start: date, end: date, *, strict: bool = False) -> list:
+    """This person's live shifts dated start..end at the venues in
+    unseen_venue_ids where their own login holds both venues, for counting
+    hours and spotting clashes. They carry the other venue's ids, so nothing
+    from them is shown but the times. Logins or a roster that can't be read
+    raise, so "couldn't look" never reads as "free"; with ``strict`` so does
+    a same-email record there that their login doesn't prove, since that
+    venue then goes unchecked."""
+    from rosteriq.services.current_roster import live_shifts
+    home = getattr(employee, "venue_id", None)
+    unseen = unseen_venue_ids(db, home, strict=True)
+    key = person_key(employee)
+    proven = _proven(db, home, unseen, [key], strict=True).get(key or "", set())
+    ids_by_venue: Dict[str, set] = defaultdict(set)
+    for other, vid in _records(db, employee, unseen):
+        if vid not in proven:
+            if strict:
+                raise LookupError("A same-email record at another venue isn't linked to this person's login")
+            continue
+        ids_by_venue[vid].add(str(other.id))
+    out = []
+    for vid, ids in ids_by_venue.items():
+        for s in live_shifts(db, vid, start, end):
+            if str(getattr(s, "employee_id", "")) in ids and _is_live(s):
+                out.append(s)
     return out
 
 
@@ -169,7 +282,7 @@ def _window(day: date, start, end, gap_minutes) -> Tuple[datetime, datetime]:
     return begin - pad, finish + pad
 
 
-def _hits(db, shifts: Iterable[Tuple[object, str]], begin: datetime, finish: datetime,
+def _hits(db, shifts: Iterable[Tuple[object, Optional[str]]], begin: datetime, finish: datetime,
           names: dict) -> List[dict]:
     hits = []
     for s, vid in shifts:
@@ -181,7 +294,7 @@ def _hits(db, shifts: Iterable[Tuple[object, str]], begin: datetime, finish: dat
                 "date": s.date.isoformat(),
                 "start": s.start_time.strftime("%H:%M"),
                 "end": s.end_time.strftime("%H:%M"),
-                "shift_id": s.id,
+                "shift_id": s.id if vid else None,
                 "_at": a,
             })
     hits.sort(key=lambda h: h["_at"])
@@ -197,7 +310,9 @@ def busy_elsewhere(db, employee, day: date, start=None, end=None, *,
     ``start``-``end`` on ``day`` (HH:MM strings or times; omit both for the
     whole day). ``gap_minutes`` widens the window on both sides, for a rest
     gap. Returns [{venue_id, venue_name, date, start, end, shift_id}],
-    earliest first; [] when they are free or have no other venue."""
+    earliest first; [] when they are free or have no other venue. A venue
+    the caller can't see comes back as venue_id None, "another venue", no
+    shift_id."""
     begin, finish = _window(day, start, end, gap_minutes)
     shifts = shifts_elsewhere(db, employee, day - timedelta(days=1), day + timedelta(days=1),
                               scope=scope, published_only=published_only)
@@ -213,17 +328,21 @@ def busy_elsewhere_many(db, venue_id: str, employees: Iterable, day: date, start
     out."""
     begin, finish = _window(day, start, end, gap_minutes)
     employees = list(employees)
-    others = [v for v in _scope(db, venue_id, scope) if v != venue_id]
+    venues, unseen = _reach(db, venue_id, scope)
+    others = [v for v in venues if v != venue_id]
     index = records_by_person(db, others)
+    proven = _proven(db, venue_id, unseen, (person_key(e) for e in employees))
     wanted: Dict[str, Dict[str, list]] = defaultdict(lambda: defaultdict(list))  # vid -> other id -> local ids
     for emp in employees:
-        for other, vid in index.get(person_key(emp) or "", []):
-            wanted[vid][str(other.id)].append(str(emp.id))
+        key = person_key(emp)
+        for other, vid in index.get(key or "", []):
+            if _shown(vid, key, unseen, proven):
+                wanted[vid][str(other.id)].append(str(emp.id))
     shifts_by_local: Dict[str, list] = defaultdict(list)
     for vid, by_id in wanted.items():
         for s in _venue_shifts(db, vid, day - timedelta(days=2), day + timedelta(days=1), published_only):
             for local in by_id.get(str(getattr(s, "employee_id", "")), []):
-                shifts_by_local[local].append((s, vid))
+                shifts_by_local[local].append((s, None if vid in unseen else vid))
     names: dict = {}
     out = {}
     for local, shifts in shifts_by_local.items():
@@ -238,17 +357,21 @@ def booked_elsewhere(db, venue_id: str, employees: Iterable, start: date, end: d
     """The other-venue shifts of ``venue_id``'s people dated start..end, as
     (shift, venue_id), each shift copied with the LOCAL employee id so the
     roster generator treats the person as booked then (the day, the rest
-    gap and their weekly hours all count)."""
+    gap and their weekly hours all count). venue_id is None for a venue the
+    caller can't see."""
     employees = list(employees)
     keys = {person_key(e): e for e in employees if person_key(e)}
     if not keys:
         return []
-    others = [v for v in _scope(db, venue_id, scope) if v != venue_id]
+    venues, unseen = _reach(db, venue_id, scope)
+    others = [v for v in venues if v != venue_id]
     index = records_by_person(db, others)
+    proven = _proven(db, venue_id, unseen, keys)
     wanted: Dict[str, Dict[str, object]] = defaultdict(dict)   # vid -> other id -> local emp
     for key, local in keys.items():
         for other, vid in index.get(key, []):
-            wanted[vid][str(other.id)] = local
+            if _shown(vid, key, unseen, proven):
+                wanted[vid][str(other.id)] = local
     out = []
     for vid, by_id in wanted.items():
         for s in _venue_shifts(db, vid, start, end, published_only=False):
@@ -256,7 +379,8 @@ def booked_elsewhere(db, venue_id: str, employees: Iterable, start: date, end: d
             if local is None or not (start <= s.date <= end):
                 continue
             out.append((s.model_copy(update={"id": f"elsewhere-{s.id}",
-                                             "employee_id": local.id}), vid))
+                                             "employee_id": local.id}),
+                        None if vid in unseen else vid))
     out.sort(key=lambda pair: (pair[0].date, pair[0].start_time))
     return out
 
@@ -303,8 +427,10 @@ def cross_venue_clashes(db, roster, employees: Optional[Iterable] = None, *,
     keyed = {person_key(by_id[eid]): eid for eid in mine if person_key(by_id[eid])}
     if not keyed:
         return []
-    others = [v for v in _scope(db, venue_id, scope) if v != venue_id]
+    venues, unseen = _reach(db, venue_id, scope)
+    others = [v for v in venues if v != venue_id]
     index = records_by_person(db, others)
+    proven = _proven(db, venue_id, unseen, keyed)
     first = getattr(roster, "week_start", None) or min(s.date for ss in mine.values() for s in ss)
     last = getattr(roster, "week_end", None) or max(s.date for ss in mine.values() for s in ss)
     shift_cache: dict = {}
@@ -314,6 +440,8 @@ def cross_venue_clashes(db, roster, employees: Optional[Iterable] = None, *,
     for key, local_id in keyed.items():
         emp = by_id[local_id]
         for other, vid in index.get(key, []):
+            if not _shown(vid, key, unseen, proven):
+                continue
             if vid not in shift_cache:
                 shift_cache[vid] = _venue_shifts(db, vid, first - timedelta(days=1),
                                                  last + timedelta(days=1), published_only=False)
@@ -328,7 +456,8 @@ def cross_venue_clashes(db, roster, employees: Optional[Iterable] = None, *,
                         kind = "short_rest"
                     else:
                         continue
-                    vname = _venue_name(db, vid, names)
+                    shown = None if vid in unseen else vid
+                    vname = _venue_name(db, shown, names)
                     when = _when(there)
                     day = _day(there.date)
                     if kind == "overlap":
@@ -339,7 +468,7 @@ def cross_venue_clashes(db, roster, employees: Optional[Iterable] = None, *,
                                f"{gap_h:g}h between that shift and this one")
                     out.append({
                         "employee_id": emp.id, "shift_id": here.id, "date": here.date,
-                        "venue_id": vid, "venue_name": vname,
+                        "venue_id": shown, "venue_name": vname,
                         "start": there.start_time.strftime("%H:%M"),
                         "end": there.end_time.strftime("%H:%M"),
                         "kind": kind, "message": msg,
