@@ -1049,13 +1049,19 @@ def _reassign_shift(db, venue_id: str, cover: dict, new_employee_id: str) -> boo
         (s for s in shifts if s.id == cover.get("shift_id") and cover_stands(cover, s)), None))
     if slot is None:
         return False
-    holders = cover_holders(cover)
+    # The requester's own copy of the slot first: an open copy may be someone
+    # else's leave, and only stands in when the requester's leave opened theirs.
+    holders = [h for h in (str(cover.get("requested_by") or ""), "") if h in cover_holders(cover)]
+
+    def same_slot(shifts):
+        return next((s for h in holders for s in shifts
+                     if shift_slot(s) == slot and str(s.employee_id or "") == h), None)
+
     for r in unsuperseded_rosters(db, venue_id, day, day):
         if r.id == staff[0].id:
             continue
         try:
-            move(r.id, lambda shifts: next((s for s in shifts if shift_slot(s) == slot
-                                            and str(s.employee_id or "") in holders), None))
+            move(r.id, same_slot)
         except edit.RosterBusy:
             logger.warning(f"Roster {r.id} busy: cover {cover.get('id')} not applied to it")
     return True

@@ -22,7 +22,7 @@ nobody, once it is open). One that doesn't is withdrawn, never approved.
 
 import logging
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Iterable, Optional
 
@@ -31,7 +31,6 @@ from rosteriq.services.clock import venue_now
 from rosteriq.services.current_roster import (
     SUPERSEDED, live_rosters, live_shifts, roster_state, week_monday,
 )
-from rosteriq.services.roster_edit import RosterBusy, recost_total, roster_lock, venue_state
 
 logger = logging.getLogger(__name__)
 
@@ -119,15 +118,22 @@ def _hours(value: float) -> str:
     return f"{round(value, 2):g}h"
 
 
-def _punched_hours(sheet: dict) -> float:
+def _shift_end(shift) -> datetime:
+    return datetime.combine(shift.date, shift.start_time) + timedelta(hours=shift.duration_hours)
+
+
+def _punched_hours(sheet: dict, until: Optional[datetime]) -> Optional[float]:
+    """Hours on one punch less its break. Punches are stored as naive UTC; one
+    not clocked out runs to `until`, or is None (unknown) without one."""
     ci, co = sheet.get("clock_in"), sheet.get("clock_out")
     if not ci:
         return 0.0
+    if not co and until is None:
+        return None
     try:
         a = ci if isinstance(ci, datetime) else datetime.fromisoformat(str(ci).replace("Z", "+00:00"))
         if not co:
-            # Still clocked in. Punches are stored as naive UTC.
-            b = datetime.utcnow()
+            b = until
         else:
             b = co if isinstance(co, datetime) else datetime.fromisoformat(str(co).replace("Z", "+00:00"))
     except ValueError:
@@ -137,21 +143,30 @@ def _punched_hours(sheet: dict) -> float:
     return max(0.0, minutes / 60)
 
 
-def _worked_by_day(db, venue_id: str, employee_id: str, days: set) -> dict:
-    """day -> hours this person punched at the venue that day."""
+def _worked_by_day(db, venue_id: str, employee_id: str, days: set, running: set,
+                   now_utc: datetime) -> tuple:
+    """(day -> hours this person punched at the venue that day, days with a
+    punch never clocked out). A punch still open while that day's shift is
+    running counts up to now; once the shift is over nobody knows when they
+    left, so it isn't counted."""
     if not days:
-        return {}
+        return {}, set()
     try:
         sheets = db.get_timesheets(venue_id, min(days), max(days)) or []
     except Exception:
-        return {}
+        return {}, set()
     out: dict = {}
+    unclosed = set()
     for t in sheets:
         day = _as_date(t.get("work_date"))
         if str(t.get("employee_id")) != str(employee_id) or day not in days:
             continue
-        out[day] = out.get(day, 0.0) + _punched_hours(t)
-    return out
+        hours = _punched_hours(t, now_utc if day in running else None)
+        if hours is None:
+            unclosed.add(day)
+        else:
+            out[day] = out.get(day, 0.0) + hours
+    return out, unclosed
 
 
 def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
@@ -163,7 +178,9 @@ def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
     draft), so a week that has both never counts a day twice. A shift that has
     started or passed adds only the rostered hours the person didn't punch
     that day."""
-    now = _venue_now(db, venue_id)
+    local = venue_now(venue_id, db)
+    now = local.replace(tzinfo=None) if local.tzinfo else local
+    now_utc = local.astimezone(timezone.utc).replace(tzinfo=None) if local.tzinfo else datetime.utcnow()
     name = getattr(employee, "name", None) or "They"
     counted = live_rosters(db, venue_id, start, end, staff=True)
     staff_weeks = {week_monday(r.week_start) for r in counted}
@@ -181,10 +198,13 @@ def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
                 slots.setdefault(shift_slot(s), s)
 
     started: dict = {}
+    running = set()
     for s in hour_shifts:
         if _started(s, now):
             started[s.date] = started.get(s.date, 0.0) + float(s.net_hours)
-    worked = _worked_by_day(db, venue_id, employee.id, set(started))
+            if now < _shift_end(s):
+                running.add(s.date)
+    worked, unclosed = _worked_by_day(db, venue_id, employee.id, set(started), running, now_utc)
     leave_hours = sum(float(s.net_hours) for s in hour_shifts if not _started(s, now))
     leave_hours += sum(max(0.0, h - worked.get(d, 0.0)) for d, h in started.items())
     hour_ids = {s.id for s in hour_shifts}
@@ -199,12 +219,18 @@ def leave_impact(db, venue_id: str, employee, start: date, end: date) -> dict:
                        "or passed, so it stays on the roster as it was")
             if s.id in hour_ids:
                 did = worked.get(s.date, 0.0)
-                if did:
-                    message += (f" — they worked {_hours(did)} that day, so "
-                                f"{_hours(max(0.0, started[s.date] - did))} of it counts as leave")
+                left = _hours(max(0.0, started[s.date] - did))
+                if s.date in unclosed and did:
+                    message += (f" — they worked {_hours(did)} that day besides a punch never "
+                                f"clocked out, which isn't counted, so {left} of it counts as "
+                                "leave: check the hours")
+                elif s.date in unclosed:
+                    message += (" — their punch that day was never clocked out, so it isn't "
+                                f"counted and its {left} counts as leave: check the hours")
+                elif did:
+                    message += f" — they worked {_hours(did)} that day, so {left} of it counts as leave"
                 else:
-                    message += (f" — nothing was punched that day, so its "
-                                f"{_hours(started[s.date])} counts as leave")
+                    message += f" — nothing was punched that day, so its {left} counts as leave"
         else:
             message = f"{name} is rostered {when} as {s.role}; this shift will be left open"
         shifts.append({
@@ -257,7 +283,9 @@ def _open_on(db, roster_id: str, venue_id: str, employee, start: date, end: date
              now: datetime, emp_map: dict, state) -> list:
     """Re-read one roster under its lock, open the person's not-yet-started
     shifts in the window, recost and save it. Returns the shifts opened."""
-    with roster_lock(db, roster_id):
+    from rosteriq.services import roster_edit as edit  # roster_edit imports this module
+
+    with edit.roster_lock(db, roster_id):
         roster = db.get_roster(roster_id)
         if roster is None or getattr(roster, "venue_id", None) != venue_id:
             return []
@@ -266,7 +294,7 @@ def _open_on(db, roster_id: str, venue_id: str, employee, start: date, end: date
         if leaving:
             for s in leaving:
                 s.employee_id = OPEN
-            recost_total(roster, emp_map, state)
+            edit.recost_total(roster, emp_map, state)
             db.save_roster(roster)
         return leaving
 
@@ -278,6 +306,8 @@ def open_leave_shifts(db, venue_id: str, employee, start: date, end: date) -> li
     and saved under its lock; RosterBusy when another save holds the lock of
     a roster staff see. Returns one entry per shift slot opened (for the
     leave record, the response and the audit trail)."""
+    from rosteriq.services import roster_edit as edit  # roster_edit imports this module
+
     now = _venue_now(db, venue_id)
     staff_ids = _staff_roster_ids(db, venue_id, start, end)
     rosters = sorted(unsuperseded_rosters(db, venue_id, start, end),
@@ -285,12 +315,12 @@ def open_leave_shifts(db, venue_id: str, employee, start: date, end: date) -> li
     covered = {c.get("shift_id"): c.get("id") for c in db.list_shift_covers(venue_id) or []
                if c.get("status") in LIVE_COVER}
     emp_map = scoped_employee_map(db, venue_id)
-    state = venue_state(db.get_venue(venue_id))
+    state = edit.venue_state(db.get_venue(venue_id))
     opened = {}
     for rid in [r.id for r in rosters]:
         try:
             leaving = _open_on(db, rid, venue_id, employee, start, end, now, emp_map, state)
-        except RosterBusy:
+        except edit.RosterBusy:
             if rid in staff_ids:
                 raise
             # A draft mid-save keeps the shift; publishing it is refused while

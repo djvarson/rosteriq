@@ -16,13 +16,23 @@ Leave and shift cover through the roster's life at the Wembley.
      and the board, the manager's list and the briefing stop counting it.
 [17] The paid-leave default for a shift that had already started is the
      rostered hours less what the person punched that day.
+     A punch never clocked out is left out once the shift is over (and the
+     manager told to check the hours), never counted up to now.
 [24] The paid-leave default counts a day once when the imported roster and a
      newer draft share the week.
+
+leave_shifts loads without roster_edit, which imports it, so neither import
+order is circular. An approved swap moves the requester's own copy of the
+slot on a newer draft, never someone else's open one.
 """
 
+import os
+import subprocess
+import sys
 import uuid
 from datetime import datetime, time as dtime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from rosteriq.cost_calculator import calculate_roster_cost
 from rosteriq.database import get_db
@@ -127,7 +137,6 @@ def test_publishing_a_roster_that_puts_someone_on_their_approved_leave_is_refuse
 
 
 def test_leave_while_a_roster_is_mid_save(monkeypatch):
-    from rosteriq.services import leave_shifts
     c, mgr, vid, ids, staff, _ = _world()
     nm = _next_week(vid)
     wed, thu = nm + timedelta(days=2), nm + timedelta(days=3)
@@ -135,14 +144,14 @@ def test_leave_while_a_roster_is_mid_save(monkeypatch):
                             _shift("sam-thu", ids["sam"], thu, dtime(10), dtime(17), "Front Bar")])
     r2 = _draft(vid, nm, [_shift("jo-wed-2", ids["jo"], wed, dtime(10), dtime(17), "Front Bar")])
     busy = set()
-    real = leave_shifts.roster_lock
+    real = edit.roster_lock
 
     def lock(db, roster_id, *a, **k):
         if roster_id in busy:
             raise edit.RosterBusy()
         return real(db, roster_id, *a, **k)
 
-    monkeypatch.setattr(leave_shifts, "roster_lock", lock)
+    monkeypatch.setattr(edit, "roster_lock", lock)
 
     # The roster staff see is mid-save: try again, nothing changed
     busy.add(r1)
@@ -159,6 +168,7 @@ def test_leave_while_a_roster_is_mid_save(monkeypatch):
     _ask_leave(c, mgr, staff["jo"], vid, wed)
     assert _roster_shift(r1, "jo-wed").employee_id == ""
     assert _roster_shift(r2, "jo-wed-2").employee_id == ids["jo"]
+    busy.clear()
     pub = _publish_api(c, mgr, r2)
     assert pub["success"] is False and "Jo Taylor is on approved leave" in pub["message"]
 
@@ -178,6 +188,46 @@ def test_an_approved_cover_also_moves_the_shift_on_a_newer_draft():
     assert _roster_shift(r1, "jo-fri").employee_id == ids["meca"]
     assert _roster_shift(r2, "jo-fri-2").employee_id == ids["meca"]
     assert _roster_shift(r2, "jo-sat-2").employee_id == ids["jo"]
+
+
+def test_an_approved_swap_moves_the_requesters_shift_on_a_newer_draft_not_an_open_copy():
+    c, mgr, vid, ids, staff, _ = _world()
+    nm = _next_week(vid)
+    fri = nm + timedelta(days=4)
+    r1 = _publish(vid, nm, [_shift("jo-fri", ids["jo"], fri, dtime(16), dtime(23), "Duty Manager"),
+                            _shift("pat-fri", ids["pat"], fri, dtime(16), dtime(23), "Duty Manager")])
+    r2 = _draft(vid, nm, [_shift("jo-fri-2", ids["jo"], fri, dtime(16), dtime(23), "Duty Manager"),
+                          _shift("pat-fri-2", ids["pat"], fri, dtime(16), dtime(23), "Duty Manager")])
+    _ask_leave(c, mgr, staff["jo"], vid, fri)
+    assert _roster_shift(r2, "jo-fri-2").employee_id == ""
+
+    cover_id = c.post("/api/me/shifts/pat-fri/cover", json={}, headers=staff["pat"]).json()["cover_id"]
+    assert c.post(f"/api/me/cover/{cover_id}/claim", headers=staff["meca"]).status_code == 200
+    r = c.post(f"/api/cover/{cover_id}/decide", json={"venue_id": vid, "approve": True}, headers=mgr)
+    assert r.status_code == 200, r.text
+    assert _roster_shift(r1, "pat-fri").employee_id == ids["meca"]
+    assert _roster_shift(r2, "pat-fri-2").employee_id == ids["meca"]
+    assert _roster_shift(r2, "jo-fri-2").employee_id == ""
+
+    assert _publish_api(c, mgr, r2)["success"] is True
+    assert c.get("/api/me/shifts", headers=staff["pat"]).json()["shifts"] == []
+    assert [x["date"] for x in c.get("/api/me/shifts", headers=staff["meca"]).json()["shifts"]] \
+        == [fri.isoformat()]
+
+
+def test_a_swap_after_the_requesters_own_leave_fills_their_open_copy_on_a_newer_draft():
+    c, mgr, vid, ids, staff, _ = _world()
+    nm = _next_week(vid)
+    fri = nm + timedelta(days=4)
+    r1 = _publish(vid, nm, [_shift("jo-fri", ids["jo"], fri, dtime(16), dtime(23), "Duty Manager")])
+    r2 = _draft(vid, nm, [_shift("jo-fri-2", ids["jo"], fri, dtime(16), dtime(23), "Duty Manager")])
+    cover_id = c.post("/api/me/shifts/jo-fri/cover", json={}, headers=staff["jo"]).json()["cover_id"]
+    _record_leave(c, mgr, vid, ids["jo"], fri)
+    assert c.post(f"/api/me/cover/{cover_id}/claim", headers=staff["meca"]).status_code == 200
+    r = c.post(f"/api/cover/{cover_id}/decide", json={"venue_id": vid, "approve": True}, headers=mgr)
+    assert r.status_code == 200, r.text
+    assert _roster_shift(r1, "jo-fri").employee_id == ids["meca"]
+    assert _roster_shift(r2, "jo-fri-2").employee_id == ids["meca"]
 
 
 # ---------------------------------------------------------------------------
@@ -477,3 +527,66 @@ def test_paid_leave_default_counts_a_day_once_when_the_import_and_a_newer_draft_
     assert rec["paid_hours"] == 6.5
     assert _roster_shift(imported, "imp-jo-sat").employee_id == ""
     assert _roster_shift(draft, "gen-jo-sat").employee_id == ""
+
+
+def test_paid_leave_default_leaves_out_a_punch_never_clocked_out(monkeypatch):
+    from rosteriq.services import leave_shifts
+    c, mgr, vid, ids, staff, _ = _world()
+    db = get_db()
+    today = venue_today(vid, db)
+    yday = today - timedelta(days=1)
+    for monday in {_monday(yday), _monday(today)}:
+        _publish(vid, monday, [
+            _shift(f"jo-{d.isoformat()}", ids["jo"], d, dtime(16), dtime(23), "Duty Manager", brk=30)
+            for d in (yday, today) if _monday(d) == monday])
+
+    def punch(day):
+        # In at 16:00 Perth (08:00 UTC, as punches are stored), never out
+        db.save_timesheet({"id": f"ts-{uuid.uuid4().hex[:6]}", "venue_id": vid,
+                           "employee_id": ids["jo"], "work_date": day,
+                           "clock_in": datetime.combine(day, dtime(8)).isoformat(),
+                           "clock_out": None, "break_minutes": 0, "status": "pending"})
+
+    # Yesterday's shift is over and nobody knows when she left
+    punch(yday)
+    imp = _impact(c, mgr, vid, ids["jo"], yday)
+    assert imp["rostered_hours"] == 6.5 and imp["paid_hours_default"] == 6.5
+    assert ("their punch that day was never clocked out, so it isn't counted and its 6.5h "
+            "counts as leave: check the hours") in imp["message"]
+    assert _record_leave(c, mgr, vid, ids["jo"], yday, leave_type="personal")["paid_hours"] == 6.5
+
+    # Today's shift is still running at 18:00: the open punch counts up to now
+    punch(today)
+    perth = ZoneInfo("Australia/Perth")
+    monkeypatch.setattr(leave_shifts, "venue_now",
+                        lambda *a, **k: datetime.combine(today, dtime(18)).replace(tzinfo=perth))
+    imp = _impact(c, mgr, vid, ids["jo"], today)
+    assert imp["paid_hours_default"] == 4.5
+    assert "they worked 2h that day, so 4.5h of it counts as leave" in imp["message"]
+
+
+def test_leave_shifts_loads_without_roster_edit_so_neither_import_order_is_circular():
+    # roster_edit imports leave_shifts at module level; run each order fresh
+    script = """
+import importlib.util, sys
+def roster_edit_importing_leave_shifts():
+    spec = importlib.util.find_spec("rosteriq.services.roster_edit")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    src = "from rosteriq.services.leave_shifts import OPEN, is_open\\n" + open(spec.origin).read()
+    exec(compile(src, spec.origin, "exec"), mod.__dict__)
+if sys.argv[1] == "leave_shifts":
+    import rosteriq.services.leave_shifts
+    assert "rosteriq.services.roster_edit" not in sys.modules
+roster_edit_importing_leave_shifts()
+import rosteriq.services.leave_shifts
+print("ok")
+"""
+    import rosteriq
+    root = os.path.dirname(os.path.dirname(os.path.abspath(rosteriq.__file__)))
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(
+        [root] + [p for p in [os.environ.get("PYTHONPATH")] if p]))
+    for first in ("leave_shifts", "roster_edit"):
+        run = subprocess.run([sys.executable, "-c", script, first], env=env, cwd=root,
+                             capture_output=True, text=True, timeout=120)
+        assert run.returncode == 0 and run.stdout.strip().endswith("ok"), (first, run.stderr[-2000:])
