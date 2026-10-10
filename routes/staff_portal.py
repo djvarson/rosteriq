@@ -285,16 +285,23 @@ async def employee_join_code(employee_id: str, user: UserContext = Depends(get_c
 _LEVEL_RANK = {"staff": 0, "department": 1, "full": 2}
 
 
-def _lowers_access(user, account, lower_to) -> bool:
+def _lowers_access(user, account, lower_to, db) -> bool:
     """``lower_to`` = (venue_id, level) is below the login's current access
-    at a venue the caller fully manages."""
-    from rosteriq.services.venue_access import access_map, fully_manages
+    at a venue the caller fully manages. Not when the login also fully runs
+    a venue the caller doesn't, unless the caller created this one: one
+    pub's manager never demotes the person running the group."""
+    from rosteriq.services.venue_access import FULL, access_map, created_venue_ids, fully_manages
     if not lower_to:
         return False
     venue_id, level = lower_to
-    current = (access_map(account).get(venue_id) or {}).get("level")
-    return (fully_manages(user, venue_id) and current in _LEVEL_RANK and level in _LEVEL_RANK
-            and _LEVEL_RANK[level] < _LEVEL_RANK[current])
+    amap = access_map(account)
+    current = (amap.get(venue_id) or {}).get("level")
+    if not (fully_manages(user, venue_id) and current in _LEVEL_RANK and level in _LEVEL_RANK
+            and _LEVEL_RANK[level] < _LEVEL_RANK[current]):
+        return False
+    runs_elsewhere = any(v != venue_id and a["level"] == FULL and not fully_manages(user, v)
+                         for v, a in amap.items())
+    return not runs_elsewhere or bool(created_venue_ids(db, user.user_id, [venue_id]))
 
 
 def _account_management_guards(user, emp, db, lower_to=None):
@@ -316,7 +323,9 @@ def _account_management_guards(user, emp, db, lower_to=None):
     ``lower_to`` = (venue_id, level) names a change that only LOWERS the
     login's access at that one venue. It gives the caller nothing anywhere
     else, so a full manager of that venue may make it whatever else the
-    login reaches; only that venue's creator stays out of reach.
+    login reaches. That venue's creator stays out of reach, and so does a
+    login that fully runs a venue the caller doesn't (unless the caller
+    created this one): both need the every-venue rule above.
     """
     if user.user_id in _DEMO_USER_IDS or (user.email or "").strip().lower() in _DEMO_EMAILS:
         raise HTTPException(status_code=403, detail="The demo can't manage logins")
@@ -376,7 +385,7 @@ def _account_management_guards(user, emp, db, lower_to=None):
     if not fully_manages(user, vid):
         raise HTTPException(status_code=403,
                             detail="Only a full manager of this venue can change staff logins")
-    scope = [lower_to[0]] if _lowers_access(user, account, lower_to) else held
+    scope = [lower_to[0]] if _lowers_access(user, account, lower_to, db) else held
     if not all(fully_manages(user, v) for v in scope):
         raise HTTPException(status_code=409,
                             detail="Their login also reaches a venue you don't fully manage — "
@@ -445,7 +454,8 @@ async def set_employee_access_role(employee_id: str, body: AccessRoleBody,
     shut there) rather than silently becoming full manager venues.
     Guards: a full manager of every venue the login reaches (of this one
     alone when the change lowers their access here, unless they created
-    it); never an owner account; never your own account (no self-lockouts)."""
+    it or fully run a venue the caller doesn't); never an owner account;
+    never your own account (no self-lockouts)."""
     from rosteriq.middleware.tenant import load_employee_in_scope
     from rosteriq.services.events import audit
     from rosteriq.services.venue_access import (

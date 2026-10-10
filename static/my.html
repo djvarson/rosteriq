@@ -1017,16 +1017,27 @@ function renderMyClock(clocks) {
           : 'No PIN here yet &mdash; set yours above.') + '</p>';
     }
     if (c.self_clock) {
-      const status = { on: 'You\'re clocked in.', break: 'You\'re on a break.', done: 'You\'ve clocked out today.' }[c.state] || 'You\'re not clocked in.';
-      const btn = function (label, action, ghost) {
+      const status = { on: 'You\'re clocked in.', break: 'You\'re on your unpaid meal break.', done: 'You\'ve clocked out today.' }[c.state] || 'You\'re not clocked in.';
+      const btn = function (label, call, ghost) {
         return '<button class="btn" style="margin-top:8px;' + (ghost ? ' background:var(--card); border:1px solid var(--border);' : '') +
-          '" onclick="selfPunch(\'' + action + '\', ' + i + ')">' + label + '</button>';
+          '" onclick="' + call + '">' + label + '</button>';
       };
-      html += '<div style="font-weight:' + (many ? '600; margin-top:8px' : '700') + '; margin-bottom:4px;">Clock in from your phone</div>' +
-        '<p style="font-size:13px; color:var(--muted);">' + status + '</p>' +
-        (c.state === 'on' ? btn('Start break', 'break/start', true) + btn('Clock out', 'out')
-          : c.state === 'break' ? btn('End break', 'break/end') + btn('Clock out', 'out', true)
-          : btn('Clock in', 'in'));
+      const punch = function (action) { return 'selfPunch(\'' + action + '\', ' + i + ')'; };
+      html += '<div style="font-weight:' + (many ? '600; margin-top:8px' : '700') + '; margin-bottom:4px;">Clock in from your phone</div>';
+      if (c.stale) {
+        html += '<p style="font-size:13px; color:var(--muted);">Still clocked in from ' + esc(c.clock_in_label || 'an earlier shift') +
+          ' &mdash; when did you finish?</p>' +
+          '<input id="my-finish-' + i + '" type="time" aria-label="The time you finished">' +
+          btn('Save my finish time', 'saveMyFinish(' + i + ')') +
+          btn('I finished just now', 'saveMyFinish(' + i + ', true)', true);
+      } else {
+        html += '<p style="font-size:13px; color:var(--muted);">' + status + '</p>' +
+          (c.state === 'on' || c.state === 'break'
+            ? '<p style="font-size:12px; color:var(--muted);">Paid rest breaks: stay clocked in.</p>' : '') +
+          (c.state === 'on' ? btn('Start meal break (unpaid)', punch('break/start'), true) + btn('Clock out', punch('out'))
+            : c.state === 'break' ? btn('End meal break', punch('break/end')) + btn('Clock out', punch('out'), true)
+            : btn('Clock in', punch('in')));
+      }
     }
     html += '</div>';
   });
@@ -1051,19 +1062,30 @@ async function saveMyPin() {
   }
 }
 
-async function selfPunch(action, i) {
+async function selfPunch(action, i, extra) {
   const c = myClocks[i || 0];
   if (!c) return;
   try {
     const r = await api('/api/clock/' + action, { method: 'POST',
-      body: { venue_id: c.venue_id, employee_id: c.employee_id } });
-    const said = { in: 'Clocked in', out: 'Clocked out', 'break/start': 'Break started', 'break/end': 'Break ended' }[action];
-    toast(said + (r.warning ? ' — ' + r.warning : ''), r.warning ? '' : 'ok');
+      body: Object.assign({ venue_id: c.venue_id, employee_id: c.employee_id }, extra || {}) });
+    const said = { in: 'Clocked in', out: 'Clocked out',
+      'break/start': 'Unpaid meal break started — tap End meal break when you\'re back',
+      'break/end': 'Back from your meal break' }[action];
+    toast(said + (r.note ? ' — ' + r.note : '') + (r.warning ? ' — ' + r.warning : ''), r.warning ? '' : 'ok');
     loadMyClock();
     loadHours();
   } catch (e) {
     toast(e.message, 'err');
   }
+}
+
+// A forgotten clock-out: the venue-local time they finished, as the kiosk asks.
+function saveMyFinish(i, justNow) {
+  const now = new Date();
+  const v = justNow ? String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0')
+    : (document.getElementById('my-finish-' + i).value || '');
+  if (!/^\d{1,2}:\d{2}$/.test(v)) { toast('Enter the time you finished, e.g. 23:30', 'err'); return; }
+  return selfPunch('out', i, { finished_at: v });
 }
 
 async function loadLeave() {

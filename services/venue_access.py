@@ -223,8 +223,13 @@ def fully_managed_group(db, user, venue_id: str) -> List[str]:
     return out + same_owner_venue_ids(db, venue_id)
 
 
+# The user.venue_grant reasons that make a login the venue's owner: it
+# created the venue at signup, or RosterIQ support set the venue up for it.
+CREATOR_REASONS = ("first_venue_bootstrap", "owner_provisioned")
+
+
 def created_venue_ids(db, user_id: str, venue_ids: Iterable[str]) -> List[str]:
-    """Which of ``venue_ids`` this login created (the first-venue bootstrap
+    """Which of ``venue_ids`` this login owns (a CREATOR_REASONS venue grant
     audit event, which is never pruned)."""
     out = []
     page = 500
@@ -240,7 +245,7 @@ def created_venue_ids(db, user_id: str, venue_ids: Iterable[str]) -> List[str]:
             for r in rows:
                 details = r.get("details") or {}
                 if (str(r.get("resource_id")) == str(user_id)
-                        and details.get("reason") == "first_venue_bootstrap"):
+                        and details.get("reason") in CREATOR_REASONS):
                     found = True
                     break
             if len(rows) < page:
@@ -252,9 +257,9 @@ def created_venue_ids(db, user_id: str, venue_ids: Iterable[str]) -> List[str]:
 
 
 def _signup_creators(db, venue_id: str, strict: bool) -> Optional[set]:
-    """The logins that created ``venue_id`` through self-serve signup (the
-    first-venue bootstrap audit event); empty for a venue RosterIQ support
-    set up, None when the audit log can't be read."""
+    """The logins that own ``venue_id``: they signed it up themselves, or
+    RosterIQ support set it up for them (CREATOR_REASONS). Empty for a venue
+    nobody owns yet, None when the audit log can't be read."""
     out: set = set()
     page, offset = 500, 0
     while True:
@@ -266,17 +271,22 @@ def _signup_creators(db, venue_id: str, strict: bool) -> Optional[set]:
                 raise
             return None
         out |= {str(r.get("resource_id")) for r in rows
-                if (r.get("details") or {}).get("reason") == "first_venue_bootstrap"}
+                if (r.get("details") or {}).get("reason") in CREATOR_REASONS}
         if len(rows) < page:
             return out
         offset += page
 
 
+def has_owner(db, venue_id: str) -> bool:
+    """Some login owns ``venue_id``, or the audit log can't be read."""
+    return _signup_creators(db, venue_id, strict=False) != set()
+
+
 def separate_signups(db, venue_a: str, venue_b: str, *, strict: bool = False) -> bool:
-    """True when different logins signed ``venue_a`` and ``venue_b`` up
-    themselves, or that can't be read. Two signups are two businesses,
-    whoever manages both: a manager's own venue isn't their employer's, and
-    a login that holds several clients' venues doesn't join them."""
+    """True when different logins own ``venue_a`` and ``venue_b``, or that
+    can't be read. Two owners are two businesses, whoever manages both: a
+    manager's own venue isn't their employer's, and a login that holds
+    several clients' venues doesn't join them."""
     a = _signup_creators(db, venue_a, strict)
     b = _signup_creators(db, venue_b, strict)
     if a is None or b is None:
