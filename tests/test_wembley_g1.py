@@ -4,6 +4,8 @@ advice.
 * The service worker only ever answers for the app's own /static/ files.
   Rosters, staff, venues, forecasts and the API go straight to the network,
   the old caches that held them are deleted, and signing out clears the rest.
+  A dashboard that opens under the old worker empties its cache before each
+  request until the new worker takes over.
 * The staff edit modal keeps an imported visa status it has no option for,
   and only sends work-rights fields the manager changed.
 * An open shift (nobody on it, e.g. left open by leave) is never a person: not
@@ -14,7 +16,8 @@ advice.
   for the venue the manager just left, and never save onto it.
 * A roster re-paste reports the shifts it removed and changed.
 * An area's follows_demand survives the editor, the wizard and older clients.
-* Trading hours take a Closed day.
+* Trading hours take a Closed day, and On-Shift and the Day view apply no
+  minimums on it.
 
 As in test_wembley_a6, the JS is pulled out of the real pages and run under
 node with a small fake DOM.
@@ -167,6 +170,99 @@ async function main() {
     assert sorted(data["onLogout"]) == ["rosteriq-v1", "rosteriq-v2"]
     assert sorted(data["onExpiry"]) == ["rosteriq-v1", "rosteriq-v2"]
     assert data["loggedOutTo"] == data["expiredTo"] == "/static/login.html"
+
+
+# The first dashboard load after the deploy still runs under the old worker for
+# a few seconds. It answered data GETs from 'rosteriq-v1' first, then the
+# network, caching what it fetched.
+OLD_WORKER_PAGE = r"""
+global.STORE = { 'rosteriq-v1': new Map([
+  ['/venues', [{ id: 'wem-v' }]],
+  ['/employees?venue_id=wem-v', { items: [{ id: 'bob', phone: '0400 111 222' }] }]]) };
+global.SERVER = { '/venues': [{ id: 'wem-v' }, { id: 'apo-v' }],
+                  '/employees?venue_id=wem-v': { items: [{ id: 'bob', phone: '0499 000 111' }] } };
+global.cacheCalls = [];
+global.caches = {
+  async has(n) { cacheCalls.push('has ' + n); return n in STORE; },
+  async delete(n) { cacheCalls.push('delete ' + n); const had = n in STORE; delete STORE[n]; return had; },
+};
+const swListeners = {};
+Object.defineProperty(globalThis, 'navigator', { configurable: true, writable: true, value: {
+  serviceWorker: { controller: CONTROLLER, addEventListener(t, f) { swListeners[t] = f; } } } });
+global.oldWorker = true;
+global.answeredFrom = [];
+function resp(body) {
+  return { ok: true, status: 200, statusText: '200', headers: { get: function () { return 'application/json'; } },
+           json: async function () { return JSON.parse(JSON.stringify(body)); } };
+}
+global.fetch = async function (url, opts) {
+  const get = !opts || !opts.method || opts.method === 'GET';
+  if (oldWorker && get && url.indexOf('/api/') !== 0) {
+    for (const n of Object.keys(STORE)) {
+      if (STORE[n].has(url)) { answeredFrom.push('cache'); return resp(STORE[n].get(url)); }
+    }
+    (STORE['rosteriq-v1'] = STORE['rosteriq-v1'] || new Map()).set(url, SERVER[url]);
+  }
+  answeredFrom.push('network');
+  return resp(SERVER[url]);
+};
+global.state = { baseUrl: '', authToken: 'tok', isDemo: false };
+global._lastErrorReference = null;
+global._refreshInFlight = null;
+global._sessionEnding = false;
+"""
+
+
+def _legacy_purge_js():
+    src = _dash()
+    return (_between(src, "window._legacySwPurge = ", "\nasync function fetchAPI") + "\n"
+            + _fns(src, "_refreshAccessToken", "_sessionExpired", "fetchAPI"))
+
+
+@needs_node
+def test_first_load_under_the_old_worker_reads_the_server_not_its_cache():
+    data = _run("const CONTROLLER = { scriptURL: '/static/sw.js' };\n" + OLD_WORKER_PAGE + _legacy_purge_js() + r"""
+async function main() {
+  const venues = (await fetchAPI('/venues')).map(function (v) { return v.id; });
+  const phone = (await fetchAPI('/employees?venue_id=wem-v')).items[0].phone;
+  // Another manager edits Bob while the old worker still has this page: the
+  // copy it just cached must not answer the next read either.
+  SERVER['/employees?venue_id=wem-v'] = { items: [{ id: 'bob', phone: '0411 222 333' }] };
+  const again = (await fetchAPI('/employees?venue_id=wem-v')).items[0].phone;
+  const underOld = cacheCalls.splice(0);
+  // The new worker takes over (it deleted 'rosteriq-v1' on activation).
+  oldWorker = false;
+  swListeners.controllerchange();
+  await fetchAPI('/venues');
+  console.log(JSON.stringify({ venues: venues, phone: phone, again: again, answeredFrom: answeredFrom,
+                               underOld: underOld, afterTakeover: cacheCalls }));
+}
+""")
+    assert data["venues"] == ["wem-v", "apo-v"]
+    assert data["phone"] == "0499 000 111"
+    assert data["again"] == "0411 222 333"
+    assert data["answeredFrom"] == ["network"] * 4
+    assert data["underOld"][0] == "has rosteriq-v1"
+    assert data["underOld"].count("delete rosteriq-v1") == 3
+    assert data["afterTakeover"] == []
+
+
+@needs_node
+def test_a_page_with_no_old_worker_never_deletes_caches_per_request():
+    prog = r"""
+async function main() {
+  oldWorker = false;
+  await fetchAPI('/venues');
+  await fetchAPI('/venues');
+  console.log(JSON.stringify({ purge: window._legacySwPurge === null, cacheCalls: cacheCalls }));
+}
+"""
+    uncontrolled = _run("const CONTROLLER = null;\n" + OLD_WORKER_PAGE + _legacy_purge_js() + prog)
+    assert uncontrolled == {"purge": True, "cacheCalls": []}
+    # Under the new worker, which deleted 'rosteriq-v1' when it took over.
+    under_new = _run("const CONTROLLER = { scriptURL: '/static/sw.js' };\n" + OLD_WORKER_PAGE
+                     + "delete STORE['rosteriq-v1'];\n" + _legacy_purge_js() + prog)
+    assert under_new["cacheCalls"] == ["has rosteriq-v1"]
 
 
 # --------------------------------------------------------------------------
@@ -383,6 +479,38 @@ async function main() {
     assert data["minuteTimers"] == 1 and data["afterMinute"] == "3"
     assert data["reads"] == ["v1", "v1", "v1"]
     assert data["keptAfterSwitch"] == 3 and data["venues"] == ["v1"]
+
+
+@needs_node
+def test_a_day_recorded_closed_has_no_minimums_on_shift_or_in_the_day_view():
+    data = _run(OPS_STUBS + _ops_js() + r"""
+async function main() {
+  // Friday recorded closed (stray hours alongside are ignored); Ava is in for a stocktake.
+  venue.trading_hours = { fri: { closed: true, open: '11:00', close: '00:00' }, sat: { closed: true } };
+  state.venues = [venue];
+  state.rosters = [{ venue_id: 'v1', shifts: [AVA] }];
+  state.employees = [{ id: 'ava', name: 'Ava Nguyen' }];
+  opsVenueNow = function () { return { iso: '2026-10-09', minute: 20 * 60 }; };
+  renderOnShiftNow();
+  const d = dayTimelineData([AVA], venue, '2026-10-09');
+  const html = renderDayTimeline(d);
+  const empty = renderDayTimeline(dayTimelineData([], venue, '2026-10-10'));
+  console.log(JSON.stringify({
+    window: opsTradingWindow(venue, '2026-10-09'), chips: el('headcount-areas').innerHTML,
+    label: el('headcount-areas-label').textContent, list: el('on-shift-list').innerHTML,
+    closed: d.closed, below: d.below, mins: d.rows.map(function (r) { return r.min; }),
+    anyOpen: d.open.some(Boolean), html: html, empty: empty }));
+}
+""")
+    assert data["window"] is None
+    assert data["chips"] == '<div class="ops-area-chip"><strong>1</strong> Front Bar</div>'
+    assert "closed today" in data["label"]
+    assert "1 on</span>" in data["list"] and "(min" not in data["list"] and 'class="below"' not in data["list"]
+    assert data["closed"] is True and data["below"] == 0 and data["mins"] == [0]
+    assert data["anyOpen"] is False
+    assert "Closed all day (recorded)" in data["html"] and "No trading hours recorded" not in data["html"]
+    assert " below" not in data["html"]
+    assert "closed all day" in data["empty"] and "no trading hours" not in data["empty"]
 
 
 def _open_world(db, vid):

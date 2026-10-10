@@ -6411,7 +6411,24 @@ function _sessionExpired() {
   window.location.href = '/static/login.html';
 }
 
+// A page that opens under the old service worker stays under it until the new
+// one takes over a few seconds later, and the old one answers GETs such as
+// /venues and /employees from its 'rosteriq-v1' cache. Until the takeover,
+// empty that cache before each request so the answer comes from the server.
+window._legacySwPurge = (function () {
+  try {
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller || typeof caches === 'undefined') return null;
+    let present = caches.has('rosteriq-v1').catch(function () { return false; });
+    navigator.serviceWorker.addEventListener('controllerchange', function () { present = Promise.resolve(false); });
+    return async function () {
+      if (!(await present)) return;
+      try { await caches.delete('rosteriq-v1'); } catch (e) { /* the request still goes out */ }
+    };
+  } catch (e) { return null; }
+})();
+
 async function fetchAPI(endpoint, options = {}, _retried = false) {
+  if (window._legacySwPurge) await window._legacySwPurge();
   const headers = {
     'Content-Type': 'application/json',
   };
@@ -15559,11 +15576,17 @@ function opsVenueAreas(venue) {
   return out;
 }
 
+// A weekday recorded as closed all day ({closed: true}): no area minimums.
+function opsClosed(venue, iso) {
+  const h = ((venue && venue.trading_hours) || {})[opsWeekKey(iso)];
+  return !!h && h.closed === true;
+}
+
 // {open, close} in minutes from that day's midnight (close may pass 1440),
-// or null when the venue hasn't recorded hours for that weekday.
+// or null when the venue hasn't recorded hours for that weekday or is closed.
 function opsTradingWindow(venue, iso) {
   const h = ((venue && venue.trading_hours) || {})[opsWeekKey(iso)];
-  if (!h) return null;
+  if (!h || h.closed === true) return null;
   const open = opsMin(h.open);
   let close = opsMin(h.close);
   if (open == null || close == null) return null;
@@ -15655,12 +15678,13 @@ function dayTimelineData(shifts, venue, iso, opts) {
   });
   const rostered = spans.concat(unfilled);
   const trading = opsTradingWindow(venue, iso);
+  const closed = opsClosed(venue, iso);
   let first = trading ? trading.open : null, last = trading ? trading.close : null;
   rostered.forEach(function (sp) {
     first = first == null ? sp.start : Math.min(first, sp.start);
     last = last == null ? sp.end : Math.max(last, sp.end);
   });
-  const result = { day: iso, trading: trading, slots: [], rows: [], total: [], below: 0, unfilled: null };
+  const result = { day: iso, trading: trading, closed: closed, slots: [], rows: [], total: [], below: 0, unfilled: null };
   if (first == null) return result;
   first = Math.floor(first / OPS_SLOT_MIN) * OPS_SLOT_MIN;
   last = Math.ceil(last / OPS_SLOT_MIN) * OPS_SLOT_MIN;
@@ -15676,13 +15700,13 @@ function dayTimelineData(shifts, venue, iso, opts) {
     result.rows.push(row);
     return row;
   };
-  areas.forEach(function (a) { add(a.name, a.label, a.min_by_day[dk] || 0); });
+  areas.forEach(function (a) { add(a.name, a.label, closed ? 0 : (a.min_by_day[dk] || 0)); });
   spans.forEach(function (sp) { if (!byName[sp.area]) add(sp.area, sp.area ? opsTitle(sp.area) : 'No area', 0); });
   spans.forEach(function (sp) {
     const row = byName[sp.area];
     result.slots.forEach(function (m, i) { if (sp.start <= m && m < sp.end) row.counts[i]++; });
   });
-  result.open = result.slots.map(function (m) { return m >= openFrom && m < openTo; });
+  result.open = result.slots.map(function (m) { return !closed && m >= openFrom && m < openTo; });
   if (only) result.rows = result.rows.filter(function (r) { return r.name === only; });
   result.rows.forEach(function (r) {
     r.below = r.counts.map(function (n, i) { return !!r.min && result.open[i] && n < r.min; });
@@ -15703,7 +15727,7 @@ function renderDayTimeline(data, opts) {
   opts = opts || {};
   if (!data.slots.length) {
     return '<div class="ops-muted" style="padding:16px 0;">Nobody is rostered on this day' +
-      (data.trading ? '' : ' and no trading hours are recorded for it') + '.</div>';
+      (data.closed ? ' (closed all day)' : (data.trading ? '' : ' and no trading hours are recorded for it')) + '.</div>';
   }
   const scale = Math.max(1, Math.max.apply(null, data.rows.map(function (r) {
     return Math.max(r.min || 0, Math.max.apply(null, r.counts.concat([0])));
@@ -15736,7 +15760,8 @@ function renderDayTimeline(data, opts) {
       data.unfilled.counts.map(function (n, i) { return cell(n, i, null); }).join('') + '</tr>'
     : '') + '<tr class="dtl-total"><th class="dtl-area">Total on</th>' +
     data.total.map(function (n, i) { return cell(n, i, null); }).join('') + '</tr>';
-  const legend = (data.trading ? 'Shaded = trading hours (' + opsClock(data.trading.open) + '–' + opsClock(data.trading.close) + '). '
+  const legend = (data.closed ? 'Closed all day (recorded) — no minimums apply. '
+    : data.trading ? 'Shaded = trading hours (' + opsClock(data.trading.open) + '–' + opsClock(data.trading.close) + '). '
     : 'No trading hours recorded for this day — minimums apply while anyone is rostered. ') +
     'Red = fewer on than the area minimum; dashed line = the minimum.' +
     (data.below ? ' ' + data.below + ' half-hour' + (data.below === 1 ? '' : 's') + ' below a minimum.' : '');
@@ -15822,8 +15847,9 @@ function renderOnShiftNow() {
     const a = areas.find(function (x) { return x.name === k; });
     return a ? a.label : (k ? opsTitle(k) : 'No area');
   };
+  const closed = opsClosed(venue, td.iso);
   const minOf = function (k) {
-    const a = areas.find(function (x) { return x.name === k; });
+    const a = closed ? null : areas.find(function (x) { return x.name === k; });
     return a ? (a.min_by_day[dk] || 0) : 0;
   };
 
@@ -15831,7 +15857,7 @@ function renderOnShiftNow() {
   set('headcount-now', String(on.length));
   set('headcount-sub', 'on shift now · ' + opsClock(now.minute) +
     (unfilled.length ? ' · ' + unfilled.length + ' open shift' + (unfilled.length === 1 ? '' : 's') + ' unfilled' : ''));
-  set('headcount-areas-label', 'By area — on now / minimum today');
+  set('headcount-areas-label', closed ? 'By area — on now (closed today: no minimums)' : 'By area — on now / minimum today');
   const cap = document.getElementById('capacity-wrap');
   if (cap) cap.style.display = 'none';
   const chips = document.getElementById('headcount-areas');
