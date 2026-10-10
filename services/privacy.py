@@ -214,6 +214,9 @@ class PrivacyService:
                     'visa_status': emp.visa_status,
                     'visa_expiry': emp.visa_expiry.isoformat() if emp.visa_expiry else None,
                     'visa_work_limit_fortnight': emp.visa_work_limit_fortnight,
+                    'pay_basis': getattr(emp, 'pay_basis', 'hourly'),
+                    'weekly_salary': (str(emp.weekly_salary)
+                                      if getattr(emp, 'weekly_salary', None) is not None else None),
                     'created_at': emp.created_at.isoformat(),
                     'updated_at': emp.updated_at.isoformat(),
                 },

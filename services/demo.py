@@ -47,6 +47,10 @@ _DEMO_STAFF = [
     ("David Miller", "kitchen", "35.00"),
 ]
 
+# Emma (the staff-phone demo) also works the bar, so the cover-board beat's
+# bar shift is one she is trained for.
+_DEMO_EXTRA_SKILLS = {"demo-staff-001": ["bar"]}
+
 # Availability per demo staffer (day -> [{start,end}] in the resolver's
 # lowercase-day convention). Deliberately varied so "who can cover Saturday
 # night?" has a real answer in the demo — with no availability the AI's
@@ -198,7 +202,7 @@ def seed_demo_environment(db, reassert_showcase: bool = True) -> None:
             award_level=AwardLevel.level_2,
             state=State.wa,
             hourly_base_rate=Decimal(rate),
-            skills=[role],
+            skills=[role] + _DEMO_EXTRA_SKILLS.get(f"demo-staff-{i:03d}", []),
             # Emma carries the staff-demo login email so /my links to her.
             email=DEMO_STAFF_EMAIL if f"demo-staff-{i:03d}" == DEMO_STAFF_EMPLOYEE_ID else None,
             availability=_DEMO_AVAILABILITY.get(f"demo-staff-{i:03d}", {}),
@@ -227,8 +231,12 @@ def seed_demo_environment(db, reassert_showcase: bool = True) -> None:
         # existed has no email, so the staff demo would land on linked:false.
         try:
             emma = next((e for e in already if e.id == DEMO_STAFF_EMPLOYEE_ID), None)
-            if emma is not None and (getattr(emma, "email", None) or "").strip().lower() != DEMO_STAFF_EMAIL:
+            extra = [s for s in _DEMO_EXTRA_SKILLS.get(DEMO_STAFF_EMPLOYEE_ID, [])
+                     if emma is not None and s not in (emma.skills or [])]
+            if emma is not None and ((getattr(emma, "email", None) or "").strip().lower() != DEMO_STAFF_EMAIL
+                                     or extra):
                 emma.email = DEMO_STAFF_EMAIL
+                emma.skills = list(emma.skills or []) + extra
                 emma.updated_at = now
                 db.save_employee(emma)
         except Exception:

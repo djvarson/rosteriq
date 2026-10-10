@@ -245,7 +245,11 @@ class EmployeeCostingService:
         casual_loading = Decimal("0.00")
         penalty_pay = Decimal("0.00")
 
-        if employee.employment_type == EmploymentType.casual:
+        from rosteriq.services.pay_basis import is_salaried, salary_per_day
+        if is_salaried(employee):
+            # A day of salary, never penalties or loading (services/pay_basis.py)
+            base_pay = salary_per_day(employee)
+        elif employee.employment_type == EmploymentType.casual:
             # Casuals: 25% loading on base
             casual_loading = (base_pay * CASUAL_LOADING_RATE).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP

@@ -77,10 +77,10 @@
     .btn:hover { filter: brightness(0.96); }
     .btn:active { transform: translateY(1px); }
     #feed-body { resize: none; }
-    input, textarea { width: 100%; background: var(--card-2); border: 1px solid var(--border);
+    input, textarea, select { width: 100%; background: var(--card-2); border: 1px solid var(--border);
       color: var(--text); border-radius: 10px; padding: 11px 12px; font-size: 15px;
       font-family: inherit; }
-    input:focus, textarea:focus { outline: none; border-color: var(--blue); }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--blue); }
     .btn { width: 100%; background: var(--blue); color: #111827; border: none; border-radius: 10px;
       padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 14px; }
     .btn:disabled { opacity: .5; }
@@ -289,6 +289,14 @@
       </div>
       <div class="section-title">Request leave</div>
       <div class="card">
+        <label for="lv-type">Type</label>
+        <select id="lv-type">
+          <option value="unavailable">Unavailable (can't work)</option>
+          <option value="annual">Annual leave</option>
+          <option value="personal">Personal/carer's leave</option>
+          <option value="unpaid">Unpaid leave</option>
+          <option value="other">Other</option>
+        </select>
         <label for="lv-start">First day off</label>
         <input type="date" id="lv-start">
         <label for="lv-end">Last day off</label>
@@ -883,7 +891,7 @@ async function loadLeave() {
           '<span class="dates">' + esc(niceDate(r.start_date)) + ' &rarr; ' + esc(niceDate(r.end_date)) + '</span>' +
           '<span class="badge ' + esc(r.status) + '">' + esc(r.status) + '</span>' +
         '</div>' +
-        (r.reason ? '<div class="note">' + esc(r.reason) + '</div>' : '') +
+        '<div class="note">' + esc(r.leave_type_label || 'Other') + (r.reason ? ' &middot; ' + esc(r.reason) : '') + '</div>' +
         (r.decision_note ? '<div class="note">Manager: ' + esc(r.decision_note) + '</div>' : '') +
       '</div>';
     }).join('');
@@ -971,6 +979,7 @@ async function submitLeave() {
   try {
     await api('/api/me/leave', { method: 'POST', body: {
       start_date: start, end_date: end,
+      leave_type: document.getElementById('lv-type').value,
       reason: document.getElementById('lv-reason').value.trim(),
     }});
     toast('Leave requested — your manager will review it', 'ok');

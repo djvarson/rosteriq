@@ -11,9 +11,11 @@ a pay rate). Every row is reported back as created, updated or
 skipped-with-reason, with flags for anything we had to assume — nothing is
 silently dropped or silently guessed.
 
-Pay figures are what the venue recorded. A salary or weekly figure is turned
-into an hourly PLANNING equivalent (annual / 52 / 38, weekly / 38) and flagged
-for the payroll advisor; RosterIQ never pays anyone.
+Pay figures are what the venue recorded. A salary or weekly figure makes the
+person salaried (weekly_salary = annual / 52, or the weekly figure), costed as
+salary rather than hours; an hourly PLANNING equivalent (annual / 52 / 38,
+weekly / 38) is kept as their rate for any reader that needs one. Flagged for
+the payroll advisor; RosterIQ never pays anyone.
 
 Route:
     POST /api/setup/import-staff
@@ -184,38 +186,42 @@ def _money(d: Decimal) -> str:
 
 
 def _parse_rate(cell: str, header_unit: Optional[str], unit_hint: str = ""):
-    """-> (rate | None, flag | None, note | None).
+    """-> (rate | None, flag | None, note | None, weekly_salary | None).
 
     None rate means 'nothing usable' and the caller applies the default with
-    the returned flag. An explicit unit in the cell (or a unit column) wins
+    the returned flag. A yearly or weekly figure is a salary: flag 'salaried'
+    with the weekly salary, and the hourly planning equivalent as the rate. An explicit unit in the cell (or a unit column) wins
     over the header's; a header unit only applies to figures too big to be
     hourly, so a mixed 'Salary' column of '$78,000' and '31.50' reads both."""
     raw = str(cell or "").strip()
     if not raw:
-        return None, "rate_defaulted", None
+        return None, "rate_defaulted", None, None
     value = _first_amount(raw)
     if value is None or value <= 0:
-        return None, "rate_unclear", f"pay rate '{raw}' couldn't be read"
+        return None, "rate_unclear", f"pay rate '{raw}' couldn't be read", None
     unit = _unit_of(raw) or _unit_of(unit_hint)
     if unit is None and header_unit and value > _HOURLY_CEILING:
         unit = header_unit
     if unit == "year":
+        weekly = (value / _WEEKS_PER_YEAR).quantize(_CENT, rounding=ROUND_HALF_UP)
         hourly = (value / _WEEKS_PER_YEAR / _HOURS_PER_WEEK).quantize(_CENT, rounding=ROUND_HALF_UP)
-        how = "a year ÷ 52 weeks ÷ 38 hours"
+        how = f"a year = {_money(weekly)} a week (÷ 52)"
     elif unit == "week":
+        weekly = value.quantize(_CENT, rounding=ROUND_HALF_UP)
         hourly = (value / _HOURS_PER_WEEK).quantize(_CENT, rounding=ROUND_HALF_UP)
-        how = "a week ÷ 38 hours"
+        how = "a week"
     else:
         if value > _HOURLY_CEILING:
             return None, "rate_unclear", (
                 f"pay rate '{raw}' is over ${_HOURLY_CEILING}/h with no unit — it looks "
-                f"like a salary or weekly figure")
-        return value.quantize(_CENT, rounding=ROUND_HALF_UP), None, None
+                f"like a salary or weekly figure"), None
+        return value.quantize(_CENT, rounding=ROUND_HALF_UP), None, None, None
     if hourly < Decimal("1"):
-        return None, "rate_unclear", f"pay rate '{raw}' couldn't be read as {unit}ly pay"
-    return hourly, "rate_converted", (
-        f"'{raw}' read as {_money(value)} {how} = {_money(hourly)}/h — a planning "
-        f"figure for labour costs only; confirm with your payroll advisor")
+        return None, "rate_unclear", f"pay rate '{raw}' couldn't be read as {unit}ly pay", None
+    return hourly, "salaried", (
+        f"'{raw}' read as {_money(value)} {how}: set up as salaried, so labour costs use "
+        f"the salary with no penalty rates or overtime; {_money(hourly)}/h (÷ 38 hours) is "
+        f"kept as their planning rate — confirm with your payroll advisor"), weekly
 
 
 def _header_unit(header: str) -> Optional[str]:
@@ -422,12 +428,13 @@ async def import_staff(body: StaffImportBody) -> dict:
                                  "it; their join code will add their own")
             email = None
 
+        weekly = None
         if rate_col is None and has_header:
             rate, rate_flag, rate_note = None, "rate_defaulted", (
                 f"no pay-rate column we recognise — set at {_money(DEFAULT_RATE)}/h; "
                 "enter the rate they're paid")
         else:
-            rate, rate_flag, rate_note = _parse_rate(rate_cell, cell_unit, get(cells, "rate_unit"))
+            rate, rate_flag, rate_note, weekly = _parse_rate(rate_cell, cell_unit, get(cells, "rate_unit"))
         emp_type = _emp_type(get(cells, "type"))
         level, level_flag = _award_level(get(cells, "award_level"))
         phone, phone_flag = _phone(get(cells, "phone"))
@@ -446,6 +453,11 @@ async def import_staff(body: StaffImportBody) -> dict:
                 changes["name"] = ("name", name)
             if rate is not None and Decimal(str(match.hourly_base_rate)) != rate:
                 changes["rate"] = ("hourly_base_rate", rate)
+            if weekly is not None:
+                if getattr(match, "pay_basis", "hourly") != "salaried":
+                    changes["pay_basis"] = ("pay_basis", "salaried")
+                if getattr(match, "weekly_salary", None) != weekly:
+                    changes["salary"] = ("weekly_salary", weekly)
             if emp_type is not None and emp_type != match.employment_type:
                 changes["type"] = ("employment_type", emp_type)
             if level is not None and level != match.award_level:
@@ -454,8 +466,8 @@ async def import_staff(body: StaffImportBody) -> dict:
                 changes["phone"] = ("phone", phone)
             if skills and skills != list(match.skills or []):
                 changes["skills"] = ("skills", skills)
-            if rate_flag == "rate_converted" and "rate" in changes:
-                flag("rate_converted", rate_note)
+            if rate_flag == "salaried" and {"rate", "pay_basis", "salary"} & set(changes):
+                flag("salaried", rate_note)
             elif rate_flag == "rate_unclear":
                 flag("rate_unclear", f"{rate_note} — their current rate was kept")
             if level_flag in ("level_interpreted", "level_unclear"):
@@ -486,8 +498,9 @@ async def import_staff(body: StaffImportBody) -> dict:
             row_out = {"line": line, "name": name, "email": email, "status": "updated",
                        "changed": changed, "rate": str(upd.hourly_base_rate),
                        "flags": flags, "notes": notes}
-            if "rate_converted" in flags:
+            if "salaried" in flags:
                 row_out["rate_original"] = rate_cell
+                row_out["weekly_salary"] = str(upd.weekly_salary)
             report.append(row_out)
             seen_names.add(norm_name(name))
             continue
@@ -525,14 +538,17 @@ async def import_staff(body: StaffImportBody) -> dict:
                 skills=skills,
                 visa_status=(get(cells, "visa") or None),
                 visa_expiry=_clean_date(get(cells, "visa_expiry")),
+                pay_basis="salaried" if weekly is not None else "hourly",
+                weekly_salary=weekly,
                 created_at=now, updated_at=now,
             )
             db.save_employee(emp)
             created.append({"name": name, "email": email, "rate": str(rate)})
             row_out = {"line": line, "name": name, "email": email, "status": "created",
                        "rate": str(rate), "flags": flags, "notes": notes}
-            if rate_flag == "rate_converted":
+            if rate_flag == "salaried":
                 row_out["rate_original"] = rate_cell
+                row_out["weekly_salary"] = str(weekly)
             report.append(row_out)
             if email:
                 by_email[email] = emp
@@ -569,8 +585,9 @@ async def import_staff(body: StaffImportBody) -> dict:
         "column_map": column_map,
         "location": location_info,
         "note": (f"Pay rates default to {_money(DEFAULT_RATE)} where the file had none or "
-                 "couldn't be read, and salaries or weekly pay become an hourly planning "
-                 "figure — check the flagged rows with your payroll advisor. RosterIQ "
+                 "couldn't be read, and salaries or weekly pay make the person salaried "
+                 "(costed as salary, with an hourly planning rate kept) — check the "
+                 "flagged rows with your payroll advisor. RosterIQ "
                  "never pays anyone; payroll runs as normal."),
     }
 

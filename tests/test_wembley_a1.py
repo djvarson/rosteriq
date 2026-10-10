@@ -2,8 +2,8 @@
 Paste importers against Wembley-shaped Deputy exports (synthetic data; the
 rates below are made-up venue records, not award values).
 
-Staff import: salaries/weekly pay converted to a flagged hourly planning
-figure, first money token only, defaulted rates flagged, First+Last names
+Staff import: salaries/weekly pay make the person salaried (flagged, with an
+hourly planning figure kept), first money token only, defaulted rates flagged, First+Last names
 never doubled, a BOM on the first header, widened header aliases, skills
 split + lower-cased (Position included), AU mobiles normalised, junk/shared
 emails, award levels, a two-location export, and update-existing re-imports.
@@ -139,7 +139,9 @@ def test_salary_and_weekly_rates_become_flagged_planning_figures():
     # $1,250 a week -> 1250 / 38 = $32.89/h
     assert emps["Sarah Delaney"].hourly_base_rate == Decimal("32.89")
     rows = _rows_by_name(out)
-    assert "rate_converted" in rows["Ben Ingram"]["flags"]
+    assert "salaried" in rows["Ben Ingram"]["flags"]
+    assert emps["Ben Ingram"].pay_basis == "salaried"
+    assert emps["Ben Ingram"].weekly_salary == Decimal("1500.00")
     assert rows["Ben Ingram"]["rate_original"] == "$78,000.00 p.a."
     note = " ".join(rows["Ben Ingram"]["notes"]).lower()
     assert "planning" in note and "advisor" in note and "$78,000.00 p.a." in note
@@ -149,7 +151,7 @@ def test_salary_and_weekly_rates_become_flagged_planning_figures():
     # Junior rates the venue recorded are kept exactly
     assert emps["Ella Rhodes"].hourly_base_rate == Decimal("22.11")
     assert emps["Kai Nguyen"].hourly_base_rate == Decimal("24.95")
-    assert out["flags_summary"]["rate_converted"] == 2
+    assert out["flags_summary"]["salaried"] == 2
     assert out["flags_summary"]["rate_unclear"] == 1
     # Nobody is stored above a plausible hourly figure
     assert all(e.hourly_base_rate < 150 for e in emps.values())
@@ -187,15 +189,15 @@ def test_first_money_token_and_odd_rate_text():
     assert "rate_defaulted" in rows["Rate Blank"]["flags"]
     assert "rate_unclear" in rows["Rate Huge"]["flags"]
     for n in ("Rate Salary", "Rate Annum", "Rate Weekly"):
-        assert "rate_converted" in rows[n]["flags"], n
-    assert not rows["Rate Hourly"]["flags"] or "rate_converted" not in rows["Rate Hourly"]["flags"]
+        assert "salaried" in rows[n]["flags"], n
+    assert not rows["Rate Hourly"]["flags"] or "salaried" not in rows["Rate Hourly"]["flags"]
 
 
 def test_annual_salary_header_converts_and_unknown_rate_header_defaults_every_row():
     c, h, vid = _world()
     out = _staff(c, h, vid, "Name,Email,Annual Salary\nDean Murray,dean@wembley-synthetic.com.au,\"78,000\"\n").json()
     assert _emps(vid)["Dean Murray"].hourly_base_rate == Decimal("39.47")
-    assert "rate_converted" in out["rows"][0]["flags"]
+    assert "salaried" in out["rows"][0]["flags"]
 
     c, h, vid = _world()
     out = _staff(c, h, vid, "Name,Email,Remuneration\nA One,a1@wembley-synthetic.com.au,28.00\n"

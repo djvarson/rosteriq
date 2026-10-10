@@ -217,6 +217,11 @@ class Employee(BaseModel):
     # Fortnightly work-hour cap from the visa condition (e.g. a student
     # visa's cap). None = no cap recorded.
     visa_work_limit_fortnight: Optional[float] = None
+    # 'salaried' people cost weekly_salary for labour planning and payroll
+    # prep (see services/pay_basis.py); hourly_base_rate stays as their
+    # planning rate for any reader that needs an hourly figure.
+    pay_basis: str = "hourly"
+    weekly_salary: Optional[Decimal] = None
     created_at: datetime
     updated_at: datetime
 
@@ -257,6 +262,23 @@ class Employee(BaseModel):
         if not (1 <= v <= 152):  # a fortnight has 336 hours; 152 = 2x76h weeks
             raise ValueError("visa_work_limit_fortnight must be between 1 and 152")
         return float(v)
+
+    @field_validator("pay_basis", mode="before")
+    @classmethod
+    def validate_pay_basis(cls, v: Any) -> str:
+        v = str(v or "hourly").strip().lower()
+        if v not in ("hourly", "salaried"):
+            raise ValueError("pay_basis must be 'hourly' or 'salaried'")
+        return v
+
+    @field_validator("weekly_salary")
+    @classmethod
+    def validate_weekly_salary(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is None:
+            return None
+        if not (0 < v <= 20000):
+            raise ValueError("weekly_salary must be greater than 0 and at most 20000")
+        return v
 
 
 class Shift(BaseModel):

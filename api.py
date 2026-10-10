@@ -572,6 +572,13 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register staff portal routes: {e}")
 
+# Leave impact, manager-recorded leave and cover approval checks
+try:
+    from rosteriq.routes.leave_cover import router as leave_cover_router
+    app.include_router(leave_cover_router)
+except Exception as e:
+    logger.error(f"Failed to register leave/cover routes: {e}")
+
 # Communication hub (announcements + SMS fan-out)
 try:
     from rosteriq.routes.comms import router as comms_router
@@ -2459,6 +2466,7 @@ _EMPLOYEE_AUDIT_FIELDS = (
     "skills", "email", "phone", "max_hours_per_week", "consecutive_days_limit",
     "venue_id", "availability",
     "visa_status", "visa_expiry", "visa_work_limit_fortnight",
+    "pay_basis", "weekly_salary",
 )
 
 
