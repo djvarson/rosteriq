@@ -2,8 +2,9 @@
 Leave and the roster: what approving leave does to the person's shifts.
 
 Approved leave leaves each of the person's upcoming shifts in the window OPEN:
-the shift stays on the roster with its role, times and cost, its employee_id
-becomes "" (nobody yet), it goes on the cover board for people who can work
+the shift stays on the roster with its role and times, its employee_id
+becomes "" (nobody yet) and its cost None (an open slot costs nothing until
+someone is on it), it goes on the cover board for people who can work
 that role, it drops off the person's /my, and the Today briefing lists it
 until someone is approved onto it. A shift that has already started stays as
 it was (history).
@@ -27,6 +28,7 @@ from decimal import Decimal
 from typing import Iterable, Optional
 
 from rosteriq.middleware.tenant import scoped_employee_map
+from rosteriq.models import normalise_area
 from rosteriq.services.clock import venue_now
 from rosteriq.services.current_roster import (
     SUPERSEDED, live_rosters, live_shifts, roster_state, week_monday,
@@ -293,7 +295,7 @@ def _open_on(db, roster_id: str, venue_id: str, employee, start: date, end: date
         leaving = [s for s in _mine(roster, employee.id, start, end) if not _started(s, now)]
         if leaving:
             for s in leaving:
-                s.employee_id = OPEN
+                s.employee_id, s.cost = OPEN, None
             edit.recost_total(roster, emp_map, state)
             db.save_roster(roster)
         return leaving
@@ -413,22 +415,67 @@ def withdraw_cover(db, cover: dict, note: str, actor_id: Optional[str] = None) -
     return cover
 
 
-def post_open_covers(db, roster, now: datetime = None) -> list:
+def _cover_slot(cover: dict) -> tuple:
+    return (cover_day(cover), str(cover.get("shift_start") or "")[:5], str(cover.get("shift_end") or "")[:5],
+            normalise_area(cover.get("role")))
+
+
+def _cover_label(cover: dict) -> str:
+    """'Sat 17 Oct 4-11pm Duty Manager'."""
+    day = cover_day(cover)
+    hm = [datetime.strptime(str(cover.get(k) or "00:00")[:5], "%H:%M").time()
+          for k in ("shift_start", "shift_end")]
+    return f"{day:%a} {day.day} {day:%b} {span(*hm)} {cover.get('role') or ''}".strip()
+
+
+def post_open_covers(db, roster, now: datetime = None) -> tuple:
     """A roster has just become the one staff see: each open shift on it that
     hasn't started and has no open or claimed cover goes on the cover board
-    (origin 'leave' when approved leave left it open, else 'open'), and the
-    open or claimed covers of that week whose shift isn't on it are withdrawn.
-    Returns the covers posted."""
+    (origin 'leave' when approved leave left it open, else 'open'). An open or
+    claimed cover of that week whose shift isn't on it moves, claim and all,
+    to the identical slot on it (same day, times and area, not started, no
+    cover yet) held by one of cover_holders; one with nowhere to go is
+    withdrawn. Returns (the covers posted, a notice for the manager naming
+    each claim withdrawn)."""
     venue_id = roster.venue_id
     now = now or _venue_now(db, venue_id)
     covers = list(db.list_shift_covers(venue_id) or [])
     on_roster = {s.id for s in roster.shifts or []}
+    covered = {c.get("shift_id") for c in covers if c.get("status") in LIVE_COVER}
+    slots: dict = {}
+    for s in roster.shifts or []:
+        if _status(s) not in _DEAD and not _started(s, now) and s.id not in covered:
+            slots.setdefault((s.date, s.start_time.strftime("%H:%M"), s.end_time.strftime("%H:%M"),
+                              normalise_area(s.role)), []).append(s)
+    notices = []
     for c in covers:
         day = cover_day(c)
-        if (c.get("status") in LIVE_COVER and c.get("shift_id") not in on_roster
+        if not (c.get("status") in LIVE_COVER and c.get("shift_id") not in on_roster
                 and day is not None and roster.week_start <= day <= roster.week_end):
-            withdraw_cover(db, c, "The week's roster was replaced and this shift isn't on it.")
-    covered = {c.get("shift_id") for c in covers if c.get("status") in LIVE_COVER}
+            continue
+        # The requester's own copy of the slot before an open one.
+        holders = [h for h in (str(c.get("requested_by") or ""), OPEN) if h in cover_holders(c)]
+        target = next((s for h in holders for s in slots.get(_cover_slot(c), [])
+                       if s.id not in covered and str(s.employee_id or "") == h), None)
+        note = ("Moved to the same shift on the newly published roster." if target is not None
+                else "The week's roster was replaced and this shift isn't on it.")
+        # Conditional, so a claim made since the read moves or is named, and a
+        # cover approved or cancelled since stays as it is.
+        row = db.withdraw_shift_cover(c["id"], None, note)
+        if row is None:
+            continue
+        claimed_by = row.get("claimed_by") or None
+        if target is not None:
+            moved = _new_cover(venue_id, target, row.get("requested_by") or OPEN, row.get("origin"))
+            moved.update(reason=row.get("reason") or "", claimed_by=claimed_by,
+                         status="claimed" if claimed_by else "open")
+            db.save_shift_cover(moved)
+            covered.add(target.id)
+        elif claimed_by:
+            claimant = db.get_employee(claimed_by)
+            name = getattr(claimant, "name", None) if getattr(claimant, "venue_id", None) == venue_id else None
+            notices.append(f"{name or 'Someone'} had claimed {_cover_label(row)}, which isn't up for "
+                           "cover on this roster — let them know.")
     left_by = {}
     for req in db.list_leave_requests(venue_id) or []:
         for item in req.get("opened_shifts") or []:
@@ -443,7 +490,7 @@ def post_open_covers(db, roster, now: datetime = None) -> list:
         db.save_shift_cover(cover)
         covered.add(s.id)
         posted.append(cover)
-    return posted
+    return posted, notices
 
 
 def open_shift_notices(db, venue_id: str, start: date, end: date, now: datetime = None) -> list:

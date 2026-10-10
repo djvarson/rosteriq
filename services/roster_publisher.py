@@ -93,6 +93,9 @@ class PublishResult:
     staffing_warnings: List[str] = field(default_factory=list)
     delivered: Optional[Dict[str, int]] = None
     channels_available: Optional[List[str]] = None
+    # "Pat Nguyen had claimed Sat 17 Oct 4-11pm Duty Manager, which isn't up
+    # for cover on this roster — let them know": claims the publish withdrew.
+    cover_notices: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -404,6 +407,7 @@ class RosterPublisher:
                 roster_id,
                 RosterPublishState.PUBLISHED.value,
                 f"Published by {publisher_id}",
+                notices=result.cover_notices,
             )
             result.state = RosterPublishState.PUBLISHED.value
 
@@ -434,6 +438,8 @@ class RosterPublisher:
                 more = len(result.staffing_warnings) - len(shown)
                 result.message += " Short-staffed: " + "; ".join(shown) + (
                     f" (+{more} more)." if more else ".")
+            if result.cover_notices:
+                result.message += " " + " ".join(result.cover_notices)
             logger.info(result.message)
 
             return result
@@ -583,6 +589,7 @@ class RosterPublisher:
                     roster_id,
                     RosterPublishState.PUBLISHED.value,
                     f"Published after approval by {reviewer_id}",
+                    notices=result.cover_notices,
                 )
                 result.state = RosterPublishState.PUBLISHED.value
 
@@ -596,6 +603,8 @@ class RosterPublisher:
 
                 result.success = True
                 result.message = f"Roster approved and published. {notified.get('message', '')}".strip()
+                if result.cover_notices:
+                    result.message += " " + " ".join(result.cover_notices)
 
             else:
                 # Rejected - go back to DRAFT
@@ -651,6 +660,7 @@ class RosterPublisher:
         new_state: str,
         reason: str,
         actor_id: str = "system",
+        notices: Optional[List[str]] = None,
     ) -> bool:
         """
         Manually transition roster to a new state.
@@ -660,6 +670,7 @@ class RosterPublisher:
             new_state: New state (must be valid RosterPublishState)
             reason: Reason for transition
             actor_id: User ID triggering transition (default "system")
+            notices: On publish, gets a line for each cover claim withdrawn
 
         Returns:
             True if successful, False otherwise
@@ -679,7 +690,9 @@ class RosterPublisher:
             )
             if new_state == RosterPublishState.PUBLISHED.value:
                 self._supersede_rest_of_week(roster_id, actor_id)
-                self._post_open_covers(roster_id)
+                dropped = self._post_open_covers(roster_id)
+                if notices is not None:
+                    notices.extend(dropped)
 
             logger.info(
                 f"Roster {roster_id} transitioned to {new_state} by {actor_id}: {reason}"
@@ -712,16 +725,18 @@ class RosterPublisher:
                 exc_info=True,
             )
 
-    def _post_open_covers(self, roster_id: str) -> None:
-        """The newly published roster's open shifts go on the cover board."""
+    def _post_open_covers(self, roster_id: str) -> List[str]:
+        """The newly published roster's open shifts go on the cover board.
+        Returns a line for the manager for each cover claim withdrawn."""
         try:
             from rosteriq.services.leave_shifts import post_open_covers
             roster = self.db.get_roster(roster_id)
             if roster is not None:
-                post_open_covers(self.db, roster)
+                return post_open_covers(self.db, roster)[1]
         except Exception as e:
             logger.error(f"Could not post roster {roster_id}'s open shifts for cover: {e}",
                          exc_info=True)
+        return []
 
     def recall_roster(self, roster_id: str, reason: str) -> bool:
         """

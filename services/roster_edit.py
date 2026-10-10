@@ -200,17 +200,30 @@ def visa_cap_flags(db, roster, employees, prev, shifts: Optional[list] = None) -
                                SimpleNamespace(shifts=last_week))
 
 
-def cross_venue_warnings(db, roster, employees) -> list:
-    """'Meca Rossi is on at Apothecary 17:00-00:00 on Wed 21 Oct' for each
-    shift on the roster that overlaps, or leaves less than the minimum rest
-    around, the same person's shift at another venue."""
+def cross_venue_clash_rows(db, roster, employees) -> list:
+    """One row per shift on the roster and the same person's shift at another
+    venue that it overlaps, or leaves less than the minimum rest around, with
+    no repeats: {employee_id, name, shift_id, date, start, end, role} of the
+    shift here and the clash's message ('Meca Rossi is on at Apothecary
+    17:00-00:00 on Wed 21 Oct')."""
     try:
         from rosteriq.services.person_identity import cross_venue_clashes
-        return [c["message"] for c in cross_venue_clashes(
-            db, roster, employees, min_rest_hours=MINIMUM_HOURS_BETWEEN_SHIFTS)]
+        clashes = cross_venue_clashes(db, roster, employees, min_rest_hours=MINIMUM_HOURS_BETWEEN_SHIFTS)
     except Exception as e:
         logger.warning(f"Cross-venue check failed for roster {getattr(roster, 'id', '?')}: {e}")
         return []
+    names = {str(e.id): getattr(e, "name", None) for e in employees}
+    here = {s.id: s for s in roster.shifts}
+    out, seen = [], set()
+    for c in clashes:
+        s = here.get(c.get("shift_id"))
+        if s is None or (s.id, c["message"]) in seen:
+            continue
+        seen.add((s.id, c["message"]))
+        out.append({"employee_id": s.employee_id, "name": names.get(str(s.employee_id)),
+                    "shift_id": s.id, "date": s.date.isoformat(), "start": hhmm(s.start_time),
+                    "end": hhmm(s.end_time), "role": s.role, "message": c["message"]})
+    return out
 
 
 def neighbour_shifts(db, roster, employee_id: str, exclude_id: Optional[str] = None) -> list:
@@ -351,7 +364,7 @@ def recost_total(roster, emp_map: dict, state) -> None:
             roster.model_copy(update={"shifts": costable}), emp_map, state)
     except Exception as e:
         logger.warning(f"Could not recost roster {roster.id}: {e}")
-        roster.total_cost = sum((s.cost or Decimal("0") for s in roster.shifts), Decimal("0"))
+        roster.total_cost = sum((s.cost or Decimal("0") for s in costable), Decimal("0"))
 
 
 # ---------------------------------------------------------------------------

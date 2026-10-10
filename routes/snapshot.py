@@ -56,7 +56,8 @@ def _labour_by_day(db, venue_id: str, start: date, end: date) -> dict:
     """Rostered labour $ per day from ONE roster per week (published, else the
     newest). Prefers each shift's stored cost; falls back to paid hours x the
     employee's base rate so a shift with no cached cost still counts (never
-    silently zero). A salaried person costs one day of salary plus super for
+    silently zero). An open shift costs nothing until someone is on it.
+    A salaried person costs one day of salary plus super for
     each day they are rostered, whatever their shifts' cached costs say
     (services/pay_basis.py)."""
     from rosteriq.cost_calculator import calculate_shift_cost_breakdown
@@ -79,7 +80,7 @@ def _labour_by_day(db, venue_id: str, start: date, end: date) -> dict:
         rosters = []
     for roster in rosters:
         for s in roster.shifts:
-            if not (start <= s.date <= end):
+            if not (start <= s.date <= end) or not s.employee_id:
                 continue
             emp = salaried.get(s.employee_id)
             if emp is not None:

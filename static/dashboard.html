@@ -8896,7 +8896,9 @@ async function decideCover(i, approve) {
       method: 'POST',
       body: JSON.stringify({ venue_id: state.currentVenue, approve: approve, note: note.trim() }),
     });
-    showToast(approve ? 'Swap approved — roster updated ✓' : 'Declined — request reopened', 'success');
+    showToast(approve
+      ? (openShift ? 'Shift filled: ' + c.claimed_by_name + ' is on it — roster updated ✓' : 'Swap approved — roster updated ✓')
+      : (openShift ? 'Declined — the shift stays open for others' : 'Declined — request reopened'), 'success');
     loadCoverRequests();
   } catch (e) {
     showToast('Decision failed: ' + e.message, 'error');
@@ -14071,8 +14073,10 @@ function _realReportRows() {
       var hrs = ((+en[0]) * 60 + (+en[1]) - (+st[0]) * 60 - (+st[1])) / 60;
       if (hrs < 0) hrs += 24;
       x.hours += Math.max(0, hrs - (sh.break_minutes || 0) / 60);
+      // An open slot costs nothing until someone is on it.
+      if (!sh.employee_id) return;
       if (sh.cost == null) x.costKnown = false; else x.cost += Number(sh.cost) || 0;
-      if (sh.employee_id) x.staff[sh.employee_id] = true;
+      x.staff[sh.employee_id] = true;
     });
   });
   return Object.keys(byDay).sort().map(function(d) {
@@ -15487,7 +15491,8 @@ function renderCopyReport(result) {
   const skipped = (result && result.skipped) || [];
   const leftOpen = (result && result.left_open) || [];
   const visa = (result && result.visa_flags) || [];
-  const elsewhere = (result && result.cross_venue_warnings) || [];
+  const elsewhere = Array.from(new Set((result && result.cross_venue_warnings) || []));
+  const clashes = (result && result.cross_venue_clashes) || [];
   const rows = list => '<ul style="margin:8px 0 0 18px; padding:0;">' + list.slice(0, 40).map(s =>
       '<li>' + esc(s.name + ' — ' + rosterDayLabel(s.date) + ' ' + s.start + '-' + s.end + (s.role ? ' (' + s.role + ')' : '') + ': ' + s.reason) + '</li>'
     ).join('') + (list.length > 40 ? '<li>' + esc('…and ' + (list.length - 40) + ' more') + '</li>' : '') + '</ul>';
@@ -15501,7 +15506,19 @@ function renderCopyReport(result) {
   if (visa.length) {
     html += '<div style="margin-top:8px; color:#B45309;">' + visa.map(f => esc(f.message)).join('<br>') + '</div>';
   }
-  if (elsewhere.length) {
+  if (clashes.length) {
+    const groups = [], byShift = {};
+    clashes.forEach(c => {
+      const key = c.employee_id + '|' + c.shift_id;
+      if (!byShift[key]) groups.push(byShift[key] = { c: c, lines: [] });
+      if (byShift[key].lines.indexOf(c.message) < 0) byShift[key].lines.push(c.message);
+    });
+    html += '<div style="margin-top:8px; color:#B45309;">' + groups.map(g =>
+      '<div style="margin-top:4px;">' + esc((g.c.name || 'Someone') + ' — ' + rosterDayLabel(g.c.date) + ' ' + g.c.start + '-' + g.c.end +
+        (g.c.role ? ' (' + g.c.role + ')' : '') + ' here:') + '</div>' +
+      '<ul style="margin:2px 0 0 18px; padding:0;">' + g.lines.map(m => '<li>' + esc(m) + '</li>').join('') + '</ul>'
+    ).join('') + '</div>';
+  } else if (elsewhere.length) {
     html += '<div style="margin-top:8px; color:#B45309;">' + elsewhere.map(m => esc(m)).join('<br>') + '</div>';
   }
   box.innerHTML = html;

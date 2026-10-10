@@ -112,6 +112,9 @@ class PublishRosterResponse(BaseModel):
     # "Meca Rossi is on at Apothecary 16:00-23:00 on Fri 16 Oct": people on
     # this roster who are on at the owner's other venue then. Warnings only.
     cross_venue_warnings: List[str] = []
+    # Cover claims the publish withdrew because their shift isn't up for
+    # cover on this roster, naming who had claimed each.
+    cover_notices: List[str] = []
 
 
 def cross_venue_warnings(roster) -> List[str]:
@@ -275,6 +278,7 @@ async def publish_roster(
         delivered=result.delivered,
         channels_available=result.channels_available,
         cross_venue_warnings=elsewhere,
+        cover_notices=result.cover_notices,
     )
 
 
@@ -490,11 +494,13 @@ async def transition_roster_state(
         )
 
     # Transition
+    notices: List[str] = []
     success = publisher.transition_state(
         roster_id=roster_id,
         new_state=body.new_state,
         reason=body.reason,
         actor_id=user.user_id,
+        notices=notices,
     )
 
     if not success:
@@ -509,7 +515,7 @@ async def transition_roster_state(
         "success": True,
         "roster_id": roster_id,
         "new_state": body.new_state,
-        "message": f"Transitioned to {body.new_state}: {body.reason}",
+        "message": " ".join([f"Transitioned to {body.new_state}: {body.reason}"] + notices),
     }
 
 
@@ -636,4 +642,5 @@ async def auto_publish_roster(
         staffing_warnings=result.staffing_warnings,
         delivered=result.delivered,
         channels_available=result.channels_available,
+        cover_notices=result.cover_notices,
     )

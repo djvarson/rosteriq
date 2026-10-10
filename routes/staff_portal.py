@@ -829,7 +829,7 @@ async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
     if not links:
         return _no_link_response(user, db)
     links = _on_team(links)
-    from rosteriq.services.cover_checks import can_take
+    from rosteriq.services.cover_checks import can_take, on_leave_on
     names = _venue_names(db, [v for _, v in links])
     up_for_grabs, mine, claimed_by_me = [], [], []
     for emp, vid in links:
@@ -837,6 +837,7 @@ async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
         venue = db.get_venue(vid)
         covers = db.list_shift_covers(vid) or []
         standing = standing_cover_ids(db, vid, covers)
+        leave = edit.approved_leave(db, vid)
         for c in covers:
             p = _cover_payload(c, emp_names, staff=True, standing=standing)
             p["venue_id"], p["venue_name"] = vid, names[vid]
@@ -846,7 +847,8 @@ async def cover_board(user: UserContext = Depends(get_current_user)) -> dict:
             elif c.get("claimed_by") == emp.id and c.get("status") in ("claimed", "approved"):
                 claimed_by_me.append(p)
             elif (c.get("status") == "open" and c.get("id") in standing and is_active(emp)
-                  and can_take(emp, c.get("role"), venue)):
+                  and can_take(emp, c.get("role"), venue)
+                  and not on_leave_on(db, vid, emp, cover_day(c), leave)):
                 up_for_grabs.append(p)
     return {"linked": True, "up_for_grabs": up_for_grabs, "mine": mine,
             "claimed_by_me": claimed_by_me}
@@ -953,9 +955,11 @@ async def claim_cover(cover_id: str, user: UserContext = Depends(get_current_use
     if not cover_stands(cover, live):
         raise HTTPException(status_code=409, detail="That shift has changed on the roster since it "
                                                     "was put up for cover, so it's no longer up for grabs")
-    from rosteriq.services.cover_checks import can_take, not_trained_message
+    from rosteriq.services.cover_checks import can_take, not_trained_message, on_leave_on
     if not can_take(emp, cover.get("role"), db.get_venue(vid)):
         raise HTTPException(status_code=409, detail=not_trained_message(cover.get("role")))
+    if on_leave_on(db, vid, emp, cover_day(cover)):
+        raise HTTPException(status_code=409, detail="You're on approved leave that day")
     clash = _clashing_shift(db, vid, emp.id, cover)
     if clash is not None:
         raise HTTPException(status_code=409, detail=_clash_detail(clash, "You're"))
