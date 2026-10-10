@@ -23,7 +23,14 @@ shift is skipped (never doubled), a moved one is reported 'replaced', one no
 longer in the export is removed, and split shifts stay as two. A row that
 can't be read leaves that person's shifts on that date alone. Only the
 imported roster is written — never a generated roster, and never a week
-already published in RosterIQ.
+published in RosterIQ (a publish supersedes the week's import for good, so
+a recalled week stays RosterIQ's too); the response names those weeks.
+
+Approved leave wins, as everywhere else: a row for someone on approved leave
+that day, whose shift hasn't started, comes in as an open shift posted for
+cover (or, on a re-paste, finds the shift their leave left open, moving it
+when the export moved its times), and is flagged. A row for anyone else in the
+slot of a stored open shift, or overlapping it in its area, fills it.
 
 Spans of zero or over 16 hours are skipped. In a file with no am/pm
 anywhere, an end before its start that would make sense 12 hours later is
@@ -38,24 +45,29 @@ import logging
 import re
 import uuid
 from collections import Counter
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from rosteriq.cost_calculator import calculate_roster_cost, calculate_shift_cost_breakdown
 from rosteriq.database import get_db
+from rosteriq.middleware.auth import UserContext, get_current_user
 from rosteriq.middleware.tenant import enforce_venue_manager
-from rosteriq.models import Roster, Shift, ShiftStatus, State
+from rosteriq.models import Roster, Shift, ShiftStatus, State, normalise_area
 from rosteriq.services import roster_edit as edit
+from rosteriq.services.clock import venue_now
 from rosteriq.services.current_roster import (
-    ARCHIVED, PUBLISHED, roster_state, supersede_for_import, week_monday,
+    ARCHIVED, PUBLISHED, SUPERSEDED, roster_state, supersede_for_import, week_monday,
 )
 from rosteriq.services.import_parsing import (
     LOCATION_KEYS, LocationChoiceNeeded, MixedDateOrder, PasteUnreadable, build_name, cell_date,
     clean_header, date_order, header_matches, location_choice_response, location_matches,
     map_columns, norm_header, norm_name, read_rows, resolve_location, split_when, unclosed_quote,
+)
+from rosteriq.services.leave_shifts import (
+    LIVE_COVER, OPEN, _new_cover, cover_day, is_open, shift_label,
 )
 
 logger = logging.getLogger(__name__)
@@ -371,14 +383,60 @@ def _held(roster) -> dict:
     return {s.id: s.model_dump() for s in (roster.shifts if roster else [])}
 
 
+def _slot(s: Shift) -> tuple:
+    return (s.date, s.start_time, s.end_time, normalise_area(s.role))
+
+
+def _open_slot(old: list, sh: Shift, kept_ids: set):
+    return next((s for s in old if is_open(s) and s.id not in kept_ids and _slot(s) == _slot(sh)),
+                None)
+
+
+def _left_open(old: list, sh: Shift, ids) -> Optional[Shift]:
+    """The stored shift in the row's slot that the person's approved leave
+    left open (it may have been covered since)."""
+    return next((s for s in old if s.id in ids and _slot(s) == _slot(sh)), None)
+
+
+def _open_overlap(old: list, sh: Shift, kept_ids: set, ids=None) -> Optional[Shift]:
+    """The open shift (among ids, when given) not yet matched, on the row's
+    day and in its area, whose times overlap the row's most."""
+    best, most = None, timedelta(0)
+    b0, b1 = _interval(sh)
+    for s in old:
+        if (not is_open(s) or s.id in kept_ids or (ids is not None and s.id not in ids)
+                or s.date != sh.date or normalise_area(s.role) != normalise_area(sh.role)):
+            continue
+        a0, a1 = _interval(s)
+        shared = min(a1, b1) - max(a0, b0)
+        if shared > most:
+            best, most = s, shared
+    return best
+
+
+def _fill(out: dict, updates: dict, kept_ids: set, hole: Shift, change: dict) -> None:
+    kept_ids.add(hole.id)
+    updates[hole.id] = hole.model_copy(update=change)
+    out["filled"].append((hole, updates[hole.id]))
+    out["replaced"] += 1
+
+
+def _leave_flag(line, name, d, detail: str) -> dict:
+    return {"line": line, "name": name, "date": d.isoformat(), "flag": "on_leave", "detail": detail}
+
+
 def _reconcile_week(paste: dict, week_start, roster, published: bool, emp_map: dict, state,
-                    venue_id: str) -> dict:
+                    venue_id: str, leave: dict, now: datetime) -> dict:
     """One week of the paste against the imported roster stored for it (None
     when there is none): the roster to save (None when nothing changes) and
     what became of each row. Notes go in the result rather than the paste, so
-    a week that changed before it could be saved can be redone."""
+    a week that changed before it could be saved can be redone.
+
+    leave: {"days": edit.approved_leave(), "opened": {(employee_id, date):
+    ids of the shifts their approved leave left open}}; now: venue-local."""
     out = {"week_start": week_start, "read": _held(roster), "roster": None, "imported": 0,
-           "replaced": 0, "removed": [], "duplicates": 0, "skipped": [], "report": []}
+           "replaced": 0, "removed": [], "duplicates": 0, "skipped": [], "report": [],
+           "flagged": [], "filled": [], "left_open": [], "published": published}
     pasted, held, covered = paste["pasted"], paste["held"], paste["covered"]
     week_items = sorted(((pair, line, name, sh) for pair, items in pasted.items()
                          if week_monday(pair[1]) == week_start for line, name, sh in items),
@@ -386,18 +444,31 @@ def _reconcile_week(paste: dict, week_start, roster, published: bool, emp_map: d
     if published:
         for (_, d), line, name, _ in week_items:
             _note_row(out, line, name, d, "skipped",
-                      f"the week of {week_start:%d/%m/%Y} is published in RosterIQ — an "
-                      "import doesn't change a published week")
+                      f"the week of {week_start:%d/%m/%Y} has been published in RosterIQ, so staff "
+                      "see RosterIQ's roster for it, never an import \u2014 not imported; make the "
+                      "change in RosterIQ")
         return out
     old = list(roster.shifts) if roster else []
     by_key = {}
     for s in old:
         by_key.setdefault((s.employee_id, s.date, s.start_time, s.end_time), s)
-    kept_ids, updates, added = set(), {}, []
+    kept_ids, updates, added, off, loose = set(), {}, [], [], []
     for (emp_id, d), line, name, sh in week_items:
         prev = by_key.get((emp_id, d, sh.start_time, sh.end_time))
         if prev is None or prev.id in kept_ids:
-            added.append((line, name, sh))
+            # A day they work part of still leaves open the shifts the leave opened.
+            if datetime.combine(d, sh.start_time) > now and (
+                    edit.on_leave(leave["days"], emp_id, d)
+                    or _left_open(old, sh, leave["opened"].get((emp_id, d), ())) is not None):
+                off.append((line, name, sh))
+                continue
+            hole = _open_slot(old, sh, kept_ids)
+            if hole is None:
+                loose.append((line, name, sh))
+                continue
+            _fill(out, updates, kept_ids, hole,
+                  {"employee_id": emp_id, "break_minutes": sh.break_minutes})
+            _note_row(out, line, name, d, "replaced", f"filled the open shift {_hhmm(hole)}")
             continue
         kept_ids.add(prev.id)
         if (prev.break_minutes, prev.role) != (sh.break_minutes, sh.role):
@@ -410,6 +481,72 @@ def _reconcile_week(paste: dict, week_start, roster, published: bool, emp_map: d
         else:
             out["duplicates"] += 1
             _note_row(out, line, name, d, "skipped", "already imported")
+    # After every other row, so someone pasted into the slot keeps it.
+    retimed = []
+    for line, name, sh in off:
+        d, mine = sh.date, leave["opened"].get((sh.employee_id, sh.date), ())
+        left = _left_open(old, sh, mine) or _open_slot(old, sh, kept_ids)
+        if left is None:
+            retimed.append((line, name, sh))
+            continue
+        kept_ids.add(left.id)
+        out["duplicates"] += 1
+        _note_row(out, line, name, d, "skipped",
+                  f"already imported \u2014 {name} is on approved leave in RosterIQ that day, "
+                  "so their shift was left open for cover")
+        out["flagged"].append(_leave_flag(line, name, d, (
+            f"{name} is on approved leave in RosterIQ that day; the export still has them on "
+            f"{_hhmm(sh)}, which the leave left open for cover")))
+    # A row that matches nothing stored may be an open shift the export moved:
+    # it fills the one it overlaps, unless it's the person's own shift moved.
+    for line, name, sh in loose:
+        hole = None
+        if not any(s.employee_id == sh.employee_id and s.date == sh.date
+                   and s.id not in kept_ids and _overlaps(s, sh) for s in old):
+            hole = _open_overlap(old, sh, kept_ids)
+        if hole is None:
+            added.append((line, name, sh))
+            continue
+        _fill(out, updates, kept_ids, hole,
+              {"employee_id": sh.employee_id, "break_minutes": sh.break_minutes,
+               "start_time": sh.start_time, "end_time": sh.end_time})
+        _note_row(out, line, name, sh.date, "replaced",
+                  f"filled the open shift {_hhmm(hole)}, moved to {_hhmm(sh)}")
+    for line, name, sh in retimed:
+        d, mine = sh.date, leave["opened"].get((sh.employee_id, sh.date), ())
+        hole = _open_overlap(old, sh, kept_ids, mine)
+        taken = None if hole else next(
+            (s for s in old if s.id in mine and s.date == d and _overlaps(s, sh)
+             and normalise_area(s.role) == normalise_area(sh.role)), None)
+        if taken is not None:
+            kept_ids.add(taken.id)
+            out["duplicates"] += 1
+            _note_row(out, line, name, d, "skipped",
+                      f"{name} is on approved leave in RosterIQ that day and the shift their "
+                      f"leave left open ({_hhmm(taken)}) has been covered \u2014 not imported")
+            out["flagged"].append(_leave_flag(line, name, d, (
+                f"{name} is on approved leave in RosterIQ that day; the export has them on "
+                f"{_hhmm(sh)}, and the shift their leave left open ({_hhmm(taken)}) has been "
+                "covered \u2014 check its times")))
+            continue
+        hole = hole or _open_overlap(old, sh, kept_ids)
+        if hole is not None:
+            _fill(out, updates, kept_ids, hole,
+                  {"break_minutes": sh.break_minutes, "start_time": sh.start_time,
+                   "end_time": sh.end_time})
+            _note_row(out, line, name, d, "replaced",
+                      f"moved the open shift {_hhmm(hole)} to {_hhmm(sh)} \u2014 {name} is on "
+                      "approved leave in RosterIQ that day, so it stays open for cover")
+            out["flagged"].append(_leave_flag(line, name, d, (
+                f"{name} is on approved leave in RosterIQ that day \u2014 the open shift "
+                f"{_hhmm(hole)} moved to {_hhmm(sh)} and stays posted for cover")))
+            continue
+        hole = sh.model_copy(update={"employee_id": OPEN, "cost": None})
+        added.append((line, name, hole))
+        out["left_open"].append((hole, sh.employee_id))
+        out["flagged"].append(_leave_flag(line, name, d, (
+            f"{name} is on approved leave in RosterIQ that day \u2014 {_hhmm(sh)} left open "
+            "and posted for cover")))
     gone = [s for s in old
             if s.id not in kept_ids and not paste["swallowed"]
             and s.employee_id in covered.get(week_start, ())
@@ -455,29 +592,74 @@ def _reconcile_week(paste: dict, week_start, roster, published: bool, emp_map: d
     return out
 
 
-def _reconcile(paste: dict, existing: dict, emp_map: dict, state, venue_id: str) -> list:
+def _reconcile(paste: dict, existing: dict, emp_map: dict, state, venue_id: str, leave: dict,
+               now: datetime) -> list:
     """Each week's imported roster rebuilt from the paste and costed from the
     rates the venue recorded. Pure CPU, run off the event loop. existing:
     {monday: (imported roster | None, published in RosterIQ)}."""
-    return [_reconcile_week(paste, week_start, *existing[week_start], emp_map, state, venue_id)
+    return [_reconcile_week(paste, week_start, *existing[week_start], emp_map, state, venue_id,
+                            leave, now)
             for week_start in _paste_weeks(paste)]
 
 
-def _save_week(db, paste: dict, week: dict, emp_map: dict, state, venue_id: str) -> dict:
+def _published_in_rosteriq(db, venue_id: str, monday, imported) -> bool:
+    """A roster of the week is published or archived, or a publish superseded
+    the week's import (recalling that roster never brings the import back)."""
+    if imported is not None and roster_state(db, imported.id) == SUPERSEDED:
+        return True
+    rosters = db.get_rosters_by_date_range(venue_id, monday, monday + timedelta(days=6)) or []
+    return any(getattr(r, "venue_id", None) == venue_id and week_monday(r.week_start) == monday
+               and roster_state(db, r.id) in (PUBLISHED, ARCHIVED) for r in rosters)
+
+
+def _save_week(db, paste: dict, week: dict, emp_map: dict, state, venue_id: str, leave: dict,
+               now: datetime) -> dict:
     """Saves the week's roster under the roster lock. If another import (a
-    double click) or an edit saved the week after it was read, the week is
-    redone against what is stored now. This runs on the event loop: the lock
-    is a threading lock, so it can't be held across an await."""
+    double click) or an edit saved the week after it was read, or a roster of
+    the week was published since, the week is redone against what is stored
+    now. This runs on the event loop: the lock is a threading lock, so it
+    can't be held across an await."""
     rid = week["roster"].id
     with edit.roster_lock(db, rid):
         fresh = db.get_roster(rid)
-        if _held(fresh) != week["read"]:
-            published = fresh is not None and roster_state(db, rid) in (PUBLISHED, ARCHIVED)
+        published = _published_in_rosteriq(db, venue_id, week["week_start"], fresh)
+        if published or _held(fresh) != week["read"]:
             week = _reconcile_week(paste, week["week_start"], fresh, published, emp_map, state,
-                                   venue_id)
+                                   venue_id, leave, now)
         if week["roster"] is not None:
             db.save_roster(week["roster"])
     return week
+
+
+def _paste_leave(db, venue_id: str) -> dict:
+    """Approved leave as _reconcile_week reads it. The shifts a person's leave
+    left open, on days it still covers, are the ones its record opened and the
+    ones its covers were posted for (a paste records none on the leave), even
+    once someone has been approved onto them."""
+    opened, spans = {}, {}
+    for r in db.list_leave_requests(venue_id) or []:
+        if r.get("status") != "approved":
+            continue
+        who = str(r.get("employee_id") or "")
+        try:
+            first = date.fromisoformat(str(r.get("start_date"))[:10])
+            last = date.fromisoformat(str(r.get("end_date"))[:10])
+        except ValueError:
+            continue
+        spans.setdefault(who, []).append((first, last))
+        for o in r.get("opened_shifts") or []:
+            try:
+                d = date.fromisoformat(str(o.get("date"))[:10])
+            except ValueError:
+                continue
+            if first <= d <= last:
+                opened.setdefault((who, d), set()).update(o.get("shift_ids") or [o.get("shift_id")])
+    for cv in db.list_shift_covers(venue_id) or []:
+        who, d = str(cv.get("requested_by") or ""), cover_day(cv)
+        if (cv.get("origin") == "leave" and cv.get("status") in LIVE_COVER + ("approved",)
+                and d is not None and any(a <= d <= b for a, b in spans.get(who, ()))):
+            opened.setdefault((who, d), set()).add(cv.get("shift_id"))
+    return {"days": edit.approved_leave(db, venue_id), "opened": opened}
 
 
 def _skip_week(paste: dict, week_start, reason: str) -> None:
@@ -488,7 +670,8 @@ def _skip_week(paste: dict, week_start, reason: str) -> None:
 
 
 @router.post("/import-roster")
-async def import_roster(body: RosterImportBody) -> dict:
+async def import_roster(body: RosterImportBody,
+                        user: UserContext = Depends(get_current_user)) -> dict:
     enforce_venue_manager(body.venue_id)
     db = get_db()
     venue = db.get_venue(body.venue_id)
@@ -519,16 +702,20 @@ async def import_roster(body: RosterImportBody) -> dict:
     existing = {}
     for week_start in _paste_weeks(paste):
         roster = db.get_roster(f"imported-{body.venue_id}-{week_start.isoformat()}")
-        existing[week_start] = (roster, roster is not None
-                                and roster_state(db, roster.id) in (PUBLISHED, ARCHIVED))
-    weeks = await asyncio.to_thread(_reconcile, paste, existing, emp_map, state, body.venue_id)
+        existing[week_start] = (roster,
+                                _published_in_rosteriq(db, body.venue_id, week_start, roster))
+    leave = _paste_leave(db, body.venue_id)
+    now = venue_now(body.venue_id, db)
+    now = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) else now
+    weeks = await asyncio.to_thread(_reconcile, paste, existing, emp_map, state, body.venue_id,
+                                    leave, now)
 
     skipped, week_costs, written, done, busy = paste["skipped"], [], [], [], False
     for week in weeks:
         if week["roster"] is not None:
             when = f"{week['week_start']:%d/%m/%Y}"
             try:
-                week = _save_week(db, paste, week, emp_map, state, body.venue_id)
+                week = _save_week(db, paste, week, emp_map, state, body.venue_id, leave, now)
             except edit.RosterBusy:
                 busy = True
                 _skip_week(paste, week["week_start"], f"someone else was saving the week of {when} "
@@ -547,15 +734,25 @@ async def import_roster(body: RosterImportBody) -> dict:
         raise HTTPException(status_code=409,
                             detail="Someone else is saving this roster right now — try again.")
     supersede_for_import(db, body.venue_id, written)
+    cover_notes = []
     for week in done:
         skipped.extend(week["skipped"])
         paste["report"].extend(week["report"])
         paste["duplicates"] += week["duplicates"]
+        if week["roster"] is None:
+            continue
+        for before, after in week["filled"]:
+            cover_notes += [f"{shift_label(before)}: {n['message']}" for n in
+                            edit.settle_covers(db, body.venue_id, before, after, user.user_id)]
+        for shift, employee_id in week["left_open"]:
+            db.save_shift_cover(_new_cover(body.venue_id, shift, employee_id, "leave"))
     imported = sum(w["imported"] for w in done)
     replaced = sum(w["replaced"] for w in done)
     removed = [r for w in done for r in w["removed"]]
     report = sorted(paste["report"], key=lambda r: r["line"])
-    flagged = paste["flagged"]
+    flagged = sorted(paste["flagged"] + [f for w in done for f in w["flagged"]],
+                     key=lambda f: f["line"])
+    published = [w["week_start"].isoformat() for w in done if w["published"]]
 
     logger.info(f"Roster import at {body.venue_id}: {imported} shifts across "
                 f"{len(written)} week(s), {replaced} replaced, {len(removed)} removed, "
@@ -578,4 +775,6 @@ async def import_roster(body: RosterImportBody) -> dict:
         "location": paste["location"],
         "date_order": paste["date_order"],
         "week_costs": week_costs,
+        "published_weeks": published,
+        "cover_notes": cover_notes,
     }

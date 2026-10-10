@@ -3638,6 +3638,7 @@ class PostgresStore(BaseStore):
                 paid_hours NUMERIC(6, 2),
                 entered_by TEXT,
                 opened_shifts JSONB DEFAULT '[]'::jsonb,
+                working_days JSONB DEFAULT '[]'::jsonb,
                 status TEXT NOT NULL DEFAULT 'pending',
                 decided_by TEXT,
                 decided_at TIMESTAMP WITH TIME ZONE,
@@ -4044,6 +4045,7 @@ class PostgresStore(BaseStore):
             "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS paid_hours NUMERIC(6, 2)",
             "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS entered_by TEXT",
             "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS opened_shifts JSONB DEFAULT '[]'::jsonb",
+            "ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS working_days JSONB DEFAULT '[]'::jsonb",
             "ALTER TABLE shift_covers ADD COLUMN IF NOT EXISTS origin TEXT",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_venue_created ON audit_logs (venue_id, created_at DESC)",
@@ -4674,12 +4676,13 @@ class PostgresStore(BaseStore):
             self._ensure_table(cur, "leave_requests")
             cur.execute("""
                 INSERT INTO leave_requests (id, venue_id, employee_id, start_date, end_date,
-                    reason, leave_type, paid_hours, entered_by, opened_shifts,
+                    reason, leave_type, paid_hours, entered_by, opened_shifts, working_days,
                     status, decided_by, decided_at, decision_note, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
+                    start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date,
                     leave_type=EXCLUDED.leave_type, paid_hours=EXCLUDED.paid_hours,
-                    opened_shifts=EXCLUDED.opened_shifts,
+                    opened_shifts=EXCLUDED.opened_shifts, working_days=EXCLUDED.working_days,
                     status=EXCLUDED.status, decided_by=EXCLUDED.decided_by,
                     decided_at=EXCLUDED.decided_at, decision_note=EXCLUDED.decision_note,
                     updated_at=now()
@@ -4688,6 +4691,7 @@ class PostgresStore(BaseStore):
                 req["end_date"], req.get("reason"), req.get("leave_type") or "other",
                 req.get("paid_hours"), req.get("entered_by"),
                 _json(list(req.get("opened_shifts") or [])),
+                _json(list(req.get("working_days") or [])),
                 req.get("status", "pending"),
                 req.get("decided_by"), req.get("decided_at"), req.get("decision_note"),
                 req.get("created_at", datetime.utcnow()),
@@ -4712,6 +4716,7 @@ class PostgresStore(BaseStore):
     def _leave_row(row):
         d = dict(row)
         d["opened_shifts"] = _jsonb(d.get("opened_shifts"), [])
+        d["working_days"] = _jsonb(d.get("working_days"), [])
         if d.get("paid_hours") is not None:
             d["paid_hours"] = float(d["paid_hours"])
         return d

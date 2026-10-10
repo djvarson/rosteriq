@@ -404,8 +404,11 @@ def _as_date(v) -> Optional[date]:
 
 
 def _paid_leave_windows(leave_requests) -> Dict[str, list]:
-    """employee_id -> [(start, end, leave label)] of approved paid leave."""
+    """employee_id -> [(start, end, leave label)] of approved paid leave, less
+    the days of it the person also works part of (their shift those days is
+    priced)."""
     from rosteriq.services.leave_shifts import PAID_LEAVE_TYPES, leave_type_label
+    from rosteriq.services.roster_edit import leave_spans
     out: Dict[str, list] = {}
     for req in leave_requests or []:
         if req.get("status") != "approved" or req.get("leave_type") not in PAID_LEAVE_TYPES:
@@ -413,8 +416,9 @@ def _paid_leave_windows(leave_requests) -> Dict[str, list]:
         start, end = _as_date(req.get("start_date")), _as_date(req.get("end_date"))
         if start is None or end is None:
             continue
-        out.setdefault(str(req.get("employee_id")), []).append(
-            (start, end, leave_type_label(req.get("leave_type")).lower()))
+        label = leave_type_label(req.get("leave_type")).lower()
+        out.setdefault(str(req.get("employee_id")), []).extend(
+            (first, last, label) for first, last in leave_spans(start, end, req.get("working_days")))
     return out
 
 
