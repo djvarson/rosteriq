@@ -33,6 +33,7 @@ from rosteriq.services.availability_rules import is_available
 from rosteriq.services.current_roster import (
     ARCHIVED, PUBLISHED, SUPERSEDED, current_roster, is_imported, roster_state, week_monday,
 )
+from rosteriq.services.leave_shifts import OPEN, is_open
 from rosteriq.services.venue_areas import area_names, can_fill
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,8 @@ logger = logging.getLogger(__name__)
 CHANGES_KEY = "roster_changes:"
 MAX_CHANGES_KEPT = 500
 LOCKED_STATES = frozenset({ARCHIVED, SUPERSEDED})
+LIVE_COVER = ("open", "claimed")
+WITHDRAWN = "withdrawn"
 
 _lock = threading.Lock()
 _PG_LOCK_CLASS = 7_734_101
@@ -170,6 +173,47 @@ def _busy_elsewhere(db, employee, day, start, end) -> list:
         return []
 
 
+def _booked_elsewhere(db, venue_id: str, employees: list, start: date, end: date) -> list:
+    """The same people's shifts at the venue's sister venues dated start..end,
+    each carrying the LOCAL employee id."""
+    try:
+        from rosteriq.services.person_identity import bookings_elsewhere
+        return list(bookings_elsewhere(db, venue_id, employees, start, end) or [])
+    except Exception as e:
+        logger.warning(f"Other-venue bookings lookup failed for {venue_id}: {e}")
+        return []
+
+
+def visa_cap_flags(db, roster, employees, prev, shifts: Optional[list] = None) -> list:
+    """Recorded fortnight visa caps over the roster's week (``shifts``, else
+    the roster's own) and the week before (``prev``). A recorded cap covers
+    every job, so the same people's shifts at the owner's other venues count."""
+    from types import SimpleNamespace
+    from rosteriq.services.visa import fortnight_cap_flags
+    employees = list(employees)
+    monday = week_monday(roster.week_start)
+    this_week = list(roster.shifts if shifts is None else shifts)
+    this_week += _booked_elsewhere(db, roster.venue_id, employees, monday, monday + timedelta(days=6))
+    last_week = list(getattr(prev, "shifts", None) or [])
+    last_week += _booked_elsewhere(db, roster.venue_id, employees,
+                                   monday - timedelta(days=7), monday - timedelta(days=1))
+    return fortnight_cap_flags(SimpleNamespace(shifts=this_week), employees,
+                               SimpleNamespace(shifts=last_week))
+
+
+def cross_venue_warnings(db, roster, employees) -> list:
+    """'Meca Rossi is on at Apothecary 17:00-00:00 on Wed 21 Oct' for each
+    shift on the roster that overlaps, or leaves less than the minimum rest
+    around, the same person's shift at another venue."""
+    try:
+        from rosteriq.services.person_identity import cross_venue_clashes
+        return [c["message"] for c in cross_venue_clashes(
+            db, roster, employees, min_rest_hours=MINIMUM_HOURS_BETWEEN_SHIFTS)]
+    except Exception as e:
+        logger.warning(f"Cross-venue check failed for roster {getattr(roster, 'id', '?')}: {e}")
+        return []
+
+
 def neighbour_shifts(db, roster, employee_id: str, exclude_id: Optional[str] = None) -> list:
     """The person's other shifts in this roster and in the live rosters of the
     weeks either side (an overnight close runs into the next week)."""
@@ -228,15 +272,14 @@ def check_shift(db, roster, venue, employee, shift, exclude_id: Optional[str] = 
         warn("max_hours", f"{employee.name} would be rostered {week_hours:g}h this week, "
                           f"over their {cap:g}h maximum.")
 
-    from rosteriq.services.visa import fortnight_cap_flags, visa_alerts
+    from rosteriq.services.visa import visa_alerts
     try:
         prev = current_roster(db, roster.venue_id, week_monday(roster.week_start) - timedelta(days=7))
     except Exception:
         prev = None
     if prev is not None and prev.id == roster.id:
         prev = None
-    trial = roster.model_copy(update={"shifts": week_shifts + [shift]})
-    for flag in fortnight_cap_flags(trial, [employee], prev):
+    for flag in visa_cap_flags(db, roster, [employee], prev, shifts=week_shifts + [shift]):
         warn("visa_cap", flag["message"])
     for alert in visa_alerts([employee], today=shift.date):
         if alert["kind"] == "expired":
@@ -391,49 +434,129 @@ def affected_staff(changes: list) -> tuple:
 
 
 # ---------------------------------------------------------------------------
+# covers on a shift the manager changes by hand
+# ---------------------------------------------------------------------------
+
+def _cover_terms(shift) -> tuple:
+    """What a cover request promises: who holds the shift, when, and the
+    area that decides who may claim it."""
+    return (shift.employee_id or OPEN, shift.date, shift.start_time, shift.end_time,
+            normalise_area(shift.role))
+
+
+def settle_covers(db, venue_id: str, before, after, actor_id: Optional[str]) -> list:
+    """Withdraw the open or claimed cover requests on a shift the manager has
+    filled, reassigned, moved, retimed, re-areaed or (``after`` None)
+    deleted, so a later claim can't take it off whoever the manager put on
+    it. A shift that is still open is posted for cover again with its new
+    details. Returns warnings for the manager."""
+    if after is not None and _cover_terms(before) == _cover_terms(after):
+        return []
+    try:
+        covers = [c for c in (db.list_shift_covers(venue_id) or [])
+                  if c.get("shift_id") == before.id and c.get("status") in LIVE_COVER]
+    except Exception as e:
+        logger.warning(f"Cover lookup failed for shift {before.id} at {venue_id}: {e}")
+        return []
+    if not covers:
+        return []
+    from rosteriq.services.events import audit
+    if after is None:
+        note = "The shift was taken off the roster."
+    elif not is_open(after):
+        note = "The shift was filled on the roster." if is_open(before) else "The shift was changed on the roster."
+    else:
+        note = "The shift was changed on the roster and posted for cover again."
+    now = datetime.utcnow()
+    claimants = []
+    for c in covers:
+        db.save_shift_cover(dict(c, status=WITHDRAWN, decided_by=actor_id, decided_at=now, decision_note=note))
+        audit("cover.withdrawn", venue_id, "shift_cover", c.get("id"), shift_id=before.id,
+              previous_status=c.get("status"), claimed_by=c.get("claimed_by"),
+              origin=c.get("origin") or "staff", deleted=after is None, note=note)
+        claimant = db.get_employee(c["claimed_by"]) if c.get("claimed_by") else None
+        if claimant is not None and getattr(claimant, "venue_id", None) == venue_id:
+            claimants.append(claimant)
+    message = "The cover request for this shift was withdrawn"
+    if after is not None and is_open(after):
+        first = next((c for c in covers if c.get("origin") == "leave"), covers[0])
+        db.save_shift_cover({
+            "id": f"cv-{uuid.uuid4().hex[:10]}",
+            "venue_id": venue_id,
+            "shift_id": after.id,
+            "shift_date": after.date,
+            "shift_start": hhmm(after.start_time),
+            "shift_end": hhmm(after.end_time),
+            "role": after.role,
+            "requested_by": first.get("requested_by"),
+            "reason": "",
+            "origin": "leave",
+            "claimed_by": None,
+            "status": "open",
+            "created_at": now,
+        })
+        message += " and the open shift posted for cover again with its new details"
+    message += "."
+    for e in claimants:
+        if after is not None and e.id == after.employee_id:
+            message += f" {e.name} had claimed it and is now on it."
+        else:
+            message += f" {e.name} had claimed it — let them know."
+    return [{"code": "cover_withdrawn", "message": message}]
+
+
+# ---------------------------------------------------------------------------
 # copy a week forward
 # ---------------------------------------------------------------------------
 
 def copy_roster(db, source, target_monday: date, venue) -> tuple:
-    """(new draft roster, skipped rows). Skips anyone no longer on this
-    venue's staff, inactive, on approved leave or marked unavailable on the
-    new date."""
+    """(new draft roster, skipped rows, left-open rows). A shift that was
+    open, or whose person is no longer on this venue's staff, inactive, on
+    approved leave or unavailable on the new date, is copied as an open
+    shift for the manager to fill. A shift that would land outside the
+    target week is skipped."""
     shift_days = (target_monday - week_monday(source.week_start)).days
     target_end = target_monday + timedelta(days=6)
     leave = approved_leave(db, source.venue_id)
     state = venue_state(venue)
     employees: dict = {}
-    shifts, skipped = [], []
+    shifts, skipped, left_open = [], [], []
     for s in sorted(source.shifts, key=lambda x: (x.date, x.start_time)):
         new_date = s.date + timedelta(days=shift_days)
-        if s.employee_id not in employees:
-            emp = db.get_employee(s.employee_id)
-            employees[s.employee_id] = emp if emp is not None and emp.venue_id == source.venue_id else None
-        emp = employees[s.employee_id]
+        emp = None
+        if not is_open(s):
+            if s.employee_id not in employees:
+                emp = db.get_employee(s.employee_id)
+                employees[s.employee_id] = emp if emp is not None and emp.venue_id == source.venue_id else None
+            emp = employees[s.employee_id]
+        row = {"employee_id": s.employee_id,
+               "name": "Open shift" if is_open(s) else getattr(emp, "name", None) or "A former staff member",
+               "date": new_date.isoformat(), "start": hhmm(s.start_time),
+               "end": hhmm(s.end_time), "role": s.role}
+        if not target_monday <= new_date <= target_end:
+            skipped.append(dict(row, reason="outside the week"))
+            continue
         reason = None
-        if emp is None:
+        if is_open(s):
+            reason = "open last week"
+        elif emp is None:
             reason = "no longer on this venue's staff"
         elif not is_active(emp):
             reason = "inactive"
-        elif not target_monday <= new_date <= target_end:
-            reason = "outside the week"
         elif on_leave(leave, emp.id, new_date):
             reason = "on approved leave"
         elif not is_available(getattr(emp, "availability", None), new_date, s.start_time, s.end_time):
             reason = "unavailable"
+        new = Shift(id=f"shift-{uuid.uuid4().hex[:10]}", employee_id=OPEN if reason else s.employee_id,
+                    date=new_date, start_time=s.start_time, end_time=s.end_time,
+                    break_minutes=s.break_minutes, status=ShiftStatus.scheduled, role=s.role)
         if reason:
-            skipped.append({"employee_id": s.employee_id,
-                            "name": getattr(emp, "name", None) or "Unknown staff member",
-                            "date": new_date.isoformat(), "start": hhmm(s.start_time),
-                            "end": hhmm(s.end_time), "role": s.role, "reason": reason})
-            continue
-        new = Shift(id=f"shift-{uuid.uuid4().hex[:10]}", employee_id=s.employee_id, date=new_date,
-                    start_time=s.start_time, end_time=s.end_time, break_minutes=s.break_minutes,
-                    status=ShiftStatus.scheduled, role=s.role)
-        cost_shift(new, emp, state)
+            left_open.append(dict(row, reason=reason))
+        else:
+            cost_shift(new, emp, state)
         shifts.append(new)
     roster = Roster(id=f"copy-{uuid.uuid4().hex[:10]}", venue_id=source.venue_id,
                     week_start=target_monday, week_end=target_end, shifts=shifts,
                     total_cost=None, created_at=datetime.utcnow())
     recost_total(roster, {k: v for k, v in employees.items() if v is not None}, state)
-    return roster, skipped
+    return roster, skipped, left_open

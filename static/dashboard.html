@@ -15152,14 +15152,14 @@ function openShiftEditor(shiftId, empId, day) {
   }
   const shift = shiftId ? (roster.shifts || []).find(s => s.id === shiftId) : null;
   if (shiftId && !shift) { showToast('That shift has changed — reloading the week.', 'warning'); loadRosterForWeek(); return; }
-  shiftEdit = { id: shift ? shift.id : null, rosterId: roster.id };
+  shiftEdit = { id: shift ? shift.id : null, rosterId: roster.id, open: !!(shift && !shift.employee_id) };
   document.getElementById('es-title').textContent = shift ? 'Edit shift' : 'Add shift';
 
   const people = rosterPeople().filter(e => e.active !== false || (shift && e.id === shift.employee_id))
     .slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
   let opts = '<option value="">Choose a person…</option>' +
     people.map(e => '<option value="' + escAttr(e.id) + '">' + esc(e.name) + '</option>').join('');
-  if (shift && !people.some(e => e.id === shift.employee_id)) {
+  if (shift && shift.employee_id && !people.some(e => e.id === shift.employee_id)) {
     opts += '<option value="' + escAttr(shift.employee_id) + '">' + esc(shift.employee_id) + '</option>';
   }
   const who = document.getElementById('es-emp');
@@ -15215,7 +15215,11 @@ async function saveShiftEdit() {
     break_minutes: parseInt(document.getElementById('es-break').value, 10) || 0,
     role: document.getElementById('es-role').value.trim(),
   };
-  if (!body.employee_id) { shiftEditProblem('Choose who works this shift.'); return; }
+  if (!body.employee_id) {
+    // An open shift can be retimed or moved and stay open until someone is chosen.
+    if (!shiftEdit.open) { shiftEditProblem('Choose who works this shift.'); return; }
+    delete body.employee_id;
+  }
   if (!body.role) { shiftEditProblem('Choose the area this shift is in.'); return; }
   if (!body.start_time || !body.end_time) { shiftEditProblem('Set a start and an end time.'); return; }
   const btn = document.getElementById('es-save');
@@ -15318,18 +15322,24 @@ function renderCopyReport(result) {
   const box = document.getElementById('roster-copy-report');
   if (!box) return;
   const skipped = (result && result.skipped) || [];
+  const leftOpen = (result && result.left_open) || [];
   const visa = (result && result.visa_flags) || [];
+  const elsewhere = (result && result.cross_venue_warnings) || [];
+  const rows = list => '<ul style="margin:8px 0 0 18px; padding:0;">' + list.slice(0, 40).map(s =>
+      '<li>' + esc(s.name + ' — ' + rosterDayLabel(s.date) + ' ' + s.start + '-' + s.end + (s.role ? ' (' + s.role + ')' : '') + ': ' + s.reason) + '</li>'
+    ).join('') + (list.length > 40 ? '<li>' + esc('…and ' + (list.length - 40) + ' more') + '</li>' : '') + '</ul>';
   let html = '<div style="display:flex; justify-content:space-between; gap:12px; align-items:start;"><div><strong>' +
     esc('Copied ' + result.copied + (result.copied === 1 ? ' shift' : ' shifts') + ' from last week as a draft.') + '</strong>' +
-    (skipped.length ? ' ' + esc(skipped.length + ' left off:') : ' Nobody was left off.') + '</div>' +
+    (leftOpen.length ? ' ' + esc(leftOpen.length + (leftOpen.length === 1 ? ' shift' : ' shifts') + ' left open for you to fill:')
+      : (skipped.length ? '' : ' Nobody was left off.')) + '</div>' +
     '<button class="btn btn-secondary btn-small" onclick="document.getElementById(\'roster-copy-report\').style.display=\'none\'">Close</button></div>';
-  if (skipped.length) {
-    html += '<ul style="margin:8px 0 0 18px; padding:0;">' + skipped.slice(0, 40).map(s =>
-      '<li>' + esc(s.name + ' — ' + rosterDayLabel(s.date) + ' ' + s.start + '-' + s.end + (s.role ? ' (' + s.role + ')' : '') + ': ' + s.reason) + '</li>'
-    ).join('') + (skipped.length > 40 ? '<li>' + esc('…and ' + (skipped.length - 40) + ' more') + '</li>' : '') + '</ul>';
-  }
+  if (leftOpen.length) html += rows(leftOpen);
+  if (skipped.length) html += '<div style="margin-top:8px;">' + esc(skipped.length + ' left off:') + '</div>' + rows(skipped);
   if (visa.length) {
     html += '<div style="margin-top:8px; color:#B45309;">' + visa.map(f => esc(f.message)).join('<br>') + '</div>';
+  }
+  if (elsewhere.length) {
+    html += '<div style="margin-top:8px; color:#B45309;">' + elsewhere.map(m => esc(m)).join('<br>') + '</div>';
   }
   box.innerHTML = html;
   box.style.display = 'block';
@@ -15352,7 +15362,7 @@ async function copyLastWeek() {
   if (!src) { showToast('There’s no roster for the week of ' + rosterDayLabel(source) + ' to copy.', 'warning', 6000); return; }
   const onScreen = state.currentRoster && String(state.currentRoster.week_start || '').slice(0, 10) === target;
   if (!window.confirm('Copy the week of ' + rosterDayLabel(source) + ' into the week of ' + rosterDayLabel(target) +
-      ' as a new draft? Anyone now on approved leave, inactive or unavailable is left off.' +
+      ' as a new draft? Shifts for anyone now on approved leave, inactive or unavailable are left open for you to fill.' +
       (onScreen ? ' The copy replaces the draft on screen (it stays in the roster history).' : ''))) return;
   const btn = document.getElementById('btn-roster-copy-week');
   if (btn) btn.disabled = true;

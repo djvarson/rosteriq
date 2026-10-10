@@ -12,6 +12,8 @@ Shift edits are gated on the shift's area (enforce_section_manager), so a
 department manager edits only their own sections; copying a week is
 venue-wide. Edits to a published roster keep it published and staff see them
 at once; the manager re-notifies from the "changed since publish" list.
+Changing who, when or where a shift is, or deleting it, withdraws any cover
+request still open on it.
 """
 
 import datetime as dt
@@ -214,17 +216,20 @@ async def update_shift(roster_id: str, shift_id: str, body: ShiftUpdate):
                 "role": role,
             }
             _in_week(roster, fields["date"])
-            emp = _venue_employee(db, roster, fields["employee_id"])
+            # An open shift left open has nobody to check or price.
+            emp = _venue_employee(db, roster, fields["employee_id"]) if fields["employee_id"] else None
             shift = Shift(id=current.id, status=current.status,
                           penalty_multiplier=current.penalty_multiplier, **fields)
             _valid_times(shift)
             venue = db.get_venue(roster.venue_id)
-            try:
-                warnings = edit.check_shift(db, roster, venue, emp, shift, exclude_id=current.id)
-            except edit.ShiftClash as clash:
-                raise HTTPException(409, str(clash))
             state = edit.venue_state(venue)
-            edit.cost_shift(shift, emp, state)
+            warnings = []
+            if emp is not None:
+                try:
+                    warnings = edit.check_shift(db, roster, venue, emp, shift, exclude_id=current.id)
+                except edit.ShiftClash as clash:
+                    raise HTTPException(409, str(clash))
+                edit.cost_shift(shift, emp, state)
             roster.shifts = [shift if s.id == current.id else s for s in roster.shifts]
             edit.recost_total(roster, scoped_employee_map(db, roster.venue_id), state)
             after = edit.snapshot(shift, emp)
@@ -232,6 +237,7 @@ async def update_shift(roster_id: str, shift_id: str, body: ShiftUpdate):
                     {k: v for k, v in after.items() if k != "employee_name"}:
                 return _result(db, roster, shift, warnings, "unchanged")
             _save_and_record(db, roster, "update", before, after)
+            warnings = warnings + edit.settle_covers(db, roster.venue_id, current, shift, _actor())
     except edit.RosterBusy:
         raise _busy()
     return _result(db, roster, shift, warnings, "update")
@@ -252,9 +258,10 @@ async def delete_shift(roster_id: str, shift_id: str):
             venue = db.get_venue(roster.venue_id)
             edit.recost_total(roster, scoped_employee_map(db, roster.venue_id), edit.venue_state(venue))
             _save_and_record(db, roster, "delete", before, None)
+            notices = edit.settle_covers(db, roster.venue_id, current, None, _actor())
     except edit.RosterBusy:
         raise _busy()
-    return _result(db, roster, None, [], "delete")
+    return _result(db, roster, None, notices, "delete")
 
 
 @router.post("/rosters/{roster_id}/copy-to")
@@ -271,7 +278,7 @@ async def copy_roster_to(roster_id: str,
         raise HTTPException(409, f"The week of {target.isoformat()} already has a roster staff can see — "
                                  "edit that one instead, or recall it first.")
     venue = db.get_venue(source.venue_id)
-    roster, skipped = edit.copy_roster(db, source, target, venue)
+    roster, skipped, left_open = edit.copy_roster(db, source, target, venue)
     db.save_roster(roster)
     try:
         superseded = supersede_week_drafts(db, source.venue_id, target, roster.id,
@@ -280,23 +287,25 @@ async def copy_roster_to(roster_id: str,
     except Exception as e:
         logger.warning(f"Could not supersede drafts for {source.venue_id} {target}: {e}")
         superseded = []
-    from rosteriq.services.visa import fortnight_cap_flags
     employees = [e for e in (db.get_employees(source.venue_id) or [])]
     prev = current_roster(db, source.venue_id, target - timedelta(days=7))
-    visa_flags = fortnight_cap_flags(roster, employees, prev if prev and prev.id != roster.id else None)
+    visa_flags = edit.visa_cap_flags(db, roster, employees, prev if prev and prev.id != roster.id else None)
+    elsewhere = edit.cross_venue_warnings(db, roster, employees)
     audit("roster.copy", source.venue_id, "roster", roster.id, source_roster_id=source.id,
           week_start=target.isoformat(), shifts=len(roster.shifts), skipped=len(skipped),
-          superseded=len(superseded))
+          left_open=len(left_open), superseded=len(superseded))
     await _broadcast(roster, f"Copied the week of {source.week_start.isoformat()} into {target.isoformat()}")
     return {
         "roster": jsonable_encoder(roster),
         "roster_id": roster.id,
         "source_roster_id": source.id,
         "week_start": target.isoformat(),
-        "copied": len(roster.shifts),
+        "copied": len(roster.shifts) - len(left_open),
         "skipped": skipped,
+        "left_open": left_open,
         "superseded": superseded,
         "visa_flags": visa_flags,
+        "cross_venue_warnings": elsewhere,
         "total_cost": str(roster.total_cost) if roster.total_cost is not None else None,
     }
 
