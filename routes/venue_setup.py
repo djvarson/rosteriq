@@ -3,7 +3,9 @@ Areas & minimums — what the Settings card and the setup wizard's areas step
 read before they save through POST /venues.
 
     GET /api/venue-setup?venue_id=
-        areas            the venue's areas with per-weekday minimums
+        areas            the venue's areas with per-weekday minimums;
+                         follows_demand_set says whether follows_demand is
+                         the venue's own setting or the default
         trading_hours    the hours the venue recorded
         effective_hours  every weekday's hours as forecasting uses them, with
                          their source (recorded / roster history / default)
@@ -31,11 +33,16 @@ async def venue_setup(venue_id: str = Query(...)) -> dict:
     if venue is None:
         raise HTTPException(404, "Venue not found")
     today = venue_today(venue_id, db)
+    recorded = {" ".join(str(a.get("name", "")).lower().split()) for a in (venue.areas or [])
+                if isinstance(a, dict) and a.get("follows_demand") is not None}
+    areas = venue_areas(venue)
+    for a in areas:
+        a["follows_demand_set"] = a["name"] in recorded
     return {
         "venue_id": venue_id,
         "name": venue.name,
         "days": list(DAY_KEYS),
-        "areas": venue_areas(venue),
+        "areas": areas,
         "trading_hours": dict(venue.trading_hours or {}),
         "effective_hours": venue_trading_hours(db, venue, today),
         "default_hours": {"open": DEFAULT_OPEN, "close": DEFAULT_CLOSE},

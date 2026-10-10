@@ -9,6 +9,8 @@ Re-running the setup wizard posts the venue again. On an existing venue:
     when someone removes every area or every day's hours)
   * the name only changes with ``rename`` (the wizard's Rename button, or an
     edited name in Settings)
+  * an area sent without a per-area setting it has stored (follows_demand,
+    say, from a client that doesn't know it) keeps the stored value
   * created_at never changes
 Whenever a venue has areas, min_staff is each area's highest weekday minimum,
 for readers that only know min_staff (section pills, older reports).
@@ -31,6 +33,11 @@ def min_staff_from_areas(areas: list) -> dict:
     return {a["name"]: max((a.get("min_by_day") or {}).values(), default=0) for a in areas}
 
 
+def _keep_area_settings(stored: list, incoming: list) -> list:
+    by_name = {a.get("name"): a for a in stored or [] if isinstance(a, dict)}
+    return [{**by_name[a.get("name")], **a} if a.get("name") in by_name else a for a in incoming]
+
+
 def merge_venue_update(existing: Optional[VenueConfig], incoming: VenueConfig, *,
                        rename: bool = False, clear: Iterable[str] = ()) -> tuple:
     """(venue to save, [fields kept from the stored venue])."""
@@ -49,6 +56,10 @@ def merge_venue_update(existing: Optional[VenueConfig], incoming: VenueConfig, *
             if not getattr(incoming, field) and field not in clear and getattr(existing, field):
                 updates[field] = getattr(existing, field)
                 kept.append(field)
+        if incoming.areas and existing.areas:
+            merged = _keep_area_settings(existing.areas, incoming.areas)
+            if merged != incoming.areas:
+                updates["areas"] = merged
     areas = updates.get("areas", incoming.areas)
     if areas:
         updates["min_staff"] = min_staff_from_areas(areas)

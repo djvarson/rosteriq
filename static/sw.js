@@ -1,14 +1,16 @@
 /**
  * RosterIQ Service Worker
  *
- * Provides offline support with intelligent caching strategy:
- * - Network-first for HTML pages (stale-while-revalidate)
- * - Cache-first for static assets (CSS, JS, images)
- * - Network-only for API calls (never cache API responses)
- * - Background sync for failed POST requests
+ * Offline support for the app's own files under /static/ only:
+ * - Network-first for /static/ HTML pages (cached copy when offline)
+ * - Cache-first for other /static/ assets (CSS, JS, images)
+ * - Everything else (API and data routes such as /rosters, /employees,
+ *   /venues, /api/...), every non-GET request and anything cross-origin is
+ *   not intercepted: the browser sends it straight to the network.
  */
 
-const CACHE_NAME = 'rosteriq-v1';
+// Changing this makes activate delete every other cache.
+const CACHE_NAME = 'rosteriq-v2';
 const CRITICAL_ASSETS = [
   '/static/dashboard.html',
   '/static/staff.html',
@@ -48,17 +50,14 @@ self.addEventListener('activate', event => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames
-          .filter(name => name.startsWith('rosteriq-') && name !== CACHE_NAME)
+          .filter(name => name !== CACHE_NAME)
           .map(name => {
             console.log('[ServiceWorker] Deleting old cache:', name);
             return caches.delete(name);
           })
       );
-    })
+    }).then(() => self.clients.claim())
   );
-
-  // Take control of all pages immediately
-  self.clients.claim();
 });
 
 // ============================================================================
@@ -67,51 +66,13 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const { request } = event;
+  if (request.method !== 'GET') return;
   const url = new URL(request.url);
+  if (url.origin !== self.location.origin || !url.pathname.startsWith('/static/')) return;
 
-  // 1. Auth endpoints — network-only, never cache
-  if (url.pathname.startsWith('/api/auth/')) {
-    return event.respondWith(
-      fetch(request)
-        .catch(err => {
-          console.warn('[ServiceWorker] Auth request failed:', err);
-          return new Response(
-            JSON.stringify({ error: 'Auth request failed offline' }),
-            { status: 503, headers: { 'Content-Type': 'application/json' } }
-          );
-        })
-    );
-  }
-
-  // 2. API calls — network-only (never cache API responses)
-  if (url.pathname.startsWith('/api/')) {
-    return event.respondWith(
-      fetch(request)
-        .then(response => {
-          // Don't cache API responses
-          return response;
-        })
-        .catch(err => {
-          console.warn('[ServiceWorker] API request failed:', err);
-
-          // Check if there's a pending request to retry
-          if (request.method === 'POST' && !navigator.onLine) {
-            // Queue for background sync (if available)
-            if (self.registration && self.registration.sync) {
-              self.registration.sync.register('retry-failed-requests');
-            }
-          }
-
-          return new Response(
-            JSON.stringify({ error: 'Request failed offline' }),
-            { status: 503, headers: { 'Content-Type': 'application/json' } }
-          );
-        })
-    );
-  }
-
-  // 3. HTML pages — network-first with cache fallback (stale-while-revalidate)
-  if (request.headers.get('accept')?.includes('text/html')) {
+  // 1. HTML pages — network-first with cache fallback
+  const accept = request.headers.get('accept') || '';
+  if (request.mode === 'navigate' || accept.includes('text/html')) {
     return event.respondWith(
       fetch(request)
         .then(response => {
@@ -134,7 +95,7 @@ self.addEventListener('fetch', event => {
     );
   }
 
-  // 4. Static assets (CSS, JS, images) — cache-first
+  // 2. Static assets (CSS, JS, images) — cache-first
   return event.respondWith(
     caches.match(request).then(cached => {
       if (cached) {

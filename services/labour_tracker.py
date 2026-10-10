@@ -652,6 +652,8 @@ class LabourTracker:
         """Get number of staff on shift for each hour."""
         counts: Dict[int, int] = {}
         for shift in self._todays_shifts(venue_id, day):
+            if not shift.employee_id:
+                continue  # an open shift has nobody on it
             end_hour = shift.end_time.hour + (1 if shift.end_time.minute else 0)
             for hour in range(shift.start_time.hour, max(end_hour, shift.start_time.hour + 1)):
                 counts[hour] = counts.get(hour, 0) + 1
