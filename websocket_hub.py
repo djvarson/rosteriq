@@ -632,6 +632,8 @@ def _may_watch_venue(token: Optional[str], venue_id: str):
     except Exception as e:
         logger.info(f"WS refused: undecodable token ({type(e).__name__})")
         return False, None
+    if payload.get("type") == "kiosk":
+        return False, None  # a time clock device only ever uses the clock routes
 
     user_id = payload.get("sub")
     role = payload.get("role")

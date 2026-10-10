@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from rosteriq.api import app
 from rosteriq.database import get_db
 from rosteriq.models import Roster, Shift, ShiftStatus
+from rosteriq.tests.kiosk_support import kiosk_headers
 
 
 def _owner(c):
@@ -41,6 +42,7 @@ def test_full_clock_lifecycle_with_variance():
     c = TestClient(app)
     h = _owner(c)
     vid = _setup_venue(c, h)
+    k = kiosk_headers(c, h, vid)
 
     # Roster today's 8h shift (17:00-01:00 would complicate; use 09:00-17:00, 30m break)
     today = date.today()
@@ -63,12 +65,12 @@ def test_full_clock_lifecycle_with_variance():
     assert me["state"] == "off" and me["rostered"]["start"] == "09:00"
 
     # Clock in
-    r = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=h)
+    r = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=k)
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "clocked_in" and r.json()["rostered"] is True
 
     # Double clock-in rejected
-    r2 = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=h)
+    r2 = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=k)
     assert r2.status_code == 409
 
     # Board now shows on
@@ -78,7 +80,7 @@ def test_full_clock_lifecycle_with_variance():
 
     # Clock out with a 30m break
     r3 = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": "clk-emp-1",
-                                        "break_minutes": 30}, headers=h)
+                                        "break_minutes": 30}, headers=k)
     assert r3.status_code == 200, r3.text
     out = r3.json()
     assert out["status"] == "clocked_out"
@@ -87,7 +89,7 @@ def test_full_clock_lifecycle_with_variance():
     assert out["variance_minutes"] <= -400  # clocked out immediately vs 7.5h rostered
 
     # Clock out again rejected
-    r4 = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=h)
+    r4 = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=k)
     assert r4.status_code == 409
 
     # Timesheet feed contains the closed sheet
@@ -102,6 +104,7 @@ def test_pin_protection():
     c = TestClient(app)
     h = _owner(c)
     vid = _setup_venue(c, h, "clock-venue-pin")
+    k = kiosk_headers(c, h, vid)
 
     # Set a PIN
     r = c.post("/api/clock/pin", json={"venue_id": vid, "employee_id": "clk-emp-1",
@@ -110,12 +113,12 @@ def test_pin_protection():
 
     # Wrong PIN rejected
     bad = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1",
-                                        "pin": "9999"}, headers=h)
+                                        "pin": "9999"}, headers=k)
     assert bad.status_code == 403
 
     # Correct PIN accepted and marked verified
     ok = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1",
-                                       "pin": "4321"}, headers=h)
+                                       "pin": "4321"}, headers=k)
     assert ok.status_code == 200 and ok.json()["pin_verified"] is True
 
 
@@ -142,7 +145,8 @@ def test_unknown_employee_404():
     c = TestClient(app)
     h = _owner(c)
     vid = _setup_venue(c, h, "clock-venue-404")
-    r = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "ghost"}, headers=h)
+    k = kiosk_headers(c, h, vid)
+    r = c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "ghost"}, headers=k)
     assert r.status_code == 404
 
 
@@ -152,12 +156,13 @@ def test_review_approve_and_correct():
     c = TestClient(app)
     h = _owner(c)
     vid = _setup_venue(c, h, "clock-venue-review")
+    k = kiosk_headers(c, h, vid)
     today = date.today()
 
     # Punch in+out
-    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=h)
+    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=k)
     out = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": "clk-emp-1"},
-                 headers=h).json()
+                 headers=k).json()
     ts_id = out["timesheet_id"]
 
     # Correction without a note -> 422
@@ -197,10 +202,11 @@ def test_review_rejects_impossible_times():
     c = TestClient(app)
     h = _owner(c)
     vid = _setup_venue(c, h, "clock-venue-review2")
+    k = kiosk_headers(c, h, vid)
     today = date.today()
-    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=h)
+    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": "clk-emp-1"}, headers=k)
     ts_id = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": "clk-emp-1"},
-                   headers=h).json()["timesheet_id"]
+                   headers=k).json()["timesheet_id"]
     r = c.post(f"/api/clock/timesheets/{ts_id}/review", json={
         "venue_id": vid, "approve": True,
         "clock_in": datetime.combine(today, dtime(15, 0)).isoformat(),

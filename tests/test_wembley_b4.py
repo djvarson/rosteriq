@@ -265,9 +265,11 @@ def test_inactive_people_are_never_offered_work(wem):
     named = {e["name"] for e in sos["available"] + sos["unavailable"]}
     assert "Liam Hart" not in named and "Ava Moss" in named
     # Kiosk board, and the kiosk refuses a clock-in
-    board = c.get(f"/api/clock/board?venue_id={WEM}", headers=wem["ben"]).json()["staff"]
+    from rosteriq.tests.kiosk_support import kiosk_headers
+    kiosk = kiosk_headers(c, wem["ben"], WEM, "Bar tablet")
+    board = c.get(f"/api/clock/board?venue_id={WEM}", headers=kiosk).json()["staff"]
     assert "w-liam" not in {s["employee_id"] for s in board}
-    r = c.post("/api/clock/in", json={"venue_id": WEM, "employee_id": "w-liam"}, headers=wem["ben"])
+    r = c.post("/api/clock/in", json={"venue_id": WEM, "employee_id": "w-liam"}, headers=kiosk)
     assert r.status_code == 409 and "no longer active" in _detail(r)
     # Notices
     r = c.post("/api/announcements", json={"venue_id": WEM, "title": "Derby", "body": "In at 4",

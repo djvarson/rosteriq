@@ -9,6 +9,7 @@ from datetime import date, datetime, time as dtime
 from fastapi.testclient import TestClient
 
 from rosteriq.api import app
+from rosteriq.tests.kiosk_support import kiosk_headers
 
 
 def _owner(c):
@@ -36,9 +37,10 @@ def test_zero_minute_punch_warns_but_is_never_blocked():
     h = _owner(c)
     vid = "hd-venue-punch"
     _setup(c, h, vid)
-    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": f"{vid}-emp"}, headers=h)
+    k = kiosk_headers(c, h, vid)
+    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": f"{vid}-emp"}, headers=k)
     out = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": f"{vid}-emp"},
-                 headers=h).json()
+                 headers=k).json()
     assert out["status"] == "clocked_out"          # the punch is a fact, kept
     assert "accidental punch" in out["warning"]    # but flagged loudly
 
@@ -48,9 +50,10 @@ def test_payroll_csv_names_every_allowance():
     h = _owner(c)
     vid = "hd-venue-csv"
     _setup(c, h, vid)
-    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": f"{vid}-emp"}, headers=h)
+    k = kiosk_headers(c, h, vid)
+    c.post("/api/clock/in", json={"venue_id": vid, "employee_id": f"{vid}-emp"}, headers=k)
     ts_id = c.post("/api/clock/out", json={"venue_id": vid, "employee_id": f"{vid}-emp"},
-                   headers=h).json()["timesheet_id"]
+                   headers=k).json()["timesheet_id"]
     today = date.today()
     c.post(f"/api/clock/timesheets/{ts_id}/review", json={
         "venue_id": vid, "approve": True,

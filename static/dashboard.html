@@ -3513,6 +3513,7 @@
                 <button class="btn btn-secondary btn-small" onclick="exportStaffContacts()" title="Download staff contact list">Export Contacts</button>
                 <button class="btn btn-secondary btn-small" onclick="openStaffImport()" title="Paste a staff export from Deputy, Tanda, or a spreadsheet">Import from export</button>
                 <button class="btn btn-secondary btn-small" id="btn-join-codes" onclick="openJoinCodes()" title="Every unlinked person's join code, to download or print">Join codes</button>
+                <button class="btn btn-secondary btn-small" onclick="generateKioskPins()" title="A time clock PIN for everyone who hasn't got one, shown once with a printable sheet">Generate PINs</button>
                 <button class="btn btn-primary btn-small" id="btn-add-staff">+ Add Staff</button>
               </div>
             </div>
@@ -3653,9 +3654,10 @@
             </div>
             <div class="input-group" style="margin:0;">
               <label>Status</label>
-              <select id="ts-status">
+              <select id="ts-status" onchange="loadTimesheets()">
                 <option value="">All</option>
-                <option value="open">Open (still clocked in)</option>
+                <option value="review">Needs a look</option>
+                <option value="open">Open punches (any date)</option>
                 <option value="closed">Awaiting approval</option>
                 <option value="approved">Approved</option>
               </select>
@@ -3663,12 +3665,18 @@
             <button class="btn btn-secondary" onclick="loadTimesheets()">Load</button>
             <span id="ts-summary" style="color:var(--text-muted); font-size:13px; margin-left:auto;"></span>
           </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px;">
+            <button class="btn btn-primary btn-small" id="ts-approve-clean" onclick="approveAllClean()" title="Within 15 min of the roster, PIN verified, break recorded or deducted as rostered">Approve all clean</button>
+            <button class="btn btn-secondary btn-small" id="ts-approve-selected" onclick="approveSelected()" disabled>Approve selected</button>
+            <span style="color:var(--text-muted); font-size:12px;">Clean = within 15 min of the roster, PIN verified, break recorded or deducted as rostered. Flagged rows stay for a look.</span>
+          </div>
         </div>
         <div class="card">
           <div style="overflow-x:auto;">
             <table class="table" style="width:100%; border-collapse:collapse;">
               <thead>
                 <tr>
+                  <th style="padding:10px 8px; width:28px;"><input type="checkbox" id="ts-select-all" onclick="tsToggleAll(this.checked)" title="Select every timesheet awaiting approval"></th>
                   <th style="padding:10px 8px;">Staff</th>
                   <th style="padding:10px 8px;">Date</th>
                   <th style="padding:10px 8px;">In</th>
@@ -3681,7 +3689,7 @@
                 </tr>
               </thead>
               <tbody id="ts-rows">
-                <tr><td colspan="9" style="padding:24px; text-align:center; color:var(--text-muted);">Pick a date range and Load</td></tr>
+                <tr><td colspan="10" style="padding:24px; text-align:center; color:var(--text-muted);">Pick a date range and Load</td></tr>
               </tbody>
             </table>
           </div>
@@ -4669,6 +4677,16 @@
               <p class="ae-note" style="margin:4px 0 0; max-width:640px;">The areas you staff, the fewest people each needs on each day, and when you trade. Rosters, the coverage check and the forecast all work from these.</p>
               <div id="settings-areas"></div>
             </div>
+            <div class="card" id="tc-settings-card">
+              <div class="chart-title">Time clock</div>
+              <p style="font-size:13px; color:var(--text-secondary); margin:4px 0 14px; max-width:620px;">The venue tablet runs the time clock on its own device key, never on someone's login. Set it up on the tablet itself; switch it off here if it's lost or replaced.</p>
+              <button class="btn btn-primary" id="tc-setup-btn" onclick="setupTimeClockHere()">Set up this device as the time clock</button>
+              <div id="tc-devices" style="margin-top:14px;"></div>
+              <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border); display:grid; gap:12px; max-width:620px;">
+                <label style="display:flex; gap:10px; align-items:flex-start; font-size:13px; cursor:pointer;"><input type="checkbox" id="tc-auto-break" onchange="saveTimeClockSetting('auto_meal_break', this.checked)" style="margin-top:3px;"> <span><b>Take the rostered meal break off when none was recorded</b> on a shift long enough to need one. The timesheet shows "auto 30m (rostered)" and it's flagged for a look. Advisor to confirm.</span></label>
+                <label style="display:flex; gap:10px; align-items:flex-start; font-size:13px; cursor:pointer;"><input type="checkbox" id="tc-self-clock" onchange="saveTimeClockSetting('allow_self_clock', this.checked)" style="margin-top:3px;"> <span><b>Let staff clock themselves in and out from their phone</b> (staff app). Off: punches only come from the venue's time clock.</span></label>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -5329,6 +5347,39 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-edit-timesheet')">Cancel</button>
       <button class="btn btn-primary" id="ets-save">Save &amp; Approve</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal-kiosk-pin">
+  <div class="modal-content" style="max-width:420px;">
+    <div class="modal-header">Kiosk PIN</div>
+    <div class="modal-body">
+      <p id="kp-who" style="font-weight:600; margin-bottom:12px;"></p>
+      <div class="input-group">
+        <label>4&ndash;6 digit PIN they type on the time clock</label>
+        <input type="text" id="kp-pin" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="e.g. 4821">
+      </div>
+      <p style="color:var(--text-muted); font-size:13px; line-height:1.5;">A new PIN replaces the old one and lifts a lockout. Staff can also set their own in the staff app, under Hours.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-kiosk-pin')">Cancel</button>
+      <button class="btn btn-secondary" onclick="suggestKioskPin()">Make one up</button>
+      <button class="btn btn-primary" onclick="saveKioskPin()">Set PIN</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal-kiosk-pins">
+  <div class="modal-content" style="max-width:520px;">
+    <div class="modal-header">New kiosk PINs</div>
+    <div class="modal-body">
+      <p style="color:#B45309; font-size:13px; margin-bottom:10px;">Shown once. Print the sheet or hand them out now &mdash; RosterIQ keeps only a scrambled copy.</p>
+      <div id="kps-list" style="max-height:50vh; overflow:auto;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeKioskPins()">Done</button>
+      <button class="btn btn-primary" onclick="printKioskPins()">Print sheet</button>
     </div>
   </div>
 </div>
@@ -6371,6 +6422,7 @@ function showPage(pageId) {
 
   if (pageId === 'settings') {
     loadVenueSettings();
+    loadTimeClockSettings();
   }
 
   if (pageId === 'reports' && !state.isDemo) {
@@ -6615,6 +6667,7 @@ async function loadChecklistHistory() {
 // TIMESHEETS (review & approval)
 // ============================================
 let tsRows = [];
+let tsSelected = new Set();
 
 function initTimesheetDates() {
   const s = document.getElementById('ts-start');
@@ -6648,50 +6701,139 @@ async function loadTimesheets() {
   const start = document.getElementById('ts-start').value;
   const end = document.getElementById('ts-end').value;
   const status = document.getElementById('ts-status').value;
+  // Open punches ignore the range: a forgotten clock-out from last week still blocks payroll.
+  const range = status === 'open' ? '' : '&start_date=' + start + '&end_date=' + end;
   try {
     const data = await fetchAPI('/api/clock/timesheets?venue_id=' + encodeURIComponent(state.currentVenue) +
-      '&start_date=' + start + '&end_date=' + end + (status ? '&status=' + status : ''));
+      range + (status ? '&status=' + status : ''));
     tsRows = data.timesheets || [];
+    tsSelected = new Set();
+    const all = document.getElementById('ts-select-all');
+    if (all) all.checked = false;
     document.getElementById('ts-summary').textContent =
-      tsRows.length + ' timesheets · ' + tsMinutesLabel(data.total_worked_minutes || 0) + ' total worked';
+      tsRows.length + ' timesheets · ' + tsMinutesLabel(data.total_worked_minutes || 0) + ' total worked' +
+      (data.clean_count ? ' · ' + data.clean_count + ' clean' : '');
     renderTimesheets();
   } catch (e) {
     showToast('Failed to load timesheets: ' + e.message, 'error');
   }
 }
 
+function tsBreakLabel(t) {
+  const m = t.break_minutes || 0;
+  if (t.on_break) return 'on break';
+  if (t.break_source === 'auto') return 'auto ' + m + 'm (rostered)';
+  if (t.break_source === 'manager') return m + 'm (edited)';
+  return m + 'm';
+}
+
+function tsChip(t) {
+  const pill = function(bg, fg, label) {
+    return '<span style="background:' + bg + '; color:' + fg + '; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap;">' + label + '</span>';
+  };
+  if (t.status === 'approved') return pill('rgba(34,197,94,.15)', 'var(--success)', 'APPROVED');
+  if (t.status === 'open') {
+    if ((t.open_minutes || 0) > 14 * 60) return pill('rgba(220,38,38,.12)', '#B91C1C', 'OPEN ' + Math.floor(t.open_minutes / 60) + 'H — CHECK');
+    return pill('rgba(34,197,94,.12)', '#15803D', t.on_break ? 'ON BREAK' : 'ON SHIFT');
+  }
+  return t.clean ? pill('rgba(34,197,94,.12)', '#15803D', 'CLEAN') : pill('rgba(245,158,11,.15)', '#B45309', 'TO APPROVE');
+}
+
 function renderTimesheets() {
   const tbody = document.getElementById('ts-rows');
+  tsUpdateSelection();
   if (!tsRows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="padding:24px; text-align:center; color:var(--text-muted);">No timesheets in this range — staff clock in at /timeclock</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="padding:24px; text-align:center; color:var(--text-muted);">No timesheets here — staff clock in on the venue\'s time clock</td></tr>';
     return;
   }
   tbody.innerHTML = tsRows.map(function(t, i) {
     const v = t.variance_minutes;
     const vColor = v == null ? 'var(--text-muted)' : (Math.abs(v) <= 15 ? 'var(--success)' : (Math.abs(v) <= 45 ? 'var(--brand-blue)' : 'var(--danger)'));
-    const chip = t.status === 'approved'
-      ? '<span style="background:rgba(34,197,94,.15); color:var(--success); padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">APPROVED</span>'
-      : (t.status === 'open'
-        ? '<span style="background:rgba(34,197,94,.12); color:#15803D; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">ON SHIFT</span>'
-        : '<span style="background:rgba(245,158,11,.15); color:#B45309; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700;">TO APPROVE</span>');
+    const pick = t.status === 'closed'
+      ? '<input type="checkbox" onclick="tsPick(' + i + ', this.checked)"' + (tsSelected.has(t.id) ? ' checked' : '') + ' title="Select to approve">'
+      : '';
     const actions = t.status === 'closed'
       ? '<button class="btn btn-primary btn-small" onclick="approveTimesheet(' + i + ')">Approve</button> ' +
         '<button class="btn btn-secondary btn-small" onclick="openEditTimesheet(' + i + ')">Edit</button>'
-      : (t.status === 'approved' && t.adjustment_note
-        ? '<span title="' + t.adjustment_note.replace(/"/g, '&quot;') + '" style="color:var(--text-muted); font-size:12px; cursor:help;">✎ corrected</span>'
-        : '');
+      : (t.status === 'open'
+        ? '<button class="btn btn-secondary btn-small" onclick="openEditTimesheet(' + i + ')" title="Add the finish time (a note is required)">Edit</button>'
+        : (t.status === 'approved' && t.adjustment_note
+          ? '<span title="' + esc(t.adjustment_note).replace(/"/g, '&quot;') + '" style="color:var(--text-muted); font-size:12px; cursor:help;">✎ corrected</span>'
+          : ''));
+    const notes = [];
+    (t.flag_labels || []).concat(t.status === 'closed' ? (t.review_reasons || []) : []).forEach(function(n) {
+      if (n && n !== 'PIN not verified' && notes.indexOf(n) < 0) notes.push(n);
+    });
+    const noteLine = notes.length
+      ? '<div style="font-size:11px; color:#B45309; margin-top:2px;">' + notes.map(esc).join(' · ') + '</div>'
+      : '';
     return '<tr style="border-top:1px solid var(--border);">' +
-      '<td style="padding:10px 8px; font-weight:600;">' + esc(t.employee_name || '') + (t.pin_verified ? '' : ' <span title="No PIN was set for this punch" style="color:var(--text-muted); font-size:11px;">•unverified</span>') + '</td>' +
-      '<td style="padding:10px 8px;">' + t.work_date + '</td>' +
+      '<td style="padding:10px 8px;">' + pick + '</td>' +
+      '<td style="padding:10px 8px; font-weight:600;">' + esc(t.employee_name || '') + (t.pin_verified ? '' : ' <span title="No PIN was checked for this punch" style="color:var(--text-muted); font-size:11px;">•unverified</span>') + noteLine + '</td>' +
+      '<td style="padding:10px 8px;">' + esc(t.work_date) + '</td>' +
       '<td style="padding:10px 8px;">' + tsTimeLabel(t.clock_in) + '</td>' +
       '<td style="padding:10px 8px;">' + tsTimeLabel(t.clock_out) + '</td>' +
-      '<td style="padding:10px 8px;">' + (t.break_minutes || 0) + 'm</td>' +
+      '<td style="padding:10px 8px; white-space:nowrap;">' + esc(tsBreakLabel(t)) + '</td>' +
       '<td style="padding:10px 8px; font-weight:600;">' + tsMinutesLabel(t.worked_minutes) + '</td>' +
       '<td style="padding:10px 8px; color:' + vColor + '; font-weight:600;">' + (v == null ? '—' : (v > 0 ? '+' : '') + tsMinutesLabel(v)) + '</td>' +
-      '<td style="padding:10px 8px;">' + chip + '</td>' +
+      '<td style="padding:10px 8px;">' + tsChip(t) + '</td>' +
       '<td style="padding:10px 8px; white-space:nowrap;">' + actions + '</td>' +
       '</tr>';
   }).join('');
+}
+
+function tsUpdateSelection() {
+  const sel = document.getElementById('ts-approve-selected');
+  if (sel) {
+    sel.disabled = tsSelected.size === 0;
+    sel.textContent = tsSelected.size ? 'Approve selected (' + tsSelected.size + ')' : 'Approve selected';
+  }
+  const clean = tsRows.filter(function(t) { return t.status === 'closed' && t.clean; }).length;
+  const btn = document.getElementById('ts-approve-clean');
+  if (btn) btn.textContent = clean ? 'Approve all clean (' + clean + ')' : 'Approve all clean';
+}
+
+function tsPick(i, on) {
+  const t = tsRows[i];
+  if (!t) return;
+  if (on) tsSelected.add(t.id); else tsSelected.delete(t.id);
+  tsUpdateSelection();
+}
+
+function tsToggleAll(on) {
+  tsSelected = new Set(on ? tsRows.filter(function(t) { return t.status === 'closed'; }).map(function(t) { return t.id; }) : []);
+  renderTimesheets();
+}
+
+async function tsBatchApprove(ids, onlyClean) {
+  try {
+    const res = await fetchAPI('/api/clock/timesheets/approve', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: state.currentVenue, ids: ids, only_clean: onlyClean }),
+    });
+    const skipped = res.skipped || [];
+    const why = skipped.slice(0, 3).map(function(s) { return (s.employee ? s.employee + ': ' : '') + s.reason; }).join('; ');
+    showToast(res.approved + ' approved ✓' + (skipped.length
+      ? ' — ' + skipped.length + ' left for a look (' + why + (skipped.length > 3 ? '; …' : '') + ')' : ''),
+      skipped.length ? 'warning' : 'success', skipped.length ? 8000 : 3000);
+    loadTimesheets();
+  } catch (e) {
+    showToast('Approve failed: ' + e.message, 'error');
+  }
+}
+
+async function approveAllClean() {
+  const ids = tsRows.filter(function(t) { return t.status === 'closed' && t.clean; }).map(function(t) { return t.id; });
+  if (!ids.length) { showToast('Nothing clean to approve here — the flagged rows need a look first', 'info'); return; }
+  if (!confirm('Approve ' + ids.length + ' clean timesheet' + (ids.length === 1 ? '' : 's') + '?')) return;
+  await tsBatchApprove(ids, true);
+}
+
+async function approveSelected() {
+  const ids = Array.from(tsSelected);
+  if (!ids.length) return;
+  if (!confirm('Approve the ' + ids.length + ' selected timesheet' + (ids.length === 1 ? '' : 's') + ' as they are?')) return;
+  await tsBatchApprove(ids, false);
 }
 
 // ============================================
@@ -8676,7 +8818,8 @@ let etsIndex = null;
 function openEditTimesheet(i) {
   etsIndex = i;
   const t = tsRows[i];
-  document.getElementById('ets-who').textContent = t.employee_name + ' — ' + t.work_date;
+  document.getElementById('ets-who').textContent = t.employee_name + ' — ' + t.work_date +
+    (t.status === 'open' ? ' · still clocked in: enter when they actually finished' : '');
   const toLocal = function(iso) {
     if (!iso) return '';
     const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
@@ -8705,6 +8848,8 @@ document.getElementById('ets-save').addEventListener('click', async function() {
     break_minutes: parseInt(document.getElementById('ets-break').value || '0', 10),
     note: document.getElementById('ets-note').value.trim(),
   };
+  if (!body.clock_out) { showToast('Enter the clock-out time', 'warning'); return; }
+  if (!body.note) { showToast('Add a note saying what you changed and why', 'warning'); return; }
   try {
     const res = await fetchAPI('/api/clock/timesheets/' + t.id + '/review', {
       method: 'POST', body: JSON.stringify(body),
@@ -8716,6 +8861,171 @@ document.getElementById('ets-save').addEventListener('click', async function() {
     showToast('Save failed: ' + e.message, 'error');
   }
 });
+
+// ============================================
+// TIME CLOCK SET-UP (kiosk PINs, devices, venue rules)
+// ============================================
+let _kioskPinEmp = null;
+let _kioskPinSheet = null;
+
+function openKioskPin(employeeId) {
+  _kioskPinEmp = employeeId;
+  const emp = (state.employees || []).find(function(e) { return e.id === employeeId; });
+  document.getElementById('kp-who').textContent = (emp && emp.name) || '';
+  document.getElementById('kp-pin').value = '';
+  openModal('modal-kiosk-pin');
+}
+
+function suggestKioskPin() {
+  let pin = '';
+  do {
+    pin = '';
+    for (let i = 0; i < 4; i++) pin += String(Math.floor(Math.random() * 10));
+  } while (/^(\d)\1+$/.test(pin) || pin === '1234' || pin === '4321');
+  document.getElementById('kp-pin').value = pin;
+}
+
+async function saveKioskPin() {
+  const pin = document.getElementById('kp-pin').value.trim();
+  if (!/^\d{4,6}$/.test(pin)) { showToast('A kiosk PIN is 4 to 6 digits', 'warning'); return; }
+  try {
+    const r = await fetchAPI('/api/clock/pin', {
+      method: 'POST',
+      body: JSON.stringify({ venue_id: state.currentVenue, employee_id: _kioskPinEmp, pin: pin }),
+    });
+    closeModal('modal-kiosk-pin');
+    showToast('Kiosk PIN set for ' + (r.employee || 'them') + ' ✓', 'success');
+  } catch (e) {
+    showToast('Could not set the PIN: ' + e.message, 'error');
+  }
+}
+
+function kioskPinTable(r) {
+  return '<table style="width:100%; border-collapse:collapse; font-size:14px;">' +
+    (r.pins || []).map(function(p) {
+      return '<tr style="border-top:1px dashed #C9C3B8;"><td style="padding:10px 6px;">' + esc(p.name) + '</td>' +
+        '<td style="padding:10px 6px; text-align:right; font-family:ui-monospace,Menlo,monospace; font-size:20px; font-weight:800; letter-spacing:3px;">' + esc(p.pin) + '</td></tr>';
+    }).join('') + '</table>';
+}
+
+async function generateKioskPins() {
+  if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
+  if (!confirm('Make a kiosk PIN for everyone here who hasn\'t got one? You\'ll see them once, to print or hand out.')) return;
+  try {
+    const r = await fetchAPI('/api/kiosk/pins/generate', {
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue }),
+    });
+    if (!r.count) { showToast('Everyone already has a kiosk PIN', 'info'); return; }
+    _kioskPinSheet = r;
+    document.getElementById('kps-list').innerHTML =
+      '<p style="font-size:13px; color:var(--text-muted); margin-bottom:6px;">' +
+      esc(r.count + ' new PIN' + (r.count === 1 ? '' : 's') + ' for ' + (r.venue_name || 'this venue')) + '</p>' +
+      kioskPinTable(r);
+    openModal('modal-kiosk-pins');
+  } catch (e) {
+    showToast('Could not make PINs: ' + e.message, 'error');
+  }
+}
+
+function printKioskPins() {
+  const r = _kioskPinSheet;
+  if (!r) return;
+  const w = window.open('', '_blank');
+  if (!w) { showToast('Allow pop-ups to print the PIN sheet', 'warning'); return; }
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Time clock PINs</title>' +
+    '<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;color:#111827}' +
+    'h1{font-size:20px;margin-bottom:6px}p{color:#55606E;font-size:13px}</style></head><body>' +
+    '<h1>' + esc((r.venue_name || 'Venue') + ' — time clock PINs') + '</h1>' +
+    '<p>Cut along the lines and give each person their own. Anyone can change theirs in the staff app.</p>' +
+    kioskPinTable(r) + '</body></html>');
+  w.document.close();
+  w.focus();
+  w.print();
+}
+
+function closeKioskPins() {
+  _kioskPinSheet = null;
+  document.getElementById('kps-list').innerHTML = '';
+  closeModal('modal-kiosk-pins');
+}
+
+function _timeClockVenueName() {
+  const v = (state.venues || []).find(function(x) { return x.id === state.currentVenue; });
+  return (v && v.name) || 'venue';
+}
+
+function _whenLabel(iso) {
+  if (!iso) return '';
+  const d = new Date(/Z|\+/.test(iso) ? iso : iso + 'Z');
+  return d.toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+async function loadTimeClockSettings() {
+  const box = document.getElementById('tc-devices');
+  if (!box || !state.currentVenue) return;
+  document.getElementById('tc-setup-btn').textContent = 'Set up this device as ' + _timeClockVenueName() + ' time clock';
+  try {
+    const results = await Promise.all([
+      fetchAPI('/api/kiosk/devices?venue_id=' + encodeURIComponent(state.currentVenue)),
+      fetchAPI('/api/kiosk/settings?venue_id=' + encodeURIComponent(state.currentVenue)),
+    ]);
+    document.getElementById('tc-auto-break').checked = !!results[1].auto_meal_break;
+    document.getElementById('tc-self-clock').checked = !!results[1].allow_self_clock;
+    renderKioskDevices(results[0].devices || []);
+  } catch (e) {
+    box.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">' + esc(e.message) + '</div>';
+  }
+}
+
+function renderKioskDevices(devices) {
+  const box = document.getElementById('tc-devices');
+  if (!devices.length) {
+    box.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">No time clock set up yet.</div>';
+    return;
+  }
+  box.innerHTML = '<table style="width:100%; border-collapse:collapse; font-size:13px;">' + devices.map(function(d) {
+    const status = d.active
+      ? 'Last used ' + (d.last_used_at ? _whenLabel(d.last_used_at) : 'not yet') + ' · set up ' + _whenLabel(d.created_at)
+      : 'Switched off ' + _whenLabel(d.revoked_at);
+    return '<tr style="border-top:1px solid var(--border);' + (d.active ? '' : ' color:var(--text-muted);') + '">' +
+      '<td style="padding:8px 6px; font-weight:600;">' + esc(d.name || 'Time clock') + '</td>' +
+      '<td style="padding:8px 6px;">' + esc(status) + '</td>' +
+      '<td style="padding:8px 6px; text-align:right;">' + (d.active
+        ? '<button class="btn btn-secondary btn-small" onclick="revokeKioskDevice(this.getAttribute(\'data-id\'))" data-id="' + esc(d.id) + '">Switch off</button>'
+        : '') + '</td></tr>';
+  }).join('') + '</table>';
+}
+
+async function revokeKioskDevice(id) {
+  if (!confirm('Switch this time clock off? It stops working straight away; set it up again on the tablet to bring it back.')) return;
+  try {
+    await fetchAPI('/api/kiosk/devices/' + encodeURIComponent(id) + '/revoke', {
+      method: 'POST', body: JSON.stringify({ venue_id: state.currentVenue }),
+    });
+    showToast('Time clock switched off', 'success');
+    loadTimeClockSettings();
+  } catch (e) {
+    showToast('Could not switch it off: ' + e.message, 'error');
+  }
+}
+
+async function saveTimeClockSetting(key, value) {
+  const body = { venue_id: state.currentVenue };
+  body[key] = !!value;
+  try {
+    await fetchAPI('/api/kiosk/settings', { method: 'PUT', body: JSON.stringify(body) });
+    showToast('Time clock setting saved', 'success');
+  } catch (e) {
+    showToast('Could not save: ' + e.message, 'error');
+    loadTimeClockSettings();
+  }
+}
+
+function setupTimeClockHere() {
+  if (!state.currentVenue) { showToast('Select a venue first', 'warning'); return; }
+  if (!confirm('Turn this browser into ' + _timeClockVenueName() + ' time clock? You\'ll be signed out of RosterIQ on this device.')) return;
+  window.location.href = '/timeclock?venue_id=' + encodeURIComponent(state.currentVenue);
+}
 
 // ============================================
 // CLOCK
@@ -9774,6 +10084,7 @@ function renderStaffTable() {
         (e.active === false ? '' :
         '<button class="btn btn-secondary btn-small" style="white-space:nowrap" onclick="showJoinCode(\'' + esc(e.id) + '\')" title="Code the staff member enters in the app to link their login">Join code</button>') +
         '<button class="btn btn-secondary btn-small" style="white-space:nowrap" onclick="openAccessModal(this.getAttribute(\'data-emp\'))" data-emp="' + esc(e.id) + '" title="Reset their login or change their dashboard access">Access</button>' +
+        '<button class="btn btn-secondary btn-small" style="white-space:nowrap" onclick="openKioskPin(this.getAttribute(\'data-emp\'))" data-emp="' + esc(e.id) + '" title="Set the PIN they type on the time clock">Kiosk PIN</button>' +
         '</div>'
       : '';
     var emailLine = e.email ? '<div style="font-size:11px;color:var(--text-muted)">' + esc(e.email) + '</div>' : '<div style="font-size:11px;color:var(--text-muted)">invite pending</div>';

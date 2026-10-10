@@ -536,6 +536,8 @@ except Exception as e:
 try:
     from rosteriq.routes.timeclock import router as timeclock_router
     app.include_router(timeclock_router)
+    from rosteriq.routes.kiosk import router as kiosk_router
+    app.include_router(kiosk_router)
     logger.info("Time clock routes registered")
 except ImportError:
     logger.info("Time clock routes not available — skipping")
