@@ -14,6 +14,7 @@ Usage:
 import os
 import json
 import logging
+from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
@@ -55,6 +56,23 @@ def _jsonb(value, default=None):
         return default
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+
+class OpenTimesheetExists(Exception):
+    """A second open punch for one person at one venue: a double tap that
+    reached both workers. Postgres enforces it (uq_timesheets_one_open)."""
+
+
+@contextmanager
+def _open_punch_guard(ts_id):
+    try:
+        yield
+    except Exception as e:
+        import psycopg2.errors
+        if isinstance(e, psycopg2.errors.UniqueViolation) and "uq_timesheets_one_open" in (
+                getattr(e.diag, "constraint_name", None) or str(e)):
+            raise OpenTimesheetExists(ts_id) from e
+        raise
 
 
 # ============================================================================
@@ -456,6 +474,12 @@ class BaseStore:
         raise NotImplementedError
 
     def get_timesheet(self, ts_id: str):
+        raise NotImplementedError
+
+    def end_timesheet_break(self, ts_id: str, minutes: int) -> Optional[int]:
+        """Add a finished break to a punch that is on one, in one step. The
+        new break total, or None when the punch is not on a break (the other
+        tap got there first)."""
         raise NotImplementedError
 
     def get_open_timesheet(self, venue_id: str, employee_id: str):
@@ -1278,10 +1302,25 @@ class MemoryStore(BaseStore):
     # --- Native time clock ---
 
     def save_timesheet(self, ts):
+        if not ts.get("clock_out") and any(
+                t["id"] != ts["id"] and t.get("venue_id") == ts.get("venue_id")
+                and t.get("employee_id") == ts.get("employee_id") and not t.get("clock_out")
+                for t in self._timesheets.values()):
+            raise OpenTimesheetExists(ts["id"])
         self._timesheets[ts["id"]] = dict(ts)
 
     def get_timesheet(self, ts_id):
         return self._timesheets.get(ts_id)
+
+    def end_timesheet_break(self, ts_id, minutes):
+        t = self._timesheets.get(ts_id)
+        if not t or not t.get("break_started_at"):
+            return None
+        t["break_minutes"] = int(t.get("break_minutes") or 0) + int(minutes)
+        if t["break_minutes"]:
+            t["break_source"] = "recorded"
+        t["break_started_at"] = None
+        return t["break_minutes"]
 
     def get_open_timesheet(self, venue_id, employee_id):
         for t in self._timesheets.values():
@@ -3950,6 +3989,7 @@ class PostgresStore(BaseStore):
                 logger.warning("Core-schema column ensure failed: %s", e)
         self._retire_legacy_blob_tables()
         self._ensure_indexes()
+        self._ensure_one_open_punch()
 
     # (table, index) for the per-venue lookups every screen makes. The core
     # ones repeat migration 001's names, so they are no-ops where 001 applied.
@@ -3987,6 +4027,33 @@ class PostgresStore(BaseStore):
                     cur.execute(ddl)
             except Exception as e:  # noqa: BLE001 — two workers may race the same index
                 logger.warning("Index ensure on %s failed: %s", table, e)
+
+    _ONE_OPEN_PUNCH_DDL = ("CREATE UNIQUE INDEX IF NOT EXISTS uq_timesheets_one_open "
+                           "ON timesheets (venue_id, employee_id) WHERE clock_out IS NULL")
+
+    def _ensure_one_open_punch(self) -> None:
+        """One open punch per person per venue, so a double tap that reaches
+        both workers can't clock someone in twice. While duplicates already
+        exist the index can't be built: they are logged and boot carries on,
+        and it lands on a later start once they are closed. Never raises."""
+        try:
+            with self._cursor() as cur:
+                self._ensure_table(cur, "timesheets")
+                cur.execute(self._ONE_OPEN_PUNCH_DDL)
+        except Exception as e:  # noqa: BLE001 — must not crash boot
+            logger.warning("One-open-punch index not created: %s", e)
+            try:
+                with self._cursor() as cur:
+                    cur.execute("""
+                        SELECT venue_id, employee_id, count(*) AS open_punches FROM timesheets
+                        WHERE clock_out IS NULL GROUP BY venue_id, employee_id HAVING count(*) > 1
+                    """)
+                    for row in cur.fetchall():
+                        logger.warning("Close the duplicate open punches on the Timesheets page: "
+                                       "venue %s employee %s has %s open",
+                                       row["venue_id"], row["employee_id"], row["open_punches"])
+            except Exception as e2:  # noqa: BLE001
+                logger.warning("Duplicate open punch check failed: %s", e2)
 
     # (table, the column the code reads) for tables an early migration 003
     # created in a normalised shape no code uses.
@@ -4117,7 +4184,7 @@ class PostgresStore(BaseStore):
     # --- Native time clock ---
 
     def save_timesheet(self, ts):
-        with self._cursor() as cur:
+        with self._cursor() as cur, _open_punch_guard(ts["id"]):
             self._ensure_table(cur, "timesheets")
             cur.execute("""
                 INSERT INTO timesheets (id, venue_id, employee_id, work_date, clock_in,
@@ -4128,6 +4195,7 @@ class PostgresStore(BaseStore):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (id) DO UPDATE SET
+                    work_date=EXCLUDED.work_date,
                     clock_in=EXCLUDED.clock_in, clock_out=EXCLUDED.clock_out,
                     break_minutes=EXCLUDED.break_minutes,
                     status=EXCLUDED.status, pin_verified=EXCLUDED.pin_verified,
@@ -4156,6 +4224,21 @@ class PostgresStore(BaseStore):
             cur.execute("SELECT * FROM timesheets WHERE id = %s", (ts_id,))
             row = cur.fetchone()
             return dict(row) if row else None
+
+    def end_timesheet_break(self, ts_id, minutes):
+        with self._cursor() as cur:
+            self._ensure_table(cur, "timesheets")
+            cur.execute("""
+                UPDATE timesheets SET
+                    break_minutes = COALESCE(break_minutes, 0) + %s,
+                    break_source = CASE WHEN COALESCE(break_minutes, 0) + %s > 0
+                                        THEN 'recorded' ELSE break_source END,
+                    break_started_at = NULL, updated_at = now()
+                WHERE id = %s AND break_started_at IS NOT NULL
+                RETURNING break_minutes
+            """, (int(minutes), int(minutes), ts_id))
+            row = cur.fetchone()
+            return int(row["break_minutes"]) if row else None
 
     def get_open_timesheet(self, venue_id, employee_id):
         with self._cursor() as cur:

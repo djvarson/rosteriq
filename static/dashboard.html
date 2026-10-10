@@ -9048,21 +9048,29 @@ async function approveTimesheet(i) {
 }
 
 let etsIndex = null;
+let etsShown = null;
 function openEditTimesheet(i) {
   etsIndex = i;
   const t = tsRows[i];
+  const open = t.status === 'open';
   document.getElementById('ets-who').textContent = t.employee_name + ' — ' + t.work_date +
-    (t.status === 'open' ? ' · still clocked in: enter when they actually finished' : '');
+    (open ? ' · still clocked in: enter when they actually finished' +
+      (t.on_break ? ' (they are on a break, which ends at that time)' : '') : '');
   const toLocal = function(iso) {
     if (!iso) return '';
     const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
     const p = function(n) { return String(n).padStart(2, '0'); };
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
   };
-  document.getElementById('ets-in').value = toLocal(t.clock_in);
-  document.getElementById('ets-out').value = toLocal(t.clock_out);
-  document.getElementById('ets-break').value = t.break_minutes || 0;
+  // An open punch shows the break it will close with: what was recorded, else the rostered meal break.
+  const brk = open && !t.break_minutes && !t.on_break && t.rostered
+    ? (t.rostered.break_minutes || 0) : (t.break_minutes || 0);
+  etsShown = { clockIn: toLocal(t.clock_in), clockOut: toLocal(t.clock_out), brk: String(brk) };
+  document.getElementById('ets-in').value = etsShown.clockIn;
+  document.getElementById('ets-out').value = etsShown.clockOut;
+  document.getElementById('ets-break').value = brk;
   document.getElementById('ets-note').value = '';
+  document.getElementById('ets-save').textContent = open ? 'Save finish time' : 'Save & Approve';
   openModal('modal-edit-timesheet');
 }
 
@@ -9073,22 +9081,32 @@ document.getElementById('ets-save').addEventListener('click', async function() {
     if (!localVal) return null;
     return new Date(localVal).toISOString().slice(0, 19);
   };
+  const open = t.status === 'open';
+  const inVal = document.getElementById('ets-in').value;
+  const outVal = document.getElementById('ets-out').value;
+  const brkVal = String(document.getElementById('ets-break').value);
+  // Only what the manager changed is sent: an untouched break leaves the
+  // server's rule to settle it (a break still running, the rostered meal break).
+  // A punch closed here goes to the review queue; a closed one is approved.
   const body = {
     venue_id: state.currentVenue,
-    approve: true,
-    clock_in: toUTC(document.getElementById('ets-in').value),
-    clock_out: toUTC(document.getElementById('ets-out').value),
-    break_minutes: parseInt(document.getElementById('ets-break').value || '0', 10),
+    approve: !open,
+    clock_in: inVal !== etsShown.clockIn ? toUTC(inVal) : null,
+    clock_out: outVal !== etsShown.clockOut ? toUTC(outVal) : null,
+    break_minutes: brkVal !== etsShown.brk ? parseInt(brkVal || '0', 10) : null,
     note: document.getElementById('ets-note').value.trim(),
   };
-  if (!body.clock_out) { showToast('Enter the clock-out time', 'warning'); return; }
+  if (!outVal) { showToast('Enter the clock-out time', 'warning'); return; }
   if (!body.note) { showToast('Add a note saying what you changed and why', 'warning'); return; }
   try {
     const res = await fetchAPI('/api/clock/timesheets/' + t.id + '/review', {
       method: 'POST', body: JSON.stringify(body),
     });
     closeModal('modal-edit-timesheet');
-    showToast(t.employee_name + ' corrected & approved — ' + tsMinutesLabel(res.worked_minutes), 'success');
+    showToast(open
+      ? t.employee_name + '\'s finish time saved — ' + tsMinutesLabel(res.worked_minutes) + ' worked, ' +
+        (res.break_minutes || 0) + 'm break. Approve it once checked.'
+      : t.employee_name + ' corrected & approved — ' + tsMinutesLabel(res.worked_minutes), 'success');
     loadTimesheets();
   } catch (e) {
     showToast('Save failed: ' + e.message, 'error');

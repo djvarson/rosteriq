@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from rosteriq.award_rules import get_minimum_break_minutes
-from rosteriq.database import get_db, _jsonb
+from rosteriq.database import get_db, _jsonb, OpenTimesheetExists
 from rosteriq.services.clock import venue_today, venue_timezone
 from rosteriq.services.current_roster import live_shifts
 from rosteriq.services import kiosk
@@ -83,7 +83,9 @@ class SetPinRequest(BaseModel):
 class ReviewRequest(BaseModel):
     """Manager review of a timesheet — optional corrections + approval."""
     venue_id: str
-    approve: bool = Field(default=True, description="Approve after (optional) corrections")
+    approve: bool = Field(default=True, description=(
+        "Approve after (optional) corrections. Closing an open punch approves it only when "
+        "this is sent explicitly."))
     clock_in: Optional[datetime] = Field(default=None, description="Corrected clock-in (UTC)")
     clock_out: Optional[datetime] = Field(default=None, description="Corrected clock-out (UTC)")
     break_minutes: Optional[int] = Field(default=None, ge=0, le=480)
@@ -277,7 +279,49 @@ def _span_minutes(ts) -> Optional[int]:
     return max(0, int((co - ci).total_seconds() // 60))
 
 
-def _finish(db, ts, clock_out: datetime, shift, settings: dict, add_flags=(), declared_break: int = 0):
+# Payroll prices a punch as one run of wall-clock time from its clock-in, so a
+# span of a whole day or more would wrap round to a short shift.
+MAX_SPAN_MINUTES = 24 * 60
+
+
+def _recheck_flags(ts, span: int) -> None:
+    """Re-derive the flags that follow from the punch's times and break."""
+    flags = set(_flags(ts)) - {"long_shift", "short_punch", "no_break"}
+    if span > kiosk.LONG_SHIFT_HOURS * 60:
+        flags.add("long_shift")
+    if span < 5:
+        flags.add("short_punch")
+    if not int(ts.get("break_minutes") or 0) and get_minimum_break_minutes(span / 60):
+        flags.add("no_break")
+    if ts.get("break_source") != "auto":
+        flags.discard("auto_break")
+    ts["flags"] = sorted(flags)
+
+
+def _overlapping_ids(sheets, now: Optional[datetime] = None) -> set:
+    """Ids of punches that overlap another of the same person's (an open one
+    runs to now)."""
+    now = now or datetime.utcnow()
+    by_emp: dict = {}
+    for t in sheets:
+        ci = naive_utc(t.get("clock_in"))
+        if ci is None:
+            continue
+        co = naive_utc(t.get("clock_out")) or max(now, ci)
+        by_emp.setdefault(t.get("employee_id"), []).append((ci, co, t["id"]))
+    out = set()
+    for spans in by_emp.values():
+        spans.sort()
+        for i, (_start, end, ts_id) in enumerate(spans):
+            for other_start, _end, other_id in spans[i + 1:]:
+                if other_start >= end:
+                    break
+                out.update((ts_id, other_id))
+    return out
+
+
+def _finish(db, ts, clock_out: datetime, shift, settings: dict, add_flags=(), declared_break: int = 0,
+            save: bool = True):
     """Close an open punch: settle the break, worked time, variance and the
     review flags. Returns (worked, span) minutes."""
     ci = naive_utc(ts["clock_in"])
@@ -314,7 +358,8 @@ def _finish(db, ts, clock_out: datetime, shift, settings: dict, add_flags=(), de
         "rostered_shift_id": ts.get("rostered_shift_id") or (shift.id if shift is not None else None),
         "flags": sorted(flags),
     })
-    db.save_timesheet(ts)
+    if save:
+        db.save_timesheet(ts)
     return worked, span
 
 
@@ -366,9 +411,11 @@ def _resolve_finish(hhmm: str, clock_in: datetime, now: datetime, tz) -> datetim
     return out
 
 
-def _review_state(ts, worked: Optional[int], span: Optional[int]):
+def _review_state(ts, worked: Optional[int], span: Optional[int],
+                  rostered_break: Optional[int] = None, overlaps: bool = False):
     """(clean, reasons). Clean = closed, within CLEAN_VARIANCE_MINUTES of the
-    roster, PIN verified, break recorded or auto-deducted, nothing flagged."""
+    roster, PIN verified, an unpaid break that meets the minimum and isn't
+    well over the rostered one, no overlapping punch, nothing flagged."""
     if ts.get("status") != "closed" or span is None:
         return False, []
     reasons = []
@@ -380,12 +427,41 @@ def _review_state(ts, worked: Optional[int], span: Optional[int]):
     if not ts.get("pin_verified"):
         reasons.append("PIN not verified")
     flags = set(_flags(ts))
-    if get_minimum_break_minutes(span / 60) and not int(ts.get("break_minutes") or 0):
+    brk = int(ts.get("break_minutes") or 0)
+    minimum = get_minimum_break_minutes(span / 60)
+    if minimum and not brk:
         reasons.append("no break recorded")
-    for f in ("finish_entered_later", "auto_closed", "long_shift", "short_punch"):
+    elif brk < minimum:
+        reasons.append(f"{brk} min break, under the {minimum} min meal break")
+    if rostered_break is not None and brk > rostered_break + kiosk.CLEAN_VARIANCE_MINUTES:
+        reasons.append(f"{brk} min unpaid break, {rostered_break} rostered — paid rest break included?")
+    if overlaps:
+        reasons.append("overlaps another punch for this person")
+    for f in ("finish_entered_later", "auto_closed", "manager_closed", "long_shift", "short_punch"):
         if f in flags:
             reasons.append(kiosk.FLAG_LABELS[f])
     return not reasons, reasons
+
+
+def _rostered_break(shift) -> Optional[int]:
+    return int(getattr(shift, "break_minutes", 0) or 0) if shift is not None else None
+
+
+def _review_context(db, venue_id: str, sheets: list):
+    """({shift id: rostered shift}, {ids of punches overlapping another of the
+    same person's}) for judging these timesheets. Neighbouring days and open
+    punches are read too, so an overnight or still-open double is seen."""
+    dates = [d for d in (_as_date(t.get("work_date")) for t in sheets) if d]
+    if not dates:
+        return {}, set()
+    lo, hi = min(dates), max(dates)
+    by_emp = _shifts_by_employee(db, venue_id, lo, hi)
+    shift_by_id = {s.id: s for shifts in by_emp.values() for s in shifts}
+    nearby = {t["id"]: t for t in (db.get_timesheets(venue_id, lo - timedelta(days=1),
+                                                      hi + timedelta(days=1)) or [])}
+    for t in list(sheets) + list(db.list_open_timesheets(venue_id) or []):
+        nearby.setdefault(t["id"], t)
+    return shift_by_id, _overlapping_ids(nearby.values())
 
 
 def _emp_name(db, venue_id, employee_id) -> str:
@@ -533,7 +609,10 @@ async def clock_in(body: PunchRequest) -> dict:
         "device_id": actor["device_id"],
         "created_at": now,
     }
-    db.save_timesheet(ts)
+    try:
+        db.save_timesheet(ts)
+    except OpenTimesheetExists:  # a second tap that reached the other worker
+        raise HTTPException(status_code=409, detail=f"{emp.name} is already clocked in")
     logger.info(f"Clock IN: {emp.name} at {body.venue_id} ({ts['id']}, {actor['source']})")
     return {
         "status": "clocked_in",
@@ -627,13 +706,11 @@ async def break_end(body: PunchRequest) -> dict:
         raise HTTPException(status_code=409, detail=f"{emp.name} is not on a break")
     now = datetime.utcnow()
     minutes = max(0, int((now - naive_utc(ts["break_started_at"])).total_seconds() // 60))
-    ts["break_minutes"] = int(ts.get("break_minutes") or 0) + minutes
-    if ts["break_minutes"]:
-        ts["break_source"] = "recorded"
-    ts["break_started_at"] = None
-    db.save_timesheet(ts)
+    total = db.end_timesheet_break(ts["id"], minutes)
+    if total is None:
+        raise HTTPException(status_code=409, detail=f"{emp.name} is not on a break")
     return {"status": "back_on_shift", "employee": emp.name, "at": now.isoformat(),
-            "break_minutes": minutes, "total_break_minutes": ts["break_minutes"]}
+            "break_minutes": minutes, "total_break_minutes": total}
 
 
 @router.post("/pin")
@@ -660,8 +737,11 @@ async def review_timesheet(
     user: UserContext = Depends(get_current_user),
 ) -> dict:
     """Manager reviews a timesheet: optionally corrects the punch times or
-    break (an open punch can be closed here by supplying clock_out), then
-    approves. Corrections recompute worked time and variance and are recorded
+    break, then approves. An open punch is closed here by supplying clock_out:
+    it settles like a clock-out on the kiosk (a break still running ends at the
+    finish time, the meal-break rule applies), is flagged manager_closed, and
+    is approved in the same step only when approve is sent explicitly.
+    Corrections recompute worked time, variance and flags and are recorded
     with who/when/why — approved time is what payroll exports use."""
     enforce_venue_manager(body.venue_id)
     db = get_db()
@@ -669,46 +749,60 @@ async def review_timesheet(
     if not ts or ts.get("venue_id") != body.venue_id:
         raise HTTPException(status_code=404, detail="Timesheet not found")
     ts = dict(ts)  # a refused correction must leave the stored punch untouched
-    if not ts.get("clock_out") and not body.clock_out:
+    was_open = not ts.get("clock_out")
+    if was_open and not body.clock_out:
         raise HTTPException(status_code=409, detail="Timesheet is still open — clock the employee out first (or supply a corrected clock_out)")
     if ts.get("status") == "approved":
         raise HTTPException(status_code=409, detail="Timesheet is already approved")
 
     before = {k: (str(ts.get(k)) if k != "break_minutes" else ts.get(k))
               for k in ("clock_in", "clock_out", "break_minutes")}
-    adjusted = False
-    for field in ("clock_in", "clock_out"):
-        val = getattr(body, field)
-        if val is not None:
-            ts[field] = naive_utc(val)
-            adjusted = True
-    if body.break_minutes is not None and body.break_minutes != ts.get("break_minutes"):
-        ts["break_minutes"] = body.break_minutes
-        ts["break_source"] = "manager"
-        adjusted = True
+    a = naive_utc(body.clock_in) if body.clock_in is not None else naive_utc(ts["clock_in"])
+    b = naive_utc(body.clock_out) if body.clock_out is not None else naive_utc(ts["clock_out"])
+    adjusted = (body.clock_in is not None or body.clock_out is not None
+                or (body.break_minutes is not None
+                    and body.break_minutes != int(ts.get("break_minutes") or 0)))
     if adjusted and not body.note:
         raise HTTPException(status_code=422, detail="A note is required when correcting a timesheet")
-
-    # Recompute worked minutes + variance from (possibly corrected) values
-    a, b = naive_utc(ts["clock_in"]), naive_utc(ts["clock_out"])
     if b <= a:
         raise HTTPException(status_code=422, detail="clock_out must be after clock_in")
-    worked = max(0, int((b - a).total_seconds() // 60) - int(ts.get("break_minutes") or 0))
+    if b - a >= timedelta(minutes=MAX_SPAN_MINUTES):
+        raise HTTPException(status_code=422, detail=(
+            "A timesheet can't run 24 hours or more — check the dates on the clock-in and clock-out."))
 
+    tz = _tz(body.venue_id, db)
+    ts["clock_in"] = a
+    if body.clock_in is not None:
+        moved_to = _local(a, tz).date()     # the venue-local day of the clock-in, as at the kiosk
+        if moved_to != _as_date(ts.get("work_date")):
+            ts["work_date"] = moved_to
+            ts["rostered_shift_id"] = None
     work_date = _as_date(ts.get("work_date"))
-    shift = _matched_shift(db, body.venue_id, dict(ts, clock_in=a), _tz(body.venue_id, db)) if work_date else None
-    ts["variance_minutes"] = (worked - _shift_minutes(shift)) if shift else ts.get("variance_minutes")
+    shift = _matched_shift(db, body.venue_id, ts, tz) if work_date else None
+    if was_open:
+        _finish(db, ts, b, shift, kiosk.load_settings(db, body.venue_id),
+                add_flags=("manager_closed",), save=False)
+    if body.break_minutes is not None and body.break_minutes != int(ts.get("break_minutes") or 0):
+        ts["break_minutes"] = body.break_minutes
+        ts["break_source"] = "manager"
+    ts["clock_out"] = b
+    span = int((b - a).total_seconds() // 60)
+    worked = max(0, span - int(ts.get("break_minutes") or 0))
+    if shift is not None:
+        ts["rostered_shift_id"] = shift.id
+    ts["variance_minutes"] = (worked - _shift_minutes(shift)) if shift is not None else None
+    _recheck_flags(ts, span)
 
     ts["break_started_at"] = None
     if ts.get("status") == "open":
         ts["status"] = "closed"
-    if body.approve:
+    approve = body.approve and (not was_open or "approve" in body.model_fields_set)
+    if approve:
         ts["status"] = "approved"
         ts["approved_by"] = user.user_id
         ts["approved_at"] = datetime.utcnow()
     if adjusted:
         ts["adjustment_note"] = body.note
-    ts["clock_in"], ts["clock_out"] = a, b
     db.save_timesheet(ts)
 
     # Event log: a correction and an approval are two separate facts a venue
@@ -725,7 +819,7 @@ async def review_timesheet(
               variance_minutes=ts.get("variance_minutes"), note=body.note,
               changed={k: {"old": before[k], "new": after[k]}
                        for k in after if before[k] != after[k]})
-    if body.approve:
+    if approve:
         audit("timesheet.approve", body.venue_id, "timesheet", ts_id,
               employee_id=ts["employee_id"], employee=emp_name,
               work_date=str(work_date), worked_minutes=worked,
@@ -735,13 +829,17 @@ async def review_timesheet(
 
     logger.info(
         f"Timesheet {ts_id} reviewed by {user.user_id}: "
-        f"{'adjusted, ' if adjusted else ''}{'approved' if body.approve else 'saved'} ({worked}m)"
+        f"{'adjusted, ' if adjusted else ''}{'approved' if approve else 'saved'} ({worked}m)"
     )
     return {
         "status": ts["status"],
         "timesheet_id": ts_id,
+        "work_date": str(work_date),
         "worked_minutes": worked,
+        "break_minutes": ts.get("break_minutes"),
+        "break_source": ts.get("break_source"),
         "variance_minutes": ts.get("variance_minutes"),
+        "flags": ts.get("flags") or [],
         "adjusted": adjusted,
         "approved_by": ts.get("approved_by"),
     }
@@ -758,10 +856,14 @@ async def approve_timesheets(
     enforce_venue_manager(body.venue_id)
     db = get_db()
     names = {e.id: e.name for e in (db.get_employees(body.venue_id) or [])}
-    approved, skipped = [], []
+    found = {}
     for ts_id in dict.fromkeys(body.ids):
         ts = db.get_timesheet(ts_id)
-        if not ts or ts.get("venue_id") != body.venue_id:
+        found[ts_id] = ts if ts and ts.get("venue_id") == body.venue_id else None
+    shift_by_id, overlapping = _review_context(db, body.venue_id, [t for t in found.values() if t])
+    approved, skipped = [], []
+    for ts_id, ts in found.items():
+        if not ts:
             skipped.append({"id": ts_id, "reason": "not found"})
             continue
         who = names.get(ts["employee_id"], ts["employee_id"])
@@ -773,8 +875,14 @@ async def approve_timesheets(
                             "reason": "still clocked in — edit it to add the finish time"})
             continue
         span = _span_minutes(ts)
+        if span >= MAX_SPAN_MINUTES:
+            skipped.append({"id": ts_id, "employee": who,
+                            "reason": "runs 24 hours or more — edit the times first"})
+            continue
         worked = max(0, span - int(ts.get("break_minutes") or 0))
-        clean, reasons = _review_state(ts, worked, span)
+        clean, reasons = _review_state(ts, worked, span,
+                                       _rostered_break(shift_by_id.get(ts.get("rostered_shift_id"))),
+                                       ts_id in overlapping)
         if body.only_clean and not clean:
             skipped.append({"id": ts_id, "employee": who, "reason": "; ".join(reasons)})
             continue
@@ -814,9 +922,7 @@ async def list_timesheets(
             raise HTTPException(status_code=422, detail="start_date and end_date are required")
         sheets = db.get_timesheets(venue_id, start_date, end_date) or []
     emp_names = {e.id: e.name for e in (db.get_employees(venue_id) or [])}
-    dates = [d for d in (_as_date(t.get("work_date")) for t in sheets) if d]
-    by_emp = _shifts_by_employee(db, venue_id, min(dates), max(dates)) if dates else {}
-    shift_by_id = {s.id: s for shifts in by_emp.values() for s in shifts}
+    shift_by_id, overlapping = _review_context(db, venue_id, sheets)
     now = datetime.utcnow()
 
     rows = []
@@ -829,12 +935,12 @@ async def list_timesheets(
         worked = None
         if span is not None:
             worked = max(0, span - int(t.get("break_minutes") or 0))
-            total_minutes += worked
-        clean, reasons = _review_state(t, worked, span)
+        shift = shift_by_id.get(t.get("rostered_shift_id"))
+        clean, reasons = _review_state(t, worked, span, _rostered_break(shift), t["id"] in overlapping)
         if status == "review" and (t.get("status") != "closed" or clean):
             continue
+        total_minutes += worked or 0
         flags = _flags(t)
-        shift = shift_by_id.get(t.get("rostered_shift_id"))
         rows.append({
             "id": t["id"],
             "employee_id": t["employee_id"],

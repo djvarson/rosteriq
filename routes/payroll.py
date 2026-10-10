@@ -14,7 +14,7 @@ Endpoints:
 import csv
 import io
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from decimal import Decimal
 from typing import Optional, List
@@ -35,6 +35,7 @@ from rosteriq.services.payroll_export import (
 from rosteriq.services.xero_payroll import XeroPayrollClient
 from rosteriq.services.keypay_export import KeyPayClient
 from rosteriq.services.events import audit
+from rosteriq.routes.timeclock import MAX_SPAN_MINUTES, _overlapping_ids, _span_minutes
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,38 @@ def _cross_venue_hours(db, venue_id: str, period_start: date, period_end: date) 
         return []
 
 
+def _salaried_elsewhere(db, venue_id: str, batch) -> List[str]:
+    """Salaried lines here whose person (same email) is also salaried at
+    another venue the caller fully manages: two fixed lines for one person.
+    Flags only — whether both are owed is the advisor's call."""
+    from rosteriq.middleware.tenant import get_tenant_context_optional
+    from rosteriq.services.pay_basis import is_salaried
+    from rosteriq.services.person_identity import person_key, records_by_person
+    from rosteriq.services.venue_access import fully_managed_group
+    tenant = get_tenant_context_optional()
+    lines = [e for e in batch.employees if e.pay_basis == "salaried"]
+    if tenant is None or not lines:
+        return []
+    try:
+        others = [v for v in fully_managed_group(db, tenant, venue_id) if v != venue_id]
+        if not others:
+            return []
+        index = records_by_person(db, others)
+        here = {e.id: e for e in (db.get_employees(venue_id) or [])}
+        out = []
+        for line in lines:
+            key = person_key(here.get(line.employee_id))
+            venues = sorted({vid for other, vid in index.get(key, []) if is_salaried(other)}) if key else []
+            if venues:
+                names = ", ".join(getattr(db.get_venue(v), "name", None) or v for v in venues)
+                out.append(f"{line.name} is also salaried at {names} — one person with a salary "
+                           "line at each venue; confirm with your advisor before paying both")
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Salaried-elsewhere check failed for {venue_id}: {e}")
+        return []
+
+
 class ExportResultResponse(BaseModel):
     """Response with export result."""
     success: bool
@@ -208,7 +241,9 @@ async def prepare_payroll_batch(
             shifts=shifts,
             employees=employees,
             leave_requests=db.list_leave_requests(request.venue_id),
+            rostered=True,
         )
+        batch.notes.extend(_salaried_elsewhere(db, request.venue_id, batch))
 
         # Validate batch
         errors = exporter.validate_batch(batch)
@@ -241,6 +276,27 @@ def _parse_dt(v):
     if isinstance(v, datetime):
         return v.replace(tzinfo=None)
     return datetime.fromisoformat(str(v).replace("Z", "+00:00")).replace(tzinfo=None)
+
+
+def _overlap_notes(sheets, employees, tz) -> List[str]:
+    """One note per person whose approved punches overlap: the same time is in
+    the batch twice (a double tap, or a correction onto another shift)."""
+    def _hhmm(v):
+        return _parse_dt(v).replace(tzinfo=timezone.utc).astimezone(tz).strftime("%H:%M")
+
+    overlapping = _overlapping_ids(sheets)
+    by_emp: dict = {}
+    for t in sheets:
+        if t.get("id") in overlapping:
+            by_emp.setdefault(t.get("employee_id"), []).append(t)
+    out = []
+    for emp_id, rows in by_emp.items():
+        name = getattr(employees.get(emp_id), "name", emp_id)
+        spans = ", ".join(f"{t.get('work_date')} {_hhmm(t['clock_in'])}-{_hhmm(t['clock_out'])}"
+                          for t in sorted(rows, key=lambda r: str(r.get("clock_in"))))
+        out.append(f"{name}: approved punches overlap ({spans}) — the same time is priced more "
+                   "than once in this batch; check them before using these hours")
+    return out
 
 
 @router.post("/prepare-actuals", response_model=PayrollBatchResponse)
@@ -295,10 +351,24 @@ async def prepare_payroll_from_timesheets(
     def _to_local(dt: datetime) -> datetime:
         return dt.replace(tzinfo=timezone.utc).astimezone(tz)
 
+    too_long = []
+    for t in sheets:
+        span = _span_minutes(t)
+        if span is not None and span >= MAX_SPAN_MINUTES:
+            emp_name = getattr(employees.get(t.get("employee_id")), "name", t.get("employee_id"))
+            too_long.append(f"{emp_name} on {t.get('work_date')} ({span // 60}h {span % 60:02d}m)")
+    if too_long:
+        raise HTTPException(
+            status_code=409,
+            detail="These timesheets run 24 hours or more, so they can't be priced as one "
+                   "shift — check their dates: " + "; ".join(sorted(too_long)))
+
+    # The Timesheets page's arithmetic: whole minutes of the punch's span from
+    # the clock-in's minute, so payroll hours equal what the manager approved.
     shifts = []
     for t in sheets:
-        ci, co = _parse_dt(t["clock_in"]), _parse_dt(t["clock_out"])
-        local_in, local_out = _to_local(ci), _to_local(co)
+        local_in = _to_local(_parse_dt(t["clock_in"])).replace(second=0, microsecond=0)
+        local_out = local_in + timedelta(minutes=_span_minutes(t))
         work_date = t.get("work_date")
         if isinstance(work_date, str):
             work_date = date.fromisoformat(work_date[:10])
@@ -325,6 +395,8 @@ async def prepare_payroll_from_timesheets(
         employees=employees,
         leave_requests=db.list_leave_requests(request.venue_id),
     )
+    batch.notes.extend(_overlap_notes(sheets, employees, tz))
+    batch.notes.extend(_salaried_elsewhere(db, request.venue_id, batch))
     errors = exporter.validate_batch(batch)
     db.save_payroll_batch(batch.to_dict())
     _audit_batch_created(batch, errors, basis="approved_timesheets")
@@ -405,6 +477,13 @@ async def payroll_batch_csv(batch_id: str, venue_id: str = Query(...)):
                 batch.get("total_overtime_hours"), batch.get("total_overtime_gross"),
                 "", batch.get("total_allowances"), batch.get("total_gross"),
                 batch.get("total_super"), "", "", batch.get("total_salary", ""), "", ""])
+    # What the prep found for the advisor: a leaver to prorate, unpaid leave,
+    # a day on paid leave left unpriced, overlapping punches.
+    notes = batch.get("validation_errors") or []
+    if notes:
+        w.writerow([])
+        for note in notes:
+            w.writerow(["Note", note])
 
     return PlainTextResponse(
         buf.getvalue(),

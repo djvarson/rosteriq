@@ -504,7 +504,8 @@ def test_approve_all_clean_skips_anything_that_needs_a_look():
     _sheet(w.vid, "ts-nopin", w.e2, pin_verified=False)
     _sheet(w.vid, "ts-late", w.me, variance_minutes=40)
     _sheet(w.vid, "ts-open", w.mgr_emp, clock_out=None, status="open")
-    _sheet(w.vid, "ts-done", w.e1, status="approved")
+    later = datetime.combine(date.today(), dtime(9, 0))      # e1's other shift that day, not a double
+    _sheet(w.vid, "ts-done", w.e1, status="approved", clock_in=later, clock_out=later + timedelta(hours=6))
     _sheet("apo-other", "ts-elsewhere", "someone")
     ids = ["ts-clean", "ts-nopin", "ts-late", "ts-open", "ts-done", "ts-elsewhere"]
 
@@ -866,8 +867,8 @@ async function main() {
 }
 """)
     assert data["off"] == ["Clock in"]
-    assert data["on"] == ["Start break", "Clock out"]
-    assert data["brk"] == ["End break", "Clock out"]
+    assert data["on"] == ["Start meal break (unpaid)", "Clock out"]
+    assert data["brk"] == ["End meal break", "Clock out"]
     assert data["stale"][0] == "Save my finish time" and data["finish"] == "block"
     assert data["sub"] == "Still clocked in from Tue 5:02 pm"
     assert "Enter the time you finished" in data["err"]
