@@ -7,6 +7,7 @@ Routes:
     POST /api/v1/rosters/optimise — run roster optimisation (async job)
     GET /api/v1/rosters/optimise/status/{job_id} — check optimisation job status
     POST /api/v1/rosters/optimise/cancel/{job_id} — cancel a running job
+    POST /api/v1/rosters/optimise/discard/{roster_id} — discard an optimiser draft
     GET /api/v1/rosters/{roster_id} — retrieve optimised roster
 
 The optimisation endpoint accepts:
@@ -46,6 +47,8 @@ from rosteriq.models import (
     VenueConfig, Employee, DemandForecast, Roster, State,
     User, UserRole,
 )
+from rosteriq.services import current_roster as cr
+from rosteriq.services.clock import venue_today
 from rosteriq.services.roster_optimiser_v2 import (
     MILPRosterOptimiser, HybridOptimiser, OptimisationStrategy,
 )
@@ -139,6 +142,7 @@ class OptimisationJobResponse(BaseModel):
     status: str = Field(..., description="Current job status")
     venue_id: str
     week_start: str
+    roster_id: Optional[str] = None
     message: str = "Optimisation job queued"
 
 
@@ -254,6 +258,17 @@ async def optimise_roster(
 
     # Rosters run Monday to Sunday; any day picks the week it falls in.
     week_start = request.week_start - timedelta(days=request.week_start.weekday())
+    # A week that has begun has worked days, often under an imported or
+    # published roster; the newest draft would replace it in manager views.
+    today = venue_today(request.venue_id, db)
+    if week_start <= today:
+        next_monday = today + timedelta(days=7 - today.weekday())
+        raise HTTPException(
+            status_code=422,
+            detail=(f"The week starting {week_start.strftime('%a %d %b')} has already started, "
+                    "so the optimiser won't replace its roster. Optimise the week starting "
+                    f"{next_monday.strftime('%a %d %b')} instead."),
+        )
 
     logger.info(
         f"Optimisation requested for venue {request.venue_id} "
@@ -352,6 +367,7 @@ async def optimise_roster(
         status=job.status,
         venue_id=request.venue_id,
         week_start=week_start.isoformat(),
+        roster_id=job.roster_id,
         message="Optimisation complete" if job.status == OptimisationJobStatus.COMPLETED
                 else f"Optimisation {job.status}: {job.error_message}"
     )
@@ -437,6 +453,32 @@ async def cancel_optimisation_job(
     logger.info(f"Optimisation job {job_id} cancelled by user {current_user.user_id}")
 
     return {"message": f"Job {job_id} cancelled"}
+
+
+@router.post("/optimise/discard/{roster_id}")
+async def discard_optimised_roster(
+    roster_id: str,
+    current_user: User = Depends(get_current_user),
+    db = Depends(get_db),
+):
+    """Discard an unpublished draft from the optimiser panel. It is kept as
+    history (superseded), so the week shows its previous roster again."""
+    roster = load_roster_in_scope(db, roster_id)  # 404 if missing or another tenant's
+    enforce_venue_manager(roster.venue_id)
+    state = cr.roster_state(db, roster_id)
+    if state == cr.SUPERSEDED:
+        return {"roster_id": roster_id, "state": state, "message": "Already discarded."}
+    if cr.is_imported(roster) or state not in ("draft", "pending_review", "approved",
+                                                "rejected", "failed"):
+        raise HTTPException(
+            status_code=409,
+            detail=(f"This roster is {'the imported week' if cr.is_imported(roster) else state}, "
+                    "so it can't be discarded here — only an unpublished optimiser draft can."),
+        )
+    db.update_roster_state(roster_id, cr.SUPERSEDED, "Discarded from Generate Optimal Roster",
+                           current_user.user_id)
+    return {"roster_id": roster_id, "state": cr.SUPERSEDED,
+            "message": "Discarded — the week shows its previous roster again."}
 
 
 @router.get("/{roster_id}", response_model=RosterResponse)

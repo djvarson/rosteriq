@@ -31,6 +31,7 @@ Strategies:
 """
 
 import logging
+from collections import Counter, defaultdict
 from datetime import date, time, datetime, timedelta
 from decimal import Decimal
 from typing import Optional, Dict, List, Tuple, Set
@@ -46,8 +47,9 @@ from rosteriq.award_rules import (
     get_penalty_multiplier, get_day_type, get_minimum_break_minutes,
     get_minimum_engagement_hours, MAX_SHIFT_LENGTH_HOURS,
 )
-from rosteriq.cost_calculator import calculate_shift_cost_breakdown
+from rosteriq.cost_calculator import calculate_shift_cost_breakdown, calculate_roster_cost
 from rosteriq.services.availability_rules import is_available
+from rosteriq.services.venue_areas import area_names, can_fill, min_staff_for
 
 logger = logging.getLogger(__name__)
 
@@ -67,16 +69,21 @@ except ImportError:
 DEFAULT_COVERS_PER_STAFF = 15.0
 MAX_SOLVER_TIME_SECONDS = 30
 
-# Shift templates: (start_hour, end_hour, break_minutes)
+# Shift templates: (start_hour, end_hour, break_minutes). The break is the
+# unpaid meal break award_rules sets for a shift of that length.
+_SHIFT_HOURS = {
+    "morning":   (6, 14),     # 8h
+    "mid":       (10, 18),    # 8h
+    "afternoon": (14, 22),    # 8h
+    "evening":   (17, 23),    # 6h
+    "short_am":  (8, 13),     # 5h
+    "short_pm":  (17, 22),    # 5h
+    "full_day":  (9, 18),     # 9h
+    "split_eve": (18, 23),    # 5h
+}
 SHIFT_TEMPLATES = {
-    "morning":   (6, 14, 30),     # 8h
-    "mid":       (10, 18, 30),    # 8h
-    "afternoon": (14, 22, 30),    # 8h
-    "evening":   (17, 23, 0),     # 6h
-    "short_am":  (8, 13, 0),      # 5h
-    "short_pm":  (17, 22, 0),     # 5h
-    "full_day":  (9, 18, 50),     # 9h
-    "split_eve": (18, 23, 0),     # 5h
+    name: (start, end, get_minimum_break_minutes(float(end - start)))
+    for name, (start, end) in _SHIFT_HOURS.items()
 }
 
 
@@ -109,6 +116,7 @@ def shift_template_to_shift(
     employee: Employee,
     shift_date: date,
     state: State,
+    role: str = "general",
 ) -> Shift:
     """
     Create a Shift object from a template name.
@@ -118,6 +126,7 @@ def shift_template_to_shift(
         employee: The employee
         shift_date: The date
         state: State for penalty calculations
+        role: The area worked (assign_areas sets it for a whole roster)
 
     Returns:
         Shift object with computed cost
@@ -134,7 +143,7 @@ def shift_template_to_shift(
         end_time=time(end_h, 0),
         break_minutes=break_m,
         status=ShiftStatus.scheduled,
-        role="general",  # Default role; should be parameterised
+        role=role,
         penalty_multiplier=1.0,
     )
 
@@ -143,6 +152,46 @@ def shift_template_to_shift(
     shift.cost = cost_breakdown.total_cost
 
     return shift
+
+
+def assign_areas(shifts: List[Shift], employees: List[Employee], venue: VenueConfig) -> None:
+    """Set each shift's role to one of the venue's areas, day by day, so each
+    area's minimum for that weekday is covered hour by hour where the rostered
+    people can fill it (venue_areas.can_fill). People who fit fewest areas are
+    placed first; extra staff go where cover is thinnest. A shift nobody's
+    skills fit keeps its role; a venue with no areas is left as it is."""
+    names = area_names(venue)
+    if not names:
+        return
+    emp_by_id = {e.id: e for e in employees}
+    by_day: Dict[date, List[Shift]] = defaultdict(list)
+    for shift in shifts:
+        by_day[shift.date].append(shift)
+    for day, day_shifts in by_day.items():
+        minimums = min_staff_for(venue, day)
+        cover: Dict[str, Counter] = {a: Counter() for a in names}
+        options = {
+            s.id: [a for a in names
+                   if s.employee_id in emp_by_id and can_fill(emp_by_id[s.employee_id], a, venue)]
+            for s in day_shifts
+        }
+        for shift in sorted(day_shifts, key=lambda s: (len(options[s.id]) or len(names) + 1,
+                                                        s.start_time)):
+            fits = options[shift.id]
+            if not fits:
+                continue
+            cells = shift.clock_hours()
+
+            def rank(area):
+                need = minimums.get(area, 0)
+                short = sum(max(0, need - cover[area][c]) for c in cells)
+                load = sum(cover[area][c] for c in cells) / max(need, 1)
+                return (short, need > 0, -load, -names.index(area))
+
+            area = max(fits, key=rank)
+            shift.role = area
+            for c in cells:
+                cover[area][c] += 1
 
 
 def calculate_required_staff_per_hour(
@@ -199,6 +248,23 @@ def is_employee_available(
         employee.availability, shift_date,
         f"{int(start_hour):02d}:00", f"{int(end_hour):02d}:00",
     )
+
+
+def _build_roster(venue: VenueConfig, employees: List[Employee], week_start: date,
+                  week_end: date, shifts: List[Shift]) -> Roster:
+    """The solved week as a Roster: areas assigned, costed as a week (weekly
+    overtime included) the way the generator and the importer cost theirs."""
+    assign_areas(shifts, employees, venue)
+    roster = Roster(
+        id=str(uuid.uuid4()),
+        venue_id=venue.id,
+        week_start=week_start,
+        week_end=week_end,
+        shifts=shifts,
+        created_at=datetime.now(),
+    )
+    roster.total_cost = calculate_roster_cost(roster, {e.id: e for e in employees}, venue.state)
+    return roster
 
 
 # ============================================================================
@@ -341,7 +407,7 @@ class MILPRosterOptimiser:
             required_per_hour = calculate_required_staff_per_hour(
                 day_forecasts,
                 self.covers_per_staff,
-                self.venue_config.min_staff,
+                min_staff_for(self.venue_config, shift_date),
             )
 
             # For each hour, ensure coverage
@@ -451,20 +517,8 @@ class MILPRosterOptimiser:
                 logger.debug(f"Failed to create shift: {e}")
                 continue
 
-        # Create roster
-        total_cost = sum(shift.cost or Decimal("0") for shift in shifts)
-
-        roster = Roster(
-            id=str(uuid.uuid4()),
-            venue_id=self.venue_config.id,
-            week_start=self.week_start,
-            week_end=self.week_end,
-            shifts=shifts,
-            total_cost=total_cost,
-            created_at=datetime.now(),
-        )
-
-        return roster
+        return _build_roster(self.venue_config, self.employees, self.week_start,
+                             self.week_end, shifts)
 
 
 # ============================================================================
@@ -572,7 +626,7 @@ class HybridOptimiser:
             required_per_hour = calculate_required_staff_per_hour(
                 day_forecasts,
                 self.covers_per_staff,
-                self.venue_config.min_staff,
+                min_staff_for(self.venue_config, shift_date),
             )
 
             # Assign shifts greedily
@@ -601,16 +655,5 @@ class HybridOptimiser:
                         logger.debug(f"Failed to create shift: {e}")
                         continue
 
-        total_cost = sum(shift.cost or Decimal("0") for shift in shifts)
-
-        roster = Roster(
-            id=str(uuid.uuid4()),
-            venue_id=self.venue_config.id,
-            week_start=self.week_start,
-            week_end=self.week_end,
-            shifts=shifts,
-            total_cost=total_cost,
-            created_at=datetime.now(),
-        )
-
-        return roster
+        return _build_roster(self.venue_config, self.employees, self.week_start,
+                             self.week_end, shifts)

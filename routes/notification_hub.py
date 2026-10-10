@@ -10,6 +10,7 @@ REST endpoints for the unified notification dispatch hub:
 """
 
 import logging
+from datetime import date, timedelta
 from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -130,6 +131,55 @@ class NotificationPreferencesResponse(BaseModel):
 
 
 # ============================================================================
+# Helpers
+# ============================================================================
+
+
+def _roster_notice_payload(venue_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """A "your roster is up" notice is only sent for a roster staff can see:
+    the one named (roster_id), else the staff-visible roster for week_start,
+    else the next one in the coming three weeks. A draft is refused (409) —
+    publishing it is what tells staff. Returns the payload naming the roster."""
+    from rosteriq.services import current_roster as cr
+    from rosteriq.services.clock import venue_today
+
+    db = get_db()
+    payload = dict(payload or {})
+    roster = None
+    rid = str(payload.get("roster_id") or "").strip()
+    if rid:
+        roster = db.get_roster(rid)
+        if roster is None or getattr(roster, "venue_id", None) != venue_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Roster not found")
+    else:
+        try:
+            day = date.fromisoformat(str(payload.get("week_start"))[:10])
+            roster = cr.current_roster(db, venue_id, day, staff=True)
+        except (TypeError, ValueError):
+            today = venue_today(venue_id, db)
+            ahead = cr.live_rosters(db, venue_id, today, today + timedelta(days=21), staff=True)
+            roster = ahead[0] if ahead else None
+    if roster is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=("There's no published roster to send yet. Publish the week first — "
+                    "publishing notifies the rostered staff."),
+        )
+    state = cr.roster_state(db, roster.id)
+    visible = state in (cr.PUBLISHED, cr.ARCHIVED) or (cr.is_imported(roster) and state != cr.SUPERSEDED)
+    if not visible:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(f"The roster for the week of {roster.week_start.strftime('%a %d %b')} isn't "
+                    "published yet, so staff can't see it. Publish it — publishing notifies "
+                    "the rostered staff."),
+        )
+    payload["roster_id"] = roster.id
+    payload["week_start"] = roster.week_start.isoformat()
+    return payload
+
+
+# ============================================================================
 # Routes
 # ============================================================================
 
@@ -178,6 +228,10 @@ async def dispatch_notification(
             detail=f"Invalid event type. Must be one of: {', '.join([e.value for e in NotificationEventType])}",
         )
 
+    payload = request.payload
+    if event_type == NotificationEventType.ROSTER_PUBLISHED:
+        payload = _roster_notice_payload(request.venue_id, payload)
+
     try:
         hub = get_notification_hub()
         targets = request.target_employee_ids
@@ -188,7 +242,7 @@ async def dispatch_notification(
         result = await hub.dispatch(
             event_type,
             request.venue_id,
-            request.payload,
+            payload,
             targets,
         )
 
@@ -263,10 +317,13 @@ async def bulk_dispatch(
         for req in request.events:
             try:
                 event_type = NotificationEventType(req.event_type)
+                payload = req.payload
+                if event_type == NotificationEventType.ROSTER_PUBLISHED:
+                    payload = _roster_notice_payload(req.venue_id, payload)
                 events.append({
                     "event_type": event_type.value,
                     "venue_id": req.venue_id,
-                    "payload": req.payload,
+                    "payload": payload,
                     "target_employee_ids": (req.target_employee_ids
                                             if req.target_employee_ids is not None
                                             else hub.reachable_staff_ids(req.venue_id)),

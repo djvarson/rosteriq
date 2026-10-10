@@ -329,16 +329,18 @@ def test_optimal_roster_runs_from_any_day_of_the_week():
     vid = "wem-opt"
     h = _manager_with_venue(c, vid, min_staff={"bar": 1})
     assert c.post("/employees/bulk", json=_staff_rows(vid, 6), headers=h).status_code == 200
-    monday = date(2026, 10, 12)
+    from rosteriq.services.clock import venue_today
+    today = venue_today(vid, get_db())
+    monday = today + timedelta(days=7 - today.weekday())   # a week that hasn't started
     assert c.post("/forecasts", json=_forecast_rows(vid, monday), headers=h).status_code == 200
 
-    # What the dashboard sends: today's date (a Friday), not the Monday
+    # Any day of the week (here its Friday) picks that week's Monday
     r = c.post("/api/v1/rosters/optimise", json={
-        "venue_id": vid, "week_start": "2026-10-16", "strategy": "balanced",
-        "solver_preference": "greedy", "timeout_seconds": 5}, headers=h)
+        "venue_id": vid, "week_start": (monday + timedelta(days=4)).isoformat(),
+        "strategy": "balanced", "solver_preference": "greedy", "timeout_seconds": 5}, headers=h)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["week_start"] == "2026-10-12"
+    assert body["week_start"] == monday.isoformat()
     status = c.get(f"/api/v1/rosters/optimise/status/{body['job_id']}", headers=h).json()
     assert status["status"] == "completed", status
     assert status["roster_id"]
@@ -438,6 +440,7 @@ def test_send_to_staff_targets_linked_or_rostered_staff_and_reports_delivery(ema
     rostered, linked, neither = rows
     _roster(get_db(), vid, [rostered["id"]], rid=f"{vid}-r")
     db = get_db()
+    db.update_roster_state(f"{vid}-r", "published", "test", "t")   # a draft is refused
     user = _register(c, linked["email"])["user"]
     rec = db.get_user_by_id(user["id"])
     rec["venue_ids"] = [vid]

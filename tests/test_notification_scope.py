@@ -52,6 +52,8 @@ def _venue_with_staff(c, n_staff):
         shifts=[Shift(id=f"{eid}-s", employee_id=eid, date=today, start_time=time(10),
                       end_time=time(16), status=ShiftStatus.scheduled, role="bar")
                 for eid in ids]))
+    # A roster notice is only sent for a roster staff can see.
+    get_db().update_roster_state(f"{vid}-r", "published", "test", "test")
     return h, vid, ids
 
 
