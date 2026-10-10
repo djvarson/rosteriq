@@ -64,7 +64,7 @@ class TestConstants:
         assert COLD_START_DAY_DEFAULTS[5] > COLD_START_DAY_DEFAULTS[4]  # Sat > Fri
 
     def test_trading_hours(self):
-        assert DEFAULT_TRADING_HOURS == list(range(6, 24))
+        assert DEFAULT_TRADING_HOURS == list(range(10, 24))
 
 
 # ============================================================================

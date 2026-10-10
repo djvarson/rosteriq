@@ -271,16 +271,19 @@ class TestVenueCRUD:
         assert response.status_code == 404
 
     def test_duplicate_venue_overwrite(self, client):
-        """POST /venues with same ID overwrites previous venue."""
+        """POST /venues with the same ID updates the venue; its name changes
+        only with ?rename=true (a wizard re-run must not rename it)."""
         create_test_venue(client, venue_id="v1", name="Original")
         response = create_test_venue(client, venue_id="v1", name="Updated")
 
-        # Second POST succeeds
+        # Second POST succeeds and keeps the name
         assert response.status_code == 200
+        assert client.get("/venues/v1").json()["name"] == "Original"
 
-        # Get the venue and verify updated name
-        response = client.get("/venues/v1")
-        assert response.json()["name"] == "Updated"
+        venue = client.get("/venues/v1").json()
+        venue["name"] = "Updated"
+        assert client.post("/venues?rename=true", json=venue).status_code == 200
+        assert client.get("/venues/v1").json()["name"] == "Updated"
 
 
 # ============================================================================

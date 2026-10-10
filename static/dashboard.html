@@ -2310,6 +2310,22 @@
       font-style: italic;
     }
 
+    /* Areas & minimums editor (Settings card and the wizard's areas step) */
+    .ae-table th, .ae-table td { padding: 6px 4px; text-align: center; font-size: 12px; }
+    .ae-table td.ae-area { text-align: left; font-weight: 600; white-space: nowrap; padding-right: 10px; }
+    .ae-table input[type="number"] { width: 52px; padding: 4px 6px; }
+    .ae-table td.ae-hint { text-align: left; }
+    .ae-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+    .ae-row select, .ae-row input[type="text"], .ae-time {
+      padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px;
+      font-size: 13px; background: #FFFFFF; color: var(--text-primary); max-width: 100%;
+    }
+    .ae-note, .ae-hint { font-size: 12px; color: var(--text-muted); }
+    .ae-subtitle { font-size: 13px; font-weight: 700; color: var(--text-secondary); margin: 20px 0 6px; }
+    /* The minimums table is wider than a phone: it scrolls inside its card. */
+    #settings-areas-card, .onboarding-step { min-width: 0; }
+    #ob-venue-name[readonly] { background: transparent; color: var(--text-secondary); cursor: default; }
+
     .btn-setup-wizard {
       padding: 6px 12px;
       font-size: 12px;
@@ -4590,7 +4606,13 @@
               <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border);">
                 <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">Want to import more staff or rebuild your first roster?</div>
                 <button class="btn btn-secondary" onclick="showOnboardingWizard()">Run Setup Wizard</button>
+                <button class="btn btn-secondary" id="btn-add-venue" onclick="showOnboardingWizard({ addVenue: true })">+ Add another venue</button>
               </div>
+            </div>
+            <div class="card" id="settings-areas-card">
+              <div class="chart-title">Areas &amp; minimums</div>
+              <p class="ae-note" style="margin:4px 0 0; max-width:640px;">The areas you staff, the fewest people each needs on each day, and when you trade. Rosters, the coverage check and the forecast all work from these.</p>
+              <div id="settings-areas"></div>
             </div>
           </div>
         </div>
@@ -4983,19 +5005,24 @@
     <div class="onboarding-progress-line"></div>
     <div class="onboarding-progress-step" data-ob-step="2"><div class="onboarding-progress-dot">2</div><span>Team</span></div>
     <div class="onboarding-progress-line"></div>
-    <div class="onboarding-progress-step" data-ob-step="3"><div class="onboarding-progress-dot">3</div><span>Kitchen</span></div>
+    <div class="onboarding-progress-step" data-ob-step="3"><div class="onboarding-progress-dot">3</div><span>Areas</span></div>
     <div class="onboarding-progress-line"></div>
-    <div class="onboarding-progress-step" data-ob-step="4"><div class="onboarding-progress-dot">4</div><span>First roster</span></div>
+    <div class="onboarding-progress-step" data-ob-step="4"><div class="onboarding-progress-dot">4</div><span>Kitchen</span></div>
+    <div class="onboarding-progress-line"></div>
+    <div class="onboarding-progress-step" data-ob-step="5"><div class="onboarding-progress-dot">5</div><span>First roster</span></div>
   </div>
 
   <div class="onboarding-body">
 
     <!-- Step 1: the venue -->
     <div class="onboarding-step active" data-ob-page="1">
-      <div class="onboarding-step-title">Your venue</div>
+      <div class="onboarding-step-title" id="ob-venue-title">Your venue</div>
       <div class="onboarding-step-subtitle">Name and state set up award compliance — nothing gets plugged into your existing systems today.</div>
-      <div class="input-group"><label>Venue name</label>
-        <input type="text" id="ob-venue-name" maxlength="80" placeholder="e.g., The Brass Monkey"></div>
+      <div class="input-group"><label for="ob-venue-name">Venue name</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="ob-venue-name" maxlength="80" placeholder="e.g., The Brass Monkey" style="flex:1; min-width:0;">
+          <button type="button" class="btn btn-secondary btn-small" id="ob-rename-btn" onclick="obStartRename()" style="display:none;">Rename</button>
+        </div></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
         <div class="input-group" style="margin:0;"><label>State (award rules)</label>
           <select id="ob-venue-state">
@@ -5025,8 +5052,16 @@
       <div class="ob-note">Each person later links their phone with a join code from the Staff page — no passwords to hand out. You can skip this and import later.</div>
     </div>
 
-    <!-- Step 3: the kitchen (optional) -->
+    <!-- Step 3: areas, minimums and trading hours -->
     <div class="onboarding-step" data-ob-page="3">
+      <div class="onboarding-step-title">Areas &amp; trading hours</div>
+      <div class="onboarding-step-subtitle">The areas you staff, the fewest people each needs on each day, and when you open and close. Pick areas from the skills and roles in your import.</div>
+      <div id="ob-areas"></div>
+      <div class="ob-note">Skippable — change these any time in Settings → Areas &amp; minimums.</div>
+    </div>
+
+    <!-- Step 4: the kitchen (optional) -->
+    <div class="onboarding-step" data-ob-page="4">
       <div class="onboarding-step-title">Your kitchen &amp; bar stock</div>
       <div class="onboarding-step-subtitle">Paste your ingredient or supplier list to light up live menu costing and stocktakes. Columns matched automatically (name, unit, pack size, cost, supplier, section).</div>
       <textarea id="ob-ing-csv" rows="8" placeholder="Name,Unit,Pack Size,Cost,Supplier,Section&#10;Chicken breast,kg,5,52,PFD,kitchen&#10;Lager kegs,l,49.5,260,CUB,bar" style="width:100%; font-family:ui-monospace,monospace; font-size:12px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); color:var(--text-primary);"></textarea>
@@ -5037,8 +5072,8 @@
       <div class="ob-note">Skippable — the roster works without it; costing joins in whenever you paste.</div>
     </div>
 
-    <!-- Step 4: the first roster (real, never simulated) -->
-    <div class="onboarding-step" data-ob-page="4">
+    <!-- Step 5: the first roster (real, never simulated) -->
+    <div class="onboarding-step" data-ob-page="5">
       <div class="onboarding-step-title">Your first roster</div>
       <div class="onboarding-step-subtitle" id="ob-roster-context">Generates a real roster for next week from your team and award rules.</div>
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -5053,7 +5088,7 @@
 
   <div class="onboarding-footer" id="ob-footer">
     <button class="btn btn-secondary" id="ob-btn-back" onclick="obPrevStep()" style="visibility: hidden;">Back</button>
-    <div style="font-size: 12px; color: var(--text-muted);" id="ob-step-counter">Step 1 of 4</div>
+    <div style="font-size: 12px; color: var(--text-muted);" id="ob-step-counter">Step 1 of 5</div>
     <button class="btn btn-primary" id="ob-btn-next" onclick="obNextStep()">Next</button>
   </div>
 </div>
@@ -8889,7 +8924,8 @@ async function loadVenues() {
     const response = await fetchAPI('/venues');
     state.venues = Array.isArray(response) ? response : (response.items || []);
     const select = document.getElementById('venue-select');
-    select.innerHTML = '<option value="">Select a venue...</option>' + state.venues.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
+    select.innerHTML = '<option value="">Select a venue...</option>' + state.venues.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('') +
+      (state.venues.length && _obCanManage() ? '<option value="__add_venue__">+ Add another venue</option>' : '');
 
     if (state.venues.length > 0) {
       // Restore previously selected venue, or default to first
@@ -10232,6 +10268,11 @@ async function onVenueSelected(venueId) {
 }
 
 document.getElementById('venue-select').addEventListener('change', (e) => {
+  if (e.target.value === '__add_venue__') {
+    e.target.value = state.currentVenue || '';
+    showOnboardingWizard({ addVenue: true });
+    return;
+  }
   onVenueSelected(e.target.value);
 });
 
@@ -12303,23 +12344,76 @@ window.addEventListener('offline', () => {
 // ============================================
 // ONBOARDING WIZARD
 // ============================================
-const obState = { currentStep: 1, totalSteps: 4, venueId: null, rosterId: null };
+const obState = { currentStep: 1, totalSteps: 5, venueId: null, rosterId: null,
+                  mode: 'new', renaming: false, created: false, adding: false, saving: false };
 
-function showOnboardingWizard() {
+function _obCanManage() {
+  const role = (_jwtClaims() || {}).role || '';
+  return role === 'manager' || role === 'owner';
+}
+
+// Re-running the wizard edits the selected venue (its name stays put until
+// Rename is pressed); { addVenue: true } starts blank and creates a new one.
+function showOnboardingWizard(opts) {
   if (state.isDemo) { showToast('The setup wizard builds your own venue \u2014 sign up to run it.', 'info'); return; }
-  // Re-running for an existing venue updates it rather than making a twin.
-  obState.venueId = state.currentVenue || null;
-  if (obState.venueId && state.venues && state.venues.length) {
-    const v = state.venues.find(x => x.id === obState.venueId);
-    if (v) {
-      document.getElementById('ob-venue-name').value = v.name || '';
-      if (v.state) document.getElementById('ob-venue-state').value = String(v.state).toLowerCase();
-      if (v.max_labour_pct) document.getElementById('ob-max-labour').value = v.max_labour_pct;
-    }
+  const adding = !!(opts && opts.addVenue);
+  obState.adding = adding;
+  obState.venueId = adding ? null : (state.currentVenue || null);
+  obState.mode = obState.venueId ? 'edit' : 'new';
+  obState.renaming = false;
+  obState.created = false;
+  obState.rosterId = null;
+  const nameEl = document.getElementById('ob-venue-name');
+  const v = obState.venueId && (state.venues || []).find(x => x.id === obState.venueId);
+  if (v) {
+    nameEl.value = v.name || '';
+    if (v.state) document.getElementById('ob-venue-state').value = String(v.state).toLowerCase();
+    if (v.max_labour_pct) document.getElementById('ob-max-labour').value = v.max_labour_pct;
+  } else if (adding) {
+    nameEl.value = '';
+    document.getElementById('ob-max-labour').value = 30;
   }
+  _obResetSteps();
+  _obVenueHeading();
   document.getElementById('onboarding-wizard').classList.add('active');
   document.body.style.overflow = 'hidden';
   obGoToStep(1);
+}
+
+function _obVenueHeading() {
+  const nameEl = document.getElementById('ob-venue-name');
+  const title = document.getElementById('ob-venue-title');
+  const renameBtn = document.getElementById('ob-rename-btn');
+  const editing = obState.mode === 'edit';
+  title.textContent = editing ? 'Editing ' + (nameEl.value || 'your venue')
+    : (obState.adding ? 'Add another venue' : 'Your venue');
+  nameEl.readOnly = editing && !obState.renaming;
+  renameBtn.style.display = editing && !obState.renaming ? '' : 'none';
+}
+
+function obStartRename() {
+  obState.renaming = true;
+  _obVenueHeading();
+  document.getElementById('ob-venue-name').focus();
+}
+
+// A run starts clean: no import results or roster from the last venue.
+function _obResetSteps() {
+  ['ob-staff-result', 'ob-ing-result', 'ob-roster-result'].forEach(function (id) {
+    const e = document.getElementById(id); if (e) e.textContent = '';
+  });
+  const report = document.getElementById('ob-staff-report');
+  if (report) report.innerHTML = '';
+  if (obState.adding) {
+    ['ob-staff-csv', 'ob-ing-csv'].forEach(function (id) {
+      const e = document.getElementById(id); if (e) e.value = '';
+    });
+  }
+  const pub = document.getElementById('ob-publish-btn');
+  if (pub) { pub.style.display = 'none'; pub.disabled = false; pub.textContent = 'Publish it'; }
+  const gen = document.getElementById('ob-generate-btn');
+  if (gen) gen.textContent = 'Generate first roster';
+  delete aeState['ob-areas'];
 }
 
 function hideOnboardingWizard() {
@@ -12351,46 +12445,94 @@ function obGoToStep(step) {
   document.querySelectorAll('.onboarding-progress-line').forEach((line, i) => {
     line.classList.toggle('completed', i < step - 1);
   });
-  document.getElementById('ob-btn-back').style.visibility = step > 1 ? 'visible' : 'hidden';
+  // Step 1's Back is Cancel — offered when there's a venue to go back to.
+  const back = document.getElementById('ob-btn-back');
+  back.textContent = step > 1 ? 'Back' : 'Cancel';
+  back.style.visibility = (step > 1 || (state.venues && state.venues.length)) ? 'visible' : 'hidden';
   document.getElementById('ob-step-counter').textContent = `Step ${step} of ${obState.totalSteps}`;
   document.getElementById('ob-btn-next').textContent = step === obState.totalSteps ? 'Finish' : 'Next';
-  if (step === 4) obRosterContext();
+  if (step === 1) _obVenueHeading();
+  // Re-read on each visit until edited, so staff imported a step back show up.
+  const obAreas = aeState['ob-areas'];
+  if (step === 3 && !(obAreas && obAreas.venueId === obState.venueId && obAreas.dirty)) {
+    aeLoad('ob-areas', obState.venueId, { save: false });
+  }
+  if (step === 5) obRosterContext();
 }
 
 async function obNextStep() {
-  if (obState.currentStep === 1) {
-    const ok = await obSaveVenue();
-    if (!ok) return;                       // stay put; the toast said why
+  // A second press while step 1 saves would create the new venue twice.
+  if (obState.saving) return;
+  const step = obState.currentStep;
+  const next = document.getElementById('ob-btn-next');
+  obState.saving = true;
+  if (next) next.disabled = true;
+  try {
+    if (step === 1 && !(await obSaveVenue())) return;   // stay put; the toast said why
+    if (step === 3 && !(await aeSave('ob-areas', { onlyIfChanged: true }))) return;
+  } finally {
+    obState.saving = false;
+    if (next) next.disabled = false;
   }
-  if (obState.currentStep < obState.totalSteps) obGoToStep(obState.currentStep + 1);
+  if (step < obState.totalSteps) obGoToStep(step + 1);
   else obFinish();
 }
 
 function obPrevStep() {
-  if (obState.currentStep > 1) obGoToStep(obState.currentStep - 1);
+  if (obState.currentStep > 1) { obGoToStep(obState.currentStep - 1); return; }
+  if (obState.created) { obFinish(); return; }   // the new venue exists: land on it
+  hideOnboardingWizard();
+}
+
+function _obNewVenueId(name) {
+  let base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `venue-${Date.now()}`;
+  if (base.indexOf('demo-') === 0) base = 'venue-' + base;   // demo- ids are reserved
+  const taken = new Set((state.venues || []).map(v => v.id));
+  let id = base, n = 2;
+  while (taken.has(id)) id = base + '-' + (n++);
+  return id;
 }
 
 async function obSaveVenue() {
   const name = document.getElementById('ob-venue-name').value.trim();
   if (!name) { showToast('Give the venue a name first', 'warning'); return false; }
   const st = document.getElementById('ob-venue-state').value;
-  const venueId = obState.venueId ||
-    (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `venue-${Date.now()}`);
-  const payload = {
-    id: venueId,
-    name: name,
-    tanda_org_id: '',
-    state: st,
-    timezone: getTimezoneForState(st.toUpperCase()),
-    min_staff: {},
-    max_labour_pct: parseFloat(document.getElementById('ob-max-labour').value) || 30.0,
-    created_at: new Date().toISOString(),
-  };
+  const pct = parseFloat(document.getElementById('ob-max-labour').value) || 30.0;
   try {
-    await fetchAPI('/venues', { method: 'POST', body: JSON.stringify(payload) });
-    obState.venueId = venueId;
-    state.currentVenue = venueId;
-    localStorage.setItem('rosteriq_current_venue', venueId);
+    if (obState.mode === 'edit' && obState.venueId) {
+      // Post the stored venue back with only this step's fields changed, so
+      // its areas, hours and connections survive a re-run.
+      let v = null;
+      try { v = await fetchAPI('/venues/' + encodeURIComponent(obState.venueId)); } catch (e) { v = null; }
+      const payload = v || { id: obState.venueId, name: name, tanda_org_id: '', created_at: new Date().toISOString() };
+      const renaming = !!(v && obState.renaming && name !== v.name);
+      if (renaming) payload.name = name;
+      payload.state = st;
+      payload.timezone = getTimezoneForState(st.toUpperCase());
+      payload.max_labour_pct = pct;
+      await fetchAPI('/venues' + (renaming ? '?rename=true' : ''), { method: 'POST', body: JSON.stringify(payload) });
+      if (v && !renaming) document.getElementById('ob-venue-name').value = v.name;
+    } else {
+      const payload = {
+        id: _obNewVenueId(name), name: name, tanda_org_id: '', state: st,
+        timezone: getTimezoneForState(st.toUpperCase()), max_labour_pct: pct,
+        created_at: new Date().toISOString(),
+      };
+      try {
+        await fetchAPI('/venues?create=true', { method: 'POST', body: JSON.stringify(payload) });
+      } catch (err) {
+        // The id is taken by a venue this login can't see: same name, new id.
+        if (!/already exists|access to this venue/i.test(err.message || '')) throw err;
+        payload.id = payload.id + '-' + Math.random().toString(36).slice(2, 6);
+        await fetchAPI('/venues?create=true', { method: 'POST', body: JSON.stringify(payload) });
+      }
+      obState.venueId = payload.id;
+      obState.mode = 'edit';
+      obState.created = true;
+    }
+    obState.renaming = false;
+    state.currentVenue = obState.venueId;
+    try { localStorage.setItem('rosteriq_current_venue', obState.venueId); } catch (e) { /* this tab still has it */ }
     await refreshSessionRole();
     return true;
   } catch (err) {
@@ -12645,6 +12787,9 @@ async function loadVenueSettings() {
   var teamBody = document.getElementById('team-self-body');
   if (teamBody) teamBody.innerHTML = '<tr><td>' + esc(who) + '</td><td><span class="alert-badge badge-info">' +
     esc(state.isDemo ? 'Demo' : roleLabel) + '</span></td></tr>';
+  var addBtn = document.getElementById('btn-add-venue');
+  if (addBtn) addBtn.style.display = (!state.isDemo && _obCanManage()) ? '' : 'none';
+  aeLoad('settings-areas', state.currentVenue, { save: true });
   if (state.isDemo || !state.currentVenue) return;
   try {
     var v = await fetchAPI('/venues/' + encodeURIComponent(state.currentVenue));
@@ -12668,17 +12813,267 @@ async function saveVenueSettings() {
   btn.disabled = true;
   try {
     var v = await fetchAPI('/venues/' + encodeURIComponent(state.currentVenue));
+    var renamed = v.name !== name;
     v.name = name;
     v.state = st;
     v.timezone = getTimezoneForState(st.toUpperCase());
     v.max_labour_pct = pct;
-    await fetchAPI('/venues', { method: 'POST', body: JSON.stringify(v) });
+    await fetchAPI('/venues' + (renamed ? '?rename=true' : ''), { method: 'POST', body: JSON.stringify(v) });
     showToast('Settings saved', 'success');
     try { await loadVenues(); } catch (e) { /* selector label refresh is cosmetic */ }
   } catch (e) {
     showToast('Could not save settings: ' + e.message, 'error');
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ── Areas & minimums: the Settings card and the wizard's areas step ──────
+// One editor, keyed by its host element. Saves through POST /venues with
+// areas, trading_hours and min_staff (each area's highest weekday minimum,
+// for the section pills and anything else that only reads min_staff).
+var AE_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+var AE_DAY_LABELS = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+var aeState = {};
+
+function aeAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function aeNorm(s) { return String(s || '').trim().toLowerCase().split(/\s+/).filter(Boolean).join(' '); }
+function aeTime(t) {
+  t = String(t || '').slice(0, 5);
+  if (t === '24:00') return '00:00';
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(t) ? t : '';
+}
+function aeNeedsSkill(name) { return /duty manager|manager|supervisor/.test(name); }
+
+async function aeLoad(hostId, venueId, opts) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  venueId = venueId || state.currentVenue;
+  if (state.isDemo || !venueId) {
+    delete aeState[hostId];
+    host.innerHTML = '<div class="ae-note" style="margin-top:12px;">' +
+      (state.isDemo ? 'The demo venue’s areas are fixed — sign up to set your own.' : 'Select a venue first.') + '</div>';
+    return;
+  }
+  host.innerHTML = '<div class="ae-note" style="margin-top:12px;">Loading areas…</div>';
+  try {
+    const d = await fetchAPI('/api/venue-setup?venue_id=' + encodeURIComponent(venueId));
+    const hours = {};
+    AE_DAYS.forEach(function (k) {
+      const h = (d.trading_hours || {})[k] || {};
+      hours[k] = { open: aeTime(h.open), close: aeTime(h.close) };
+    });
+    aeState[hostId] = {
+      venueId: venueId, loaded: true, dirty: false, save: !(opts && opts.save === false),
+      areas: (d.areas || []).map(function (a) {
+        const mins = {};
+        AE_DAYS.forEach(function (k) { mins[k] = parseInt((a.min_by_day || {})[k], 10) || 0; });
+        return { name: a.name, label: a.label || a.name, min_by_day: mins, requires_skill: !!a.requires_skill };
+      }),
+      hours: hours, effective: d.effective_hours || {}, candidates: d.candidates || [],
+    };
+    aeRender(hostId);
+  } catch (e) {
+    aeState[hostId] = { venueId: venueId, loaded: false };
+    host.innerHTML = '<div class="ae-note" style="margin-top:12px;">Could not load areas: ' + esc(e.message) + '</div>';
+  }
+}
+
+function aeRender(hostId) {
+  const st = aeState[hostId];
+  const host = document.getElementById(hostId);
+  if (!st || !st.loaded || !host) return;
+  const q = "'" + hostId + "'";
+  const have = new Set(st.areas.map(function (a) { return a.name; }));
+  const rows = st.areas.map(function (a, i) {
+    return '<tr><td class="ae-area">' + esc(a.label) + '</td>' +
+      AE_DAYS.map(function (d) {
+        return '<td><input type="number" min="0" max="100" step="1" value="' + (parseInt(a.min_by_day[d], 10) || 0) +
+          '" aria-label="' + aeAttr(a.label + ' minimum on ' + AE_DAY_LABELS[d]) +
+          '" oninput="aeSetMin(' + q + ',' + i + ',\'' + d + '\',this.value)"></td>';
+      }).join('') +
+      '<td><input type="checkbox"' + (a.requires_skill ? ' checked' : '') +
+        ' aria-label="' + aeAttr(a.label + ' needs this skill') + '" onchange="aeSetSkill(' + q + ',' + i + ',this.checked)"></td>' +
+      '<td><button type="button" class="btn btn-secondary btn-small" onclick="aeRemove(' + q + ',' + i + ')">Remove</button></td></tr>';
+  }).join('');
+  const options = st.candidates.map(function (c, i) {
+    if (have.has(c.name)) return '';
+    const n = [c.staff ? c.staff + ' staff' : '', c.shifts ? c.shifts + ' shifts' : ''].filter(Boolean).join(', ');
+    return '<option value="' + i + '">' + esc(c.label) + (n ? ' (' + esc(n) + ')' : '') + '</option>';
+  }).join('');
+  const hourRows = AE_DAYS.map(function (d) {
+    const h = st.hours[d];
+    return '<tr><td class="ae-area">' + AE_DAY_LABELS[d] + '</td>' +
+      '<td><input type="time" class="ae-time" value="' + aeTime(h.open) + '" aria-label="Opens ' + AE_DAY_LABELS[d] +
+        '" onchange="aeSetHours(' + q + ',\'' + d + '\',\'open\',this.value)"></td>' +
+      '<td><input type="time" class="ae-time" value="' + aeTime(h.close) + '" aria-label="Closes ' + AE_DAY_LABELS[d] +
+        '" onchange="aeSetHours(' + q + ',\'' + d + '\',\'close\',this.value)"></td>' +
+      '<td class="ae-hint" id="' + hostId + '-hint-' + d + '">' + esc(_aeHint(st, d)) + '</td></tr>';
+  }).join('');
+  host.innerHTML =
+    '<div class="ae-subtitle">Minimum staff on, by day</div>' +
+    (st.areas.length
+      ? '<div class="table-container"><table class="table ae-table"><thead><tr><th style="text-align:left;">Area</th>' +
+        AE_DAYS.map(function (d) { return '<th>' + AE_DAY_LABELS[d] + '</th>'; }).join('') +
+        '<th title="Only people with this skill may work it">Needs skill</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+      : '<div class="ae-note">No areas yet. Add the areas you staff, like Restaurant, Front Bar, Bottle Shop or Duty Manager.</div>') +
+    '<div class="ae-row">' +
+      (options ? '<select id="' + hostId + '-cand" aria-label="Area from your staff skills and roster">' + options + '</select>' +
+        '<button type="button" class="btn btn-secondary btn-small" onclick="aeAddCandidate(' + q + ')">Add area</button>' : '') +
+      '<input type="text" id="' + hostId + '-new" maxlength="40" placeholder="Or type a new area" aria-label="New area name">' +
+      '<button type="button" class="btn btn-secondary btn-small" onclick="aeAddTyped(' + q + ')">Add</button>' +
+    '</div>' +
+    '<div class="ae-note">“Needs skill”: only people with that area in their skills are rostered there (on by default for duty managers and supervisors).</div>' +
+    '<div class="ae-subtitle">Trading hours</div>' +
+    '<div class="table-container"><table class="table ae-table"><thead><tr><th style="text-align:left;">Day</th><th>Opens</th><th>Closes</th><th></th></tr></thead><tbody>' +
+      hourRows + '</tbody></table></div>' +
+    '<div class="ae-row"><button type="button" class="btn btn-secondary btn-small" onclick="aeFillHours(' + q + ')">Fill empty days with the hours shown</button>' +
+      '<span class="ae-note">A close after midnight (say 01:00) counts as that night.</span></div>' +
+    (st.save ? '<div class="ae-row"><button type="button" class="btn btn-primary" id="' + hostId + '-save" onclick="aeSave(' + q + ')">Save areas &amp; hours</button>' +
+      '<span class="ae-note" id="' + hostId + '-status"></span></div>' : '');
+}
+
+function _aeHint(st, d) {
+  const h = st.hours[d], eff = st.effective[d] || {};
+  if (!h.open && !h.close) {
+    const close = aeTime(eff.close) || '00:00';
+    return 'Not set — forecasting uses ' + (aeTime(eff.open) || '10:00') + '–' + (close === '00:00' ? 'midnight' : close) +
+      (eff.source === 'roster history' ? ' from your roster history' : ' (default)');
+  }
+  if (!h.open || !h.close) return 'Needs both times';
+  if (h.close === '00:00') return 'Closes at midnight';
+  return h.close <= h.open ? 'Closes after midnight' : '';
+}
+
+function _aeEdit(hostId) {
+  const st = aeState[hostId];
+  if (st) st.dirty = true;
+  const status = document.getElementById(hostId + '-status');
+  if (status) status.textContent = 'Unsaved changes';
+  return st;
+}
+
+function aeSetMin(hostId, i, day, value) {
+  const st = _aeEdit(hostId);
+  if (st && st.areas[i]) st.areas[i].min_by_day[day] = Math.max(0, Math.min(100, parseInt(value, 10) || 0));
+}
+
+function aeSetSkill(hostId, i, on) {
+  const st = _aeEdit(hostId);
+  if (st && st.areas[i]) st.areas[i].requires_skill = !!on;
+}
+
+function aeRemove(hostId, i) {
+  const st = _aeEdit(hostId);
+  if (st) { st.areas.splice(i, 1); aeRender(hostId); }
+}
+
+function _aeAdd(hostId, name, label) {
+  const st = aeState[hostId];
+  if (!st || !st.loaded) return false;
+  name = aeNorm(name);
+  if (!name) return false;
+  if (name.length > 40 || !/^[a-z0-9 _\/&+.-]+$/.test(name)) {
+    showToast('Area names may use letters, numbers, spaces and _ / & + . -', 'warning');
+    return false;
+  }
+  if (st.areas.some(function (a) { return a.name === name; })) {
+    showToast('That area is already listed', 'info');
+    return false;
+  }
+  const mins = {};
+  AE_DAYS.forEach(function (d) { mins[d] = 1; });
+  st.areas.push({ name: name, label: label || name.replace(/\b\w/g, function (c) { return c.toUpperCase(); }),
+                  min_by_day: mins, requires_skill: aeNeedsSkill(name) });
+  _aeEdit(hostId);
+  aeRender(hostId);
+  return true;
+}
+
+function aeAddCandidate(hostId) {
+  const st = aeState[hostId];
+  const sel = document.getElementById(hostId + '-cand');
+  const c = st && sel ? st.candidates[parseInt(sel.value, 10)] : null;
+  if (c) _aeAdd(hostId, c.name, c.label);
+}
+
+function aeAddTyped(hostId) {
+  const input = document.getElementById(hostId + '-new');
+  const typed = input ? String(input.value || '').trim() : '';
+  const label = /[<>"']/.test(typed) ? '' : typed.slice(0, 40);
+  if (_aeAdd(hostId, typed, label) && input) input.value = '';
+}
+
+function aeSetHours(hostId, day, which, value) {
+  const st = _aeEdit(hostId);
+  if (!st) return;
+  st.hours[day][which] = aeTime(value);
+  const hint = document.getElementById(hostId + '-hint-' + day);
+  if (hint) hint.textContent = _aeHint(st, day);
+}
+
+function aeFillHours(hostId) {
+  const st = _aeEdit(hostId);
+  if (!st) return;
+  AE_DAYS.forEach(function (d) {
+    const h = st.hours[d], eff = st.effective[d] || {};
+    if (!h.open && !h.close) {
+      h.open = aeTime(eff.open) || '10:00';
+      h.close = aeTime(eff.close) || '00:00';
+    }
+  });
+  aeRender(hostId);
+}
+
+async function aeSave(hostId, opts) {
+  opts = opts || {};
+  const st = aeState[hostId];
+  if (!st || !st.loaded) {
+    if (opts.onlyIfChanged) return true;
+    showToast('Areas haven’t loaded, so nothing was saved', 'warning');
+    return false;
+  }
+  if (opts.onlyIfChanged && !st.dirty) return true;
+  const hours = {};
+  for (const d of AE_DAYS) {
+    const o = aeTime(st.hours[d].open), c = aeTime(st.hours[d].close);
+    if (!o && !c) continue;
+    if (!o || !c) { showToast(AE_DAY_LABELS[d] + ' needs both an opening and a closing time', 'warning'); return false; }
+    hours[d] = { open: o, close: c };
+  }
+  const areas = st.areas.map(function (a) {
+    const mins = {};
+    AE_DAYS.forEach(function (d) { mins[d] = Math.max(0, Math.min(100, parseInt(a.min_by_day[d], 10) || 0)); });
+    return { name: a.name, label: a.label, min_by_day: mins, requires_skill: !!a.requires_skill };
+  });
+  const minStaff = {};
+  areas.forEach(function (a) { minStaff[a.name] = Math.max.apply(null, AE_DAYS.map(function (d) { return a.min_by_day[d]; })); });
+  // An empty list here is on purpose (this editor loaded what was stored);
+  // without clear= the server keeps the old values.
+  const clear = [];
+  if (!areas.length) clear.push('areas', 'min_staff');
+  if (!Object.keys(hours).length) clear.push('trading_hours');
+  const btn = document.getElementById(hostId + '-save');
+  if (btn) btn.disabled = true;
+  try {
+    const v = await fetchAPI('/venues/' + encodeURIComponent(st.venueId));
+    v.areas = areas;
+    v.trading_hours = hours;
+    v.min_staff = minStaff;
+    await fetchAPI('/venues' + (clear.length ? '?clear=' + clear.join(',') : ''), { method: 'POST', body: JSON.stringify(v) });
+    st.dirty = false;
+    const cached = (state.venues || []).find(function (x) { return x.id === st.venueId; });
+    if (cached) { cached.areas = areas; cached.trading_hours = hours; cached.min_staff = minStaff; }
+    try { rosterSectionPills(); } catch (e) { /* roster page not built yet */ }
+    const status = document.getElementById(hostId + '-status');
+    if (status) status.textContent = 'Saved ✓';
+    if (!opts.onlyIfChanged) showToast('Areas and trading hours saved', 'success');
+    return true;
+  } catch (e) {
+    showToast('Could not save areas: ' + e.message, 'error');
+    return false;
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -12693,6 +13088,11 @@ async function refreshSessionRole() {
 
 async function obFinish() {
   hideOnboardingWizard();
+  if (obState.created) {
+    // A venue added from inside another: drop the old venue's lists and feed.
+    try { resetVenuePageState(); } catch (e) { /* the reload below still runs */ }
+    if (state.ws) { try { state.ws.close(); } catch (e) { /* already closed */ } }
+  }
   try {
     await loadVenues();
   } catch (e) { /* selector refresh is cosmetic */ }

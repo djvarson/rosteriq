@@ -540,6 +540,8 @@ def compute_coverage_gaps(
     weekly_forecasts: list[DemandForecast],
     covers_per_staff: float = DEFAULT_COVERS_PER_STAFF,
     min_staff_by_role: dict = None,
+    venue_config: Optional[VenueConfig] = None,
+    trading_hours: Optional[dict] = None,
 ) -> dict:
     """Compare demand against the roster at EVERY forecast hour and report the
     worst-covered hour per day — so a manager never publishes a quietly
@@ -549,7 +551,26 @@ def compute_coverage_gaps(
     Per day: for each forecast hour, required staff (demand + venue floor) vs
     rostered staff actually working that hour; a day is SHORT if ANY hour is
     short, and the reported hour is the one with the largest gap.
+
+    With venue_config the floor is the area minimums of the trading day the
+    hour belongs to (min_staff_for), in place of min_staff_by_role, and only
+    hours inside trading hours count: trading_hours
+    (services.trading_hours.venue_trading_hours) when given, else the hours
+    the venue recorded.
     """
+    from rosteriq.services.trading_hours import trading_day_of
+    from rosteriq.services.venue_areas import min_staff_for
+    if trading_hours is None:
+        trading_hours = getattr(venue_config, "trading_hours", None) or {}
+    floors: dict = {}
+
+    def _floor(day):
+        if venue_config is None:
+            return min_staff_by_role
+        if day not in floors:
+            floors[day] = min_staff_for(venue_config, day)
+        return floors[day]
+
     cells = _rostered_coverage_by_cell(roster)
     gaps = []
     fully_covered = True
@@ -558,7 +579,12 @@ def compute_coverage_gaps(
         by_day_forecasts.setdefault(f.date, []).append(f)
 
     for day, day_fcs in sorted(by_day_forecasts.items()):
-        required_by_hour = calculate_required_staff(day_fcs, covers_per_staff, min_staff_by_role)
+        required_by_hour = {}
+        for f in day_fcs:
+            trading_day = trading_day_of(trading_hours, f.date, f.hour)
+            if trading_day is not None:
+                required_by_hour.update(
+                    calculate_required_staff([f], covers_per_staff, _floor(trading_day)))
         if not required_by_hour:
             continue
         # Worst hour = largest shortfall; tie-break to the busiest hour so the

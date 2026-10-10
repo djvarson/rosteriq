@@ -1280,7 +1280,10 @@ class AgentContext:
                     "message": "No demand forecast for this week — can't assess coverage."}
         venue = self.db.get_venue(self.venue_id)
         min_staff = getattr(venue, "min_staff", None) if venue else None
-        result = compute_coverage_gaps(roster, forecasts, min_staff_by_role=min_staff)
+        from rosteriq.services.trading_hours import venue_trading_hours
+        hours = venue_trading_hours(self.db, venue, roster.week_start) if venue else None
+        result = compute_coverage_gaps(roster, forecasts, min_staff_by_role=min_staff,
+                                       venue_config=venue, trading_hours=hours)
         result["week_of"] = roster.week_start.isoformat()
         return result
 

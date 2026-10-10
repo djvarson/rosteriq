@@ -75,7 +75,7 @@ def test_manager_still_updates_held_venue():
     c = TestClient(app)
     vid, email, h = _bootstrap_venue(c)  # bootstrap promoted them to manager
 
-    r = c.post("/venues", json=_venue_payload(
+    r = c.post("/venues?rename=true", json=_venue_payload(
         vid, name="Renamed", max_labour_pct=28, min_staff={"kitchen": 2}), headers=h)
     assert r.status_code == 200, r.text
     got = c.get(f"/venues/{vid}", headers=h).json()

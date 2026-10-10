@@ -685,6 +685,16 @@ except ImportError:
 except Exception as e:
     logger.error(f"Failed to register setup wizard routes: {e}")
 
+# Areas & minimums and trading hours (Settings card, setup wizard step)
+try:
+    from rosteriq.routes.venue_setup import router as venue_setup_router
+    app.include_router(venue_setup_router)
+    logger.info("Venue setup routes registered")
+except ImportError:
+    logger.info("Venue setup routes not available — skipping")
+except Exception as e:
+    logger.error(f"Failed to register venue setup routes: {e}")
+
 # Staff import (paste/CSV export from any program — no live connection)
 try:
     from rosteriq.routes.staff_import import router as staff_import_router
@@ -2324,8 +2334,14 @@ def _refuse_demo_write(message: str) -> None:
 
 
 @app.post("/venues")
-async def create_venue(venue: VenueConfig):
+async def create_venue(
+    venue: VenueConfig,
+    rename: bool = Query(False, description="Allow an existing venue's name to change"),
+    create: bool = Query(False, description="Refuse (409) if the id already exists"),
+    clear: str = Query("", description="Comma list of areas,trading_hours,min_staff to empty on purpose"),
+):
     _refuse_demo_write("Sign up to create your own venue \u2014 the demo can't add venues.")
+    from rosteriq.services.venue_setup import merge_venue_update, parse_clear
     # First-venue bootstrap: a signed-in user creating a BRAND-NEW venue id
     # becomes that venue's manager. Existing venues stay protected — touching
     # one you don't own is a 403, and you gain access only to the venue you
@@ -2335,6 +2351,7 @@ async def create_venue(venue: VenueConfig):
         _raw = getattr(_db, "_store", _db)  # unscoped store for the bootstrap write
         if _raw.get_venue(venue.id) is not None:
             raise HTTPException(status_code=403, detail="You do not have access to this venue")
+        venue, kept = merge_venue_update(None, venue)
         _raw.save_venue(venue)
         _user = _raw.get_user_by_id(_tenant.user_id)
         if _user:
@@ -2377,6 +2394,10 @@ async def create_venue(venue: VenueConfig):
         # managers are both refused (a department manager must not rewrite config
         # that drives every section's rostering/labour math).
         enforce_venue_manager(venue.id)
+        _existing = _store["venues"].get(venue.id)
+        if create and _existing is not None:
+            raise HTTPException(status_code=409, detail="A venue with this id already exists")
+        venue, kept = merge_venue_update(_existing, venue, rename=rename, clear=parse_clear(clear))
         _store["venues"][venue.id] = venue
 
     from rosteriq.services.clock import forget_venue_tz
@@ -2391,7 +2412,7 @@ async def create_venue(venue: VenueConfig):
         except Exception as e:
             logger.debug(f"Cache invalidation failed: {e}")
 
-    return {"id": venue.id, "status": "created"}
+    return {"id": venue.id, "status": "created", "name": venue.name, "kept": kept}
 
 
 @app.get("/venues")
@@ -2812,19 +2833,33 @@ async def _ensure_week_forecasts(venue, week_start):
     # Query only THIS venue's week (not a full scan of every venue's forecasts —
     # which on Postgres materialised the whole table into memory each call).
     existing = list(get_db().get_forecasts(venue.id, week_start, week_end) or [])
+    # Outside trading hours there is no demand. Cold-start rows are rebuilt for
+    # every day without a real forecast, so they follow hours recorded later;
+    # stored ones that now fall outside the hours are zeroed.
+    from rosteriq.services.trading_hours import in_trading_hours, venue_trading_hours
+    hours = venue_trading_hours(get_db(), venue, week_start)
+    def _is_cold(f):
+        return str(f.model_version or "").startswith("cold_start")
+    cold = [f for f in existing if _is_cold(f)]
+    real = [f for f in existing if not _is_cold(f) and in_trading_hours(hours, f.date, f.hour)]
     # A week with only SOME days forecast (the demo seeds just today; a POS
     # import may cover a few days) used to roster only those days.
-    have_days = {f.date for f in existing}
+    have_days = {f.date for f in real}
     if len(have_days) >= 7:
-        return existing
+        return real
     try:
-        generated = EnsembleForecaster(venue).predict_week(week_start)
+        generated = EnsembleForecaster(venue, trading_hours=hours).predict_week(week_start)
     except Exception as e:
         logger.warning(f"Cold-start forecast generation failed for {venue.id}: {e}")
         generated = []
     generated = [f for f in generated if f.date not in have_days]
-    if generated:
-        _store["forecasts"].extend(generated)
+    stored = {(f.date, f.hour, f.model_version): f.predicted_covers for f in cold}
+    to_save = [f for f in generated
+               if stored.get((f.date, f.hour, f.model_version)) != f.predicted_covers]
+    to_save += [f.model_copy(update={"predicted_covers": 0.0}) for f in cold
+                if f.predicted_covers > 0 and not in_trading_hours(hours, f.date, f.hour)]
+    if to_save:
+        _store["forecasts"].extend(to_save)
         # Keep the forecast list cache fresh (mirrors POST /forecasts).
         if get_cache_manager:
             try:
@@ -2832,10 +2867,10 @@ async def _ensure_week_forecasts(venue, week_start):
             except Exception:
                 pass
         logger.info(
-            "Cold-start: generated %d forecasts for venue %s (week of %s)",
-            len(generated), venue.id, week_start,
+            "Cold-start: saved %d forecasts for venue %s (week of %s)",
+            len(to_save), venue.id, week_start,
         )
-    return existing + generated
+    return real + generated
 
 
 def _approved_leave_map(venue_id: str) -> dict:
@@ -2996,7 +3031,12 @@ async def roster_coverage(roster_id: str, covers_per_staff: float = Query(DEFAUL
                 "days": []}
     venue = _store["venues"].get(roster.venue_id)
     min_staff = getattr(venue, "min_staff", None) if venue else None
-    result = compute_coverage_gaps(roster, forecasts, covers_per_staff, min_staff)
+    hours = None
+    if venue is not None:
+        from rosteriq.services.trading_hours import venue_trading_hours
+        hours = venue_trading_hours(_db, venue, roster.week_start)
+    result = compute_coverage_gaps(roster, forecasts, covers_per_staff, min_staff,
+                                   venue_config=venue, trading_hours=hours)
     result["roster_id"] = roster_id
     result["venue_id"] = roster.venue_id
     return result
