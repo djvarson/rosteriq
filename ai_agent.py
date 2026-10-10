@@ -24,7 +24,6 @@ import httpx
 
 from rosteriq.database import get_db
 from rosteriq.models import Employee, Shift, State
-from rosteriq.services.availability_rules import is_available
 
 logger = logging.getLogger(__name__)
 
@@ -200,27 +199,27 @@ GENERAL RULES OF THUMB (say they are rules of thumb when you use them):
 - Casuals are usually the flex lever; full-time and part-time staff form the
   baseline. Cross-trained staff are the most flexible to roster.
 
-CUT/DON'T-CUT LOGIC:
+CUT / HOLD:
 When a manager asks whether to send staff home early:
-1. Use get_cut_recommendation — it reports the venue's recorded labour target and
-   minimum staffing for the area
-2. Check covers/sales in the last hour — trending up or down?
-3. Check if there's an event, AFL game, or weather change coming
-4. Check remaining bookings for tonight
-5. If labour is OVER target AND trade is declining AND no upcoming demand signal:
-   → Recommend CUT with specific staff (lowest-seniority casual first)
-6. If labour is NEAR target OR there's an upcoming demand signal:
-   → Recommend DON'T CUT, explain what's coming
-7. Always suggest cutting casuals before part-timers, part-timers before full-timers
-8. Never recommend cutting below the venue's recorded minimum staffing
+1. Use get_cut_recommendation and pass on its call (cut, hold, need_sales) with its
+   reasons. It already weighs who is on now, the venue's recorded labour target and
+   area minimums, function bookings and local AFL games — don't replace its call
+   with a rule of thumb.
+2. If it returns need_sales, ask for the last hour's takings and call it again with
+   current_hourly_sales.
+3. Name its candidates in its order (casuals only, finishing latest first). It never
+   cuts below the venue's recorded minimums.
 
 SOS STAFF FINDING:
 When asked to find available staff at short notice:
-1. Use find_available_staff tool to get ALL staff, including those marked unavailable
+1. Use find_available_staff — it is the On-Shift SOS card's list: leave, people
+   already on (here or at another venue), recorded visa caps and casuals-first
+   ordering are already applied
 2. Show available staff first, then unavailable staff — some will still come in
    if asked, especially for a penalty-rate shift
-3. Include contact details so the manager can call/text directly
-4. Prioritise by: relevant skills > availability > cost
+3. Include contact details so the manager can call/text directly (the On-Shift
+   page has one-tap Call and Text buttons)
+4. Pass on each person's flags (visa cap, rostered that day, on elsewhere)
 5. Flag anyone whose availability the tool marks as stale
 
 AVAILABILITY REFRESH:
@@ -346,15 +345,16 @@ GEMINI_TOOLS = [
         },
         {
             "name": "find_available_staff",
-            "description": "SOS staff finder — find ALL staff and their availability status for a specific date/time. Returns both available AND unavailable staff with contact details, so the manager can call anyone. Prioritised by skills, availability, and cost.",
+            "description": "SOS staff finder — the same list as the On-Shift SOS card: who can be called in for a date/time, casuals first, with contact details. People on approved leave are left out (listed under on_leave); people already on a shift that overlaps (here or at another venue) are under already_on with their times; each person carries hours this week and any RECORDED visa fortnight cap with hours left. Salaried staff are left out unless include_salaried is true.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {
                     "date": {"type": "STRING", "description": "Date to check availability for (YYYY-MM-DD). Defaults to today."},
                     "start_time": {"type": "STRING", "description": "Shift start time (HH:MM, 24-hour). If omitted, staff available at any point on the date are listed."},
                     "end_time": {"type": "STRING", "description": "Shift end time (HH:MM). If omitted, a 4-hour shift from start_time is assumed."},
-                    "role": {"type": "STRING", "description": "Role needed (e.g. 'bar', 'kitchen', 'floor', 'runner'). Optional — returns all if not specified."},
+                    "role": {"type": "STRING", "description": "Area needed — one of the venue's areas (e.g. 'front bar', 'kitchen') or a skill. Optional — returns all if not specified."},
                     "include_unavailable": {"type": "BOOLEAN", "description": "Include staff marked as unavailable. Default true."},
+                    "include_salaried": {"type": "BOOLEAN", "description": "Also include salaried managers. Default false."},
                 },
             },
         },
@@ -371,13 +371,13 @@ GEMINI_TOOLS = [
         },
         {
             "name": "get_cut_recommendation",
-            "description": "Real-time cut/don't-cut recommendation. Analyses current staffing level, live trade data, upcoming demand signals, and labour targets to advise whether to send staff home early or keep them on.",
+            "description": "Cut / hold call for right now, in venue local time — the same as the On-Shift card. Uses who is on shift now, each person's recorded rate priced for this hour, the last hour's takings, the venue's recorded labour target and area minimums, function bookings and local AFL games. Names casual candidates, finishing latest first. Returns need_sales when it needs the last hour's takings.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {
-                    "area": {"type": "STRING", "description": "Venue area to analyse: 'bar', 'kitchen', 'floor', 'bottle_shop', or 'all'. Default 'all'."},
-                    "current_covers": {"type": "INTEGER", "description": "Current number of covers/customers in venue right now. Optional."},
-                    "current_hourly_sales": {"type": "NUMBER", "description": "Current hour's sales in AUD. Optional."},
+                    "area": {"type": "STRING", "description": "One of the venue's areas (e.g. 'front bar'), or 'all'. Default 'all'."},
+                    "current_covers": {"type": "INTEGER", "description": "Current number of covers/customers in venue right now. Optional, for context."},
+                    "current_hourly_sales": {"type": "NUMBER", "description": "The last hour's takings in AUD, inc GST, as the till shows them. Optional."},
                 },
             },
         },
@@ -502,35 +502,22 @@ def _system_prompt_now(venue_id: Optional[str] = None) -> str:
 # Tool execution — maps tool names to actual data/action functions
 # ---------------------------------------------------------------------------
 
-def _recorded_labour_settings(venue, area: str) -> dict:
-    """The labour target and minimum staffing the venue itself recorded
-    (VenueConfig.max_labour_pct / min_staff) for an area, with plain notes for
-    anything not recorded. Nothing is assumed in place of a missing setting."""
-    notes = []
-    target = getattr(venue, "max_labour_pct", None) if venue is not None else None
-    try:
-        target = float(target) if target is not None else None
-    except (TypeError, ValueError):
-        target = None
-    if target is None:
-        notes.append("No labour target is recorded for this venue.")
-    elif area != "all":
-        notes.append(f"No per-area labour target is recorded; using the venue's "
-                     f"overall target of {target:g}%.")
-
-    def norm(k):
-        return str(k or "").strip().lower().replace("_", " ")
-
-    mins = {norm(k): v for k, v in (getattr(venue, "min_staff", None) or {}).items()}
-    if area == "all":
-        minimum = sum(int(v or 0) for v in mins.values()) or None
-    else:
-        minimum = mins.get(norm(area))
-    if not minimum:
-        minimum = None
-        notes.append(f"No minimum staffing is recorded for {area}; "
-                     "never cutting the last person on.")
-    return {"target_pct": target, "min_staff": minimum, "notes": notes}
+def _scoped_areas(venue_id: str, area) -> tuple:
+    """(areas, refusal) for an area the model asked about: a department
+    manager is kept to their own sections, as on the On-Shift page."""
+    from rosteriq.models import normalise_area
+    from rosteriq.services.sos import viewer_sections
+    sections = viewer_sections(venue_id)
+    area = normalise_area(area)
+    if area and area != "all":
+        if sections is not None and area not in sections:
+            return [], f"You manage {', '.join(sections) or 'no areas'} here, not {area}."
+        return [area], None
+    if sections is None:
+        return [], None
+    if not sections:
+        return [], "You don't manage any area of this venue."
+    return sections, None
 
 
 class AgentContext:
@@ -887,117 +874,54 @@ class AgentContext:
         }
 
     async def _tool_find_available_staff(self, params: dict) -> dict:
-        """SOS staff finder — returns all staff with availability status and contact details."""
-        target_date_str = params.get("date", self.today.isoformat())
+        """SOS staff finder — the On-Shift SOS card's list (services/sos), plus
+        a flag on availability nobody has saved for a while."""
+        from rosteriq.services import sos
         start_time = _tool_time(params.get("start_time"))
         end_time = _tool_time(params.get("end_time"))
         if start_time is None or end_time is None:
             return {"error": "Times must be HH:MM in 24-hour time, e.g. 17:30."}
+        if end_time and not start_time:
+            return {"error": "Give a start time with the end time."}
+        if start_time and not end_time:
+            end_time = _default_shift_end(start_time)
         role_filter = (params.get("role") or "").strip().lower()
-        include_unavailable = params.get("include_unavailable", True)
-
+        areas, denied = _scoped_areas(self.venue_id, role_filter)
+        if denied:
+            return {"error": denied}
         try:
-            target_date = date.fromisoformat(target_date_str)
+            target_date = date.fromisoformat(str(params.get("date") or ""))
         except ValueError:
             target_date = self.today
+        include_unavailable = params.get("include_unavailable", True) is not False
 
-        employees = self.db.get_employees(self.venue_id)
-        if not employees:
-            return {"available": [], "unavailable": [], "total": 0, "note": "No employees found. Connect a rostering system to import staff."}
+        result = sos.find_cover(self.db, self.venue_id, day=target_date,
+                                start=start_time or None, end=end_time or None, areas=areas,
+                                include_unavailable=include_unavailable,
+                                include_salaried=bool(params.get("include_salaried")))
+        sos.record_shown(self.venue_id, {
+            "date": target_date.isoformat(), "start": start_time, "end": end_time,
+            "area": role_filter or "all", "include_unavailable": include_unavailable,
+        }, result, source="ai", user_id=self.user_id)
 
-        # Get existing shifts for that date to identify who's already rostered
-        shifts = self.db.get_shifts(self.venue_id, target_date, target_date + timedelta(days=1))
-        rostered_ids = set()
-        for s in (shifts or []):
-            eid = str(getattr(s, "employee_id", ""))
-            if eid:
-                rostered_ids.add(eid)
-
-        available = []
-        unavailable = []
-        stale_availability = []
-
-        for emp in employees:
-            eid = str(getattr(emp, "id", None) or getattr(emp, "external_id", ""))
-            name = getattr(emp, "name", "Unknown")
-            # Employees carry skills, not a single role — same derivation as
-            # _tool_get_employees: an explicit role if any, else the primary skill.
-            skills = [str(s) for s in (getattr(emp, "skills", None) or []) if s]
-            role = getattr(emp, "role", None) or next(iter(skills), None)
-            phone = getattr(emp, "phone", None)
-            email = getattr(emp, "email", None)
-            emp_type = _enum_text(getattr(emp, "employment_type", "casual"))
-
-            # Apply role filter if specified — against the role and every skill
-            if role_filter and not any(
-                role_filter in r.lower() for r in ([str(role)] if role else []) + skills
-            ):
-                continue
-
-            entry = {
-                "id": eid,
-                "name": name,
-                "role": role,
-                "skills": skills,
-                "employment_type": emp_type,
-                "phone": phone,
-                "email": email,
-                "already_rostered": eid in rostered_ids,
-            }
-
-            # Check availability data freshness (updated_at is bumped when
-            # staff save their availability in the staff app)
-            days_old = _availability_age_days(emp)
+        # Employee.updated_at moves when staff save their availability in the
+        # staff app (and on any other edit), so this can only under-flag.
+        employees = {str(e.id): e for e in (self.db.get_employees(self.venue_id) or [])}
+        stale = []
+        for entry in result["available"] + result["unavailable"]:
+            days_old = _availability_age_days(employees.get(entry["id"]))
             entry["availability_days_old"] = days_old
             if days_old is not None and days_old > AVAILABILITY_STALE_DAYS:
                 entry["stale_availability"] = True
-                stale_availability.append(name)
-
-            # Availability per the shared rule (services/availability_rules):
-            # {} / unlisted day = available, [] = unavailable that day,
-            # ranges = available only if the requested shift fits inside one.
-            avail = getattr(emp, "availability", None)
-            if not isinstance(avail, dict):
-                avail = None  # no data -> no constraints
-            if start_time:
-                available_now = is_available(avail, target_date, start_time,
-                                             end_time or _default_shift_end(start_time))
-            else:
-                available_now = is_available(avail, target_date)
-
-            # Skip already rostered staff
-            if eid in rostered_ids:
-                entry["status"] = "already_rostered"
-                unavailable.append(entry)
-                continue
-
-            if available_now:
-                entry["status"] = "available"
-                available.append(entry)
-            else:
-                entry["status"] = "unavailable"
-                if include_unavailable:
-                    unavailable.append(entry)
-
-        # Sort: casuals first (cheapest flex), then part-time, then full-time
-        type_order = {"casual": 0, "part_time": 1, "part-time": 1, "full_time": 2, "full-time": 2}
-        available.sort(key=lambda e: type_order.get(e["employment_type"], 3))
-        unavailable.sort(key=lambda e: type_order.get(e["employment_type"], 3))
-
-        result = {
-            "date": target_date.isoformat(),
-            "role_filter": role_filter or "all",
-            "available": available,
-            "available_count": len(available),
-            "unavailable": unavailable,
-            "unavailable_count": len(unavailable),
-            "total_checked": len(available) + len(unavailable),
-        }
-        if stale_availability:
-            result["stale_availability_warning"] = f"{len(stale_availability)} staff haven't updated availability in >2 weeks: {', '.join(stale_availability[:5])}"
-        if start_time:
-            result["requested_shift"] = f"{start_time} - {end_time or _default_shift_end(start_time)}"
-
+                stale.append(entry["name"])
+        result["role_filter"] = role_filter or "all"
+        result["total_checked"] = (len(result["available"]) + len(result["unavailable"])
+                                   + len(result["already_on"]))
+        if stale:
+            result["stale_availability_warning"] = (
+                f"{len(stale)} staff haven't updated availability in >2 weeks: {', '.join(stale[:5])}")
+        if not result["total_checked"] and not result["on_leave"]:
+            result["note"] = "No staff matched. Import staff (Staff → Import) if the team isn't loaded yet."
         return result
 
     async def _tool_get_afl_fixtures(self, params: dict) -> dict:
@@ -1013,133 +937,30 @@ class AgentContext:
         )
 
     async def _tool_get_cut_recommendation(self, params: dict) -> dict:
-        """Real-time cut/don't-cut recommendation based on current conditions."""
-        area = (params.get("area", "all") or "all").lower()
-        current_covers = params.get("current_covers")
-        current_hourly_sales = params.get("current_hourly_sales")
-
-        today = self.today
-        now = datetime.now()
-        current_hour = now.hour
-
-        # Get current shifts
-        shifts = self.db.get_shifts(self.venue_id, today, today + timedelta(days=1))
-        if not shifts:
-            return {"recommendation": "NO_DATA", "message": "No shifts rostered today. Cannot make a cut recommendation.", "confidence": "low"}
-
-        # Filter by area if specified
-        area_shifts = shifts
-        if area != "all":
-            area_shifts = [s for s in shifts if area in (getattr(s, "role", "") or "").lower() or area in (getattr(s, "area", "") or "").lower()]
-            if not area_shifts:
-                area_shifts = shifts  # Fallback to all if no matches
-
-        settings = _recorded_labour_settings(self.db.get_venue(self.venue_id), area)
-        target_pct = settings["target_pct"]
-        min_staff = settings["min_staff"] or 1
-
-        # Count current staff on shift
-        active_staff = []
-        for s in area_shifts:
-            start_time = getattr(s, "start_time", None)
-            end_time = getattr(s, "end_time", None)
-            # Simple check — is this shift currently active?
-            entry = {
-                "name": getattr(s, "employee_name", "Unknown"),
-                "role": getattr(s, "role", ""),
-                "hours": getattr(s, "hours", 0) or 0,
-                "cost": float(getattr(s, "cost", 0) or 0),
-                "employment_type": str(getattr(s, "status", "casual")),
-                "shift_id": str(getattr(s, "id", "")),
-            }
-            active_staff.append(entry)
-
-        staff_count = len(active_staff)
-        total_cost = sum(s["cost"] for s in active_staff)
-
-        # Estimate current labour %
-        estimated_labour_pct = None
-        if current_hourly_sales and current_hourly_sales > 0:
-            hourly_labour = total_cost / max(sum(s["hours"] for s in active_staff), 1)
-            estimated_labour_pct = (hourly_labour / current_hourly_sales) * 100
-
-        # Build recommendation
-        recommendation = "HOLD"  # Default: keep current staffing
-        reasons = []
-        cut_candidates = []
-        confidence = "medium"
-
-        # Check if we're already at skeleton crew
-        if staff_count <= min_staff:
-            recommendation = "DONT_CUT"
-            reasons.append(f"Already at skeleton crew ({staff_count} staff, minimum is {min_staff})")
-            confidence = "high"
-        else:
-            # Check time of day — don't cut if peak hours approaching
-            if 16 <= current_hour <= 18:
-                reasons.append("Approaching dinner peak (16:00-18:00) — hold staff")
-                recommendation = "DONT_CUT"
-            elif 11 <= current_hour <= 13:
-                reasons.append("Lunch service window — hold staff")
-                recommendation = "DONT_CUT"
-
-            # Check labour % if we have sales data
-            if estimated_labour_pct is not None and target_pct is not None:
-                if estimated_labour_pct > target_pct + 5:
-                    reasons.append(f"Labour at {estimated_labour_pct:.1f}% — over target of {target_pct}% by {estimated_labour_pct - target_pct:.1f}pp")
-                    recommendation = "CUT"
-                elif estimated_labour_pct < target_pct - 3:
-                    reasons.append(f"Labour at {estimated_labour_pct:.1f}% — well under target of {target_pct}%")
-                    recommendation = "DONT_CUT"
-
-            # Check covers trend
-            if current_covers is not None:
-                covers_per_staff = current_covers / max(staff_count, 1)
-                if covers_per_staff < 3:
-                    reasons.append(f"Low covers-per-staff ratio ({covers_per_staff:.1f}) — venue is quiet")
-                    if recommendation != "DONT_CUT":
-                        recommendation = "CUT"
-                elif covers_per_staff > 10:
-                    reasons.append(f"High covers-per-staff ratio ({covers_per_staff:.1f}) — venue is busy")
-                    recommendation = "DONT_CUT"
-
-            # Late night wind-down
-            if current_hour >= 21:
-                reasons.append("After 21:00 — trade typically declining")
-                if recommendation == "HOLD":
-                    recommendation = "CUT"
-
-            # Identify cut candidates (casuals first, then part-timers)
-            if recommendation == "CUT":
-                type_priority = {"casual": 0, "part_time": 1, "part-time": 1, "full_time": 2, "full-time": 2}
-                sorted_staff = sorted(active_staff, key=lambda s: type_priority.get(s.get("employment_type", "casual"), 3))
-                # Can cut down to skeleton crew
-                cuttable = max(0, staff_count - min_staff)
-                cut_candidates = sorted_staff[:min(cuttable, 2)]  # Suggest max 2 at a time
-                confidence = "high" if len(reasons) >= 2 else "medium"
-
-        result = {
-            "recommendation": recommendation,
-            "area": area,
-            "current_staff_count": staff_count,
-            "skeleton_minimum": min_staff,
-            "labour_target_pct": target_pct,
-            "settings_notes": settings["notes"],
-            "estimated_labour_pct": round(estimated_labour_pct, 1) if estimated_labour_pct else None,
-            "reasons": reasons,
-            "confidence": confidence,
-            "time": now.strftime("%H:%M"),
-        }
-
-        if recommendation == "CUT" and cut_candidates:
-            result["cut_candidates"] = [{"name": c["name"], "role": c["role"], "type": c.get("employment_type", "casual"), "shift_id": c["shift_id"]} for c in cut_candidates]
-            result["message"] = f"Recommend cutting {len(cut_candidates)} staff. {'; '.join(reasons)}."
-            result["savings_estimate"] = round(sum(c["cost"] / max(c["hours"], 1) for c in cut_candidates), 2)
-        elif recommendation == "DONT_CUT":
-            result["message"] = f"Hold current staffing. {'; '.join(reasons)}."
-        else:
-            result["message"] = f"Borderline — monitor closely. {'; '.join(reasons) if reasons else 'No strong signals either way.'}."
-
+        """The On-Shift cut / hold card's call (services/cut_advice)."""
+        from rosteriq.services import cut_advice
+        from rosteriq.services.sos import viewer_sections
+        areas, denied = _scoped_areas(self.venue_id, params.get("area"))
+        if denied:
+            return {"error": denied}
+        if areas and viewer_sections(self.venue_id) is None:
+            areas = cut_advice.expand_area_names(self.db.get_venue(self.venue_id), areas)
+        try:
+            takings = params.get("current_hourly_sales")
+            takings = float(takings) if takings not in (None, "") else None
+            if takings is not None and takings < 0:
+                takings = None
+        except (TypeError, ValueError):
+            takings = None
+        try:
+            covers = int(params["current_covers"]) if params.get("current_covers") not in (None, "") else None
+        except (TypeError, ValueError):
+            covers = None
+        result = await cut_advice.advise(self.db, self.venue_id, areas=areas,
+                                         takings=takings, covers=covers)
+        cut_advice.record_shown(self.venue_id, {"area": params.get("area") or "all",
+                                                "takings": takings, "covers": covers},
+                                result, source="ai", user_id=self.user_id)
         return result
 
     # --- Kitchen money loop + approvals (this reasons over the same engines
