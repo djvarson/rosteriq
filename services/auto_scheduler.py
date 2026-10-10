@@ -34,8 +34,9 @@ from rosteriq.award_rules import (
     check_consecutive_days, calculate_overtime_hours,
     MAX_SHIFT_LENGTH_HOURS, MINIMUM_HOURS_BETWEEN_SHIFTS,
 )
-from rosteriq.cost_calculator import calculate_shift_cost_breakdown
+from rosteriq.cost_calculator import calculate_shift_cost_breakdown, calculate_roster_cost
 from rosteriq.services.conflict_detector import ConflictDetector, RosterConflict
+from rosteriq.services.roster_optimiser_v2 import assign_areas
 from rosteriq.services.availability_resolver import AvailabilityResolver
 from rosteriq.services.availability_rules import is_available
 from rosteriq.database import get_db
@@ -45,16 +46,14 @@ logger = logging.getLogger(__name__)
 # Default covers per staff member per hour
 DEFAULT_COVERS_PER_STAFF = 15.0
 
-# Standard shift templates (start_hour, end_hour, break_minutes)
+# Standard shift templates (start_hour, end_hour, break_minutes); the break is
+# the unpaid meal break award_rules sets for a shift of that length.
 SHIFT_TEMPLATES = {
-    "morning": (6, 14, 30),       # 8h with 30min break
-    "mid": (10, 18, 30),          # 8h with 30min break
-    "afternoon": (14, 22, 30),    # 8h with 30min break
-    "evening": (17, 23, 0),       # 6h no break needed
-    "short_am": (8, 13, 0),       # 5h no break needed
-    "short_pm": (17, 22, 0),      # 5h no break needed
-    "full_day": (9, 18, 50),      # 9h with 50min break
-    "split_eve": (18, 23, 0),     # 5h evening
+    name: (start, end, get_minimum_break_minutes(float(end - start)))
+    for name, (start, end) in {
+        "morning": (6, 14), "mid": (10, 18), "afternoon": (14, 22), "evening": (17, 23),
+        "short_am": (8, 13), "short_pm": (17, 22), "full_day": (9, 18), "split_eve": (18, 23),
+    }.items()
 }
 
 
@@ -186,6 +185,7 @@ class AutoScheduler:
             shifts = self._assign_employees_to_shifts(
                 shift_slots, employees, venue, week_start, strategy
             )
+            assign_areas(shifts, employees, venue)
 
             # Step 5: Create roster object
             week_end = week_start + timedelta(days=6)
@@ -203,15 +203,10 @@ class AutoScheduler:
                 roster, venue, employees
             )
 
-            # Step 7: Calculate costs
-            total_cost = Decimal("0")
+            # Step 7: Calculate costs — the week as a whole, so weekly
+            # overtime is priced as the generator and the importer price it.
             cost_breakdown = self._calculate_cost_breakdown(roster, employees)
-            for cost_item in cost_breakdown.values():
-                if isinstance(cost_item, dict) and "total" in cost_item:
-                    total_cost += Decimal(str(cost_item["total"]))
-                elif isinstance(cost_item, (int, float, Decimal)):
-                    total_cost += Decimal(str(cost_item))
-
+            total_cost = calculate_roster_cost(roster, {e.id: e for e in employees}, venue.state)
             roster.total_cost = total_cost
 
             # Step 8: Calculate quality score
@@ -413,7 +408,7 @@ class AutoScheduler:
 
                 # Create shift
                 shift = self._create_shift(
-                    selected_emp, slot_date, start_hour, end_hour
+                    selected_emp, slot_date, start_hour, end_hour, venue.state
                 )
                 shifts.append(shift)
 
@@ -507,8 +502,9 @@ class AutoScheduler:
         shift_date: date,
         start_hour: int,
         end_hour: int,
+        state: Optional[State] = None,
     ) -> Shift:
-        """Create a Shift object."""
+        """Create a Shift object (role 'general' until assign_areas places it)."""
         # A demand window ending at midnight arrives as end_hour 24, which
         # time() rejects — represent it as 23:59 (overnight shifts are out of
         # scope for the template generator; this keeps the last hour staffed).
@@ -516,31 +512,24 @@ class AutoScheduler:
         end_time_obj = time(hour=23, minute=59) if end_hour >= 24 \
             else time(hour=end_hour, minute=0)
 
-        # Determine break duration
         shift_duration_hours = min(end_hour, 24) - start_hour
-        if shift_duration_hours >= 6:
-            break_minutes = 30
-        else:
-            break_minutes = 0
-
-        # Calculate cost (simplified)
-        day_type = get_day_type(shift_date, employee.state)
+        state = state or employee.state
+        day_type = get_day_type(shift_date, state)
         penalty_mult = get_penalty_multiplier(employee.employment_type, day_type)
-        base_cost = Decimal(str(employee.hourly_base_rate)) * Decimal(str(shift_duration_hours - break_minutes / 60.0))
-        cost = base_cost * penalty_mult
 
-        return Shift(
+        shift = Shift(
             id=str(uuid.uuid4()),
             employee_id=employee.id,
             date=shift_date,
             start_time=start_time_obj,
             end_time=end_time_obj,
-            break_minutes=break_minutes,
+            break_minutes=get_minimum_break_minutes(float(shift_duration_hours)),
             status=ShiftStatus.scheduled,
             role="general",
-            cost=cost,
             penalty_multiplier=float(penalty_mult),
         )
+        shift.cost = calculate_shift_cost_breakdown(employee, shift, state).total_cost
+        return shift
 
     def _calculate_cost_breakdown(
         self,

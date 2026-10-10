@@ -93,7 +93,8 @@ class NotificationHub:
         self._ws_dispatcher = get_dispatcher()
         self._prefs_service = get_preferences_service()
 
-        # Deduplication: (employee_id, event_type, venue_id) -> last_sent_timestamp
+        # Deduplication: (employee_id, event_type, venue_id[, roster or week])
+        # -> when it last reached them
         self._dedup_cache: Dict[str, float] = {}
         self._dedup_window_seconds = 300  # 5 minutes
 
@@ -150,11 +151,14 @@ class NotificationHub:
         linked login, or with a shift in the coming weeks. Someone imported
         from a spreadsheet who has neither is left alone."""
         from rosteriq.services.clock import venue_today
+        from rosteriq.services.current_roster import live_shifts
         today = today or venue_today(venue_id, self._db)
         staff = self._db.get_employees(venue_id) or []
         try:
+            # What staff can see: a draft's shifts aren't on anyone's /my yet.
             rostered = {str(getattr(s, "employee_id", "")) for s in
-                        (self._db.get_shifts(venue_id, today, today + timedelta(days=days_ahead)) or [])}
+                        live_shifts(self._db, venue_id, today,
+                                    today + timedelta(days=days_ahead), staff=True)}
         except Exception:
             rostered = set()
         linked_emails = set(self._linked_logins(venue_id))
@@ -168,35 +172,54 @@ class NotificationHub:
         delivered = summary.get("delivered") or {}
         reached = summary.get("reached", 0)
         available = summary.get("channels_available") or []
+        duplicate = (summary.get("skipped") or {}).get("duplicate", 0)
         if reached:
             parts = [f"{n} {label}" for key, label in
                      (("email", "by email"), ("sms", "by SMS"), ("push", "by push"),
                       ("in_app", "in the app"))
                      for n in [delivered.get(key, 0)] if n]
-            return f"{reached} staff notified ({', '.join(parts)})."
+            again = f" {duplicate} already had it from the last few minutes." if duplicate else ""
+            return f"{reached} staff notified ({', '.join(parts)}).{again}"
         if summary.get("venue_id") == DEMO_VENUE_ID:
             return "The demo never emails or texts anyone — staff see the roster in the app."
         if not available:
             return ("Nobody was messaged — email and SMS aren't switched on. "
                     "Share the /my link so staff can see their shifts.")
-        if (summary.get("skipped") or {}).get("duplicate"):
-            return ("Nobody was messaged again — these staff were already notified "
-                    "in the last few minutes.")
         if not summary.get("total_targets"):
             return ("Nobody was messaged — no staff here have a linked login or an "
                     "upcoming shift.")
+        channels = " or ".join("SMS" if c == "sms" else c for c in available)
+        if duplicate and duplicate >= summary.get("total_targets", 0):
+            return ("Nobody was messaged again — these staff were already sent this "
+                    "in the last few minutes.")
+        if duplicate:
+            return (f"Nobody new was messaged — {duplicate} already had this from the last "
+                    f"few minutes, and the others couldn't be reached by {channels} "
+                    "(check their email and mobile on the Staff page).")
         return ("Nobody was messaged — none of the staff could be reached by "
-                f"{' or '.join('SMS' if c == 'sms' else c for c in available)} "
+                f"{channels} "
                 "(check their email and mobile on the Staff page). "
                 "Share the /my link so they can see their shifts.")
 
-    def _make_dedup_key(self, employee_id: str, event_type: str, venue_id: str) -> str:
-        """Create deduplication cache key."""
-        return f"{employee_id}:{event_type}:{venue_id}"
+    @staticmethod
+    def _dedup_subject(payload: Optional[Dict[str, Any]]) -> str:
+        """Which roster or week the message is about: the same event for
+        another week is a different message."""
+        p = payload or {}
+        return str(p.get("roster_id") or p.get("week_start") or p.get("week") or "")
 
-    def _is_duplicate(self, employee_id: str, event_type: str, venue_id: str) -> bool:
-        """Check if event was sent to employee recently (within 5 min)."""
-        key = self._make_dedup_key(employee_id, event_type, venue_id)
+    def _make_dedup_key(self, employee_id: str, event_type: str, venue_id: str,
+                        subject: str = "") -> str:
+        """Create deduplication cache key."""
+        key = f"{employee_id}:{event_type}:{venue_id}"
+        return f"{key}:{subject}" if subject else key
+
+    def _is_duplicate(self, employee_id: str, event_type: str, venue_id: str,
+                      subject: str = "") -> bool:
+        """Check if event was sent to employee recently (within 5 min).
+        A miss holds the slot so a concurrent repeat is suppressed; the caller
+        releases it (_release_dedup) when nothing reached the person."""
+        key = self._make_dedup_key(employee_id, event_type, venue_id, subject)
         now = time()
         last_sent = self._dedup_cache.get(key, 0)
 
@@ -206,6 +229,12 @@ class NotificationHub:
 
         self._dedup_cache[key] = now
         return False
+
+    def _release_dedup(self, key: str, previous: Optional[float]) -> None:
+        if previous is None:
+            self._dedup_cache.pop(key, None)
+        else:
+            self._dedup_cache[key] = previous
 
     def _check_rate_limit(self, employee_id: str) -> bool:
         """
@@ -449,12 +478,32 @@ class NotificationHub:
         linked: Optional[Dict[str, List[str]]] = None,
     ) -> None:
         """Dispatch notification to a single employee across all channels."""
+        subject = self._dedup_subject(payload)
+        dedup_key = self._make_dedup_key(employee_id, event_type.value, venue_id, subject)
+        previous = self._dedup_cache.get(dedup_key)
+        if self._is_duplicate(employee_id, event_type.value, venue_id, subject):
+            summary["skipped"]["duplicate"] += 1
+            return
+        channels_sent: Dict[str, bool] = {}
         try:
-            # Check deduplication
-            if self._is_duplicate(employee_id, event_type.value, venue_id):
-                summary["skipped"]["duplicate"] += 1
-                return
+            await self._deliver_to_employee(event_type, venue_id, employee_id, payload,
+                                            summary, linked, channels_sent)
+        finally:
+            # Only a delivery that reached them counts as "already notified".
+            if not any(channels_sent.values()):
+                self._release_dedup(dedup_key, previous)
 
+    async def _deliver_to_employee(
+        self,
+        event_type: NotificationEventType,
+        venue_id: str,
+        employee_id: str,
+        payload: Dict[str, Any],
+        summary: Dict[str, Any],
+        linked: Optional[Dict[str, List[str]]],
+        channels_sent: Dict[str, bool],
+    ) -> None:
+        try:
             # Check rate limit
             if not self._check_rate_limit(employee_id):
                 summary["skipped"]["rate_limit"] += 1
@@ -469,7 +518,6 @@ class NotificationHub:
 
             # Get preferences
             prefs = self._prefs_service.get_preferences(employee_id)
-            channels_sent = {}
             # The public demo is a shared sandbox anyone can drive: it must never
             # email, text or push a real person. In-app delivery only.
             if venue_id == DEMO_VENUE_ID:
@@ -561,7 +609,12 @@ class NotificationHub:
             week = week or "the coming week"
             where = f" at {venue_name}" if venue_name else ""
             subject = f"Your roster{where} is up"
-            lines = [greeting, f"The roster for {week}{where} has been published.",
+            published = False
+            if payload.get("roster_id"):
+                from rosteriq.services.current_roster import roster_state, PUBLISHED, ARCHIVED
+                published = roster_state(self._db, str(payload["roster_id"])) in (PUBLISHED, ARCHIVED)
+            lines = [greeting, f"The roster for {week}{where} "
+                               f"{'has been published' if published else 'is up'}.",
                      "Your shifts are in the RosterIQ staff app."]
             sms = f"{venue_name + ': ' if venue_name else ''}the roster for {week} is up. See your shifts: {link}"
         else:

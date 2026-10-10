@@ -4491,14 +4491,30 @@ async def trigger_daily_digest(venue_id: str, manager_email: str = Query(...)):
     if today_roster:
         today_shifts = [s for s in today_roster.shifts if s.date == today]
 
+    # Sample context is for the demo only. A real venue gets today's games from
+    # the published AFL fixture, or no context at all — no weather feed exists.
+    import html
+    from rosteriq.services.demo import DEMO_VENUE_ID
+    weather, events = None, None
+    if venue_id == DEMO_VENUE_ID:
+        weather, events = "Sunny, 24°C", ["Local market day", "AFL Round 10"]
+    else:
+        try:
+            from rosteriq.services.afl_fixtures import upcoming_games
+            afl = await upcoming_games(venue_id, days_ahead=1, db=_db)
+            events = [html.escape(f"AFL: {g['matchup']}, {g['kickoff']} at {g['ground']}")
+                      for g in afl.get("games") or []] or None
+        except Exception as e:  # noqa: BLE001 — the digest goes out without it
+            logger.warning(f"Digest AFL lookup failed for {venue_id}: {e}")
+
     success = await service.send_daily_digest(
         venue_id=venue_id,
         venue=venue,
         manager_email=manager_email,
         roster_shifts=today_shifts,
         expected_covers=expected_covers,
-        weather_forecast="Sunny, 24°C",
-        events=["Local market day", "AFL Round 10"],
+        weather_forecast=weather,
+        events=events,
     )
 
     return {

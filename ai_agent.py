@@ -108,6 +108,54 @@ def _strip_reasoning(text: str) -> str:
         return stripped
     return re.sub(r"</?think>", "", text, flags=re.IGNORECASE).strip()
 
+
+def _shift_paid_hours(s) -> float:
+    """Paid hours of a shift (Shift.net_hours: overnight-aware, less the
+    unpaid meal break). Shift has no 'hours' field."""
+    try:
+        return float(s.net_hours)
+    except Exception:
+        return 0.0
+
+
+COMPLIANCE_NOTE = ("A guide from RosterIQ's award settings (break and shift-length rules), "
+                   "not legal advice — confirm against your award or with your adviser.")
+
+
+def _shift_rule_checks(shifts, emp_names: dict) -> list:
+    """Break and shift-length checks against award_rules — the same thresholds
+    validate_shift_compliance uses — worded as things to check."""
+    from rosteriq.award_rules import get_minimum_break_minutes, MAX_SHIFT_LENGTH_HOURS
+    issues = []
+    for s in shifts or []:
+        try:
+            hours = float(s.duration_hours)
+        except Exception:
+            continue
+        who = emp_names.get(str(getattr(s, "employee_id", ""))) or "A staff member"
+        when = getattr(s, "date", "?")
+        recorded = int(getattr(s, "break_minutes", 0) or 0)
+        expected = get_minimum_break_minutes(hours)
+        if recorded < expected:
+            issues.append({
+                "type": "break_violation",
+                "severity": "high",
+                "description": (f"{who} has a {hours:.1f}h shift on {when} with {recorded}min unpaid "
+                                f"break recorded; RosterIQ's break settings expect {expected}min "
+                                "for a shift that long. Worth checking."),
+                "shift_id": str(getattr(s, "id", "")),
+            })
+        if hours > MAX_SHIFT_LENGTH_HOURS:
+            issues.append({
+                "type": "long_shift",
+                "severity": "medium",
+                "description": (f"{who} has a {hours:.1f}h shift on {when}, longer than the "
+                                f"{MAX_SHIFT_LENGTH_HOURS:g}h maximum in RosterIQ's award settings. "
+                                "Worth checking."),
+                "shift_id": str(getattr(s, "id", "")),
+            })
+    return issues
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -365,7 +413,7 @@ GEMINI_TOOLS = [
                 "type": "OBJECT",
                 "properties": {
                     "days_ahead": {"type": "INTEGER", "description": "How many days ahead to look. Default 14."},
-                    "team_filter": {"type": "STRING", "description": "Filter by team name (e.g. 'Fremantle', 'West Coast'). Optional — returns all local games if not specified."},
+                    "team_filter": {"type": "STRING", "description": "Filter by club, by name or nickname (e.g. 'Fremantle', 'Freo', 'West Coast Eagles'). Optional — returns all local games if not specified."},
                 },
             },
         },
@@ -617,7 +665,7 @@ class AgentContext:
                 "date": str(getattr(s, "date", "")),
                 "start_time": str(getattr(s, "start_time", "")),
                 "end_time": str(getattr(s, "end_time", "")),
-                "hours": getattr(s, "hours", None),
+                "hours": round(_shift_paid_hours(s), 2),
                 "cost": float(getattr(s, "cost", 0)) if getattr(s, "cost", None) else None,
                 "status": str(getattr(s, "status", "confirmed")),
             }
@@ -653,7 +701,7 @@ class AgentContext:
         by_role = {}
 
         for s in shifts:
-            hrs = getattr(s, "hours", 0) or 0
+            hrs = _shift_paid_hours(s)
             cost = float(getattr(s, "cost", 0) or 0)
             total_hours += hrs
             total_cost += cost
@@ -693,26 +741,8 @@ class AgentContext:
             if eid:
                 emp_map[str(eid)] = emp
 
-        # Check for long shifts without breaks
-        for s in (shifts or []):
-            hrs = getattr(s, "hours", 0) or 0
-            if hrs > 5:
-                has_break = getattr(s, "break_minutes", 0) or 0
-                if has_break < 30:
-                    issues.append({
-                        "type": "break_violation",
-                        "severity": "high",
-                        "description": f"{getattr(s, 'employee_name', 'Staff')} has a {hrs:.1f}h shift on {getattr(s, 'date', '?')} with insufficient break time ({has_break}min). Fair Work requires a 30min unpaid break for shifts over 5 hours.",
-                        "shift_id": str(getattr(s, "id", "")),
-                    })
-            # Check for overtime (>38h/week)
-            if hrs > 10:
-                issues.append({
-                    "type": "long_shift",
-                    "severity": "medium",
-                    "description": f"{getattr(s, 'employee_name', 'Staff')} has a {hrs:.1f}h shift on {getattr(s, 'date', '?')}. Shifts over 10 hours may trigger fatigue management requirements.",
-                    "shift_id": str(getattr(s, "id", "")),
-                })
+        issues.extend(_shift_rule_checks(
+            shifts, {k: getattr(v, "name", None) for k, v in emp_map.items()}))
 
         # Check for expired certifications
         for emp in (employees or []):
@@ -729,7 +759,7 @@ class AgentContext:
                                 issues.append({
                                     "type": "expired_certification",
                                     "severity": "high",
-                                    "description": f"{getattr(emp, 'name', 'Staff')}'s {cert_name} expired on {exp_dt.strftime('%d/%m/%Y')}. They cannot legally work in roles requiring this certification.",
+                                    "description": f"{getattr(emp, 'name', 'Staff')}'s {cert_name} expired on {exp_dt.strftime('%d/%m/%Y')}. Check it's renewed before rostering them in roles that need it.",
                                     "employee_id": str(getattr(emp, "id", "")),
                                 })
                             elif exp_dt < end_dt:
@@ -747,6 +777,7 @@ class AgentContext:
             "count": len(issues),
             "high_severity": sum(1 for i in issues if i["severity"] == "high"),
             "check_period": f"{start_dt} to {end_dt}",
+            "note": COMPLIANCE_NOTE,
         }
 
     async def _tool_get_venue_stats(self, params: dict) -> dict:
@@ -833,7 +864,7 @@ class AgentContext:
         if not shifts:
             return {"suggestions": [{"type": "info", "description": "No shifts found for this date. Consider generating a roster."}], "count": 1}
 
-        total_hours = sum(getattr(s, "hours", 0) or 0 for s in shifts)
+        total_hours = sum(_shift_paid_hours(s) for s in shifts)
         shift_count = len(shifts)
 
         # Basic analysis
@@ -1741,7 +1772,7 @@ async def generate_insights(venue_id: str, max_insights: int = 5) -> list[dict]:
         week_shifts = db.get_shifts(venue_id, today, week_end)
         if week_shifts:
             total_cost = sum(float(getattr(s, "cost", 0) or 0) for s in week_shifts)
-            total_hours = sum(getattr(s, "hours", 0) or 0 for s in week_shifts)
+            total_hours = sum(_shift_paid_hours(s) for s in week_shifts)
             if total_cost > 0:
                 avg_rate = total_cost / total_hours if total_hours > 0 else 0
                 insights.append({
@@ -1752,19 +1783,18 @@ async def generate_insights(venue_id: str, max_insights: int = 5) -> list[dict]:
                     "action": {"type": "ask_ai", "label": "Cost Breakdown", "prompt": "Give me a labour cost breakdown for this week by day and role"},
                 })
 
-        # 3. Compliance quick-check
-        for s in (week_shifts or []):
-            hrs = getattr(s, "hours", 0) or 0
-            break_min = getattr(s, "break_minutes", 0) or 0
-            if hrs > 5 and break_min < 30:
+        # 3. Compliance quick-check (one card)
+        if week_shifts:
+            names = {e.id: getattr(e, "name", None) for e in (db.get_employees(venue_id) or [])}
+            breaks = [i for i in _shift_rule_checks(week_shifts, names) if i["type"] == "break_violation"]
+            if breaks:
                 insights.append({
                     "type": InsightType.COMPLIANCE,
                     "severity": "high",
-                    "title": "Break violation detected",
-                    "description": f"{getattr(s, 'employee_name', 'A staff member')} has a {hrs:.1f}h shift on {getattr(s, 'date', '?')} with only {break_min}min break. Fair Work requires 30min for shifts over 5h.",
+                    "title": "Break to check",
+                    "description": f"{breaks[0]['description']} {COMPLIANCE_NOTE}",
                     "action": {"type": "ask_ai", "label": "Fix Compliance", "prompt": "What compliance issues do I have this week and how do I fix them?"},
                 })
-                break  # Only show one compliance insight
 
         # 4. Weekend staffing peek
         days_until_saturday = (5 - today.weekday()) % 7

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time as _time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -55,6 +56,40 @@ LOCAL_FOOTY: Dict[str, Dict[str, Any]] = {
 
 # Squiggle's name for the Perth ground is the stadium's non-sponsor name.
 _GROUND_DISPLAY = {"Perth Stadium": "Optus Stadium"}
+
+ALL_TEAMS = sorted({t for v in LOCAL_FOOTY.values() for t in v["teams"]})
+
+# What people (and the AI) call the clubs, mapped to Squiggle's names.
+_NICKNAMES = {
+    "crows": "Adelaide", "lions": "Brisbane Lions", "brisbane": "Brisbane Lions",
+    "blues": "Carlton", "pies": "Collingwood", "magpies": "Collingwood",
+    "bombers": "Essendon", "dons": "Essendon", "dockers": "Fremantle",
+    "freo": "Fremantle", "cats": "Geelong", "suns": "Gold Coast",
+    "giants": "Greater Western Sydney", "gws": "Greater Western Sydney",
+    "hawks": "Hawthorn", "demons": "Melbourne", "dees": "Melbourne",
+    "roos": "North Melbourne", "kangaroos": "North Melbourne", "north": "North Melbourne",
+    "power": "Port Adelaide", "port": "Port Adelaide", "tigers": "Richmond",
+    "saints": "St Kilda", "swans": "Sydney", "eagles": "West Coast",
+    "dogs": "Western Bulldogs", "bulldogs": "Western Bulldogs", "doggies": "Western Bulldogs",
+}
+_PHRASES = {**{t.lower(): t for t in ALL_TEAMS},
+            "western sydney": "Greater Western Sydney"}
+
+
+def resolve_teams(text: str) -> set:
+    """The Squiggle club names a free-text team filter refers to: formal names
+    ("West Coast Eagles" -> West Coast) and nicknames (Freo, Pies, Roos).
+    Longer names win, so "North Melbourne" is never also Melbourne."""
+    words = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split()
+    rest = f" {' '.join(words)} "
+    found = set()
+    for phrase in sorted(_PHRASES, key=len, reverse=True):
+        key = f" {phrase} "
+        if key in rest:
+            found.add(_PHRASES[phrase])
+            rest = rest.replace(key, " ")
+    found |= {_NICKNAMES[w] for w in rest.split() if w in _NICKNAMES}
+    return found
 
 _KEEP = ("id", "round", "roundname", "hteam", "ateam", "venue", "unixtime",
          "date", "tz", "is_final", "is_grand_final", "complete")
@@ -185,6 +220,12 @@ def _fmt_day(d: date) -> str:
     return f"{d.strftime('%a')} {d.day} {d.strftime('%b')}"
 
 
+def _fmt_span(start: date, end: date) -> str:
+    if start == end:
+        return f"on {_fmt_day(start)}"
+    return f"between {_fmt_day(start)} and {_fmt_day(end)}"
+
+
 async def upcoming_games(venue_id: str, days_ahead: int = 14,
                          team_filter: str = "", db=None,
                          now: Optional[datetime] = None) -> Dict[str, Any]:
@@ -218,6 +259,14 @@ async def upcoming_games(venue_id: str, days_ahead: int = 14,
         return base
     base["local_teams"] = list(local["teams"])
     base["home_ground"] = _GROUND_DISPLAY.get(local["grounds"][0], local["grounds"][0])
+    filter_text = (team_filter or "").strip()
+    wanted = resolve_teams(filter_text)
+    if filter_text and not wanted:
+        base.update(status="team_not_recognised",
+                    note=f"'{filter_text[:40]}' isn't an AFL club RosterIQ recognises, so "
+                         "nothing was looked up for it. Ask again with the club's name "
+                         f"(the local clubs are {' and '.join(local['teams'])}).")
+        return base
 
     years = sorted({start.year, end.year})
     season: Dict[int, Optional[List[dict]]] = {}
@@ -236,7 +285,6 @@ async def upcoming_games(venue_id: str, days_ahead: int = 14,
 
     teams = set(local["teams"])
     grounds = set(local["grounds"])
-    wanted = (team_filter or "").strip().lower()
     any_in_range = False
     games = []
     for y in years:
@@ -248,7 +296,7 @@ async def upcoming_games(venue_id: str, days_ahead: int = 14,
             home, away = g.get("hteam") or "", g.get("ateam") or ""
             if home not in teams and away not in teams:
                 continue
-            if wanted and wanted not in home.lower() and wanted not in away.lower():
+            if wanted and home not in wanted and away not in wanted:
                 continue
             ground = g.get("venue") or ""
             if home in teams and ground in grounds:
@@ -284,13 +332,42 @@ async def upcoming_games(venue_id: str, days_ahead: int = 14,
         base["note"] = ("Real fixture from Squiggle; kick-off times are venue local time. "
                         "Staffing impact is the manager's call — no multiplier is applied.")
         return base
-    if any_in_range:
+
+    # A quiet window inside the season (midweek, the pre-finals bye) is not the
+    # off-season: games of this season lie on both sides of it.
+    this_season = [k for k in (_kickoff(g, tz) for g in season.get(start.year) or []) if k]
+    in_season = (any(k.date() < start for k in this_season)
+                 and any(k.date() > end for k in this_season))
+    if any_in_range or in_season:
+        if wanted and not wanted <= teams:
+            who = f"{' or '.join(sorted(wanted))} v {' or '.join(local['teams'])}"
+        else:
+            who = " or ".join(sorted(wanted) if wanted else local["teams"])
+        nxt = None
+        for y in years:
+            for g in season.get(y) or []:
+                ko = _kickoff(g, tz)
+                home, away = g.get("hteam") or "", g.get("ateam") or ""
+                if ko is None or ko.date() <= end or (home not in teams and away not in teams):
+                    continue
+                if wanted and home not in wanted and away not in wanted:
+                    continue
+                if nxt is None or ko < nxt[0]:
+                    nxt = (ko, f"{home} v {away}")
+        quiet = f"No {who} games" if any_in_range else "No AFL games"
         base["status"] = "ok"
-        base["note"] = (f"No {' or '.join(local['teams'])} games between "
-                        f"{_fmt_day(start)} and {_fmt_day(end)}.")
+        base["note"] = f"{quiet} {_fmt_span(start, end)}"
+        if nxt:
+            ko, matchup = nxt
+            base["next_local_game"] = {"date": ko.date().isoformat(), "kickoff": ko.strftime("%H:%M"),
+                                       "matchup": matchup}
+            base["note"] += (f"; next local game is {_fmt_day(ko.date())} "
+                             f"({matchup}, {ko.strftime('%H:%M')}).")
+        else:
+            base["note"] += f"; no more {who} games are in the {start.year} fixture."
         return base
 
-    # Nothing at all scheduled in the window: off-season (or a long break).
+    # Nothing scheduled in the window and none on one side of it: off-season.
     later = []
     for y in sorted({start.year, start.year + 1} | set(years)):
         if y not in season:

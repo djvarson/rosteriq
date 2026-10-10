@@ -10652,6 +10652,7 @@ document.getElementById('btn-save-note').addEventListener('click', async () => {
 // ROSTER OPTIMISER FUNCTIONS
 // ============================================================================
 let currentOptimisationJob = null;
+let currentOptimisedRosterId = null;
 let optimisationPollInterval = null;
 
 async function startOptimisation() {
@@ -10674,7 +10675,7 @@ async function startOptimisation() {
       method: 'POST',
       body: JSON.stringify({
         venue_id: state.currentVenue,
-        week_start: localIso(),
+        week_start: obNextMonday(),
         strategy: strategy,
         solver_preference: solver,
         timeout_seconds: 30,
@@ -10682,6 +10683,7 @@ async function startOptimisation() {
     });
 
     currentOptimisationJob = response.job_id;
+    currentOptimisedRosterId = response.roster_id || null;
     pollOptimisationStatus();
   } catch (error) {
     console.error('Optimisation failed:', error);
@@ -10712,6 +10714,7 @@ function pollOptimisationStatus() {
 
       if (status === 'completed') {
         clearInterval(optimisationPollInterval);
+        currentOptimisedRosterId = response.roster_id || currentOptimisedRosterId;
         displayOptimisationResults(response);
       } else if (status === 'failed') {
         clearInterval(optimisationPollInterval);
@@ -10763,9 +10766,19 @@ document.getElementById('btn-optimiser-accept').addEventListener('click', () => 
   document.getElementById('optimiser-results').style.display = 'none';
 });
 
-document.getElementById('btn-optimiser-discard').addEventListener('click', () => {
-  document.getElementById('optimiser-results').style.display = 'none';
-  currentOptimisationJob = null;
+document.getElementById('btn-optimiser-discard').addEventListener('click', async () => {
+  const rosterId = currentOptimisedRosterId;
+  try {
+    if (rosterId) {
+      const res = await fetchAPI('/api/v1/rosters/optimise/discard/' + encodeURIComponent(rosterId), { method: 'POST' });
+      showToast(res.message || 'Discarded.', 'success', 5000);
+    }
+    document.getElementById('optimiser-results').style.display = 'none';
+    currentOptimisationJob = null;
+    currentOptimisedRosterId = null;
+  } catch (error) {
+    showToast('Could not discard: ' + (error.message || 'Unknown error'), 'error', 6000);
+  }
 });
 
 // ============================================================================
@@ -12894,6 +12907,10 @@ function rosterDeliverySummary(result) {
     if (push) parts.push(push + ' sent a phone notification');
     return { reached: reached, text: parts.join(', ') + '.' + app };
   }
+  // A dispatch reply carries the server's own account of why nobody was reached.
+  if (typeof result.reached === 'number' && result.message) {
+    return { reached: 0, text: result.message + app };
+  }
   const avail = Array.isArray(result.channels_available) ? result.channels_available : [];
   const switchedOn = avail.indexOf('email') >= 0 || avail.indexOf('sms') >= 0;
   return {
@@ -13066,7 +13083,7 @@ async function sendRosterToStaff() {
         payload: {
           week: weekLabel,
           sent_by: 'manager',
-          message: 'Your roster for the week of ' + weekLabel + ' has been published.'
+          roster_id: displayedRosterId() || undefined
         }
       })
     });
