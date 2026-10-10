@@ -13,6 +13,8 @@ the manager's confirm dialog can say exactly what was found:
                 is checked when no cap was recorded).
   * rest      — the gap to their shifts either side vs the award table's
                 minimum rest (warning; advisor to confirm).
+  * leave     — approved leave here on the shift's day (block), as the
+                publish check treats it.
   * clash     — another shift of theirs here overlapping this one (block).
   * elsewhere — rostered at another venue at the same time (block), through
                 services/person_identity when it is present; a warning when
@@ -30,6 +32,7 @@ from rosteriq.award_rules import MINIMUM_HOURS_BETWEEN_SHIFTS
 from rosteriq.roster_optimiser import GENERIC_ROLES
 from rosteriq.services.current_roster import live_shifts, week_monday
 from rosteriq.services.leave_shifts import span
+from rosteriq.services.roster_edit import approved_leave, on_leave
 from rosteriq.services.venue_areas import can_fill, find_area, _SUPERVISORY
 
 OK, WARN, BLOCK = "ok", "warn", "block"
@@ -89,6 +92,16 @@ def can_take(employee, role, venue) -> bool:
     """May this person be offered / claim a cover for `role`? Inactive staff
     are offered nothing."""
     return getattr(employee, "active", True) and trained_for(employee, role, venue)
+
+
+def on_leave_on(db, venue_id: str, employee, day, leave: Optional[dict] = None) -> bool:
+    """Is this person on approved leave here on `day`? ``leave`` is
+    approved_leave(db, venue_id), when the caller has it."""
+    if day is None:
+        return False
+    if leave is None:
+        leave = approved_leave(db, venue_id)
+    return on_leave(leave, getattr(employee, "id", None), day)
 
 
 def _their_shifts(db, venue_id: str, employee, start: date, end: date, skip_id=None) -> tuple:
@@ -158,6 +171,9 @@ def cover_checks(db, venue_id: str, cover: dict, claimant, cover_shift=None) -> 
 
     if not getattr(claimant, "active", True):
         add("active", BLOCK, f"{name} is marked inactive")
+
+    if on_leave_on(db, venue_id, claimant, day):
+        add("leave", BLOCK, f"{name} is on approved leave {day:%a} {day.day} {day:%b}")
 
     if trained_for(claimant, role, venue):
         add("trained", OK, f"{name} can work {role}")

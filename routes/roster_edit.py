@@ -290,7 +290,7 @@ async def copy_roster_to(roster_id: str,
     employees = [e for e in (db.get_employees(source.venue_id) or [])]
     prev = current_roster(db, source.venue_id, target - timedelta(days=7))
     visa_flags = edit.visa_cap_flags(db, roster, employees, prev if prev and prev.id != roster.id else None)
-    elsewhere = edit.cross_venue_warnings(db, roster, employees)
+    clashes = edit.cross_venue_clash_rows(db, roster, employees)
     audit("roster.copy", source.venue_id, "roster", roster.id, source_roster_id=source.id,
           week_start=target.isoformat(), shifts=len(roster.shifts), skipped=len(skipped),
           left_open=len(left_open), superseded=len(superseded))
@@ -305,7 +305,8 @@ async def copy_roster_to(roster_id: str,
         "left_open": left_open,
         "superseded": superseded,
         "visa_flags": visa_flags,
-        "cross_venue_warnings": elsewhere,
+        "cross_venue_warnings": list(dict.fromkeys(c["message"] for c in clashes)),
+        "cross_venue_clashes": clashes,
         "total_cost": str(roster.total_cost) if roster.total_cost is not None else None,
     }
 
